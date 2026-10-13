@@ -31,7 +31,14 @@ grpc::Status status(const core::Reply& r){
     switch(r.code){case core::Code::Ok:break;case core::Code::Invalid:code=S::INVALID_ARGUMENT;break;case core::Code::NotFound:code=S::NOT_FOUND;break;case core::Code::Exhausted:code=S::RESOURCE_EXHAUSTED;break;case core::Code::Unavailable:code=S::UNAVAILABLE;break;case core::Code::Cancelled:code=S::CANCELLED;break;}
     return {code,r.message};
 }
-class Services final:public api::SceneService::Service,public api::CameraService::Service {
+void clockStatus(const time::Status& s,api::ClockStatus* out){
+    out->set_quality(static_cast<api::ClockStatus::Quality>(s.quality));out->set_utc_unix_seconds(s.utcSeconds);
+    out->set_uncertainty_seconds(s.uncertaintySeconds);out->set_last_sync_utc_unix_seconds(s.lastSyncUtc);
+    out->set_age_seconds(s.ageSeconds);out->set_round_trip_seconds(s.delaySeconds);out->set_source(s.source);
+    out->set_authenticated(s.authenticated);out->set_synchronizing(s.synchronizing);out->set_error(s.error);
+    out->set_generation(s.generation);out->set_pending_correction_seconds(s.correctionSeconds);
+}
+class Services final:public api::SceneService::Service,public api::CameraService::Service,public api::TimeService::Service {
 public:
     explicit Services(core::Bridge& bridge):bridge_(bridge){}
     grpc::Status apply(grpc::ServerContext* context,core::Command command,api::Applied* out){
@@ -46,11 +53,16 @@ public:
     }
     grpc::Status GetScene(grpc::ServerContext*,const api::Empty*,api::Scene* out) override{
         const auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};
+        clockStatus(s->clock,out->mutable_clock());
         out->set_revision(s->revision);out->set_utc_unix_seconds(s->utcSeconds);camera(s->camera,out->mutable_camera());
         for(const auto& o:s->objects){auto* result=out->add_objects();result->set_id(o.id);result->set_name(o.name);result->set_source(o.source);result->set_builtin(o.builtin);result->set_visible(o.visible);result->set_radius_meters(o.radiusMeters);
             auto* g=result->mutable_geometry();g->set_shape(static_cast<api::Geometry::Shape>(o.appearance.shape));vector(o.appearance.sizeMeters,g->mutable_size_meters());g->set_color_rgb(o.appearance.color);
             if(!o.samples.empty()){sample(o.samples.back(),result->mutable_state());result->set_stale(!o.builtin&&(s->utcSeconds<o.samples.back().utcSeconds||s->utcSeconds-o.samples.back().utcSeconds>1.));}}
         return grpc::Status::OK;
+    }
+    grpc::Status GetTime(grpc::ServerContext*,const api::Empty*,api::ClockStatus* out) override{
+        const auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};
+        clockStatus(s->clock,out);return grpc::Status::OK;
     }
     grpc::Status GetCapabilities(grpc::ServerContext*,const api::Empty*,api::Capabilities* out) override{
         out->add_frames(api::GEOCENTRIC_ICRF);out->set_max_objects(core::Scene::maxObjects);out->set_max_samples_per_batch(core::Scene::maxSamples);
@@ -93,7 +105,7 @@ struct Server::Impl {core::Bridge& bridge;Services services;std::unique_ptr<grpc
 Server::Server(core::Bridge& bridge,unsigned port):impl_(std::make_unique<Impl>(bridge)){
     if(port>65535)throw std::invalid_argument("Invalid gRPC port");grpc::ServerBuilder builder;
     builder.AddListeningPort("127.0.0.1:"+std::to_string(port),grpc::InsecureServerCredentials(),&impl_->port);
-    builder.RegisterService(static_cast<api::SceneService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CameraService::Service*>(&impl_->services));
+    builder.RegisterService(static_cast<api::SceneService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CameraService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::TimeService::Service*>(&impl_->services));
     builder.SetMaxReceiveMessageSize(1024*1024);builder.SetMaxSendMessageSize(4*1024*1024);
     grpc::ResourceQuota quota;quota.SetMaxThreads(16);quota.Resize(64*1024*1024);builder.SetResourceQuota(quota);
     builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::NUM_CQS,1);

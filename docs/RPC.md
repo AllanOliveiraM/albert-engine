@@ -53,6 +53,7 @@ Para compilar somente o programa visual, configure `-DALBERT_RPC=OFF`.
 | --- | --- |
 | `SceneService` | `GetScene`, `GetCapabilities`, `CreateObject`, `RemoveObject`, `SetVisibility`, `PushStates`, `StreamStates` |
 | `CameraService` | `Focus`, `Orbit`, `GetCamera` |
+| `TimeService` | `GetTime` |
 
 `GetCapabilities` informa os formatos e limites realmente suportados. IDs dos
 corpos embarcados: `earth`, `moon`, `sun`. Eles não podem ser removidos nem ter
@@ -71,11 +72,27 @@ serão acrescentados nos próximos marcos; não são simulados por campos ignora
 - Posições em metros e velocidades em m/s, no **ICRF com origem no centro da Terra**.
   Cada amostra deve declarar `GEOCENTRIC_ICRF`; referenciais diferentes são rejeitados.
 - Instante em segundos Unix UTC (`utc_unix_seconds`), definido pelo produtor.
-  Não é o horário de chegada do pacote. A primeira versão usa o relógio real.
+  Não é o horário de chegada do pacote. O Albert usa sua referência NTP interna.
 - Quaternion em ordem **X, Y, Z, W**, girando os eixos locais do modelo para o
   ICRF. O Albert normaliza quaternions válidos e rejeita quaternion nulo.
 - Os eixos gráficos, a escala e a origem próxima da câmera são cuidados pelo
   render. O cliente não precisa enviar matrizes threepp nem coordenadas em float.
+
+`TimeService.GetTime` e `Scene.clock` expõem o mesmo snapshot temporal do quadro:
+qualidade (`LOCAL`, `SYNCHRONIZED`, `HOLDOVER`, `EXPIRED`), UTC, fontes, idade,
+última sincronização, incerteza, RTT e geração. `uncertainty_seconds=-1` significa
+incerteza desconhecida. `authenticated=false` explicita a ausência de NTS.
+Correções grandes mudam `generation`; integrações devem observar esse campo e
+suas próprias políticas de cobertura temporal. O Albert preserva o timestamp do
+produtor, inclusive quando corrige seu próprio relógio. O exemplo sintético
+obtém o UTC inicial dessa API; para apenas consultar:
+
+```sh
+./build/linux/src/rpc/albert_demo_client 127.0.0.1:50051 --time
+```
+
+A consulta reflete o último quadro, não o instante exato de chegada da resposta.
+Detalhes, falhas de rede e política de leap seconds em [TIME.md](TIME.md).
 
 Amostras devem chegar em ordem estritamente crescente por objeto, inclusive
 entre chamadas distintas. Uma chamada rejeitada não aplica parte do seu lote.

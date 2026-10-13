@@ -1,4 +1,5 @@
 #pragma once
+#include "time.hpp"
 #include <array>
 #include <cstdint>
 #include <map>
@@ -29,7 +30,7 @@ struct Object {
 };
 struct Evaluated {Sample state;bool stale=false;};
 struct CameraState {ObjectId target="earth";Vector positionMeters;double distanceMeters=0;bool transitioning=false;};
-struct Snapshot {std::uint64_t revision=0;double utcSeconds=0;std::vector<Object> objects;CameraState camera;};
+struct Snapshot {std::uint64_t revision=0;double utcSeconds=0;std::vector<Object> objects;CameraState camera;time::Status clock;};
 class Scene {
 public:
     static constexpr size_t maxObjects=2048,maxSamples=256;

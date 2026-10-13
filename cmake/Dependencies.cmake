@@ -58,6 +58,8 @@ function(albert_fetch_curl)
     set(CURL_DISABLE_INSTALL ON)
     set(CURL_STATIC_CRT ON)
     set(HTTP_ONLY ON)
+    # Time synchronization reuses curl's bounded asynchronous DNS resolver.
+    set(ENABLE_THREADED_RESOLVER ON)
     # curl declares these as CACHE STRING under older CMake policies.
     set(CURL_ZLIB OFF CACHE STRING "" FORCE)
     set(CURL_BROTLI OFF CACHE STRING "" FORCE)

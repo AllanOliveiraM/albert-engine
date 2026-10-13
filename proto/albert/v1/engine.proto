@@ -36,7 +36,16 @@ message StateBatch { string id=1; repeated State samples=2; }
 // This acknowledges application on the owner thread, not just enqueueing.
 message Applied { uint64 revision=1; }
 message Camera { string target_id=1; Vector3 position_meters=2; double distance_meters=3; bool transitioning=4; }
-message Scene { uint64 revision=1; double utc_unix_seconds=2; repeated Object objects=3; Camera camera=4; }
+message ClockStatus {
+  enum Quality { LOCAL=0; SYNCHRONIZED=1; HOLDOVER=2; EXPIRED=3; }
+  Quality quality=1; double utc_unix_seconds=2;
+  // Negative means unknown (local fallback); estimates are not hard bounds.
+  double uncertainty_seconds=3; double last_sync_utc_unix_seconds=4;
+  double age_seconds=5; double round_trip_seconds=6;
+  string source=7; bool authenticated=8; bool synchronizing=9;
+  string error=10; uint64 generation=11; double pending_correction_seconds=12;
+}
+message Scene { uint64 revision=1; double utc_unix_seconds=2; repeated Object objects=3; Camera camera=4; ClockStatus clock=5; }
 message FocusRequest { string id=1; bool reset_zoom=2; }
 message OrbitRequest { double azimuth_radians=1; double elevation_radians=2; optional double distance_scale=3; }
 message StreamSummary { uint64 applied_batches=1; uint64 revision=2; }
@@ -59,4 +68,9 @@ service CameraService {
   rpc Focus(FocusRequest) returns (Applied);
   rpc Orbit(OrbitRequest) returns (Applied);
   rpc GetCamera(Empty) returns (Camera);
+}
+
+service TimeService {
+  // Same immutable frame snapshot as GetScene. No OS clock modification.
+  rpc GetTime(Empty) returns (ClockStatus);
 }

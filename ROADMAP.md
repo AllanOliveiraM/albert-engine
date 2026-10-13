@@ -77,12 +77,19 @@ efemérides reais e cinco quadros. A conferência integrada também exercitou zo
 manual sobre o veículo controlado por gRPC. Arte e prompt em
 [BRANDING.md](docs/BRANDING.md).
 
-**Prioridade alta — F23/M2C: tempo confiável.** Substituir a dependência do
-horário civil da máquina por sincronização com fontes externas verificáveis.
-Planejado, ainda não implementado; hoje o render usa o relógio do computador.
+**F23/M2C — primeiro corte entregue.** Referência NTP compartilhada por
+astronomia, nuvens, cena, interface e gRPC; concordância de pelo menos dois entre
+Cloudflare/NIST/PTB, compensação de atraso, avanço monotônico incluindo suspensão,
+correções graduais, expiração/qualidade explícita e renovação das efemérides após
+mudança de referência. Consulta `TimeService.GetTime` e `Scene.clock`; cliente de
+exemplo usa o tempo do Albert. 14 testes Linux passaram; build e fixtures de tempo
+mais transporte gRPC passaram no Windows/MinGW via Wine. Consultas públicas reais
+passaram em ambos; executável Windows também renderizou efemérides reais e cinco
+quadros. NTS e tratamento integral de leap second continuam pendentes;
+esta entrega não declara autenticação criptográfica. Políticas e limites em
+[TIME.md](docs/TIME.md).
 
-**Sequência:** concluir apresentação/documentação do repositório; F23/M2C,
-sincronização de tempo; depois M3, o primeiro planeta adicional, e M4, a primeira integração interna de
+**Sequência:** M3, o primeiro planeta adicional, e M4, a primeira integração interna de
 dados. Inventário inicial de Mercúrio/Marte em
 [PLANETARY_ASSETS.md](docs/PLANETARY_ASSETS.md); download, processamento e
 renderização de M3 ainda não começaram. M4–M7 seguem pendentes.
@@ -311,31 +318,34 @@ um `switch` central ou depender de posições fixas em arrays.
 
 **F23 — alta prioridade: uma referência de tempo confiável para todo o Albert.**
 
-- [ ] Criar um serviço interno de tempo compartilhado por astronomia, cena,
+- [x] Criar um serviço interno de tempo compartilhado por astronomia, cena,
   provedores e gRPC; o relógio civil local deixa de ser a fonte autoritativa.
-- [ ] Consultar NTP em workers, com fontes identificadas e mais de uma origem,
+- [x] Consultar NTP em workers, com fontes identificadas e mais de uma origem,
   respeitando limites e políticas dos servidores. Medir atraso, offset e
   incerteza; rejeitar respostas inconsistentes, antigas ou sem sincronização.
 - [ ] Avaliar NTS para autenticação das respostas e declarar o nível de confiança
   da fonte. Validar provedores e suas políticas de leap second/smear antes de
   combiná-los; não misturar escalas silenciosamente.
-- [ ] Ancorar o instante confiável em relógio monotônico entre consultas, com
+- [x] Ancorar o instante conferido externamente em relógio monotônico entre consultas, com
   deriva/incerteza acompanhadas. Ressincronizar após suspensão ou perda de rede,
   sem deixar saltos do relógio civil alterar a animação ou as efemérides.
-- [ ] Sem fonte disponível, manter a última referência confiável enquanto for
+- [x] Sem fonte disponível, manter a última referência conferida externamente enquanto for
   válida e informar a degradação. Um fallback local deve ser explicitamente
   marcado; não apresentar horário local como sincronização externa confirmada.
-- [ ] Expor fonte, última sincronização, qualidade/incerteza e estado na UI e
+- [x] Expor fonte, última sincronização, qualidade/incerteza e estado na UI e
   no gRPC, mantendo os detalhes técnicos fora da visualização principal.
 - [ ] Preservar conversões UTC/TAI/TT/TDB, leap seconds e timestamp fornecido
   pelo integrador. Não substituir o instante das amostras pelo horário de chegada.
-- [ ] Validar com fixtures: máquina adiantada/atrasada, salto do relógio civil,
+- [x] Validar com fixtures: máquina adiantada/atrasada, salto do relógio civil,
   latência, timeout, resposta inválida, suspensão e reconexão no Linux/Windows.
 
 Referências de protocolo: [NTPv4 — RFC 5905](https://www.rfc-editor.org/rfc/rfc5905)
 e [NTS — RFC 8915](https://www.rfc-editor.org/rfc/rfc8915), incluindo suas atualizações.
-Escolha de fontes e orçamento de precisão serão documentados após validação;
-não prometer precisão fixa independentemente da rede.
+Fontes, orçamento de precisão e evidências do primeiro corte em
+[TIME.md](docs/TIME.md). NTS foi avaliado e adiado; `authenticated=false`.
+A política conservadora rejeita anúncios de leap second e não mistura smear:
+o tratamento completo do instante intercalar ainda precisa ser implementado.
+Não prometer precisão fixa independentemente da rede.
 
 - [ ] Usar doubles para estado físico e origem relativa à câmera na GPU.
 - [ ] Declarar unidades em cada contrato: proposta de SI na API, posições em metros,
@@ -633,8 +643,8 @@ Dentro de cada faixa, a ordem indicada é a recomendada, respeitando as dependê
 | F21 | Completar cobertura do catálogo de luas e conteúdo embarcado | Alto para a visão completa | Variável por corpo | Grande | F16, inventário e orçamento; dados limitados não podem virar fotorealismo inventado |
 | F22 | Catálogo amplo de provedores e novas classes de camadas | Valor variável por caso de uso | Média–baixa no conjunto | Grande | Expandir F14/F18 após validar demanda, termos, limites e manutenção de cada fonte |
 
-**Faixas de execução:** M0–M2B entregues nos cortes acima; F23 é a próxima
-prioridade de implementação, antes dos novos planetas. F11–F20 seguem em
+**Faixas de execução:** M0–M2B e primeiro corte de M2C entregues nos cortes acima;
+NTS/leap second seguem como endurecimento de F23. M3 é a próxima expansão de conteúdo. F11–F20 seguem em
 entregas incrementais após o MVP; F21–F22 como expansão continuada. F07 pode
 ser investigada junto à fundação. Os IDs não impõem uma fila rígida: por exemplo,
 F14 pode preceder F12 se importar objetos existentes tiver mais valor imediato.

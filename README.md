@@ -51,9 +51,11 @@ da Lua e as trajetórias da Terra e Lua no Horizons. Entre consultas, interpola
 as amostras para manter o movimento contínuo. A orientação dos corpos usa
 transformações astronômicas; a Terra considera o modelo WGS84.
 
-Atualmente, o instante de referência vem do **relógio do computador**.
-A sincronização com NTP e fontes confiáveis de tempo é uma prioridade alta
-planejada no [roadmap](ROADMAP.md#53-precisão-e-estado-temporal).
+O horário é conferido automaticamente com **fontes NTP independentes** e
+continua avançando entre consultas. Se a rede falhar, a interface informa quando
+o horário é estimado ou local. Fonte e qualidade ficam em **Dados** e também
+estão disponíveis pela API. Esta versão ainda não autentica NTP com NTS;
+[funcionamento e limites](docs/TIME.md).
 
 **As imagens estáticas acompanham o aplicativo.** Superfícies, luzes das cidades,
 relevo e referência solar estão em uma biblioteca de **2,86 GB**. Na distribuição,

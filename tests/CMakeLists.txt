@@ -53,3 +53,8 @@ if(ALBERT_RPC)
     add_test(NAME rpc_commands COMMAND rpc_test)
     set_tests_properties(rpc_commands PROPERTIES TIMEOUT 30)
 endif()
+
+add_executable(time_test time_test.cpp)
+target_link_libraries(time_test PRIVATE albert_core)
+add_test(NAME external_time COMMAND time_test)
+set_tests_properties(external_time PROPERTIES TIMEOUT 10)

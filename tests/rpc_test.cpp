@@ -19,13 +19,20 @@ int main(){try{
                 else if constexpr(std::is_same_v<T,Append>)registry.samples(value.id,std::move(value.values));
                 else if constexpr(std::is_same_v<T,Focus>){registry.get(value.id);camera.target=value.id;registry.cameraChanged();}
             },command);return Reply{Code::Ok,{},registry.revision()};});
-            bridge.publish(registry.snapshot(100.5,camera));std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            auto snapshot=registry.snapshot(100.5,camera);snapshot.clock.utcSeconds=100.5;snapshot.clock.quality=albert::time::Quality::Holdover;
+            snapshot.clock.source="fixture-one, fixture-two";snapshot.clock.uncertaintySeconds=.03;snapshot.clock.generation=2;
+            bridge.publish(std::move(snapshot));std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
     albert::rpc::Server server(bridge,0);
     auto channel=grpc::CreateChannel("127.0.0.1:"+std::to_string(server.port()),grpc::InsecureChannelCredentials());
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto scene=api::SceneService::NewStub(channel);auto camera=api::CameraService::NewStub(channel);api::Applied applied;
+    {auto time=api::TimeService::NewStub(channel);grpc::ClientContext c;api::ClockStatus timing;
+        require(time->GetTime(&c,{},&timing).ok(),"Clock RPC failed");
+        require(timing.quality()==api::ClockStatus::HOLDOVER&&timing.utc_unix_seconds()==100.5&&!timing.authenticated()&&timing.generation()==2,"Clock quality/provenance lost in RPC");
+        grpc::ClientContext cs;api::Scene snapshot;require(scene->GetScene(&cs,{},&snapshot).ok(),"Scene snapshot failed");
+        require(snapshot.has_clock()&&snapshot.clock().utc_unix_seconds()==snapshot.utc_unix_seconds(),"Scene and clock snapshots disagree");}
     api::CreateObjectRequest create;create.set_id("rpc-test");create.set_name("External object");create.set_source("Test fixture");
     auto* g=create.mutable_geometry();g->set_shape(api::Geometry::BOX);g->mutable_size_meters()->set_x(10);g->mutable_size_meters()->set_y(20);g->mutable_size_meters()->set_z(30);
     auto* state=create.mutable_initial_state();state->set_frame(api::GEOCENTRIC_ICRF);state->set_utc_unix_seconds(100);state->mutable_position_meters()->set_x(1e11);state->mutable_attitude()->set_w(1);

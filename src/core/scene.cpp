@@ -81,5 +81,5 @@ Evaluated Scene::evaluate(const ObjectId& id,double now) const{
     if(a.attitude&&b->attitude)r.attitude=blend(*a.attitude,*b->attitude,t);
     return {r,false};
 }
-Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera};for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}
+Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera,{}};result.clock.utcSeconds=now;for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}
 }

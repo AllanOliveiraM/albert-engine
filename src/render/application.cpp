@@ -23,6 +23,7 @@
 #include "borders.hpp"
 #include "objects.hpp"
 #include "core/bridge.hpp"
+#include "core/time.hpp"
 #ifdef ALBERT_HAS_RPC
 #include "rpc/server.hpp"
 #endif
@@ -152,13 +153,7 @@ Vec3 geodetic(double latDeg, double lonDeg, double h = 0) {
 // ----------------------------------------
 
 double jdUTC() {
-    using namespace std::chrono;
-
-    double seconds = duration<double>(
-        system_clock::now().time_since_epoch()
-    ).count();
-
-    return 2440587.5 + seconds / 86400.0;
+    return 2440587.5 + albert::time::clock().utcSeconds()/86400.;
 }
 
 double jdTT(double utc) {
@@ -537,6 +532,7 @@ struct LoadedData {
     std::vector<float> borders;
     Ephemerides ephemerides;
     Orbits orbits;
+    std::uint64_t timeGeneration=0;
 };
 
 // Network work owns its progress state and never accesses scene/UI objects.
@@ -563,6 +559,7 @@ public:
                 progress.stage("Preparando cartografia local", 6);
                 result.borders = loadBorders(countries_);
             }
+            result.timeGeneration=albert::time::clock().status().generation;
             result.ephemerides = loadEphemerides(&progress, 5);
             result.orbits = loadOrbits(&progress, 5);
             progress.stage("Pronto", LOAD_STEPS);
@@ -839,6 +836,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
             ~CurlLifetime() { curl_global_cleanup(); }
         } curlLifetime;
+        auto& timeService=albert::time::clock();
 
         fs::path countries =
             albert::assetDirectory() / "countries.geojson";
@@ -887,6 +885,10 @@ int albert::runRenderer(int argc, char** argv) {
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
+            const auto timing=timeService.status();
+            if(timing.synchronizing) ImGui::TextDisabled("Conferindo horario na internet...");
+            else if(timing.quality==albert::time::Quality::Local) ImGui::TextColored(ImVec4(1,.7f,.4f,1),"Horario local: sem confirmacao externa");
+            else ImGui::TextDisabled("Horario conferido na internet");
             drawDownloadStatus(downloads);
             ImGui::Spacing();
             ImGui::TextWrapped("Imagens incluidas no programa. Buscando as posicoes reais da Terra, Lua e Sol.");
@@ -896,9 +898,15 @@ int albert::runRenderer(int argc, char** argv) {
         };
         drawInterface = [&] { drawLoading(1.f); };
         canvas.onWindowResize([&](WindowSize size) { renderer.setSize(size); });
-        downloads.start();
+        bool initialDownloadsStarted=false;
+        const double initialClockWait=albert::time::monotonicSeconds();
         std::optional<LoadedData> loaded;
         while (canvas.isOpen() && !loaded) {
+            if(!initialDownloadsStarted && (!timeService.status().synchronizing || albert::time::monotonicSeconds()-initialClockWait>12.)) {
+                downloads.start();initialDownloadsStarted=true;
+                const auto timing=timeService.status();
+                std::cout<<"Tempo: "<<albert::time::qualityName(timing.quality)<<" ("<<timing.source<<"), incerteza "<<timing.uncertaintySeconds<<" s"<<std::endl;
+            }
             loaded = downloads.poll();
             if (smokeTest && !downloads.error.empty()) throw std::runtime_error(downloads.error);
             if (loaded) break;
@@ -912,6 +920,7 @@ int albert::runRenderer(int argc, char** argv) {
         auto borders = std::move(loaded->borders);
         auto ephemerides = std::move(loaded->ephemerides);
         auto orbits = std::move(loaded->orbits);
+        const auto initialTimeGeneration=loaded->timeGeneration;
         loaded.reset();
 
         auto scene = Scene::create();
@@ -1185,6 +1194,16 @@ int albert::runRenderer(int argc, char** argv) {
                     if (ImGui::Button("Atualizar posicoes agora", ImVec2(-1, 36))) downloads.start(false);
                     ImGui::EndDisabled();
                     ImGui::Spacing();
+                    const auto timing=timeService.status();
+                    ImGui::TextDisabled("HORARIO DA SIMULACAO");
+                    if(timing.quality==albert::time::Quality::Synchronized) ImGui::TextWrapped("Conferido na internet");
+                    else if(timing.quality==albert::time::Quality::Holdover) ImGui::TextWrapped("Ultimo horario conferido; aguardando nova consulta");
+                    else if(timing.quality==albert::time::Quality::Expired) ImGui::TextWrapped("Horario estimado; confirmacao externa expirada");
+                    else ImGui::TextWrapped("Horario local, sem confirmacao externa");
+                    ImGui::BeginDisabled(timing.synchronizing);
+                    if(ImGui::Button("Conferir horario",ImVec2(-1,32)))timeService.resynchronize();
+                    ImGui::EndDisabled();
+                    ImGui::Spacing();
                     ImGui::TextDisabled("NUVENS EM TEMPO REAL");
                     if (!visualSettings.clouds) ImGui::TextWrapped("Desativadas. Ative em Cena para buscar observacoes.");
                     else if (cloudSync.date.empty()) ImGui::TextWrapped("Aguardando observacoes de satelite.");
@@ -1236,6 +1255,11 @@ int albert::runRenderer(int argc, char** argv) {
                         ImGui::EndDisabled();
                     }
                     if (ImGui::CollapsingHeader("Detalhes tecnicos")) {
+                        const auto timing=timeService.status();
+                        ImGui::TextWrapped("Tempo: %s. Fontes: %s",albert::time::qualityName(timing.quality),timing.source.c_str());
+                        if(timing.uncertaintySeconds>=0)ImGui::TextWrapped("Incerteza estimada: %.1f ms. Atraso: %.1f ms. Ultima consulta valida: %.0f s atras.",timing.uncertaintySeconds*1000.,timing.delaySeconds*1000.,timing.ageSeconds);
+                        ImGui::TextWrapped("NTP com concordancia entre fontes; sem autenticacao NTS.");
+                        if(!timing.error.empty())ImGui::TextWrapped("%s",timing.error.c_str());
                         if(!regional.error.empty()) ImGui::TextWrapped("%s",regional.error.c_str());
                         ImGui::TextWrapped("Posicoes: NASA/JPL Horizons, atualizadas a cada 5 minutos. Orbitas: a cada 24 horas.");
                         ImGui::TextWrapped("Nuvens: Terra + Aqua / MODIS, NASA GIBS. Consulta a cada 30 minutos.");
@@ -1304,9 +1328,12 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::SetNextWindowBgAlpha(.65f);
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(18,14));
                 ImGui::Begin("Estado", nullptr, (flags & ~ImGuiWindowFlags_AlwaysAutoResize) | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-                const auto time = albert::utcTime(std::time(nullptr));
+                const auto timing=timeService.status();
+                const auto time = albert::utcTime(static_cast<std::time_t>(timing.utcSeconds));
                 ImGui::TextDisabled("%02d:%02d:%02d UTC", time.tm_hour, time.tm_min, time.tm_sec);
-                if (refreshing || refreshingOrbits || cloudSync.active) ImGui::TextColored(ImVec4(.4f,.85f,.9f,1), "Atualizando dados");
+                if(timing.quality==albert::time::Quality::Local)ImGui::TextColored(ImVec4(1,.7f,.4f,1),"Horario local");
+                else if(timing.quality!=albert::time::Quality::Synchronized)ImGui::TextColored(ImVec4(1,.7f,.4f,1),"Horario estimado");
+                else if (refreshing || refreshingOrbits || cloudSync.active) ImGui::TextColored(ImVec4(.4f,.85f,.9f,1), "Atualizando dados");
                 else if (!cloudSync.error.empty() || !refreshError.empty()) ImGui::TextColored(ImVec4(1,.7f,.4f,1), "Atualizacao pendente");
                 else ImGui::TextColored(ImVec4(.4f,.85f,.7f,1), "Dados sincronizados");
                 ImGui::End();
@@ -1342,6 +1369,10 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::SetNextWindowPos(ImVec2(display.x * .5f, display.y * .5f), ImGuiCond_Always, ImVec2(.5f,.5f));
                 ImGui::SetNextWindowSize(ImVec2(std::min(460.f, display.x - 32), 0));
                 ImGui::Begin("Sincronizacao", nullptr, flags);
+                const auto timing=timeService.status();
+                if(timing.synchronizing) ImGui::TextDisabled("Conferindo horario na internet...");
+                else if(timing.quality==albert::time::Quality::Local) ImGui::TextColored(ImVec4(1,.7f,.4f,1),"Horario local: sem confirmacao externa");
+                else ImGui::TextDisabled("Horario conferido na internet");
                 drawDownloadStatus(downloads);
                 ImGui::End();
             }
@@ -1407,10 +1438,20 @@ int albert::runRenderer(int argc, char** argv) {
         bool dataValid = true;
         int renderedFrames = 0;
 
+        auto timeGeneration=initialTimeGeneration;
+        std::uint64_t refreshEpoch=0,ephemerisRequestEpoch=0,orbitRequestEpoch=0;
+        double lastFrameMonotonic=albert::time::monotonicSeconds();
         canvas.animate([&] {
+            const auto frameTime=timeService.status();
             const float elapsed = clock.getDelta();
             const float dt = std::min(elapsed, 0.1f);
             auto steadyNow = SteadyClock::now();
+            const double frameMonotonic=albert::time::monotonicSeconds();
+            if(frameTime.generation!=timeGeneration||frameMonotonic-lastFrameMonotonic>30.){
+                timeGeneration=frameTime.generation;++refreshEpoch;nextRefresh=steadyNow;nextOrbitRefresh=steadyNow;
+            }
+            lastFrameMonotonic=frameMonotonic;
+
             planets.updateUploads(renderer);
             if (introductionStart) introductionElapsed = std::min(introductionDuration,
                 std::chrono::duration<float>(steadyNow - *introductionStart).count());
@@ -1435,8 +1476,8 @@ int albert::runRenderer(int argc, char** argv) {
                 ephemerides = std::move(updated->ephemerides);
                 orbits = std::move(updated->orbits);
                 refreshError.clear();
-                nextRefresh = steadyNow + std::chrono::seconds(REFRESH_SECONDS);
-                nextOrbitRefresh = steadyNow + std::chrono::hours(24);
+                nextRefresh = updated->timeGeneration==frameTime.generation ? steadyNow+std::chrono::seconds(REFRESH_SECONDS):steadyNow;
+                nextOrbitRefresh = updated->timeGeneration==frameTime.generation ? steadyNow+std::chrono::hours(24):steadyNow;
                 ephemerisFailures = orbitFailures = 0;
             }
 
@@ -1452,7 +1493,7 @@ int albert::runRenderer(int argc, char** argv) {
                 try {
                     ephemerides = pending.get();
                     ephemerisFailures = 0;
-                    nextRefresh = steadyNow + std::chrono::seconds(REFRESH_SECONDS);
+                    nextRefresh = ephemerisRequestEpoch==refreshEpoch ? steadyNow+std::chrono::seconds(REFRESH_SECONDS):steadyNow;
                     dataValid = true;
                     refreshError.clear();
                 } catch (const std::exception& e) {
@@ -1464,7 +1505,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
 
             if (!refreshing && !downloads.active && steadyNow >= nextRefresh) {
-                refreshing = true;
+                refreshing = true;ephemerisRequestEpoch=refreshEpoch;
 
                 pending = std::async(
                     std::launch::async,
@@ -1488,7 +1529,7 @@ int albert::runRenderer(int argc, char** argv) {
 
                     orbits = std::move(updated);
                     orbitFailures = 0;
-                    nextOrbitRefresh = steadyNow + std::chrono::hours(24);
+                    nextOrbitRefresh = orbitRequestEpoch==refreshEpoch ? steadyNow+std::chrono::hours(24):steadyNow;
 
                     scene->add(moonOrbit);
                     scene->add(earthOrbit);
@@ -1501,7 +1542,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
 
             if (!refreshingOrbits && !downloads.active && steadyNow >= nextOrbitRefresh) {
-                refreshingOrbits = true;
+                refreshingOrbits = true;orbitRequestEpoch=refreshEpoch;
 
                 pendingOrbits = std::async(
                     std::launch::async,
@@ -1532,7 +1573,7 @@ int albert::runRenderer(int argc, char** argv) {
             });
 
             // Posicionamento fisico dos corpos
-            double utc = jdUTC();
+            double utc = 2440587.5+frameTime.utcSeconds/86400.;
             double tdb = jdTDB(utc);
 
             try {
@@ -1540,7 +1581,7 @@ int albert::runRenderer(int argc, char** argv) {
                 Vec3 moonState = interpolate(ephemerides.moon, tdb);
                 Vec3 earthHelio = interpolate(orbits.earth, tdb);
 
-                const double timestamp=(utc-2440587.5)*86400.;
+                const double timestamp=frameTime.utcSeconds;
                 registry.builtinState("earth",{timestamp,{0,0,0}});
                 registry.builtinState("moon",{timestamp,{moonState.x*1000.,moonState.y*1000.,moonState.z*1000.}});
                 registry.builtinState("sun",{timestamp,{sunState.x*1000.,sunState.y*1000.,sunState.z*1000.}});
@@ -1784,9 +1825,10 @@ int albert::runRenderer(int argc, char** argv) {
             }
             if(rpcPort) {
                 const double r=albert::core::earthRadiusMeters;
-                commands.publish(registry.snapshot((utc-2440587.5)*86400.,{focus,
+                auto snapshot=registry.snapshot(frameTime.utcSeconds,{focus,
                     {sceneOrigin.x+camera->position.x*r,sceneOrigin.y-camera->position.z*r,sceneOrigin.z+camera->position.y*r},
-                    camera->position.distanceTo(controls.target)*r,transition.active}));
+                    camera->position.distanceTo(controls.target)*r,transition.active});
+                snapshot.clock=frameTime;commands.publish(std::move(snapshot));
             }
             renderer.render(*scene, *camera);
             ui.render();

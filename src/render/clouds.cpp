@@ -1,4 +1,5 @@
 #include "clouds.hpp"
+#include "core/time.hpp"
 #include "platform.hpp"
 #include "wms.hpp"
 #include "threepp/loaders/ImageLoader.hpp"
@@ -29,7 +30,7 @@ std::string read(const fs::path& path) {
 std::string observationDay(int daysAgo = 0) {
     // Leave a processing margin. Within each UTC day the mosaic is partial
     // and may have gaps; the UI reports its date and actual valid coverage.
-    const auto utc = albert::utcTime(std::time(nullptr) - 3 * 3600 - daysAgo * 86400);
+    const auto utc = albert::utcTime(static_cast<std::time_t>(albert::time::clock().utcSeconds()) - 3 * 3600 - daysAgo * 86400);
     std::ostringstream out;
     out << std::put_time(&utc, "%Y-%m-%d");
     return out.str();
@@ -182,7 +183,7 @@ void save(const fs::path& directory, const std::array<std::string, 6>& data, con
         fs::rename(temporary, target);
     }
     std::ofstream fetched(directory / "fetched-at.txt");
-    fetched << std::time(nullptr);fetched.close();
+    fetched << static_cast<std::time_t>(albert::time::clock().utcSeconds());fetched.close();
     if(!fetched) throw std::runtime_error("Nao foi possivel salvar a consulta das nuvens");
     std::ofstream metadata(directory / "date.txt");
     metadata << day;
@@ -222,7 +223,7 @@ void albert::CloudSync::refresh(bool clearCache) {
                 fallback.fromCache = true;
                 try {
                     const auto fetched=std::stoll(read(cache_/"fetched-at.txt"));
-                    const auto age=std::time(nullptr)-fetched;
+                    const auto age=static_cast<std::time_t>(albert::time::clock().utcSeconds())-fetched;
                     if(age>=0 && age<1800) fallback.refreshAfterSeconds=static_cast<int>(1800-age);
                 } catch(const std::exception&) {}
                 return fallback; // Show cached observations; retain the 30-minute cadence.
@@ -325,7 +326,7 @@ std::optional<albert::CloudDetail> albert::CloudSync::pollDetail() {
             cell << std::fixed << std::setprecision(3) << region.west << '_' << region.south << '_' << region.east << '_' << region.north;
             const auto directory = cache_/"detail"/(dates.substr(dates.size()-10)+"_"+cell.str());
             try {
-                const auto age=std::time(nullptr)-std::stoll(read(directory/"fetched-at.txt"));
+                const auto age=static_cast<std::time_t>(albert::time::clock().utcSeconds())-std::stoll(read(directory/"fetched-at.txt"));
                 if(age>=0 && age<1800 && read(directory/"date.txt")==dates) {
                     result.observation=decode({read(directory/"current.png"),read(directory/"previous.png"),read(directory/"reflectance-current.png"),read(directory/"reflectance-current-terra.png"),read(directory/"reflectance-previous.png"),read(directory/"reflectance-previous-terra.png")},dates,palette_,2048,2048,region);
                     return result;
