@@ -77,7 +77,12 @@ efemérides reais e cinco quadros. A conferência integrada também exercitou zo
 manual sobre o veículo controlado por gRPC. Arte e prompt em
 [BRANDING.md](docs/BRANDING.md).
 
-**Sequência:** M3, o primeiro planeta adicional, e M4, a primeira integração interna de
+**Prioridade alta — F23/M2C: tempo confiável.** Substituir a dependência do
+horário civil da máquina por sincronização com fontes externas verificáveis.
+Planejado, ainda não implementado; hoje o render usa o relógio do computador.
+
+**Sequência:** concluir apresentação/documentação do repositório; F23/M2C,
+sincronização de tempo; depois M3, o primeiro planeta adicional, e M4, a primeira integração interna de
 dados. Inventário inicial de Mercúrio/Marte em
 [PLANETARY_ASSETS.md](docs/PLANETARY_ASSETS.md); download, processamento e
 renderização de M3 ainda não começaram. M4–M7 seguem pendentes.
@@ -303,6 +308,34 @@ um `switch` central ou depender de posições fixas em arrays.
 - [ ] Carregar recursos por visibilidade/prioridade; não manter todas as texturas de todas as luas na GPU.
 
 ### 5.3 Precisão e estado temporal
+
+**F23 — alta prioridade: uma referência de tempo confiável para todo o Albert.**
+
+- [ ] Criar um serviço interno de tempo compartilhado por astronomia, cena,
+  provedores e gRPC; o relógio civil local deixa de ser a fonte autoritativa.
+- [ ] Consultar NTP em workers, com fontes identificadas e mais de uma origem,
+  respeitando limites e políticas dos servidores. Medir atraso, offset e
+  incerteza; rejeitar respostas inconsistentes, antigas ou sem sincronização.
+- [ ] Avaliar NTS para autenticação das respostas e declarar o nível de confiança
+  da fonte. Validar provedores e suas políticas de leap second/smear antes de
+  combiná-los; não misturar escalas silenciosamente.
+- [ ] Ancorar o instante confiável em relógio monotônico entre consultas, com
+  deriva/incerteza acompanhadas. Ressincronizar após suspensão ou perda de rede,
+  sem deixar saltos do relógio civil alterar a animação ou as efemérides.
+- [ ] Sem fonte disponível, manter a última referência confiável enquanto for
+  válida e informar a degradação. Um fallback local deve ser explicitamente
+  marcado; não apresentar horário local como sincronização externa confirmada.
+- [ ] Expor fonte, última sincronização, qualidade/incerteza e estado na UI e
+  no gRPC, mantendo os detalhes técnicos fora da visualização principal.
+- [ ] Preservar conversões UTC/TAI/TT/TDB, leap seconds e timestamp fornecido
+  pelo integrador. Não substituir o instante das amostras pelo horário de chegada.
+- [ ] Validar com fixtures: máquina adiantada/atrasada, salto do relógio civil,
+  latência, timeout, resposta inválida, suspensão e reconexão no Linux/Windows.
+
+Referências de protocolo: [NTPv4 — RFC 5905](https://www.rfc-editor.org/rfc/rfc5905)
+e [NTS — RFC 8915](https://www.rfc-editor.org/rfc/rfc8915), incluindo suas atualizações.
+Escolha de fontes e orçamento de precisão serão documentados após validação;
+não prometer precisão fixa independentemente da rede.
 
 - [ ] Usar doubles para estado físico e origem relativa à câmera na GPU.
 - [ ] Declarar unidades em cada contrato: proposta de SI na API, posições em metros,
@@ -581,6 +614,7 @@ Dentro de cada faixa, a ordem indicada é a recomendada, respeitando as dependê
 | F03 | Fronteiras acompanhando o terreno no zoom | Alto: recuperar recurso existente | Média | Médio | Amostragem do relevo e erro dos segmentos; reutilizar resultado depois nas camadas |
 | F04 | Luz auxiliar desligada por padrão, brilho lunar menor e transição | Alto: aparência inicial e controle previsível | Alta | Pequeno–médio | Comparação visual para escolher brilho e curva; mesmos materiais globais/regionais |
 | F05 | Remover tooltips redundantes e acertar animações já existentes | Médio: interface mais limpa | Alta | Pequeno | Limitar ao menu, foco, zoom e estados existentes; auditoria ampla continua incremental |
+| F23 — alta prioridade | Relógio interno sincronizado com NTP/fontes confiáveis | Muito alto: precisão temporal comum a toda a simulação | Média | Médio | Fonte/qualidade, relógio monotônico, falhas de rede, UTC/TAI/TT/TDB; executar após M2B e antes de novos planetas |
 | F06 | Registro genérico + serviços internos mínimos + câmera por ID | Alto de fundação: permite novos objetos e gRPC | Média | Grande, dividido | Migrar Terra/Lua/Sol e provar cadastro de um quarto objeto sem branches específicos |
 | F07 | Inventário dos próximos assets e teste de um corpo | Alto de redução de risco | Alta para inventário | Pequeno–médio | Confirmar cobertura, origem, redistribuição, escala e tamanho antes do download completo |
 | F08 | gRPC local: consultar cena, criar/remover objeto e focar | Muito alto para programação externa | Média após F06 | Médio | Contrato mínimo, fila de comandos, snapshots e build Linux/Windows |
@@ -599,7 +633,8 @@ Dentro de cada faixa, a ordem indicada é a recomendada, respeitando as dependê
 | F21 | Completar cobertura do catálogo de luas e conteúdo embarcado | Alto para a visão completa | Variável por corpo | Grande | F16, inventário e orçamento; dados limitados não podem virar fotorealismo inventado |
 | F22 | Catálogo amplo de provedores e novas classes de camadas | Valor variável por caso de uso | Média–baixa no conjunto | Grande | Expandir F14/F18 após validar demanda, termos, limites e manutenção de cada fonte |
 
-**Faixas de execução:** F01–F05 agora; F06–F10 na próxima etapa; F11–F20 em
+**Faixas de execução:** M0–M2B entregues nos cortes acima; F23 é a próxima
+prioridade de implementação, antes dos novos planetas. F11–F20 seguem em
 entregas incrementais após o MVP; F21–F22 como expansão continuada. F07 pode
 ser investigada junto à fundação. Os IDs não impõem uma fila rígida: por exemplo,
 F14 pode preceder F12 se importar objetos existentes tiver mais valor imediato.
@@ -612,6 +647,7 @@ F14 pode preceder F12 se importar objetos existentes tiver mais valor imediato.
 | M1 — um objeto a mais pelo caminho genérico | Primeiro corte de F06, investigação F07 | IDs, estado físico/temporal, descritor simples e câmera; extrair apenas os serviços necessários | Terra/Lua/Sol preservados e quarto objeto criado sem nova ramificação por nome/tipo |
 | M2A — primeiro cliente gRPC útil | F08 | Uma fatia da API de cena/câmera; não implementar todos os serviços da seção 6 de uma vez | Cliente consulta cena, cria/remove uma primitiva e pede foco; UI continua operando |
 | M2B — objeto em movimento controlado externamente | F09/F10 | Um cliente e um stream bem definido; primitivas e dados sintéticos declarados | Cliente atualiza posição/atitude; usuário orbita e faz zoom; desconexão não trava nem inventa voo |
+| M2C — tempo confiável, alta prioridade | F23 | Serviço interno com fontes externas e qualidade explícita; não alterar o relógio do sistema operacional | Máquina com horário errado não define o instante astronômico; monotônico entre consultas; degradação e fonte visíveis; testes Linux/Windows |
 | M3 — primeiro conteúdo novo embarcado | F11 e parte de F15 | Um corpo por vez, sem exigir todas as luas para concluir o primeiro planeta | Assets locais com proveniência/LOD; orientação, iluminação, câmera e memória validadas |
 | M4 — uma integração interna completa | Primeiro corte de F14 | Um provedor conhecido; busca/importação/acompanhamento; sem catálogo enorme | UI e gRPC importam pelo mesmo serviço, com fonte, instante, validade, cache e limites |
 | M5 — conteúdo externo visual | Cortes independentes de F12/F13/F18 | Um modelo, uma camada vetorial e uma raster, entregues separadamente | Dados aparecem com escala, referencial, oclusão e créditos corretos, sem bloquear navegação |
