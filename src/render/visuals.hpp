@@ -9,6 +9,7 @@
 #include "geography.hpp"
 #include "regional.hpp"
 #include "uploads.hpp"
+#include "solids.hpp"
 #include <future>
 
 #include <array>
@@ -23,6 +24,7 @@ struct DecodedAssets {
     std::array<std::optional<threepp::Image>, 6> images;
     std::optional<threepp::Image> oceans;
     std::optional<threepp::Image> moonHeight;
+    std::vector<SurfaceAssets> surfaces;
 };
 DecodedAssets loadVisualAssets(const std::filesystem::path& directory, DownloadProgress& progress);
 

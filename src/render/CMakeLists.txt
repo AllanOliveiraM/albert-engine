@@ -13,7 +13,7 @@ target_link_libraries(albert_imgui PUBLIC glfw ${CMAKE_DL_LIBS})
 add_library(albert_download STATIC download.cpp)
 target_link_libraries(albert_download PUBLIC CURL::libcurl)
 target_include_directories(albert_download PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-add_library(albert_render STATIC application.cpp objects.cpp visuals.cpp uploads.cpp paths.cpp borders.cpp clouds.cpp asset_pack.cpp cache.cpp regional.cpp wms.cpp)
+add_library(albert_render STATIC application.cpp solids.cpp objects.cpp visuals.cpp uploads.cpp paths.cpp borders.cpp clouds.cpp asset_pack.cpp cache.cpp regional.cpp wms.cpp)
 target_include_directories(albert_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${threepp_SOURCE_DIR}/src/external/stb ${threepp_SOURCE_DIR}/src/external/glad)
 target_link_libraries(albert_render PRIVATE threepp::threepp

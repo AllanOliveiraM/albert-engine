@@ -9,7 +9,7 @@
 #include <optional>
 namespace albert {
 struct RegionalImages {
-    bool moon=false;
+    std::string body="earth";
     int level=0;
     GeoRegion region;
     std::optional<threepp::Image> day,night,roughness,height,surfaceMask;
@@ -21,7 +21,7 @@ void prepareRegionalImages(RegionalImages& images);
 class RegionalImagery {
 public:
     ~RegionalImagery();
-    void request(std::optional<GeoRegion> region,bool moon=false,int level=0);
+    void request(std::optional<GeoRegion> region,std::string body="earth",int level=0);
     std::optional<RegionalImages> poll();
     bool active() const {return pending_.valid();}
     void retry();
@@ -30,8 +30,7 @@ public:
 private:
     std::optional<GeoRegion> desired_,loaded_;
     std::optional<GeoRegion> working_;
-    bool workingMoon_=false;
-    bool moon_=false,loadedMoon_=false;
+    std::string workingBody_="earth",body_="earth",loadedBody_="earth";
     int level_=0,loadedLevel_=-1;
     std::chrono::steady_clock::time_point changed_{},next_{};
     std::future<RegionalImages> pending_;

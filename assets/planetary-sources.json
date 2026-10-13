@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "bodies": [
+    {
+      "id": "mercury",
+      "datum_radius_m": 2439400,
+      "orientation": "IAU_MERCURY, NASA/NAIF pck00011 (IAU 2015), including physical libration",
+      "credit": "NASA / Johns Hopkins University Applied Physics Laboratory / Carnegie Institution of Washington / USGS Astrogeology",
+      "license": "NASA/PDS mission imagery; USGS-derived product. Cite original authors. No endorsement implied.",
+      "sources": [
+        {
+          "id": "messenger-mdis-bdr-2016",
+          "layer": "mercury-day",
+          "url": "https://planetarydata.jpl.nasa.gov/img/data/test/messenger/MDIS_MAPS/DATA/Mercury_MESSENGER_MDIS_Basemap_BDR_Mosaic_Global_166m.cub",
+          "filename": "Mercury_MESSENGER_MDIS_Basemap_BDR_Mosaic_Global_166m.cub",
+          "product": "https://astrogeology.usgs.gov/search/map/mercury_messenger_mdis_global_basemap_bdr_166m",
+          "grid": [
+            92160,
+            46080
+          ],
+          "tile_size": 1440,
+          "longitude": "east-positive, -180 to 180; planetocentric latitude",
+          "lighting": "Monochrome reflectance mosaic, photometrically normalized; acquisition morphology remains. Not a true-color photograph.",
+          "epoch": "MESSENGER mission mosaic, 2016 release"
+        },
+        {
+          "id": "messenger-usgs-dem-2016-v1",
+          "layer": "mercury-height",
+          "kind": "elevation",
+          "url": "https://planetarydata.jpl.nasa.gov/img/data/test/messenger/MDIS_MAPS/DATA/Mercury_Messenger_USGS_DEM_Global_665m.cub",
+          "filename": "Mercury_Messenger_USGS_DEM_Global_665m.cub",
+          "product": "https://astrogeology.usgs.gov/search/map/mercury_messenger_global_dem_665m",
+          "grid": [
+            23040,
+            11520
+          ],
+          "tile_size": 720,
+          "longitude": "east-positive, 0 to 360; converted losslessly to -180 to 180",
+          "epoch": "2016 original archive version; not the subsequently revised V02 product",
+          "encoding": "ISIS SignedWord; use GDAL band scale/offset; reference radius 2439400 m",
+          "sha256": "2f427b0db038e7edd452d680d856f53e3a7b62bace9562f481c15b03fb45e99a",
+          "bytes": 530913601
+        }
+      ]
+    }
+  ]
+}

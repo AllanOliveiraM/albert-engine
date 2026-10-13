@@ -1,7 +1,8 @@
 .DEFAULT_GOAL := render-build
-.PHONY: setup bootstrap build run test dist clean render-build render-run render-test render-dist render-clean assets
+.PHONY: setup bootstrap build run test dist clean render-build render-run render-test render-dist render-clean assets assets-body
 
 JOBS ?= 4
+BODY ?= mercury
 ifeq ($(OS),Windows_NT)
 SETUP := powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1 -Task setup
 else
@@ -51,4 +52,12 @@ ifeq ($(OS),Windows_NT)
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1 -Task assets
 else
 	bash scripts/prepare-assets.sh
+endif
+
+# Regenerate one additional body's archive; existing image parts stay intact.
+assets-body:
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1 -Task assets-body -Body "$(BODY)"
+else
+	bash scripts/prepare-assets.sh --body "$(BODY)"
 endif

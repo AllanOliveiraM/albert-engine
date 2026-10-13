@@ -22,6 +22,8 @@
 #include "paths.hpp"
 #include "borders.hpp"
 #include "objects.hpp"
+#include "asset_pack.hpp"
+#include "solids.hpp"
 #include "core/bridge.hpp"
 #include "core/time.hpp"
 #ifdef ALBERT_HAS_RPC
@@ -41,6 +43,7 @@
 #include <iomanip>
 #include <iostream>
 #include <optional>
+#include <map>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -102,12 +105,20 @@ struct State {
 struct Ephemerides {
     std::vector<State> sun;
     std::vector<State> moon;
+    std::map<std::string,std::vector<State>> bodies;
 };
 
 struct Orbits {
     std::vector<State> moon;
     std::vector<State> earth;
+    std::map<std::string,std::vector<State>> bodies;
 };
+
+std::vector<const albert::core::NaturalBody*> availableBodies(){
+    std::vector<const albert::core::NaturalBody*> result;const auto pack=albert::visualAssetPack();
+    for(const auto& body:albert::core::naturalBodies()){const std::string id(body.id);if(pack->contains(id+"-day")&&pack->contains(id+"-height"))result.push_back(&body);}
+    return result;
+}
 
 using Focus=albert::core::ObjectId;
 namespace targets {
@@ -383,6 +394,10 @@ Ephemerides loadEphemerides(albert::DownloadProgress* progress = nullptr, int of
         "5 min", progress
     );
 
+    for(const auto* body:availableBodies()){
+        if(progress)progress->stage("Efemerides: "+std::string(body->name),3+offset);
+        e.bodies[std::string(body->id)]=queryHorizons(body->horizonsId,"500@399",now-1./1440.,now+30./1440.,"5 min",progress);
+    }
     return e;
 }
 
@@ -409,6 +424,10 @@ Orbits loadOrbits(albert::DownloadProgress* progress = nullptr, int offset = 0) 
         "1 d", progress
     );
 
+    for(const auto* body:availableBodies()){
+        if(progress)progress->stage("Orbita: "+std::string(body->name),5+offset);
+        orbits.bodies[std::string(body->id)]=queryHorizons(body->horizonsId,"500@10",now-body->orbitHalfDays,now+body->orbitHalfDays,std::to_string(static_cast<int>(body->orbitStepHours))+" h",progress);
+    }
     return orbits;
 }
 
@@ -944,7 +963,9 @@ int albert::runRenderer(int argc, char** argv) {
 
         auto stars = albert::makeStarField(albert::assetDirectory() / "stars.csv", jdTDB(jdUTC()));
         scene->add(stars);
+        auto solidAssets=std::move(loadedAssets->surfaces);
         albert::PlanetVisuals planets(*scene, std::move(*loadedAssets));
+        albert::SolidBodies solids(*scene,std::move(solidAssets));
         auto earth = planets.earth;
         auto moon = planets.moon;
         auto sun = planets.sun;
@@ -956,6 +977,7 @@ int albert::runRenderer(int argc, char** argv) {
 #endif
         albert::SceneObjects objects(*scene);
         objects.bind("earth",earth);objects.bind("moon",moon);objects.bind("sun",sun);
+        for(const auto& [id,node]:solids.nodes()){registry.include(*albert::core::naturalBody(id));objects.bind(id,node);}
         albert::core::Vector sceneOrigin;
         Focus originId="earth";
         if(demo){albert::core::Object object;object.id="demo";object.name="Exemplo (simulado)";object.source="Synthetic example";
@@ -988,6 +1010,14 @@ int albert::runRenderer(int argc, char** argv) {
 
         scene->add(moonOrbit);
         scene->add(earthOrbit);
+        std::map<std::string,std::shared_ptr<OrbitPath>> bodyOrbits;
+        auto replaceBodyOrbits=[&](const Orbits& values){
+            std::map<std::string,std::shared_ptr<OrbitPath>> next;
+            for(const auto& [id,samples]:values.bodies)next[id]=makeOrbit(samples);
+            for(const auto& [id,path]:bodyOrbits){(void)id;scene->remove(*path);}
+            bodyOrbits=std::move(next);for(const auto& [id,path]:bodyOrbits){(void)id;scene->add(path);}
+        };
+        replaceBodyOrbits(orbits);
 
         albert::Cache cache(albert::dataDirectory());
         albert::RegionalImagery regional;
@@ -1050,6 +1080,7 @@ int albert::runRenderer(int argc, char** argv) {
         camera->position.copy(initialSun).multiplyScalar(1.8f).add(tangent.multiplyScalar(3.f));
         camera->lookAt(controls.target);
         int appliedQuality = -1;
+        Focus lastRegionalFocus=focus;bool lastDetailQuality=visualSettings.quality;
 
         drawInterface = [&] {
             const auto display = ImGui::GetIO().DisplaySize;
@@ -1178,6 +1209,7 @@ int albert::runRenderer(int argc, char** argv) {
                             ImGui::TextDisabled("Ajuda visual para a regiao sem Sol.");
                         }
                     }
+                    if(solids.contains(focus))ImGui::TextWrapped("MESSENGER / USGS: superficie monocromatica e relevo medido. Detalhes incluidos no programa.");
                     if (focus == targets::Sun) ImGui::TextWrapped("Explore a superficie solar arrastando para girar a vista.");
                     ImGui::Spacing();
                     ImGui::TextDisabled("QUALIDADE DA IMAGEM");
@@ -1308,7 +1340,7 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::PopStyleVar(4);
             }
 
-            const bool loadingDetails=planets.detailActive() || cloudSync.detailActive() || regional.active();
+            const bool loadingDetails=planets.detailActive() || solids.uploading() || cloudSync.detailActive() || regional.active();
             detailLoaderAge=loadingDetails ? detailLoaderAge+ImGui::GetIO().DeltaTime : 0.f;
             detailLoaderAlpha=albert::animateValue(detailLoaderAlpha,detailLoaderAge>.15f ? .65f : 0.f,ImGui::GetIO().DeltaTime);
             if(detailLoaderAlpha>0.f) {
@@ -1362,7 +1394,7 @@ int albert::runRenderer(int argc, char** argv) {
                 };
                 mark(earthPosition, focus == targets::Overview ? "Terra / Lua" : "Terra", IM_COL32(145,208,229,230));
                 if (focus == targets::EarthMoon) mark(moonPosition, "Lua", IM_COL32(215,220,230,230));
-                else mark(sunPosition, "Sol", IM_COL32(255,239,204,230));
+                else {mark(sunPosition, "Sol", IM_COL32(255,239,204,230));for(const auto& [id,node]:solids.nodes())mark(node->position,registry.get(id).name.c_str(),IM_COL32(211,201,184,230));}
             }
 
             if (downloads.active || !downloads.error.empty()) {
@@ -1474,6 +1506,7 @@ int albert::runRenderer(int argc, char** argv) {
                 scene->add(moonOrbit);
                 scene->add(earthOrbit);
                 ephemerides = std::move(updated->ephemerides);
+                replaceBodyOrbits(updated->orbits);
                 orbits = std::move(updated->orbits);
                 refreshError.clear();
                 nextRefresh = updated->timeGeneration==frameTime.generation ? steadyNow+std::chrono::seconds(REFRESH_SECONDS):steadyNow;
@@ -1527,6 +1560,7 @@ int albert::runRenderer(int argc, char** argv) {
 
                     earthOrbit = makeOrbit(updated.earth);
 
+                    replaceBodyOrbits(updated);
                     orbits = std::move(updated);
                     orbitFailures = 0;
                     nextOrbitRefresh = orbitRequestEpoch==refreshEpoch ? steadyNow+std::chrono::hours(24):steadyNow;
@@ -1585,6 +1619,7 @@ int albert::runRenderer(int argc, char** argv) {
                 registry.builtinState("earth",{timestamp,{0,0,0}});
                 registry.builtinState("moon",{timestamp,{moonState.x*1000.,moonState.y*1000.,moonState.z*1000.}});
                 registry.builtinState("sun",{timestamp,{sunState.x*1000.,sunState.y*1000.,sunState.z*1000.}});
+                for(const auto& [id,samples]:ephemerides.bodies){const auto value=interpolate(samples,tdb);registry.builtinState(id,{timestamp,{value.x*1000.,value.y*1000.,value.z*1000.}});}
                 const auto nextOriginId=targetId(focus);
                 const auto nextOrigin=registry.evaluate(nextOriginId,timestamp).state.positionMeters;
                 const auto shift=albert::renderPosition(sceneOrigin,nextOrigin);
@@ -1616,6 +1651,7 @@ int albert::runRenderer(int argc, char** argv) {
                 earthOrbit->origin=earthHelio;
                 updateOrbitTime(moonOrbit, orbits.moon, tdb);
                 updateOrbitTime(earthOrbit, orbits.earth, tdb);
+                for(const auto& [id,path]:bodyOrbits){path->origin=earthHelio;updateOrbitTime(path,orbits.bodies.at(id),tdb);}
 
                 dataValid = true;
             } catch (const std::exception& e) {
@@ -1634,6 +1670,8 @@ int albert::runRenderer(int argc, char** argv) {
             // Show the selected physical path in close views, and both in context.
             moonOrbit->visible = orbitVisibility>0.f && focus != targets::Sun;
             earthOrbit->visible = orbitVisibility>0.f && (focus == targets::Earth || focus == targets::Sun || focus == targets::Overview);
+
+            for(const auto& [id,path]:bodyOrbits)path->visible=orbitVisibility>0.f&&(focus==id||focus==targets::Overview||focus==targets::Sun);
 
             // Camera segue o objeto sem acumular erro
             Vector3 target = targetFor(focus);
@@ -1759,6 +1797,15 @@ int albert::runRenderer(int argc, char** argv) {
             if(earthOrbit->visible) earthOrbit->rebase(camera->position,{sceneOrigin.x/1000.,sceneOrigin.y/1000.,sceneOrigin.z/1000.});
             orbitView(moonOrbit,moonPosition,.0721f);
             orbitView(earthOrbit,earthPosition,.00248f);
+            for(const auto& [id,path]:bodyOrbits)if(path->visible){
+                path->rebase(camera->position,{sceneOrigin.x/1000.,sceneOrigin.y/1000.,sceneOrigin.z/1000.});
+                const auto& samples=orbits.bodies.at(id);
+                const auto sample=std::lower_bound(samples.begin(),samples.end(),tdb,[](const State& s,double t){return s.jd<t;});
+                const auto& velocity=(sample==samples.end()?samples.back():*sample).velocity;
+                const double speed=std::hypot(velocity.x,velocity.y,velocity.z);
+                orbitView(path,solids.nodes().at(id)->position,static_cast<float>(EARTH_RADIUS/(std::max(speed,.001)*86400.)));
+            }
+            solids.update(renderer,*camera,sunPosition,tdb,focus,visualSettings.quality,dt);
 
             if (appliedQuality != visualSettings.quality) {
                 renderer.setPixelRatio(std::min(visualSettings.quality ? 2.f : 1.f, displayPixelRatio));
@@ -1790,6 +1837,8 @@ int albert::runRenderer(int argc, char** argv) {
                 const double lon = albert::longitude(std::atan2(earthCamera.z,-earthCamera.x)*180./PI-180.);
                 cloudSync.requestDetail(albert::cloudRegion(lon,latitude,earthCamera.length(),camera->aspect,camera->fov));
             } else cloudSync.requestDetail(std::nullopt);
+            if((focus!=lastRegionalFocus&&(solids.contains(focus)||solids.contains(lastRegionalFocus)))||(lastDetailQuality!=static_cast<bool>(visualSettings.quality)&&solids.contains(focus)))regional.retry();
+            lastRegionalFocus=focus;lastDetailQuality=visualSettings.quality;
             if(visualSettings.quality && focus==targets::Earth && earthCamera.length()<2.2f) {
                 const double latitude=albert::geodeticLatitude(std::asin(std::clamp(earthCamera.y/earthCamera.length(),-1.f,1.f)))*180./PI;
                 const double lon=albert::longitude(std::atan2(earthCamera.z,-earthCamera.x)*180./PI-180.);
@@ -1798,13 +1847,18 @@ int albert::runRenderer(int argc, char** argv) {
                 Vector3 local=camera->position;moon->worldToLocal(local);
                 const double latitude=std::asin(std::clamp(local.y/local.length(),-1.f,1.f))*180./PI;
                 const double lon=albert::longitude(std::atan2(local.z,-local.x)*180./PI-180.);
-                regional.request(albert::viewRegion(lon,latitude,local.length(),1737.4/6378.137,camera->aspect,camera->fov,1.40625),true);
+                regional.request(albert::viewRegion(lon,latitude,local.length(),1737.4/6378.137,camera->aspect,camera->fov,1.40625),"moon");
+            } else if(visualSettings.quality&&solids.contains(focus)&&camera->position.distanceTo(solids.nodes().at(focus)->position)<radiusFor(focus)*2.2f){
+                Vector3 local=camera->position;solids.nodes().at(focus)->worldToLocal(local);
+                const double latitude=std::asin(std::clamp(local.y/local.length(),-1.f,1.f))*180./PI;
+                const double lon=albert::longitude(std::atan2(local.z,-local.x)*180./PI-180.);
+                regional.request(albert::viewRegion(lon,latitude,local.length(),radiusFor(focus),camera->aspect,camera->fov,1.40625),focus);
             } else regional.request(std::nullopt);
-            if(auto images=planets.uploading() ? std::nullopt : regional.poll(); images) {
+            if(auto images=(planets.uploading()||solids.uploading()) ? std::nullopt : regional.poll(); images) {
                 if(!images->error.empty()) std::cerr<<"Detalhes regionais: "<<images->error<<std::endl;
                 if(images->day || images->night) {
-                std::cout<<"Detalhes locais carregados: "<<(images->moon ? "Lua LROC" : "Terra")<<std::endl;
-                planets.stageRegionalImages(std::move(*images));
+                std::cout<<"Detalhes locais carregados: "<<images->body<<std::endl;
+                if(solids.contains(images->body))solids.stage(std::move(*images));else planets.stageRegionalImages(std::move(*images));
                 }
             }
             if (auto detail = cloudSync.pollDetail(); detail && detail->observation.image) {

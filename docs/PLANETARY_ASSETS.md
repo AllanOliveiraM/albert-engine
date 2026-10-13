@@ -1,7 +1,10 @@
 # Próximo conteúdo embarcado
 
-Inventário inicial consultado em 13/10/2026. Nenhum destes arquivos foi incluído
-na biblioteca nem representa um planeta já implementado.
+Inventário consultado em 13/10/2026. M3 está em andamento: registro adicional,
+orientação IAU, consulta Horizons, órbita, render de sólidos e pipeline de assets
+estão implementados. O DEM original foi baixado e processado; a superfície de
+92160 × 46080 pixels ainda está sendo baixada. Mercúrio só será habilitado quando
+seu pacote completo estiver incluído. Marte e os demais corpos seguem pendentes.
 
 ## Primeiro candidato: Mercúrio
 
@@ -44,3 +47,36 @@ depende da validação do mosaico e do relevo.
 
 Vênus, gigantes gasosos, luas e anéis exigem inventários específicos. Permanecem
 no escopo do roadmap, sem reutilizar mapas de outro corpo como substitutos.
+
+## Mercúrio: decisões do primeiro corte
+
+- Fonte de superfície: cópia ISIS do mosaico MDIS BDR no arquivo oficial NASA/PDS;
+  grade 92160 × 46080, aproximadamente 166 m/pixel. Monocromática, normalizada
+  fotometricamente; não é uma fotografia em cores naturais nem albedo calibrado
+  para fotometria absoluta.
+- Relevo: `Mercury_Messenger_USGS_DEM_Global_665m.cub`, arquivo original de 2016,
+  23040 × 11520. Não confundir com a revisão V02 posterior do catálogo USGS.
+  Amostras SignedWord × 0,5 m, datum esférico de 2439400 m. Longitudes 0–360 são
+  rearranjadas para −180–180 sem interpolar posições. PNG de 16 bits conserva
+  a quantização original; regiões sem altitude válida usam apenas o datum.
+- Cinco níveis por camada; JPEG 94 para a superfície e PNG sem perdas para
+  altitude. Original, SHA-256 e processamento constam do plano e do pacote.
+- Orientação: modelo IAU 2015 de `pck00011`, com libração física. Comparado com
+  CSPICE `pxform(IAU_MERCURY,J2000)` em quatro épocas, sem depender de SPICE em
+  runtime. SHA-256 do kernel usado nas fixtures:
+  `3dff7b1dbeceaa01f25467767d3fa25816051c85d162d1edf04acb310ee28bb1`.
+- Iluminação própria do sólido considera a direção/distância real do Sol,
+  espalhamento difuso de uma superfície rugosa e tamanho angular solar no
+  terminador. Não há iluminação auxiliar ligada por padrão. Microestrutura e
+  sombras presentes no mosaico de aquisição continuam sendo uma limitação real
+  da textura; não são um modelo completo de transporte de luz sobre cada cratera.
+- Estado geocêntrico e órbita heliocêntrica vêm do Horizons, seguindo a mesma
+  atualização automática dos corpos atuais. Novos corpos sólidos entram pelo
+  descritor e por camadas nomeadas; Terra, Lua e Sol preservam seus modelos próprios.
+- Detalhes regionais continuam sendo preparados no worker, enviados à GPU em
+  parcelas e revelados gradualmente. A região detalhada é liberada após deixar
+  o corpo, mantendo a imagem global pequena disponível para nova navegação.
+
+Os 16 testes CTest Linux, renderização com fixtures, build MinGW e testes de
+orientação, pacote e gráficos pelo Wine passaram. A conferência com a superfície
+real completa e o tamanho final do pacote ainda dependem da conclusão do download.

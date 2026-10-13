@@ -1,4 +1,5 @@
 #include "scene.hpp"
+#include "bodies.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -32,6 +33,16 @@ Scene::Scene(){
         o.minDistanceMeters=(earth ? 1.05 : moon ? .30 : 150.)*earthRadiusMeters;
         const auto id=o.id;objects_.emplace(id,std::move(o));
     }
+}
+void Scene::include(const NaturalBody& body){
+    if(naturalBody(body.id)!=&body)throw std::invalid_argument("Unknown built-in body definition");
+    if(objects_.size()>=maxObjects)throw std::length_error("Scene object limit reached");
+    if(objects_.contains(std::string(body.id)))throw std::invalid_argument("Built-in body already registered");
+    Object o;o.id=body.id;o.name=body.name;o.source="NASA/JPL Horizons; NASA/USGS MESSENGER; IAU/NAIF pck00011";
+    o.builtin=true;o.appearance.shape=Shape::Builtin;o.radiusMeters=body.radiusMeters;
+    o.appearance.sizeMeters={2*body.radiusMeters,2*body.radiusMeters,2*body.radiusMeters};
+    o.defaultDistanceMeters=body.radiusMeters*4;o.minDistanceMeters=body.radiusMeters*1.05;
+    objects_.emplace(o.id,std::move(o));++revision_;
 }
 const Object& Scene::get(const ObjectId& id) const{
     const auto it=objects_.find(id);if(it==objects_.end())throw std::out_of_range("Unknown object: "+id);return it->second;

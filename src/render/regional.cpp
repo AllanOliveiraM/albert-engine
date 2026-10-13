@@ -1,5 +1,6 @@
 #include "regional.hpp"
 #include "asset_pack.hpp"
+#include "core/bodies.hpp"
 #include "threepp/geometries/SphereGeometry.hpp"
 #include <numbers>
 
@@ -15,10 +16,10 @@ using namespace threepp;
 
 albert::RegionalImagery::~RegionalImagery() {progress.cancelled=true;if(pending_.valid()) pending_.wait();}
 void albert::RegionalImagery::retry() {loaded_.reset();next_={};error.clear();}
-void albert::RegionalImagery::request(std::optional<GeoRegion> region,bool moon,int level) {
-    if(region!=desired_ || moon!=moon_ || level!=level_) {
-        if(pending_.valid() && (!region || workingMoon_!=moon || level!=level_ || (working_ && !regionRelevant(*working_,*region)))) progress.cancelled=true;
-        desired_=region;moon_=moon;level_=level;next_={};
+void albert::RegionalImagery::request(std::optional<GeoRegion> region,std::string body,int level) {
+    if(region!=desired_ || body!=body_ || level!=level_) {
+        if(pending_.valid() && (!region || workingBody_!=body || level!=level_ || (working_ && !regionRelevant(*working_,*region)))) progress.cancelled=true;
+        desired_=region;body_=std::move(body);level_=level;next_={};
     }
     if(!region) progress.cancelled=true;
 }
@@ -28,23 +29,23 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
         if(pending_.wait_for(std::chrono::seconds(0))!=std::future_status::ready) return std::nullopt;
         auto result=pending_.get();
         working_.reset();
-        if(progress.cancelled || !desired_ || !regionRelevant(result.region,*desired_) || result.moon!=moon_ || result.level!=level_) return std::nullopt;
+        if(progress.cancelled || !desired_ || !regionRelevant(result.region,*desired_) || result.body!=body_ || result.level!=level_) return std::nullopt;
         error=result.error;next_=error.empty() ? now+std::chrono::milliseconds(80) : now+std::chrono::minutes(2);
-        if(result.day || result.night) {loaded_=result.region;loadedMoon_=result.moon;loadedLevel_=result.level;}
+        if(result.day || result.night) {loaded_=result.region;loadedBody_=result.body;loadedLevel_=result.level;}
         return result;
     }
-    if(!desired_ || (loaded_ && regionSufficient(*loaded_,*desired_) && loadedMoon_==moon_ && loadedLevel_==level_ && error.empty()) || now<next_) return std::nullopt;
+    if(!desired_ || (loaded_ && regionSufficient(*loaded_,*desired_) && loadedBody_==body_ && loadedLevel_==level_ && error.empty()) || now<next_) return std::nullopt;
     progress.cancelled=false;
-    const auto region=*desired_;const bool moon=moon_;const int level=level_;
-    working_=region;workingMoon_=moon;
-    pending_=std::async(std::launch::async,[this,region,moon,level] {
-        RegionalImages result;result.region=region;result.moon=moon;result.level=level;
+    const auto region=*desired_;const auto body=body_;const int level=level_;
+    working_=region;workingBody_=body;
+    pending_=std::async(std::launch::async,[this,region,body,level] {
+        RegionalImages result;result.region=region;result.body=body;result.level=level;
         try {
             const auto pack=visualAssetPack();
             progress.stage("Lendo detalhes incluidos",0);
-            result.day=pack->image(moon ? "moon-day" : "earth-day",region,4096,progress);
-            if(!moon) result.night=pack->image("earth-night",region,4096,progress);
-            result.height=pack->image(moon ? "moon-height" : "earth-height",region,1024,progress);
+            result.day=pack->image(body+"-day",region,4096,progress);
+            if(body=="earth") result.night=pack->image("earth-night",region,4096,progress);
+            result.height=pack->image(body+"-height",region,1024,progress);
             if(result.day) {
                 auto& image=*result.day;auto& rgba=image.data();
                 std::vector<unsigned char> rough(rgba.size(),255);
@@ -56,7 +57,7 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
                     const unsigned edge=std::min({x,y,width-1-x,height-1-y});
                     rgba[at+3]=static_cast<unsigned char>(rgba[at+3]*std::min(1.f,edge/(width*.025f)));
                 }
-                if(!moon) result.roughness=threepp::Image(std::move(rough),width,height);
+                if(body=="earth") result.roughness=threepp::Image(std::move(rough),width,height);
             }
             progress.checkCancelled();
             prepareRegionalImages(result);
@@ -89,7 +90,7 @@ void albert::prepareRegionalImages(RegionalImages& images) {
     }
     images.surfaceMask=Image(std::move(mask),maskWidth,maskHeight);
     const float radians=static_cast<float>(pi/180.);
-    const float radius=images.moon ? static_cast<float>(1737.4/6378.137) : 1.f;
+    const float radius=static_cast<float>(core::surfaceRadius(images.body)/core::earthRadiusMeters);
     constexpr unsigned segments=192;
     auto geometry=SphereGeometry::create(radius,segments,segments,
         static_cast<float>(region.west+180.)*radians,static_cast<float>(region.east-region.west)*radians,
@@ -102,7 +103,7 @@ void albert::prepareRegionalImages(RegionalImages& images) {
             const float meters=height.data<float>()[4*(static_cast<size_t>(py)*height.width()+px)];
             const unsigned i=y*(segments+1)+x;
             Vector3 point(position->getX(i),position->getY(i),position->getZ(i));
-            if(!images.moon) {
+            if(images.body=="earth") {
                 const double latitude=albert::parametricLatitude((region.north-y*(region.north-region.south)/segments)*pi/180.);
                 const double phi=(region.west+180.+x*(region.east-region.west)/segments)*pi/180.;
                 point.set(static_cast<float>(-std::cos(phi)*std::cos(latitude)),static_cast<float>(std::sin(latitude)),

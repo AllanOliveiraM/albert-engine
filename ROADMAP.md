@@ -91,8 +91,14 @@ esta entrega não declara autenticação criptográfica. Políticas e limites em
 
 **Sequência:** M3, o primeiro planeta adicional, e M4, a primeira integração interna de
 dados. Inventário inicial de Mercúrio/Marte em
-[PLANETARY_ASSETS.md](docs/PLANETARY_ASSETS.md); download, processamento e
-renderização de M3 ainda não começaram. M4–M7 seguem pendentes.
+[PLANETARY_ASSETS.md](docs/PLANETARY_ASSETS.md); M3 está em andamento: descritor de sólido, orientação IAU validada contra
+CSPICE, Horizons/órbita, shader solar e recortes por corpo implementados. O DEM de
+Mercúrio foi processado; o download da superfície completa ainda está em andamento.
+Pacote adicional mantém os blocos LFS existentes intactos e resulta em um único
+arquivo no build. Os 16 testes Linux, build Windows/MinGW e testes gráficos,
+orientação e pacote via Wine passaram. Mercúrio ainda não está habilitado na
+biblioteca publicada; faltam superfície, pacote e conferência visual final.
+M4–M7 seguem pendentes.
 
 ## 1. Visão e decisões de produto
 

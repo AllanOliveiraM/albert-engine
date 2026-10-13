@@ -15,6 +15,7 @@ public:
     threepp::Image image(const std::string& layer, const GeoRegion& region,
                          unsigned maximum, DownloadProgress& progress) const;
     std::uint64_t bytes() const;
+    bool contains(const std::string& layer) const;
 private:
     struct Index;
     std::shared_ptr<const Index> index_;

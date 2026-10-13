@@ -128,3 +128,49 @@ bash scripts/prepare-assets.sh --pack-only
 permite processar somente essas camadas; o manifesto final só é publicado quando
 todas as seis estiverem prontas. A pasta padrão é `asset-packs`; `--output` deve
 apontar para um caminho dentro da montagem `/work` quando usado via Docker.
+
+## Pacotes por corpo
+
+O build também aceita arquivos adicionais em `assets/imagery/<corpo>/`, cada um
+com seu manifesto e partes LFS. O manifesto principal registra essas extensões.
+Os três blocos originais permanecem intactos; a montagem verifica cada arquivo
+e acrescenta um índice de coleção ao final de **um único `visuals.pak`**.
+Não é necessário extrair imagens nem carregar todos os planetas na GPU.
+
+A infraestrutura de Mercúrio está implementada; a inclusão do pacote de superfície
+em alta resolução depende da conclusão/verificação do download e processamento.
+O executável só cadastra o corpo quando suas camadas estão efetivamente presentes.
+Não substitui assets ausentes por imagens de outro planeta.
+
+Para reproduzir os assets de um corpo declarado em
+[planetary-sources.json](../assets/planetary-sources.json), usando Docker:
+
+```sh
+# Linux
+make assets-body BODY=mercury
+```
+
+```powershell
+# Windows, Docker usando containers Linux
+.\make.cmd assets-body -Body mercury
+```
+
+O comando executa `scripts/prepare-body-assets.py` e reutiliza a geração de
+pirâmides do pipeline original. Os originais e os blocos intermediários ficam em
+`asset-packs/<corpo>/`; somente as partes finais e os manifestos são versionados.
+`fetch-ranges.py` baixa intervalos limitados em paralelo, mantém um diário de
+SHA-256 por bloco, retoma transferências parciais, respeita `Retry-After` e
+recusa misturar versões com ETag/Last-Modified diferentes. O checksum completo
+da fonte também é conferido quando declarado no plano.
+
+Apenas para retomar o processamento de uma camada já baixada:
+
+```sh
+bash scripts/prepare-assets.sh --body mercury --process-only --layer mercury-height
+```
+
+O pacote só é publicado quando todas as camadas declaradas estão prontas.
+A montagem normal continua automática no próximo build; esses comandos não
+criam versões de distribuição. Camadas novas descrevem seu tipo, profundidade,
+escala/offset de altura e no-data no índice, permitindo relevo de outros corpos
+sem reutilizar a codificação particular da Lua.

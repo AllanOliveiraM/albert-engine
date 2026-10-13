@@ -65,6 +65,14 @@
       "bytes": 372526,
       "source": "Generated for Albert Engine with the built-in imagegen tool; see docs/BRANDING.md",
       "license": "Albert Engine project artwork"
+    },
+    {
+      "path": "planetary-sources.json",
+      "bytes": 2238,
+      "sha256": "69b9aec3b1d31d47499fa165a24723d478465773d7ff44c58de0176470f622f4",
+      "source": "NASA/PDS and USGS product inventory",
+      "license": "Provenance and terms in the source plan",
+      "processing": "Declared source grids, datum, credits and physical encoding"
     }
   ]
 }

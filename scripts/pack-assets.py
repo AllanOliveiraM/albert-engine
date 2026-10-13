@@ -8,7 +8,7 @@ import argparse, hashlib, json, pathlib, shutil, struct
 
 MAGIC = b'ALBRTPK1'
 
-def create_pack(root):
+def create_pack(root, name=None):
     public = root / 'public'
     manifest = json.loads((public / 'manifest.json').read_text())
     offset = 0
@@ -40,7 +40,9 @@ def create_pack(root):
     }, indent=2) + '\n')
     # GitHub LFS parts stay below the per-file limit. Distribution reads the
     # byte-identical assembled container, never these working parts.
-    directory=pathlib.Path(__file__).resolve().parents[1]/'assets/imagery'
+    imagery=pathlib.Path(__file__).resolve().parents[1]/'assets/imagery'
+    if name and (not name.replace('-','').isalnum() or not name.isascii()):raise RuntimeError('Invalid asset archive name')
+    directory=imagery/name if name else imagery
     directory.mkdir(parents=True,exist_ok=True)
     parts=[]
     with destination.open('rb') as source:
@@ -60,18 +62,26 @@ def create_pack(root):
     record=json.loads((root/'visuals.pak.json').read_text())
     record['parts']=parts
     part_manifest=directory/'manifest.json'
+    if not name and part_manifest.exists():
+        extensions=json.loads(part_manifest.read_text()).get('extensions')
+        if extensions:record['extensions']=extensions
     part_manifest.write_text(json.dumps(record,indent=2)+'\n')
+    if name:
+        base_manifest=imagery/'manifest.json';base=json.loads(base_manifest.read_text())
+        extensions=base.setdefault('extensions',[])
+        if not any(e['manifest']==name+'/manifest.json' for e in extensions):extensions.append({'manifest':name+'/manifest.json'})
+        base_manifest.write_text(json.dumps(base,indent=2)+'\n')
     for path in directory.glob('*.pakpart'):
         if path.name not in {entry['path'] for entry in parts}:path.unlink()
-    auxiliary=directory.parent/'manifest.json'
+    auxiliary=imagery.parent/'manifest.json'
     metadata=json.loads(auxiliary.read_text())
-    entry=next((entry for entry in metadata['files'] if entry['path']=='imagery/manifest.json'),None)
-    if entry is None:
-        entry={'path':'imagery/manifest.json','source':'Generated from highres-sources.json',
-               'license':'Imagery credits in the packed SOURCES.json',
-               'processing':'Ordered Git LFS parts; lossless assembly into visuals.pak'}
-        metadata['files'].append(entry)
-    entry.update(bytes=part_manifest.stat().st_size,sha256=hashlib.sha256(part_manifest.read_bytes()).hexdigest())
+    for target in ([part_manifest,imagery/'manifest.json',imagery.parent/'planetary-sources.json'] if name else [part_manifest]):
+        relative=target.relative_to(imagery.parent).as_posix()
+        entry=next((entry for entry in metadata['files'] if entry['path']==relative),None)
+        if entry is None:
+            entry={'path':relative,'source':'Generated imagery archive manifest','license':'Credits in the packed source records','processing':'SHA-256 verified Git LFS parts; one distribution container'}
+            metadata['files'].append(entry)
+        entry.update(bytes=target.stat().st_size,sha256=hashlib.sha256(target.read_bytes()).hexdigest())
     auxiliary.write_text(json.dumps(metadata,indent=2,ensure_ascii=False)+'\n')
     print('PACK READY:', destination, destination.stat().st_size, 'bytes', flush=True)
 
@@ -79,4 +89,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=pathlib.Path,
                         default=pathlib.Path(__file__).resolve().parents[1] / 'asset-packs')
-    create_pack(parser.parse_args().root.resolve())
+    parser.add_argument("--name",help="Version a separate body archive and register it in the combined library")
+    args=parser.parse_args();create_pack(args.root.resolve(),args.name)

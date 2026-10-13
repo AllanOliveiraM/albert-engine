@@ -1,32 +1,65 @@
 param([Parameter(Mandatory=$true)][string]$Manifest,
       [Parameter(Mandatory=$true)][string]$Destination)
 $ErrorActionPreference='Stop'
-$record=Get-Content -Raw -LiteralPath $Manifest | ConvertFrom-Json
 $directory=Split-Path -Parent $Manifest
+$base=Get-Content -Raw -LiteralPath $Manifest | ConvertFrom-Json
+$manifests=@($Manifest)
+$extensions=if ($base.PSObject.Properties.Name -contains 'extensions') { $base.extensions } else { @() }
+foreach ($extension in $extensions) {
+    if ([IO.Path]::IsPathRooted($extension.manifest) -or $extension.manifest -match '(^|[\\/])\.\.([\\/]|$)') { throw 'Invalid extension manifest path' }
+    $manifests+=Join-Path $directory $extension.manifest
+}
 [IO.Directory]::CreateDirectory((Split-Path -Parent $Destination)) | Out-Null
 $temporary="$Destination.tmp"
 try {
-    $output=[IO.File]::Create($temporary)
+    $output=[IO.File]::Open($temporary,[IO.FileMode]::Create,[IO.FileAccess]::ReadWrite,[IO.FileShare]::ReadWrite)
+    $archives=@()
     try {
-        foreach ($part in $record.parts) {
-            if ([IO.Path]::GetFileName($part.path) -ne $part.path) { throw 'Invalid asset part path' }
-            $path=Join-Path $directory $part.path
-            if ((Get-Item -LiteralPath $path).Length -ne $part.bytes) {
-                throw "Git LFS images missing or incomplete. Run: git lfs install; git lfs pull"
+        foreach ($path in $manifests) {
+            $record=Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
+            if ($path -ne $Manifest -and ($record.PSObject.Properties.Name -contains 'extensions')) { throw 'Nested extensions are unsupported' }
+            $start=$output.Position
+            foreach ($part in $record.parts) {
+                if ([IO.Path]::GetFileName($part.path) -ne $part.path) { throw 'Invalid asset part path' }
+                $partPath=Join-Path (Split-Path -Parent $path) $part.path
+                if ((Get-Item -LiteralPath $partPath).Length -ne $part.bytes) { throw 'Git LFS images missing or incomplete. Run: git lfs install; git lfs pull' }
+                if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $part.sha256) { throw "Asset part integrity mismatch: $($part.path)" }
+                $inputStream=[IO.File]::OpenRead($partPath)
+                try { $inputStream.CopyTo($output,1048576) } finally { $inputStream.Dispose() }
             }
-            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $part.sha256) {
-                throw "Asset part integrity mismatch: $($part.path)"
-            }
-            $inputStream=[IO.File]::OpenRead($path)
-            try { $inputStream.CopyTo($output,1048576) } finally { $inputStream.Dispose() }
+            $size=$output.Position-$start
+            if ($size -ne $record.bytes) { throw 'Complete asset archive size mismatch' }
+            # Hash only this archive, preserving the original package unchanged.
+            $output.Flush()
+            $inputStream=[IO.File]::Open($temporary,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+            $sha=[Security.Cryptography.SHA256]::Create()
+            try {
+                [void]$inputStream.Seek($start,[IO.SeekOrigin]::Begin)
+                $buffer=New-Object byte[] 1048576
+                $remaining=$size
+                while ($remaining -gt 0) {
+                    $count=$inputStream.Read($buffer,0,[int][Math]::Min($buffer.Length,$remaining))
+                    if ($count -le 0) { throw 'Incomplete asset archive' }
+                    [void]$sha.TransformBlock($buffer,0,$count,$buffer,0);$remaining-=$count
+                }
+                [void]$sha.TransformFinalBlock([byte[]]@(),0,0)
+                $actual=([BitConverter]::ToString($sha.Hash)).Replace('-','').ToLowerInvariant()
+                if ($actual -ne $record.sha256) { throw 'Complete asset archive integrity mismatch' }
+            } finally { $inputStream.Dispose();$sha.Dispose() }
+            $archives+=[ordered]@{offset=[long]$start;bytes=[long]$size}
+        }
+        if ($archives.Count -gt 1) {
+            $index=[ordered]@{container='albert-pack-collection-v1';archives=@($archives)} | ConvertTo-Json -Depth 4 -Compress
+            $bytes=[Text.Encoding]::UTF8.GetBytes($index)
+            $output.Write($bytes,0,$bytes.Length)
+            $length=[BitConverter]::GetBytes([long]$bytes.Length)
+            if (-not [BitConverter]::IsLittleEndian) { [Array]::Reverse($length) }
+            $output.Write($length,0,8)
+            $magic=[Text.Encoding]::ASCII.GetBytes('ALBRTPX1');$output.Write($magic,0,8)
         }
     } finally { $output.Dispose() }
-    if ((Get-Item -LiteralPath $temporary).Length -ne $record.bytes -or
-        (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $record.sha256) {
-        throw 'Complete asset library integrity mismatch'
-    }
     Move-Item -Force -LiteralPath $temporary -Destination $Destination
 } finally {
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
 }
-Write-Host "Assets ready: $Destination $($record.bytes) bytes"
+Write-Host "Assets ready: $Destination"

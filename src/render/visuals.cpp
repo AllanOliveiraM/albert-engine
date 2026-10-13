@@ -186,6 +186,10 @@ albert::DecodedAssets albert::loadVisualAssets(const std::filesystem::path& dire
         else result.images[i]=pack->image(layers[i],i==4 ? GeoRegion{0,0,1,1} : GeoRegion{},i==4 ? 2048 : i==5 ? 1024 : 4096,progress);
     }
     result.moonHeight=pack->image("moon-height",GeoRegion{},1024,progress);
+    for(const auto& body:core::naturalBodies()){
+        const std::string id(body.id);
+        if(pack->contains(id+"-day")&&pack->contains(id+"-height"))result.surfaces.push_back({id,pack->image(id+"-day",{},2048,progress),pack->image(id+"-height",{},512,progress)});
+    }
     // A visual ocean mask inferred from the day map, not elevation or terrain.
     const auto& day = *result.images[0];
     auto pixels = day.data();
@@ -529,7 +533,7 @@ void albert::PlanetVisuals::updateUploads(GLRenderer& renderer) {
 void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
     prepareRegionalImages(images);
     const auto& region=images.region;
-    if(images.night && !images.moon) {
+    if(images.night && images.body!="moon") {
         if(regionalTextures_[3]) regionalTextures_[3]->dispose();
         regionalTextures_[3]=images.gpu[1] ? images.gpu[1] : texture(std::move(*images.night),ColorSpace::NoColorSpace);
         nightMaterial_->uniforms.at("nightDetailMap").setValue(regionalTextures_[3].get());
@@ -539,28 +543,28 @@ void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
         nightMaterial_->uniforms.at("nightDetailEnabled").setValue(1.f);
     }
     if(!images.day) return;
-    const size_t slot=images.moon ? 2 : 0;
-    const size_t bodySlot=images.moon ? 1 : 0;
-    auto& patch=images.moon ? moonDetail_ : earthDetail_;
-    auto& parent=images.moon ? moon : earth;
+    const size_t slot=(images.body=="moon") ? 2 : 0;
+    const size_t bodySlot=(images.body=="moon") ? 1 : 0;
+    auto& patch=(images.body=="moon") ? moonDetail_ : earthDetail_;
+    auto& parent=(images.body=="moon") ? moon : earth;
     // The high-resolution DEM can lie below the coarse interpolated globe.
     // Remove the coarse surface inside the patch instead of exaggerating the
     // new terrain to draw it on top. The overlap margin is outside the viewport.
     const auto oldMask=surfaceMasks_[bodySlot];
     surfaceMasks_[bodySlot]=images.gpu[4] ? images.gpu[4] : texture(std::move(*images.surfaceMask),ColorSpace::NoColorSpace);
-    if(images.moon) {moonMaterial_->alphaMap=surfaceMasks_[bodySlot];moonMaterial_->needsUpdate();}
+    if((images.body=="moon")) {moonMaterial_->alphaMap=surfaceMasks_[bodySlot];moonMaterial_->needsUpdate();}
     else {earthMaterial_->alphaMap=surfaceMasks_[bodySlot];earthMaterial_->needsUpdate();}
     if(oldMask) oldMask->dispose();
     if(patch) { parent->remove(*patch);patch->geometry()->dispose();patch->material()->dispose(); }
     if(regionalTextures_[slot]) regionalTextures_[slot]->dispose();
     regionalTextures_[slot]=images.gpu[0] ? images.gpu[0] : texture(std::move(*images.day));
     auto geometry=std::move(images.geometry);
-    const size_t heightSlot=images.moon ? 1 : 0;
+    const size_t heightSlot=(images.body=="moon") ? 1 : 0;
     if(images.height) {
         if(regionalHeights_[heightSlot]) regionalHeights_[heightSlot]->dispose();
         regionalHeights_[heightSlot]=images.gpu[2] ? images.gpu[2] : elevationTexture(std::move(*images.height));
     }
-    if(images.moon) {
+    if((images.body=="moon")) {
         moonDetailMaterial_=MeshPhongMaterial::create();
         moonDetailMaterial_->map=regionalTextures_[slot];
         moonDetailMaterial_->lightMap=surfaceFillTextures_[1];

@@ -30,6 +30,8 @@ target_include_directories(pack_test PRIVATE ${PROJECT_SOURCE_DIR}/src/render ${
 target_link_libraries(pack_test PRIVATE albert_download threepp::threepp nlohmann_json::nlohmann_json)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
+    add_test(NAME asset_source_download COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/fetch_fixture.py)
+    set_tests_properties(asset_source_download PROPERTIES TIMEOUT 30)
     add_test(NAME bundled_asset_pack COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/pack_fixture.py $<TARGET_FILE:pack_test>)
 endif()
 
@@ -58,3 +60,7 @@ add_executable(time_test time_test.cpp)
 target_link_libraries(time_test PRIVATE albert_core)
 add_test(NAME external_time COMMAND time_test)
 set_tests_properties(external_time PROPERTIES TIMEOUT 10)
+
+add_executable(bodies_test bodies_test.cpp)
+target_link_libraries(bodies_test PRIVATE albert_core)
+add_test(NAME natural_bodies COMMAND bodies_test)

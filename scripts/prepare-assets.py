@@ -36,6 +36,63 @@ def download(source,root):
     print('Ready:',source['id'],round(record['bytes']/1024**2,1),'MiB',flush=True)
     return record
 
+def tile_pyramid(root,dataset,name,width,height,tile,levels,mode,info,dataset_for_level=None):
+    from osgeo import gdal
+    from PIL import Image
+    import math
+    work=root/'work';work.mkdir(parents=True,exist_ok=True)
+    public=root/'public';public.mkdir(parents=True,exist_ok=True)
+    Image.MAX_IMAGE_PIXELS=None
+    files=[];layers=[]
+    def register(path):files.append({'path':path.relative_to(public).as_posix(),'bytes':path.stat().st_size,'sha256':digest(path)})
+    bands=3 if mode=='RGB' else 1
+    data_type=gdal.GDT_UInt16 if mode=='I;16' else gdal.GDT_Byte
+    extension='png' if name.endswith('height') or name=='earth-night' else 'jpg'
+    layer=dict(id=name,projection='equirectangular',bounds=[-180,-90,180,90],width=width,height=height,tile_size=tile,gutter=2,max_level=levels,format=extension)
+    layer.update(info)
+    start=len(files)
+    layers.append(layer)
+    for level in range(levels+1):
+        w=width//(1<<(levels-level));h=height//(1<<(levels-level))
+        if dataset_for_level:dataset=dataset_for_level(level,w,h)
+        cols=math.ceil(w/tile);rows=math.ceil(h/tile)
+        print('Processing:',name,'level',level,f'{w}x{h}',cols*rows,'tiles',flush=True)
+        for row in range(rows):
+            destinations=[public/f'v1/{name}/{level}/{row}/{col}.{extension}' for col in range(cols)]
+            if all(path.is_file() for path in destinations):
+                for path in destinations:register(path)
+                continue
+            y0=max(0,row*tile-2);y1=min(h,(row+1)*tile+2)
+            raw=dataset.ReadRaster(0,y0*dataset.RasterYSize/h,dataset.RasterXSize,(y1-y0)*dataset.RasterYSize/h,
+                buf_xsize=w,buf_ysize=y1-y0,buf_type=data_type,band_list=list(range(1,bands+1)),
+                buf_pixel_space=bands*(2 if mode=='I;16' else 1),buf_line_space=w*bands*(2 if mode=='I;16' else 1),
+                buf_band_space=(2 if mode=='I;16' else 1),resample_alg=gdal.GRIORA_Average)
+            strip=Image.frombytes(mode,(w,y1-y0),bytes(raw))
+            del raw
+            padded=Image.new(mode,(w+4,tile+4))
+            offset=2 if row==0 else 0
+            padded.paste(strip,(2,offset))
+            if offset:padded.paste(strip.crop((0,0,w,1)).resize((w,2)),(2,0))
+            used=offset+strip.height
+            if used<tile+4:padded.paste(strip.crop((0,strip.height-1,w,strip.height)).resize((w,tile+4-used)),(2,used))
+            # Repeat longitude at the antimeridian, including real gutters.
+            padded.paste(padded.crop((w,0,w+2,tile+4)),(0,0))
+            padded.paste(padded.crop((2,0,4,tile+4)),(w+2,0))
+            for col,path in enumerate(destinations):
+                path.parent.mkdir(parents=True,exist_ok=True)
+                if not path.is_file():
+                    core=min(tile,w-col*tile)
+                    image=padded.crop((col*tile,0,col*tile+core+4,min(tile,h-row*tile)+4))
+                    temporary=path.with_suffix('.tmp')
+                    if extension=='jpg':image.save(temporary,format='JPEG',quality=94,subsampling=0,optimize=True,progressive=True)
+                    else:image.save(temporary,format='PNG',compress_level=9,optimize=True)
+                    temporary.replace(path)
+                register(path)
+            if row%4==0 or row+1==rows:print('Rows:',name,level,row+1,'/',rows,flush=True)
+    record_path=work/(name+'.json')
+    record_path.write_text(json.dumps({'layer':layer,'files':files[start:]},indent=2)+'\n')
+    return {"layer":layer,"files":files}
+
 def process(root, selected=None):
     from osgeo import gdal
     from PIL import Image
@@ -58,53 +115,8 @@ def process(root, selected=None):
     files=[];layers=[]
     def register(path):
         files.append({'path':path.relative_to(public).as_posix(),'bytes':path.stat().st_size,'sha256':digest(path)})
-    def pyramid(dataset,name,width,height,tile,levels,mode,info,dataset_for_level=None):
-        bands=3 if mode=='RGB' else 1
-        data_type=gdal.GDT_UInt16 if mode=='I;16' else gdal.GDT_Byte
-        extension='png' if name.endswith('height') or name=='earth-night' else 'jpg'
-        layer=dict(id=name,projection='equirectangular',bounds=[-180,-90,180,90],width=width,height=height,tile_size=tile,gutter=2,max_level=levels,format=extension)
-        layer.update(info)
-        start=len(files)
-        layers.append(layer)
-        for level in range(levels+1):
-            w=width//(1<<(levels-level));h=height//(1<<(levels-level))
-            if dataset_for_level:dataset=dataset_for_level(level,w,h)
-            cols=math.ceil(w/tile);rows=math.ceil(h/tile)
-            print('Processing:',name,'level',level,f'{w}x{h}',cols*rows,'tiles',flush=True)
-            for row in range(rows):
-                destinations=[public/f'v1/{name}/{level}/{row}/{col}.{extension}' for col in range(cols)]
-                if all(path.is_file() for path in destinations):
-                    for path in destinations:register(path)
-                    continue
-                y0=max(0,row*tile-2);y1=min(h,(row+1)*tile+2)
-                raw=dataset.ReadRaster(0,y0*dataset.RasterYSize/h,dataset.RasterXSize,(y1-y0)*dataset.RasterYSize/h,
-                    buf_xsize=w,buf_ysize=y1-y0,buf_type=data_type,band_list=list(range(1,bands+1)),
-                    buf_pixel_space=bands*(2 if mode=='I;16' else 1),buf_line_space=w*bands*(2 if mode=='I;16' else 1),
-                    buf_band_space=(2 if mode=='I;16' else 1),resample_alg=gdal.GRIORA_Average)
-                strip=Image.frombytes(mode,(w,y1-y0),bytes(raw))
-                del raw
-                padded=Image.new(mode,(w+4,tile+4))
-                offset=2 if row==0 else 0
-                padded.paste(strip,(2,offset))
-                if offset:padded.paste(strip.crop((0,0,w,1)).resize((w,2)),(2,0))
-                used=offset+strip.height
-                if used<tile+4:padded.paste(strip.crop((0,strip.height-1,w,strip.height)).resize((w,tile+4-used)),(2,used))
-                # Repeat longitude at the antimeridian, including real gutters.
-                padded.paste(padded.crop((w,0,w+2,tile+4)),(0,0))
-                padded.paste(padded.crop((2,0,4,tile+4)),(w+2,0))
-                for col,path in enumerate(destinations):
-                    path.parent.mkdir(parents=True,exist_ok=True)
-                    if not path.is_file():
-                        core=min(tile,w-col*tile)
-                        image=padded.crop((col*tile,0,col*tile+core+4,min(tile,h-row*tile)+4))
-                        temporary=path.with_suffix('.tmp')
-                        if extension=='jpg':image.save(temporary,format='JPEG',quality=94,subsampling=0,optimize=True,progressive=True)
-                        else:image.save(temporary,format='PNG',compress_level=9,optimize=True)
-                        temporary.replace(path)
-                    register(path)
-                if row%4==0 or row+1==rows:print('Rows:',name,level,row+1,'/',rows,flush=True)
-        record_path=work/(name+'.json')
-        record_path.write_text(json.dumps({'layer':layer,'files':files[start:]},indent=2)+'\n')
+    def pyramid(*args,**kwargs):
+        record=tile_pyramid(root,*args,**kwargs);layers.append(record['layer']);files.extend(record['files'])
     for name in ('earth-day','earth-night'):
         if selected and name not in selected:continue
         sources=[str(root/'sources'/s['filename']) for s in records if s['layer']==name]

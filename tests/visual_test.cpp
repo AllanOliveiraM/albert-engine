@@ -99,7 +99,7 @@ void graphics() {
     albert::PlanetVisuals planets(*scene,assets());
     planets.earth->position.set(100,0,0);planets.sun->position.set(250,0,0);
     albert::VisualSettings settings;settings.atmosphere=settings.clouds=settings.nightLights=settings.shadows=false;
-    albert::RegionalImages region;region.moon=true;region.region={-135,-45,-45,45};
+    albert::RegionalImages region;region.body="moon";region.region={-135,-45,-45,45};
     region.day=rgba(255,128);region.height=height(-1200.f);
     planets.stageRegionalImages(std::move(region));
     for(int frame=0;planets.uploading() && frame<256;++frame) planets.updateUploads(renderer);
@@ -178,6 +178,23 @@ void graphics() {
     };
     const auto near=generic(0),far=generic(1e11);
     require(near==far && std::any_of(near.begin(),near.end(),[](auto value){return value>20;}),"Camera-relative rendering lost sub-metre geometry at astronomical distances");
+    auto solidScene=Scene::create();solidScene->background=Color(0x000000);
+    auto solidCamera=PerspectiveCamera::create(45,1,.001f,30000.f);solidCamera->position.set(0,0,1.5f);solidCamera->lookAt(Vector3());
+    std::vector<albert::SurfaceAssets> surfaceAssets;surfaceAssets.push_back({"mercury",rgba(120),height(0)});
+    albert::SolidBodies solids(*solidScene,std::move(surfaceAssets));
+    solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
+    const int lit=pixels[3*(96*192+96)];require(lit>20,"Solid body solar shader failed to render");
+    solids.update(renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
+    require(pixels[3*(96*192+96)]<3,"Solid body's night hemisphere is lit without solar incidence");
+    albert::RegionalImages solidRegion;solidRegion.body="mercury";solidRegion.day=rgba(230);solidRegion.height=height(1000);
+    albert::prepareRegionalImages(solidRegion);solids.stage(std::move(solidRegion));
+    for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);
+    require(!solids.uploading(),"Solid regional texture upload did not finish");renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
+    require(std::abs(int(pixels[3*(96*192+96)])-lit)<4,"Solid detail appeared without crossfade");
+    solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
+    require(pixels[3*(96*192+96)]>lit+30,"Solid detail crossfade did not settle");
+    solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"earth",true,4.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
+    require(std::abs(int(pixels[3*(96*192+96)])-lit)<4,"Solid detail eviction damaged the global surface");
     std::cout<<"Graphics OK: incremental upload, terrain occlusion, subpixel paths, borders, cloud fade and precise generic objects\n";
 }
 }
