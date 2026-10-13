@@ -1,0 +1,14 @@
+
+**/build/
+/dist/
+/CMakeUserPresets.json
+/imgui.ini
+/.tools/
+.vscode/
+.idea/
+.DS_Store
+
+/asset-packs/
+
+__pycache__/
+*.pyc

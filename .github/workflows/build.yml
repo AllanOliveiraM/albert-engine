@@ -1,0 +1,58 @@
+name: Build and tests
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            preset: linux
+          - os: windows-2022
+            preset: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: bash scripts/setup-linux.sh
+      - name: Configure Linux
+        if: runner.os == 'Linux'
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build Windows with bootstrap wrapper
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: make.cmd render-build
+      - name: Build Linux
+        if: runner.os == 'Linux'
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Tests
+        run: ctest --preset ${{ matrix.preset }}
+      - name: HTTP errors, retry and cancellation (Linux)
+        if: runner.os == 'Linux'
+        run: python3 tests/http_fixture.py build/linux/tests/download_test
+      - name: HTTP errors, retry and cancellation (Windows)
+        if: runner.os == 'Windows'
+        run: python tests/http_fixture.py build/windows/tests/Release/download_test.exe
+      - name: WMS antimeridian coverage (Linux)
+        if: runner.os == 'Linux'
+        run: python3 tests/wms_fixture.py build/linux/tests/wms_test
+      - name: WMS antimeridian coverage (Windows)
+        if: runner.os == 'Windows'
+        run: python tests/wms_fixture.py build/windows/tests/Release/wms_test.exe
+      - name: Executable help (Linux)
+        if: runner.os == 'Linux'
+        run: build/linux/bin/AlbertEngine --help
+      - name: Executable help (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & build/windows/bin/Release/AlbertEngine.exe --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

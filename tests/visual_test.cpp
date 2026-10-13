@@ -1,0 +1,187 @@
+#include "animation.hpp"
+#include "borders.hpp"
+#include "paths.hpp"
+#include "visuals.hpp"
+#include "objects.hpp"
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
+
+using namespace threepp;
+namespace {
+void require(bool condition,const char* message) {
+    if(!condition) throw std::runtime_error(message);
+}
+void controls() {
+    const albert::VisualSettings settings;
+    require(!settings.earthAssist && !settings.moonAssist,"Auxiliary lights must start disabled");
+    require(!settings.clouds,"Live clouds must start disabled");
+    require(albert::regionRelevant({170,-10,190,10},{-185,-10,-175,10}),"Moving across the date line cancelled a useful crop");
+    require(albert::regionSufficient({170,-10,190,10},{-189,-9,-171,9}),"Existing overlapping detail was not reused");
+    require(!albert::regionSufficient({-30,-30,30,30},{-5,-5,5,5}),"Zooming did not request finer detail");
+    require(!albert::regionRelevant({0,-10,10,10},{90,-10,100,10}),"Distant view accepted an irrelevant crop");
+    require(albert::regionSufficient({-180,80,180,90},{-90,80,270,90}),"Polar panorama was reloaded for a longitude-only change");
+    float reference=0;
+    for(int fps:{30,60,144}) {
+        float value=0;
+        for(int frame=0;frame<fps;++frame) value=albert::animateValue(value,.25f,1.f/fps);
+        require(std::abs(value-.25f)<.0006f,"Animation did not settle");
+        if(reference) require(std::abs(value-reference)<.0006f,"Animation depends on frame rate");
+        reference=value;
+    }
+    float value=albert::animateValue(0.f,.25f,.05f);
+    const float reversed=albert::animateValue(value,0.f,.01f);
+    require(reversed>0 && reversed<value,"Reversing a fade must preserve continuity");
+    require(albert::animateValue(value,.25f,0.f)==value,"Zero elapsed time changed the animation");
+    for(int i=0;i<100;++i) value=albert::animateValue(value,0.f,.01f);
+    require(value==0,"A disabled effect must stop rendering after its fade");
+    constexpr double radians=3.141592653589793/180.;
+    // Independent WGS84 relation: a geodetic 45-degree surface point has a
+    // sphere parameter of approximately 44.9037878494 degrees.
+    require(std::abs(albert::parametricLatitude(45*radians)/radians-44.9037878494)<1e-8,"WGS84 texture latitude is misaligned");
+    require(std::abs(albert::geodeticLatitude(44.9037878494*radians)/radians-45)<1e-8,"Inverse geographic latitude is misaligned");
+    // An island smaller than the global simplification error must remain a
+    // closed outline, and LOD must not oscillate inside its transition band.
+    albert::BorderLines island({1,0,0, 1,.0001f,0, 1,.0001f,0, 1,0,.0001f, 1,0,.0001f, 1,0,0});
+    int vertices=0;
+    for(auto* child:island.children.front()->children) vertices+=dynamic_cast<Mesh*>(child)->geometry()->drawRange.count;
+    require(vertices==18,"Global border simplification erased a small island");
+    island.updateDetail(2.f);island.updateDetail(2.2f);
+    require(island.children.back()->visible,"Border detail oscillated in the hysteresis band");
+    island.updateDetail(2.4f);
+    require(island.children.front()->visible && !island.children.back()->visible,"Distant borders kept the expensive detail level");
+}
+Image rgba(unsigned char value,unsigned char alpha=255) {
+    return Image(std::vector<unsigned char>{value,value,value,alpha},1,1);
+}
+Image height(float meters) {return Image(std::vector<float>{meters,meters,meters,1.f},1,1);}
+albert::DecodedAssets assets() {
+    albert::DecodedAssets result;
+    for(size_t i=0;i<5;++i) result.images[i]=rgba(i==1 || i==2 ? 0 : 255);
+    result.images[5]=height(6000.f);
+    result.oceans=rgba(255);result.moonHeight=height(0.f);
+    return result;
+}
+std::shared_ptr<Mesh> stroke(std::shared_ptr<ShaderMaterial> material,const std::vector<Vector3>& points) {
+    std::vector<float> positions,next,sides,times,nextTimes;
+    constexpr int ends[]={0,1,0,0,1,1};constexpr float signs[]={-1,-1,1,1,-1,1};
+    for(size_t segment=0;segment+1<points.size();++segment) for(int v=0;v<6;++v) {
+        const int e=ends[v];const auto& p=points[segment+e];const auto& q=points[segment+1-e];
+        positions.insert(positions.end(),{p.x,p.y,p.z});next.insert(next.end(),{q.x,q.y,q.z});
+        sides.push_back(signs[v]*(e ? -1.f : 1.f));
+        times.push_back(static_cast<float>(segment+e));nextTimes.push_back(static_cast<float>(segment+1-e));
+    }
+    auto geometry=BufferGeometry::create();
+    geometry->setAttribute("position",FloatBufferAttribute::create(std::move(positions),3));
+    geometry->setAttribute("nextPosition",FloatBufferAttribute::create(std::move(next),3));
+    geometry->setAttribute("lineSide",FloatBufferAttribute::create(std::move(sides),1));
+    geometry->setAttribute("orbitTime",FloatBufferAttribute::create(std::move(times),1));
+    geometry->setAttribute("nextTime",FloatBufferAttribute::create(std::move(nextTimes),1));
+    auto mesh=Mesh::create(geometry,material);mesh->frustumCulled=false;mesh->renderOrder=1;
+    return mesh;
+}
+int cyanPixels(const std::vector<unsigned char>& pixels,int x0,int x1,int y0,int y1) {
+    int count=0;
+    for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) {
+        const size_t at=3*(y*192+x);
+        if(pixels[at+1]>pixels[at]+12 && pixels[at+2]>pixels[at]+12) ++count;
+    }
+    return count;
+}
+void graphics() {
+    Canvas canvas(Canvas::Parameters().title("Albert visual regression").size(192,192).headless(true).antialiasing(0));
+    GLRenderer renderer(canvas);renderer.setPixelRatio(1);
+    auto scene=Scene::create();scene->background=Color(0x000000);
+    auto camera=OrthographicCamera::create(-.6f,.6f,.6f,-.6f,.01f,300.f);
+    camera->position.set(0,0,1.5f);camera->lookAt(Vector3());
+    scene->add(AmbientLight::create(Color(0xffffff),1.f));
+    albert::PlanetVisuals planets(*scene,assets());
+    planets.earth->position.set(100,0,0);planets.sun->position.set(250,0,0);
+    albert::VisualSettings settings;settings.atmosphere=settings.clouds=settings.nightLights=settings.shadows=false;
+    albert::RegionalImages region;region.moon=true;region.region={-135,-45,-45,45};
+    region.day=rgba(255,128);region.height=height(-1200.f);
+    planets.stageRegionalImages(std::move(region));
+    for(int frame=0;planets.uploading() && frame<256;++frame) planets.updateUploads(renderer);
+    require(!planets.uploading(),"Incremental terrain upload did not complete");
+    auto material=albert::orbitMaterial(100.f);
+    material->uniforms.at("viewport").setValue(Vector2(192,192));
+    material->uniforms.at("present").setValue(2.f);
+    auto behind=stroke(material,{{-.55f,0,-1.9f},{.55f,0,-1.9f}});
+    scene->add(behind);
+    planets.update(Vector3(0,0,1),camera->position,settings,1.f);
+    renderer.render(*scene,*camera);auto pixels=renderer.readRGBPixels();
+    require(cyanPixels(pixels,83,109,91,101)==0,"Orbit leaked through the regional lunar terrain");
+    require(cyanPixels(pixels,15,40,93,100)>10,"Occlusion test hid the whole orbit");
+    scene->remove(*behind);
+    auto front=stroke(material,{{-.55f,0,-1.1f},{.55f,0,-1.1f}});scene->add(front);
+    renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(cyanPixels(pixels,83,109,93,100)>20,"Orbit physically in front of the Moon was hidden");
+    scene->remove(*front);planets.moon->visible=false;
+    material->uniforms.at("present").setValue(-2.f);
+    material->uniforms.at("dashDays").setValue(.0001f);
+    scene->add(front);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    int darkest=255,brightest=0;
+    for(int x=40;x<150;++x) {const int r=pixels[3*(96*192+x)];darkest=std::min(darkest,r);brightest=std::max(brightest,r);}
+    require(darkest>40 && brightest-darkest<15,"Subpixel dashes must converge to a stable continuous line");
+    scene->remove(*front);
+    planets.earth->position.set(0,0,0);camera->position.set(0,0,1.5f);camera->lookAt(Vector3());
+    albert::RegionalImages earthRegion;earthRegion.region={-135,-45,-45,45};
+    earthRegion.day=rgba(32,128);earthRegion.height=height(6000.f);
+    planets.setRegionalImages(std::move(earthRegion));
+    planets.update(Vector3(0,0,1),camera->position,settings,1.f);
+    material->uniforms.at("present").setValue(2.f);
+    scene->add(behind);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(cyanPixels(pixels,83,109,91,101)==0,"Orbit leaked through the regional Earth terrain");
+    auto earthFront=stroke(material,{{-.55f,0,-.4f},{.55f,0,-.4f}});
+    scene->remove(*behind);scene->add(earthFront);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(cyanPixels(pixels,83,109,93,100)>20,"Orbit physically in front of Earth was hidden");
+    scene->remove(*earthFront);
+    std::vector<Vector3> points;
+    for(int i=-100;i<=100;++i) {const float angle=i*.001f;points.emplace_back(std::sin(angle),0,std::cos(angle));}
+    std::vector<float> borderPoints;
+    for(size_t i=0;i+1<points.size();++i) for(const auto& p:{points[i],points[i+1]})
+        borderPoints.insert(borderPoints.end(),{p.x,p.y,p.z});
+    auto line=std::make_shared<albert::BorderLines>(borderPoints);line->updateDetail(1.5f);
+    auto borders=line->style;borders->uniforms.at("viewport").setValue(Vector2(192,192));
+    borders->uniforms.at("visibility").setValue(1.f);planets.updateBorderMaterial(*borders,camera->position);
+    scene->add(line);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(cyanPixels(pixels,86,106,93,100)>10,"Borders disappeared beneath 6 km terrain");
+    scene->remove(*line);
+    for(auto& point:points) point.z=-point.z;
+    scene->add(stroke(borders,points));renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(cyanPixels(pixels,86,106,93,100)==0,"Borders showed through the far hemisphere");
+    const int plain=pixels[3*(96*192+96)];
+    planets.setCloudDetail(rgba(255),{-135,-45,-45,45});settings.clouds=true;
+    planets.update(Vector3(0,0,1),camera->position,settings,1.f);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    const int cloudy=pixels[3*(96*192+96)];require(cloudy>plain+40,"Live cloud detail shader did not render");
+    planets.setCloudDetail(rgba(0),{-135,-45,-45,45});
+    planets.update(Vector3(0,0,1),camera->position,settings,0.f);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(std::abs(int(pixels[3*(96*192+96)])-cloudy)<3,"Cloud replacement discarded the previous image before fading");
+    settings.nightLights=true;planets.update(Vector3(0,0,1),camera->position,settings,1.f);
+    renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(pixels[3*(96*192+96)]<cloudy-40,"Cloud detail transition did not settle");
+    auto generic=[&](double origin){
+        albert::core::Scene registry;albert::core::Object object;object.id="box";object.name="Box";
+        object.appearance.shape=albert::core::Shape::Box;object.appearance.sizeMeters={.5,.5,.5};object.samples.emplace_back(100,albert::core::Vector{origin+.25,0,0});registry.create(object);
+        auto world=Scene::create();world->background=Color(0x000000);world->add(AmbientLight::create(Color(0xffffff),1.f));
+        albert::SceneObjects objects(*world);objects.sync(registry,100,{origin,0,0});
+        auto view=OrthographicCamera::create(-2e-7f,2e-7f,2e-7f,-2e-7f,1e-9f,1e-3f);view->position.z=1e-5f;view->lookAt(Vector3());
+        renderer.render(*world,*view);auto result=renderer.readRGBPixels();
+        object.id="second";object.samples.front().positionMeters.x+=1000;registry.create(object);objects.sync(registry,100,{origin,0,0});
+        require(objects.nodes().at("box")->geometry()==objects.nodes().at("second")->geometry(),"Identical primitives duplicated GPU buffers");
+        registry.remove("second");objects.sync(registry,100,{origin,0,0});renderer.render(*world,*view);
+        require(renderer.readRGBPixels()==result,"Removing a shared primitive damaged another object");
+        registry.visible("box",false);objects.sync(registry,100,{origin,0,0});renderer.render(*world,*view);
+        const auto hidden=renderer.readRGBPixels();require(std::all_of(hidden.begin(),hidden.end(),[](auto value){return value==0;}),"Hidden external object still rendered");
+        return result;
+    };
+    const auto near=generic(0),far=generic(1e11);
+    require(near==far && std::any_of(near.begin(),near.end(),[](auto value){return value>20;}),"Camera-relative rendering lost sub-metre geometry at astronomical distances");
+    std::cout<<"Graphics OK: incremental upload, terrain occlusion, subpixel paths, borders, cloud fade and precise generic objects\n";
+}
+}
+int main(int argc,char**) {
+    try {controls();if(argc>1) graphics();return 0;}
+    catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
+}

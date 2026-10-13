@@ -1,0 +1,77 @@
+cmake_minimum_required(VERSION 3.25...4.2)
+
+project(AlbertEngine VERSION 0.2.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+# All sources use headers; avoid unnecessary C++ module scanning/dyndep.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build configuration" FORCE)
+endif()
+
+include(CTest)
+include(GNUInstallDirs)
+include(cmake/Assets.cmake)
+include(cmake/Dependencies.cmake)
+option(ALBERT_RPC "Build the optional local gRPC server" ON)
+if(ALBERT_RPC)
+    include(cmake/Grpc.cmake)
+endif()
+find_package(Threads REQUIRED)
+add_subdirectory(src/core)
+if(ALBERT_RPC)
+    add_subdirectory(src/rpc)
+endif()
+add_subdirectory(src/render)
+
+add_executable(render WIN32 src/main.cpp)
+if(WIN32)
+    enable_language(RC)
+    configure_file(cmake/Icon.rc.in ${CMAKE_CURRENT_BINARY_DIR}/albert-icon.rc @ONLY)
+    target_sources(render PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/albert-icon.rc)
+endif()
+target_link_libraries(render PRIVATE albert_render)
+set_target_properties(render PROPERTIES OUTPUT_NAME AlbertEngine RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_custom_target(albert_assets ALL
+    COMMAND ${CMAKE_COMMAND} "-DSOURCE=${PROJECT_SOURCE_DIR}/assets"
+        "-DDESTINATION=$<TARGET_FILE_DIR:render>/assets"
+        -P "${PROJECT_SOURCE_DIR}/cmake/CopyAssets.cmake"
+    COMMENT "Copying bundled static assets")
+add_dependencies(render albert_assets)
+file(READ "${PROJECT_SOURCE_DIR}/assets/imagery/manifest.json" imagery_manifest)
+string(JSON part_count LENGTH "${imagery_manifest}" parts)
+math(EXPR last_part "${part_count} - 1")
+set(imagery_inputs "${PROJECT_SOURCE_DIR}/assets/imagery/manifest.json")
+foreach(index RANGE 0 ${last_part})
+    string(JSON part GET "${imagery_manifest}" parts ${index} path)
+    list(APPEND imagery_inputs "${PROJECT_SOURCE_DIR}/assets/imagery/${part}")
+endforeach()
+if(CMAKE_HOST_WIN32)
+    set(assemble_command powershell -NoProfile -ExecutionPolicy Bypass -File
+        "${PROJECT_SOURCE_DIR}/scripts/assemble-assets.ps1" -Manifest
+        "${PROJECT_SOURCE_DIR}/assets/imagery/manifest.json" -Destination "${ALBERT_ASSET_PACK}")
+else()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(assemble_command "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/assemble-assets.py"
+        "${PROJECT_SOURCE_DIR}/assets/imagery/manifest.json" "${ALBERT_ASSET_PACK}")
+endif()
+add_custom_command(OUTPUT "${ALBERT_ASSET_PACK}"
+    COMMAND ${assemble_command}
+    DEPENDS ${imagery_inputs} "${PROJECT_SOURCE_DIR}/scripts/assemble-assets.py"
+        "${PROJECT_SOURCE_DIR}/scripts/assemble-assets.ps1"
+    COMMENT "Verifying and assembling the bundled visual library" VERBATIM)
+add_custom_target(albert_imagery ALL DEPENDS "${ALBERT_ASSET_PACK}")
+add_dependencies(render albert_imagery)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_target_properties(render PROPERTIES INSTALL_RPATH "$ORIGIN/lib")
+    # DT_RPATH resolves dependencies of the bundled shared libraries, too.
+    target_link_options(render PRIVATE "LINKER:--disable-new-dtags")
+endif()
+include(cmake/Distribution.cmake)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

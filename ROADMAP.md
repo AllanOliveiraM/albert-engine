@@ -1,0 +1,702 @@
+# Albert Engine — plano de evolução
+
+Documento de planejamento e acompanhamento, atualizado em **13/10/2026**.
+A seção de andamento registra as entregas realizadas. Os demais requisitos
+formam o backlog para entregas incrementais conforme as prioridades acordadas.
+Este documento reúne os pedidos, a proposta de arquitetura
+e os critérios para orientar as próximas implementações.
+
+### Andamento
+
+**M0 — correções implementadas; validação local concluída em 13/10/2026.**
+
+- **F01:** recortes regionais da Terra e Lua escrevem profundidade no passe
+  opaco, antes das órbitas. Trajetórias fisicamente à frente continuam visíveis.
+- **F02:** o tracejado integra a cobertura por pixel e converge suavemente
+  para linha contínua quando os traços ficam pequenos; passado/futuro conservam
+  as cores e os fades. A faixa em pixels usa interpolação sem perspectiva.
+- **F03:** fronteiras amostram o relevo global/regional, com largura suavizada
+  em pixels e oclusão. Dois níveis de geometria e recortes espaciais evitam
+  desenhar o mapa completo no zoom. Corrigida também a correspondência entre
+  latitude geodética WGS84 e texturas/recortes terrestres.
+- **F04:** luz auxiliar desligada inicialmente, 25% na Lua e 22% na Terra ao
+  ativar, com transição reversível ao ligar, desligar ou ajustar o brilho.
+- **F05:** removidos tooltips redundantes; atmosfera, nuvens, cidades,
+  fronteiras e órbitas têm transições suaves. Menu e restauração de zoom
+  preservam suas animações existentes. A auditoria ampla de UX segue incremental.
+
+Validação: nove testes CTest passaram; testes OpenGL verificaram oclusão dos
+recortes terrestres/lunares, trajetórias à frente, tracejado subpixel e fronteiras
+sobre relevo de 6 km. Conferência visual no programa com efemérides reais,
+fronteiras globais e aproximadas. Build Linux e compilação cruzada Windows
+(MinGW); teste gráfico Windows pelo Wine. A renderização local usou llvmpipe:
+desempenho em GPU física, HiDPI e execução em Windows real ainda precisam de
+validação específica. Nenhuma distribuição foi gerada.
+
+**M1 — primeiro corte implementado e validado.** Registro em `src/core/`
+com IDs estáveis, estado SI/ICRF em double, geometria por descritor, interpolação
+temporal e fila limitada de comandos. Terra/Lua/Sol usam o registro e a câmera
+seleciona IDs. O render admite esfera, caixa e cilindro adicionais; `--demo`
+cria um quarto objeto explicitamente simulado. Testes de validação, precisão,
+interpolação, histórico limitado, concorrência e cancelamento passaram. A nova
+origem gráfica acompanha o alvo antes da conversão para float. A conferência
+integrada criou um veículo de 9 × 120 m, acompanhou sua posição/atitude e
+verificou órbita manual e retorno à Terra ao remover o alvo.
+
+**M2A/M2B — primeiros cortes implementados e validados.** Contrato
+`proto/albert/v1/engine.proto`, servidor gRPC local opcional, consulta da cena,
+criação/remoção/visibilidade, foco/órbita da câmera, estados por lote/streaming
+e cliente C++ de exemplo. Comandos são aplicados na thread gráfica; consultas
+usam snapshots. Incluídas dependências fixadas e teste de integração do
+transporte. Build Linux e cruzado Windows concluídos; 11 testes próprios CTest
+passaram no Linux, incluindo transporte real. Testes de cena, RPC e gráficos
+passaram também pelo Wine. No programa Linux, o cliente aplicou 300 lotes de
+estado; foco, órbita manual e remoção do alvo funcionaram juntos com o render.
+Os serviços e formatos futuros da seção 6 continuam no backlog.
+
+**UX adicional — implementada e validada localmente.** Nuvens
+desligadas ao abrir e sem consulta automática enquanto desativadas. Recortes
+úteis continuam carregando durante o movimento, sem debounce que exige parar
+a câmera. Preparação do terreno em worker e upload de texturas em blocos entre
+quadros, mantendo a superfície anterior até a nova ficar pronta. Loader menor,
+com atraso/fade e posição fixa, sem deslocar o botão de zoom. O teste gráfico
+de upload incremental e oclusão passou no Linux e no Wine, junto da transição
+entre mapas de nuvens e precisão dos objetos genéricos. GPU física e Windows
+real continuam exigindo validação específica.
+
+**Build:** scanner de módulos C++ desativado, comandos de build serializados e
+recuperação do índice do Ninja incluída no wrapper Linux. Reconstrução do índice
+local concluída. O build seguinte apenas copiou assets, sem recompilar fontes
+ou dependências. Os 13 testes CTest passaram (11 próprios e dois exemplos zlib).
+Nenhuma distribuição foi gerada.
+
+**Ícone — gerado e integrado.** PNG com transparência na janela Linux/Windows
+e ICO com sete resoluções embutido no executável Windows. Verificado o ícone de
+512 px na janela Linux, o recurso PE Windows e execução Windows pelo Wine com
+efemérides reais e cinco quadros. A conferência integrada também exercitou zoom
+manual sobre o veículo controlado por gRPC. Arte e prompt em
+[BRANDING.md](docs/BRANDING.md).
+
+**Sequência:** M3, o primeiro planeta adicional, e M4, a primeira integração interna de
+dados. Inventário inicial de Mercúrio/Marte em
+[PLANETARY_ASSETS.md](docs/PLANETARY_ASSETS.md); download, processamento e
+renderização de M3 ainda não começaram. M4–M7 seguem pendentes.
+
+## 1. Visão e decisões de produto
+
+O Albert Engine deve oferecer uma simulação astronômica visualmente refinada,
+com conteúdo gerenciado dentro do próprio programa e ferramentas programáveis.
+A interface gráfica e clientes externos devem acessar os mesmos recursos internos.
+O gRPC será uma forma de controlar o Albert, mantendo no programa a renderização,
+as transformações de coordenadas, a câmera, os assets, as animações e os provedores de dados.
+
+Decisões já expressas pelo usuário:
+
+- Corrigir órbitas, oclusão e fronteiras antes de ampliar a quantidade de objetos.
+- Remover tooltips redundantes dos botões e lapidar animações e respostas da interface.
+- Iluminação auxiliar da Terra e Lua desativada por padrão, com ativação/desativação
+  suave; reduzir o brilho lunar atual e manter intensidade ajustável por corpo.
+- Incluir Mercúrio, Vênus, Marte, Júpiter, Saturno, Urano e Netuno, suas luas e anéis,
+  além da Terra, Lua e Sol já existentes. Assets estáticos acompanham o programa.
+- Cinturões e outros objetos adicionais ficam fora do conteúdo padrão, disponíveis
+  para casos de uso programáveis. A infraestrutura interna também poderá gerenciá-los.
+- Permitir objetos externos, trajetórias, atitude, velocidade, geometria, modelos,
+  nomes, ícones, camadas e acompanhamento de câmera através de uma API abstrata.
+- Permitir que o próprio Albert consulte fontes públicas, importe conteúdo e o atualize.
+- Preservar Linux e Windows, distribuição portátil, executável na raiz e assets organizados.
+- Gerar distribuições somente quando solicitado. Sem README, documentação ou
+  informações de build no pacote; conservar os avisos de licença necessários.
+
+Recomendações deste plano, ainda sujeitas a refinamento: divisão dos módulos,
+nomes de serviços, formatos de importação, durações de novas animações, orçamento
+de recursos e sequência das entregas.
+
+### Ordem recomendada de execução
+
+1. **Corrigir a experiência atual:** oclusão, tracejado, fronteiras, luz auxiliar
+   e pequenos ajustes de interface. Não esperar uma refatoração para corrigir bugs.
+2. **Criar a base mínima e provar o gRPC:** cadastrar um objeto genérico, movê-lo
+   por streaming e acompanhá-lo com câmera controlável pelo usuário.
+3. **Ampliar em entregas independentes:** primeiros planetas, modelos externos,
+   camadas e poucos provedores internos confiáveis.
+4. **Expandir após validar:** sistemas completos de luas/anéis, cenários mais ricos,
+   catálogo amplo e integrações avançadas.
+
+A [seção 12](#12-priorização-por-valor-viabilidade-e-dependências) detalha a
+classificação, os marcos e o que fica fora das primeiras entregas. As seções
+temáticas seguintes continuam sendo o inventário completo de requisitos.
+
+## 2. Ponto de partida observado no código, antes de M0
+
+| Área | Estado observado | Consequência para a evolução |
+| --- | --- | --- |
+| Aplicação | `src/render/application.cpp` reúne consultas astronômicas, câmera, órbitas e UI | Extrair responsabilidades gradualmente, preservando comportamento |
+| Objetos | `Focus`, `Ephemerides`, `Orbits` e `PlanetVisuals` têm campos específicos para Terra/Lua/Sol | Trocar dependências de nomes por IDs, registros e capacidades |
+| Assets | `DecodedAssets` usa posições fixas em arrays; regiões distinguem Terra/Lua por booleano | Introduzir descritores por corpo, camada e finalidade |
+| Biblioteca visual | Um `visuals.pak` de 2.855.439.799 bytes; três partes LFS reunidas no build | Manter leitura por blocos e ampliar o índice para novos corpos |
+| Órbitas | Faixas trianguladas, coordenadas relativas à câmera, tracejado baseado em tempo | Revisar amostragem do padrão e profundidade; preservar a precisão já obtida |
+| Terreno | Globo global mascarado no interior de recortes regionais com relevo | Auditar oclusão entre globo, recortes, órbitas e demais camadas |
+| Fronteiras | Segmentos com subdivisão angular fixa de 0,2° e altitude fixa de 3 km | Investigar penetração no terreno, cordas entre vértices e detalhe insuficiente no zoom |
+| Luz auxiliar | Terra/Lua começam ligadas; intensidades atuais de 35%/65% | Alterar defaults e separar valor desejado do valor visual animado |
+| API interna | Entrada pública principal: `runRenderer`; ainda não há módulo gRPC | Criar serviços internos antes de expor operações pela rede |
+
+Os problemas relatados de linhas atravessando a Lua e fronteiras desaparecendo
+são requisitos de correção. As possíveis causas abaixo são hipóteses de trabalho,
+não diagnósticos definitivos.
+
+## 3. Correções visuais prioritárias
+
+### 3.1 Órbitas: estabilidade do tracejado
+
+- [ ] Reproduzir os pontos minúsculos e as falhas nas vistas próximas e distantes,
+  com câmera parada, em movimento, diferentes resoluções e escalas HiDPI.
+- [ ] Medir tamanho projetado dos traços e intervalos em pixels. A velocidade
+  orbital e a perspectiva não devem produzir padrões subpixel ilegíveis.
+- [ ] Preferir tracejado com comprimento visual estável, em vez de pontinhos.
+  Avaliar parametrização por comprimento de arco e sua projeção na tela.
+- [x] Filtrar a cobertura do padrão com derivadas; quando não houver resolução
+  para separar os traços, misturar gradualmente para uma linha contínua suave.
+- [ ] Usar histerese/transição entre níveis do padrão para evitar cintilação durante o zoom.
+- [x] Manter passado contínuo azul e futuro âmbar, com fades e legenda. A cor
+  deve continuar diferenciando os dois quando o tracejado precisar ficar contínuo.
+- [ ] Preservar fase estável do padrão, junções entre segmentos e recorte correto
+  no plano próximo. Não reiniciar o desenho a cada atualização de efemérides.
+
+**Aceite:** nenhuma sequência de pontos alternando pixels ou lacunas acidentais;
+passado/futuro legíveis nas vistas de contexto e no zoom, sem tremores novos.
+
+### 3.2 Órbitas atravessando objetos
+
+- [ ] Reproduzir o caso lunar por ângulo, distância, qualidade e presença de recorte regional.
+- [x] Auditar `depthTest`, `depthWrite`, transparência, ordem de desenho e máscara
+  que substitui o globo pelo terreno regional. Verificar também anéis e camadas futuras.
+- [x] Garantir profundidade completa da superfície antes de desenhar trajetórias.
+  Avaliar separar o núcleo opaco do recorte de sua borda de transição ou usar
+  um passe de profundidade, somente se necessário.
+- [ ] Verificar precisão do depth buffer e planos da câmera nas diferentes escalas.
+  Não resolver o problema desativando o teste de profundidade das linhas.
+- [x] Distinguir trajetória realmente à frente do corpo de trecho atrás dele:
+  uma linha sobre a imagem pode ser correta se estiver fisicamente à frente.
+
+**Aceite:** trechos atrás do terreno ficam ocultos em todos os ângulos, inclusive
+na borda dos recortes; trechos à frente continuam visíveis. Validar Terra e Lua.
+
+### 3.3 Fronteiras no zoom grande
+
+- [ ] Reproduzir em montanhas, costas, polos e cruzamento de ±180° de longitude.
+- [ ] Comparar altitude fixa da linha com o relevo global e regional; verificar
+  se os segmentos retos atravessam a superfície entre vértices.
+- [x] Projetar fronteiras sobre o mesmo terreno usado pela superfície, com pequeno
+  afastamento visual controlado, sem criar linhas através do lado oposto do globo.
+- [ ] Adaptar subdivisão ao erro projetado e à resolução do dado; usar largura
+  em pixels e antialiasing compatíveis com Linux e Windows.
+- [x] Preservar a precisão relativa à câmera. Separar limitação do mapa de origem
+  de defeito de renderização: ampliar uma fronteira não cria detalhe cartográfico real.
+- [ ] Transformar fronteiras na primeira camada vetorial reutilizável do programa.
+
+**Aceite:** fronteiras permanecem estáveis e visíveis sobre o terreno ao aproximar,
+sem afundar, flutuar excessivamente ou aparecer através do planeta.
+
+### 3.4 Iluminação auxiliar
+
+- [x] Desativar por padrão na Terra e Lua, inclusive em sessões novas e cenários padrão.
+- [x] Reduzir o brilho lunar em relação ao valor anterior de 65%; escolher o novo
+  valor por comparação visual, preservando textura, relevo e percepção da fase.
+- [x] Animar o ganho ao ligar, desligar e mudar intensidade. Proposta inicial:
+  200–350 ms, sem salto ao inverter a ação durante a animação.
+- [x] Aplicar a ajuda somente à região sem iluminação solar direta, usando a
+  orientação atual do corpo. Face oculta e lado escuro são conceitos distintos.
+- [x] Conferir continuidade entre material global e recortes regionais, além
+  da suavidade no terminador. Não clarear o lado diurno.
+- [x] Identificar na UI que é uma ajuda visual, separada dos dados astronômicos.
+
+**Aceite:** desligada ao abrir; ao ligar, detalhes noturnos ficam perceptíveis
+sem lavar a imagem; ligar/desligar repetidamente é suave e reversível.
+
+## 4. Auditoria de UX e animações
+
+Retirar tooltips dos botões de menu, foco e restauração de zoom. Explicações
+necessárias devem ficar junto ao controle ou nas áreas dedicadas de ajuda/dados;
+não substituir a informação por outro popup automático redundante.
+
+| Interação | Comportamento desejado |
+| --- | --- |
+| Abrir/fechar menu | Mesma duração e curva nos dois sentidos; reversão sem salto |
+| Trocar aba | Transição discreta, sem mudar a posição de controles inesperadamente |
+| Selecionar objeto | Foco e indicação visual sincronizados; navegação para muitos corpos |
+| Viagem de câmera | Trajeto sem atravessar corpos, duração limitada e interrupção previsível |
+| Restaurar zoom | Botão aparece/some suavemente; preserva ângulo e acompanha objeto móvel |
+| Arrastar/rolar | Sensibilidade adaptada à altitude; resposta independente do FPS |
+| Atmosfera, nuvens, luzes e órbitas | Transição de intensidade/opacidade quando apropriada |
+| Fronteiras e camadas | Entrada/saída suave, com oclusão correta desde o primeiro quadro |
+| Sombras/qualidade | Troca sem travar; não aplicar efeitos que invalidem a profundidade |
+| Mudança de LOD/textura | Preservar última imagem válida; evitar flashes e emendas |
+| Carregar/adicionar/remover objetos | Mostrar progresso; revelar quando estiverem prontos; remoção coerente com câmera |
+| Download/falha/retentativa | Indicador discreto; estado claro; retentativa sem reiniciar a navegação |
+| Limpeza de cache | Atualizar espaço/estado sem apagar biblioteca embarcada |
+| Entrada/saída de streaming | Mostrar origem, atraso e interrupção; não teletransportar silenciosamente |
+
+- [ ] Criar política pequena e compartilhada de animações, com cancelamento,
+  reversão e combinação, em vez de timers independentes para cada controle.
+- [ ] Separar animação de apresentação da posição física do objeto. Interpolar
+  amostras temporais com regras explícitas; não suavizar uma trajetória científica arbitrariamente.
+- [ ] Respeitar navegação por teclado, foco e cursor nos clicáveis. Prever opção
+  de reduzir animações, sem esconder estados importantes.
+- [ ] Verificar janelas pequenas, diferentes escalas de fonte, menus com rolagem
+  e ausência de sobreposição entre botão flutuante, loaders e legendas.
+- [ ] Animações não podem exigir downloads extras, reconstrução de malhas por
+  quadro ou pós-processamento caro sem benefício medido.
+
+## 5. Arquitetura proposta
+
+### 5.1 Um núcleo compartilhado
+
+```mermaid
+flowchart TD
+    UI[Interface gráfica] --> APP[Serviços internos do Albert]
+    CLIENT[Clientes externos e assistentes de IA] --> RPC[gRPC C++ no programa]
+    RPC --> APP
+    APP --> SCENE[Registro de objetos, camadas e relógio]
+    APP --> CONTENT[Catálogo e provedores de dados]
+    APP --> ASSETS[Assets e cache]
+    SCENE --> RENDER[Renderização e câmera]
+    CONTENT --> SCENE
+    ASSETS --> RENDER
+```
+
+O gRPC traduz chamadas para serviços internos. Ele não mantém uma segunda cena,
+não recebe objetos threepp e não exige um cliente conectado para o Albert funcionar.
+O gerenciamento de conteúdo, inclusive consultas externas, permanece no programa.
+
+Responsabilidades sugeridas, extraídas em etapas:
+
+| Módulo | Responsabilidade |
+| --- | --- |
+| `src/core/` | IDs, tipos físicos, registro da cena, comandos, eventos e relógio |
+| `src/astronomy/` | Referenciais, escalas de tempo, efemérides, propagação e orientação |
+| `src/content/` | Catálogo, provedores, importação, agendamento e proveniência |
+| `src/assets/` | Descritores, biblioteca empacotada, importações, LOD e orçamento de memória |
+| `src/render/` | Adaptar a cena para threepp, materiais, câmera, camadas e UI |
+| `src/rpc/` | Servidor gRPC, validação do transporte e conversão de mensagens |
+| `proto/albert/v1/` | Contratos documentados da API, quando a etapa gRPC começar |
+
+Esses caminhos são uma proposta; este planejamento não cria os módulos.
+Começar com estruturas e composição simples. Não exigir ECS, plugins binários,
+microserviços ou uma reescrita completa para cadastrar um novo planeta.
+
+### 5.2 Objetos extensíveis
+
+Cada objeto terá ID estável, nome, tipo, origem dos dados, corpo pai/referencial,
+estado temporal e capacidades opcionais. Separar relação física de relação
+visual: uma lua orbita um planeta; uma peça de foguete pode herdar um transform
+local; essas relações não devem ser confundidas.
+
+Capacidades previstas: geometria/modelo, materiais e assets, orientação, trajetória,
+anéis, atmosfera, camadas, rótulo/ícone, acompanhamento de câmera e efeitos visuais.
+Adicionar um objeto deve combinar essas capacidades por descritor, sem ampliar
+um `switch` central ou depender de posições fixas em arrays.
+
+- [ ] Migrar Terra/Lua/Sol para esse registro primeiro, preservando suas particularidades.
+- [ ] Trocar seleção fixa por `ObjectId`; vistas de contexto passam a enquadrar conjuntos.
+- [ ] Definir criação, atualização, ocultação e remoção, com descarte de recursos.
+- [ ] Ao remover o objeto acompanhado, escolher alvo substituto ou câmera livre de forma explícita.
+- [ ] Carregar recursos por visibilidade/prioridade; não manter todas as texturas de todas as luas na GPU.
+
+### 5.3 Precisão e estado temporal
+
+- [ ] Usar doubles para estado físico e origem relativa à câmera na GPU.
+- [ ] Declarar unidades em cada contrato: proposta de SI na API, posições em metros,
+  velocidades em m/s, ângulos em radianos e orientação em quaternion com convenção documentada.
+- [ ] Toda posição precisa de origem, referencial e instante. Converter ICRF,
+  referenciais fixos de corpos, geodésico WGS84, sistemas locais e TEME quando suportados.
+- [ ] Declarar escala de tempo e conversões UTC/TAI/TT/TDB; não usar dias julianos
+  em float nem confundir tempo de chegada de mensagem com instante da amostra.
+- [ ] Oferecer modos de relógio: agora, instante escolhido, pausa e reprodução
+  de cenário. Provedores ao vivo devem explicitar incompatibilidade com tempo arbitrário.
+- [ ] Marcar estado como observado, propagado, interpolado ou fornecido pelo cliente,
+  com fonte, época, validade, atraso e limites de precisão.
+- [ ] Não extrapolar indefinidamente. Definir por fonte quando congelar, sinalizar
+  dados antigos ou permitir previsão limitada.
+
+### 5.4 Concorrência e desempenho
+
+- [ ] Rede, importação e decodificação trabalham fora da thread gráfica.
+- [ ] Workers gRPC enviam comandos a uma fila limitada; somente a thread dona
+  da cena gráfica cria/altera/remove recursos OpenGL.
+- [ ] Consultas leem snapshots consistentes, com revisão/instante; não percorrem
+  diretamente objetos threepp em threads de rede.
+- [ ] Limitar trabalho e uploads por quadro, filas, streams e recursos residentes.
+- [ ] Para amostras contínuas, combinar atualizações substituíveis por objeto;
+  comandos de criação/remoção e eventos de missão não podem ser descartados desse modo.
+- [ ] Medir tempo de quadro, CPU, RAM/VRAM, uploads e atraso de comandos. Definir
+  metas após medir uma cena de referência e o hardware disponível.
+- [ ] Encerramento cancela consultas/streams e libera recursos sem bloquear indefinidamente.
+
+## 6. API gRPC de alto nível
+
+Proposta inicial de serviços, com nomes ilustrativos:
+
+| Serviço | Operações previstas |
+| --- | --- |
+| `SceneService` | Listar/criar/atualizar/remover objetos; gerir camadas, rótulos, trajetórias e lotes |
+| `CameraService` | Focar, acompanhar, enquadrar conjunto, orbitar, mover, restaurar e consultar câmera |
+| `AssetService` | Registrar/importar assets, consultar progresso e referenciá-los por ID/hash |
+| `DataService` | Descobrir provedores/capacidades, buscar objetos, importar e acompanhar fontes |
+| `SimulationService` | Relógio, cenário, streaming de estados, eventos e acompanhamento de operações |
+
+O cliente deve poder dizer “acompanhe este objeto e permita órbita manual” ou
+“adicione este satélite pelo catálogo”, sem calcular matrizes de câmera,
+malhas do globo ou protocolos de provedores públicos.
+
+- [ ] Definir contratos `v1`, IDs independentes de nomes traduzidos, campos
+  opcionais/`oneof`, enumerações extensíveis e regras de compatibilidade Protobuf.
+- [ ] Documentar unidades, referenciais, erros, limites, exemplos e efeito de cada comando.
+- [ ] Retornar `OperationId` para tarefas longas, progresso e resultado por eventos/consulta.
+- [ ] Distinguir comando aceito, aplicado e concluído; incluir revisão/instante relevante.
+- [ ] Prever idempotência em operações repetidas e aplicação atômica de lotes relacionados.
+- [ ] Validar valores finitos, dimensões, quaternions, ciclos de parentesco e referências inexistentes.
+- [ ] Oferecer descoberta de capacidades: formatos, provedores e recursos suportados.
+- [ ] Incluir gRPC/Protobuf e geração de código no CMake, com versões fixadas
+  e builds Linux/Windows; a execução da versão pronta não exige ferramentas de desenvolvimento.
+
+### 6.1 Streaming de movimento
+
+Cada amostra deve identificar objeto, sequência, instante, origem/referencial,
+posição, orientação e, quando disponíveis, velocidades linear/angular.
+Metadados de geometria/assets são registrados uma vez; não reenviar texturas por quadro.
+
+- [ ] Buffer temporal limitado, interpolação de posição e SLERP de atitude;
+  velocidade só participa da interpolação quando seu significado estiver definido.
+- [ ] Definir ordenação, tolerância a amostras atrasadas, duplicadas e fora de ordem,
+  reconexão, retomada e tratamento de lacunas.
+- [ ] Marcar saltos/descontinuidades: separação de estágios e teletransporte
+  deliberado não devem ser interpolados como voo contínuo.
+- [ ] Separar amostras de estado, eventos e comandos de animação.
+- [ ] Aplicar controle de fluxo da aplicação além do transporte gRPC; limitar
+  frequência/tamanho e informar descarte ou atraso ao integrador.
+- [ ] Distinguir modo ao vivo com pequeno buffer de apresentação de reprodução
+  determinística por timestamps. Documentar a latência adicionada.
+
+As regras de RPC, streaming e controle de fluxo devem seguir a documentação
+oficial de [conceitos gRPC](https://grpc.io/docs/what-is-grpc/core-concepts/),
+[flow control](https://grpc.io/docs/guides/flow-control/) e
+[deadlines](https://grpc.io/docs/guides/deadlines/).
+
+### 6.2 Câmera e coexistência com o usuário
+
+- [ ] Separar alvo acompanhado de distância, ângulo, orientação e modo de câmera.
+- [ ] Modos propostos: livre, orbitar alvo, acompanhar posição, acompanhar atitude,
+  vista de superfície e enquadramento de um conjunto.
+- [ ] Receber novas posições do alvo não reinicia a viagem de câmera nem apaga
+  a rotação/zoom escolhidos pelo usuário.
+- [ ] Definir prioridade de controle quando usuário e clientes comandarem a câmera.
+  Proposta: órbita/zoom manual permanecem livres no acompanhamento; comandos de
+  viagem podem ser interrompidos; controle exclusivo remoto exige modo explícito.
+- [ ] Definir referencial do deslocamento da câmera: inercial, corpo ou objeto.
+- [ ] Evitar colisão/entrada em superfícies e permitir cancelamento de voos em andamento.
+
+### 6.3 Acesso e limites
+
+Proposta: servidor opcional dentro do executável, escutando somente em loopback
+por padrão, com configuração e indicação de estado na UI. Acesso remoto será
+uma opção explícita, com autenticação e TLS quando habilitado.
+
+Limitar conexões, mensagens, importações e memória. Referências de assets devem
+usar IDs ou importação controlada; não expor execução de comandos, leitura
+arbitrária do disco ou download irrestrito por URL como recurso da API.
+Clientes de IA usam as mesmas operações documentadas dos demais integradores.
+
+## 7. Assets e conteúdo visual por objeto
+
+- [ ] Descritor versionado por corpo: dimensões físicas, orientação, materiais,
+  mapas de cor/normal/relevo, níveis de detalhe, anéis, atmosfera e créditos.
+- [ ] Ampliar o pacote para lookup por corpo/camada/nível/bloco, evitando índices
+  fixos. Manter um arquivo de biblioteca estática na distribuição.
+- [ ] Manter gerador reproduzível, hashes, fontes e processamento declarados;
+  originais/intermediários ficam fora do Git e da distribuição.
+- [ ] Para conteúdo adicionado pelo usuário, usar armazenamento separado da
+  biblioteca embarcada, com ciclo de vida e limpeza explícitos.
+- [ ] Distinguir biblioteca embarcada, assets persistentes de cenários, cache
+  descartável de provedores e recursos residentes na GPU.
+- [ ] Geometria simples por composição: esfera/elipsoide, caixa, cilindro, cone,
+  anel, linhas e pontos. Importação de modelo: avaliar glTF/GLB e suporte real da threepp.
+- [ ] Permitir hierarquia de peças e transformações locais, materiais simples,
+  nomes e ícones como alternativa de representação.
+- [ ] Validar escala física, eixos, origem/pivô, formatos, limites de tamanho,
+  texturas, caminhos e dependências antes de carregar um modelo externo.
+- [ ] Preservar modelo de baixa resolução enquanto outro carrega e animar
+  substituições quando isso não comprometer oclusão ou posição física.
+
+## 8. Sistema Solar embarcado
+
+| Grupo | Trabalho visual e físico a planejar |
+| --- | --- |
+| Mercúrio | Mosaico de superfície, relevo disponível, rotação/orientação e terminador |
+| Vênus | Atmosfera/nuvens opacas; superfície por radar em modo separado e identificado |
+| Marte | Cor, relevo, atmosfera tênue, calotas e separação entre imagem estática e clima atual |
+| Júpiter e Saturno | Topo de nuvens, achatamento, iluminação e orientação; não tratá-los como solo sólido |
+| Urano e Netuno | Atmosfera, cor observacional, achatamento, orientação e anéis quando aplicáveis |
+| Luas | Catálogo por planeta, formas esféricas/irregulares, rotação, efemérides e mapas disponíveis |
+| Anéis | Geometria, inclinação, opacidade, iluminação e sombras entre anéis e planeta |
+
+- [ ] Inventariar todas as luas abrangidas pela edição do catálogo: nomes,
+  identificadores, parâmetros, disponibilidade de efemérides, forma e cobertura de imagens.
+- [ ] Entregar as luas com cobertura detalhada primeiro, sem apagar do escopo
+  as demais. Registrar explicitamente o que cada entrega inclui.
+- [ ] Não prometer fotografia global em alta resolução onde ela não existe.
+  Regiões não observadas, modelos aproximados e cores instrumentais precisam ser identificados.
+- [ ] Usar fontes adequadas por corpo; uma imagem estática de nuvens de outro
+  planeta não pode ser apresentada como observação em tempo real.
+- [ ] Avaliar kernels SPICE locais para ampliar corpos/luas e reduzir consultas
+  individuais; declarar intervalo de validade e atualizações da biblioteca de efemérides.
+- [ ] Fazer orçamento de disco, RAM/VRAM e geração depois do inventário; não
+  extrapolar o tamanho do pacote atual como estimativa garantida do Sistema Solar completo.
+- [ ] Evoluir a seleção de foco para busca/lista hierárquica por sistema planetário.
+- [ ] Cinturões, asteroides, cometas e demais conteúdos opcionais usam a mesma
+  infraestrutura, mas não entram no conjunto embarcado padrão deste escopo.
+
+Referências iniciais para o inventário: [parâmetros de satélites JPL](https://ssd.jpl.nasa.gov/sats/phys_par/),
+[SPICE/NAIF](https://naif.jpl.nasa.gov/naif/toolkit.html) e
+[modelos NASA](https://science.nasa.gov/3d-resources/).
+Texturas, modelos e condições de redistribuição serão verificados individualmente.
+
+## 9. Camadas geográficas e meteorológicas
+
+Uma camada pertence a um corpo ou referencial, tem ID, fonte, estilo, opacidade,
+visibilidade, validade temporal e regra de profundidade.
+
+Tipos previstos: pontos, nomes, ícones, linhas, polígonos, rasters georreferenciados,
+mapas de elevação, campos meteorológicos e vetores como vento/correntes.
+Fronteiras, ruas, rios e lugares devem reutilizar essa infraestrutura.
+
+- [ ] Primeiro formato vetorial: avaliar GeoJSON com subconjunto declarado;
+  pontos/linhas/polígonos devem conter referencial e regra de altitude.
+- [ ] Distinguir altitude absoluta, relativa ao terreno e projeção sobre a superfície.
+- [ ] Para mapas, definir projeção, extensão, esquema de tiles, orientação,
+  transparência, nível de detalhe e instante; suportar antimeridiano e polos.
+- [ ] Reutilizar suporte WMS existente; avaliar WMTS/XYZ e formatos adicionais
+  somente conforme as primeiras fontes concretas.
+- [ ] Recortar pela área visível, simplificar vetores por erro em tela e limitar rótulos
+  por prioridade/colisão. Não baixar ruas de todo o planeta para uma vista local.
+- [ ] Ancorar camadas no terreno e respeitar oclusão, inclusive em outros corpos.
+- [ ] Mostrar fonte, data, legenda, unidades e créditos das camadas ativas.
+- [ ] Distinguir observação, previsão meteorológica e reanálise; não chamar tudo
+  de “tempo real”. Não inferir dados onde o provedor não os oferece.
+
+## 10. Catálogo interno de provedores
+
+Separar catálogo de provedores, catálogo de objetos e objetos instanciados na cena.
+Encontrar um resultado de busca não deve automaticamente carregá-lo ou focá-lo.
+O catálogo pode crescer por adaptadores de capacidade; não depende de scraping
+ou de um endpoint genérico que interprete qualquer serviço arbitrário.
+
+Cada provedor declara: ID, documentação, capacidades, cobertura espacial/temporal,
+credenciais, limites, frequência adequada, formatos, referencial, unidades,
+licença/atribuição, política de cache, versão e estado de disponibilidade.
+
+| Fonte candidata | Uso no Albert | Observação para a integração |
+| --- | --- | --- |
+| [JPL SSD/Horizons/SBDB](https://ssd-api.jpl.nasa.gov/) | Busca, efemérides e objetos pequenos | Respeitar política de uso, serialização de requisições e cache; conferir versão de resposta |
+| [NAIF/SPICE](https://naif.jpl.nasa.gov/naif/toolkit.html) | Órbitas/orientações de corpos e missões | Toolkit e arquivos de kernels; não é um feed universal de telemetria ao vivo |
+| [CelesTrak GP/OMM](https://celestrak.org/NORAD/documentation/gp-data-formats.php) | Satélites artificiais terrestres | Incluir propagação apropriada e conversões; elementos orbitais não são posições observadas instantâneas |
+| [NASA GIBS](https://nasa-gibs.github.io/gibs-api-docs/) | Imagens de observação terrestre e nuvens | Consultar datas/cobertura de cada camada; ampliar adaptador existente |
+| [OpenStreetMap](https://www.openstreetmap.org/copyright) / [Overpass](https://wiki.openstreetmap.org/wiki/Overpass_API) | Lugares, ruas, rios e geometrias | Atribuição/licença e limites por serviço; dados abertos não significam servidor ilimitado de tiles |
+| [NOAA NOMADS](https://nomads.ncep.noaa.gov/) | Grades de previsão meteorológica | Recortes, variáveis e horários de execução dos modelos; custo de decodificação deve ser medido |
+| [Open-Meteo](https://open-meteo.com/en/docs) | Variáveis meteorológicas por localização | Verificar modalidade de uso e limites; não assumir fornecimento de textura global pronta |
+| [Copernicus CDS](https://cds.climate.copernicus.eu/how-to-api) | Reanálise e outros conjuntos climáticos | Requer preparação de acesso e condições por dataset; não presumir baixa latência |
+| [Google Maps Tile API](https://developers.google.com/maps/documentation/tile/policies) | Candidato opcional para conteúdo cartográfico | Avaliar produto/API, custos, atribuição e restrições de armazenamento; não incluir dados Google no pacote por suposição |
+| [Ventusky](https://www.ventusky.com/faq) | Referência desejada para visualização climática | FAQ informa ausência de integração/API disponível; buscar dados de modelos diretamente em provedores adequados |
+
+Fontes consultadas para este planejamento em 13/10/2026. Disponibilidade e termos
+devem ser revistos quando cada adaptador for implementado. Esta lista é inicial,
+não um compromisso de suporte imediato nem uma lista de serviços todos gratuitos e irrestritos.
+
+- [ ] Oferecer busca, importação e acompanhamento por serviços internos, acessíveis
+  tanto pela UI quanto por gRPC.
+- [ ] Centralizar limites por provedor, deduplicação, cache, retentativa com espera
+  e cancelamento; nunca fazer uma consulta pública por quadro renderizado.
+- [ ] Permitir resultados parciais e informar falta de posição, imagem ou validade.
+- [ ] Para missões/lançamentos, distinguir informações públicas da missão de
+  telemetria de voo: não presumir feed aberto e completo do Starship ou de outra missão.
+- [ ] Priorizar poucos adaptadores confiáveis, com fixtures e documentação, antes
+  de ampliar o catálogo para muitas APIs.
+
+## 11. Cenários que devem orientar os contratos
+
+### Lançamento fornecido por um integrador
+
+1. O cliente cria um cenário com época, relógio e referenciais explícitos.
+2. Registra um modelo/asset ou descreve o foguete por primitivas e peças.
+3. Cria veículo, estágios, rótulos e trajetória, referenciando assets por ID.
+4. Envia estados com posição, atitude e velocidades por streaming.
+5. Solicita acompanhamento de posição; o usuário continua podendo orbitar e aproximar.
+6. Envia eventos de ignição, corte e separação, no instante correto. Efeitos
+   visuais opcionais não substituem os dados físicos enviados.
+7. Interrupções são sinalizadas; reprodução usa os mesmos dados temporais.
+8. O Albert cuida de transformações, interpolação permitida, render e câmera.
+
+O cliente pode calcular a dinâmica do lançamento; o Albert não deve inventar
+um modelo físico de voo para preencher dados ausentes. Um simulador dinâmico
+interno mais amplo seria outra etapa, com requisitos próprios.
+
+### Assistente de IA guiando uma explicação
+
+O integrador descobre capacidades, consulta o catálogo interno, pede importação
+de objetos, aguarda operações e solicita foco/camadas. Recebe estados e eventos
+para explicar fonte, instante e limitações. Voz, geração de texto e conexão com
+um modelo de IA podem permanecer no integrador; o Albert fornece operações
+programáveis e previsíveis, sem exigir IA para funcionar.
+
+## 12. Priorização por valor, viabilidade e dependências
+
+### 12.1 Como decidir a ordem
+
+Esta é uma avaliação inicial baseada no código atual e nos objetivos do usuário,
+sem estimativas de prazo ou pontuações numéricas que ainda não podemos sustentar.
+
+- **Valor:** melhora direta da experiência ou capacidade essencial para os casos
+  de uso desejados. Valor de fundação é indicado separadamente do benefício visual.
+- **Viabilidade:** confiança de executar uma primeira entrega útil com a base
+  existente. Alta não significa pronta; média exige investigação; baixa indica
+  dependência importante de dados, acesso ou pesquisa ainda não resolvida.
+- **Esforço:** relativo entre tarefas. Pequeno é localizado; médio atravessa algumas
+  responsabilidades; grande exige novos contratos/pipelines ou mudanças estruturais.
+- **Dependências:** uma feature de alto valor não entra antes da base necessária.
+- **Incerteza:** primeiro resolver a dúvida que pode inviabilizar uma entrega,
+  antes de baixar grandes bibliotecas ou construir infraestrutura extensa.
+
+Correção de precisão/oclusão tem precedência sobre cosmética. Ajustes pequenos
+podem ser entregues enquanto se investiga um bug mais difícil, sem atrasar sua
+correção. Refatoração deve acompanhar um caso concreto, com comportamento verificável.
+
+### 12.2 Backlog ordenado
+
+Os IDs abaixo servem para acompanhar entregas futuras; não são tarefas já iniciadas.
+Dentro de cada faixa, a ordem indicada é a recomendada, respeitando as dependências.
+
+| ID | Feature / primeira entrega útil | Valor | Viabilidade | Esforço | Dependências / principal incerteza |
+| --- | --- | --- | --- | --- | --- |
+| F01 | Corrigir órbitas atrás da Lua/Terra | Muito alto: correção visual e espacial | Média | Médio | Reproduzir interação entre profundidade, transparência e terreno regional |
+| F02 | Tracejado estável em diferentes distâncias | Alto: legibilidade constante | Média | Médio | Medir tamanho em pixels e validar filtragem nas escalas extremas |
+| F03 | Fronteiras acompanhando o terreno no zoom | Alto: recuperar recurso existente | Média | Médio | Amostragem do relevo e erro dos segmentos; reutilizar resultado depois nas camadas |
+| F04 | Luz auxiliar desligada por padrão, brilho lunar menor e transição | Alto: aparência inicial e controle previsível | Alta | Pequeno–médio | Comparação visual para escolher brilho e curva; mesmos materiais globais/regionais |
+| F05 | Remover tooltips redundantes e acertar animações já existentes | Médio: interface mais limpa | Alta | Pequeno | Limitar ao menu, foco, zoom e estados existentes; auditoria ampla continua incremental |
+| F06 | Registro genérico + serviços internos mínimos + câmera por ID | Alto de fundação: permite novos objetos e gRPC | Média | Grande, dividido | Migrar Terra/Lua/Sol e provar cadastro de um quarto objeto sem branches específicos |
+| F07 | Inventário dos próximos assets e teste de um corpo | Alto de redução de risco | Alta para inventário | Pequeno–médio | Confirmar cobertura, origem, redistribuição, escala e tamanho antes do download completo |
+| F08 | gRPC local: consultar cena, criar/remover objeto e focar | Muito alto para programação externa | Média após F06 | Médio | Contrato mínimo, fila de comandos, snapshots e build Linux/Windows |
+| F09 | Streaming de estado + acompanhamento com órbita manual | Muito alto: prova o caso central do integrador | Média após F08 | Médio–grande | Unidades, referenciais, timestamps, buffer limitado e comportamento com lacunas |
+| F10 | Exemplo de lançamento com primitivas e dados de demonstração | Alto: valida uso completo com pouco conteúdo extra | Alta após F09 | Pequeno–médio | Não exige telemetria real nem foguete fotorealista; exemplo deve declarar dados sintéticos |
+| F11 | Primeiro planeta adicional com assets embarcados | Alto: ganho visual e teste de extensibilidade | Média após F06/F07 | Médio | Usar o caminho genérico; candidato simples primeiro, conforme inventário |
+| F12 | Importação de modelo externo e hierarquia de peças | Alto para veículos e missões | Média | Médio–grande | F06/F08, validação de formatos/eixos/escala e suporte efetivo da threepp |
+| F13 | Camadas vetoriais: pontos, nomes, linhas e polígonos | Alto: lugares, rios, ruas e anotações | Média | Médio–grande | F03/F06; projeção no terreno, oclusão, simplificação e limite de rótulos |
+| F14 | Catálogo interno mínimo com provedor astronômico já usado | Alto: importar sem conhecer detalhes da fonte | Alta–média | Médio | Extrair/reutilizar Horizons, registrar proveniência e limites; expor também por gRPC |
+| F15 | Demais planetas em lotes pequenos | Alto: ampliar exploração | Média | Grande no conjunto | F11; adaptar famílias de materiais sem forçar tudo ao modelo terrestre |
+| F16 | Primeiras luas detalhadas e anéis | Alto: sistemas planetários completos | Média | Grande no conjunto | F15 por sistema; mapas, formas, orientações, transparência e sombras |
+| F17 | Satélites artificiais por provedor interno | Alto para acompanhamento de objetos próximos | Média | Médio–grande | F09/F14; propagação e conversões de referencial, validade e atualização dos elementos |
+| F18 | Camadas raster e clima de poucas fontes selecionadas | Alto para exploração da Terra | Média | Grande, dividido | F13/F14; reutilizar WMS/GIBS e adicionar variáveis/grades apenas com caso concreto |
+| F19 | Eventos de missão, gravação e reprodução determinística | Alto para cenários complexos | Média | Grande | F09/F10; registrar dados/eventos e controlar relógio, lacunas e descontinuidades |
+| F20 | Exemplo de cliente para assistente de IA | Médio–alto: demonstra uso educativo | Alta após API documentada | Pequeno–médio | Reutilizar F08/F09/F14; sem exigir modelo de IA embutido no Albert |
+| F21 | Completar cobertura do catálogo de luas e conteúdo embarcado | Alto para a visão completa | Variável por corpo | Grande | F16, inventário e orçamento; dados limitados não podem virar fotorealismo inventado |
+| F22 | Catálogo amplo de provedores e novas classes de camadas | Valor variável por caso de uso | Média–baixa no conjunto | Grande | Expandir F14/F18 após validar demanda, termos, limites e manutenção de cada fonte |
+
+**Faixas de execução:** F01–F05 agora; F06–F10 na próxima etapa; F11–F20 em
+entregas incrementais após o MVP; F21–F22 como expansão continuada. F07 pode
+ser investigada junto à fundação. Os IDs não impõem uma fila rígida: por exemplo,
+F14 pode preceder F12 se importar objetos existentes tiver mais valor imediato.
+
+### 12.3 Marcos pequenos e verificáveis
+
+| Marco | Entrega | Corte de escopo | Critério de conclusão |
+| --- | --- | --- | --- |
+| M0 — experiência atual confiável | F01–F05 | Corrigir o que já existe; não refatorar toda a aplicação nem animar todos os controles futuros | Órbitas ocultas quando estão atrás, tracejado legível, fronteiras visíveis e luz auxiliar discreta/desligada ao abrir |
+| M1 — um objeto a mais pelo caminho genérico | Primeiro corte de F06, investigação F07 | IDs, estado físico/temporal, descritor simples e câmera; extrair apenas os serviços necessários | Terra/Lua/Sol preservados e quarto objeto criado sem nova ramificação por nome/tipo |
+| M2A — primeiro cliente gRPC útil | F08 | Uma fatia da API de cena/câmera; não implementar todos os serviços da seção 6 de uma vez | Cliente consulta cena, cria/remove uma primitiva e pede foco; UI continua operando |
+| M2B — objeto em movimento controlado externamente | F09/F10 | Um cliente e um stream bem definido; primitivas e dados sintéticos declarados | Cliente atualiza posição/atitude; usuário orbita e faz zoom; desconexão não trava nem inventa voo |
+| M3 — primeiro conteúdo novo embarcado | F11 e parte de F15 | Um corpo por vez, sem exigir todas as luas para concluir o primeiro planeta | Assets locais com proveniência/LOD; orientação, iluminação, câmera e memória validadas |
+| M4 — uma integração interna completa | Primeiro corte de F14 | Um provedor conhecido; busca/importação/acompanhamento; sem catálogo enorme | UI e gRPC importam pelo mesmo serviço, com fonte, instante, validade, cache e limites |
+| M5 — conteúdo externo visual | Cortes independentes de F12/F13/F18 | Um modelo, uma camada vetorial e uma raster, entregues separadamente | Dados aparecem com escala, referencial, oclusão e créditos corretos, sem bloquear navegação |
+| M6 — sistemas planetários progressivos | F15/F16/F21 | Lotes por planeta/sistema; luas detalhadas e cobertura completa não são um único bloqueio | Cada lote declara objetos incluídos, cobertura real, tamanho e custo de recursos |
+| M7 — cenários e ecossistema | F17/F19/F20 e expansão de F22 | Satélites, replay e exemplo de IA são entregas independentes | Exemplos reproduzíveis e documentados, com contratos e tratamento de falhas já exercitados |
+
+Os marcos M3–M7 não precisam terminar todos em ordem linear: depois de M2B,
+escolher a próxima entrega de acordo com uso concreto, dependências e dados disponíveis.
+O gRPC continua sendo o próximo módulo novo após a base mínima, sem esperar
+a conclusão do Sistema Solar completo.
+
+### 12.4 Como priorizar os planetas e seus recursos
+
+Recomendação inicial, a confirmar pelo inventário F07:
+
+1. **Um corpo rochoso como piloto.** Mercúrio é candidato por reutilizar o caminho
+   de superfície sem exigir anéis ou uma nova atmosfera. Marte é candidato de
+   alto valor visual, mas adiciona trabalho de atmosfera e apresentação de superfície.
+2. **Marte e demais rochosos.** Entregar Vênus separando aparência atmosférica
+   de visualização da superfície por radar; não bloquear os outros rochosos por isso.
+3. **Júpiter como primeiro gigante.** Validar família visual de topo de nuvens,
+   achatamento e orientação. Começar suas luas detalhadas como entrega posterior.
+4. **Saturno e anéis.** Tratar transparência, iluminação e sombras dos anéis como
+   um recurso reutilizável, com regressão de oclusão coberta por F01.
+5. **Urano e Netuno, demais luas e anéis.** Reutilizar as famílias de materiais
+   anteriores e respeitar as limitações de observação de cada corpo.
+
+Essa ordem não reduz o conteúdo solicitado. Ela divide a entrega para obter
+ganho visual cedo e descobrir custos antes de gerar a biblioteca inteira.
+Se o inventário mostrar melhor cobertura/menor esforço para outro corpo,
+reordenar o piloto, documentando a escolha.
+
+### 12.5 Investigações curtas antes de comprometer esforço grande
+
+| Dúvida | Investigação mínima | Decisão produzida |
+| --- | --- | --- |
+| Por que a órbita atravessa a Lua? | Caso reproduzível com/sem recorte, inspeção de profundidade e ordem de desenho | Correção localizada ou necessidade comprovada de passe de profundidade |
+| Qual corpo embarcar primeiro? | Uma amostra representativa de cor/relevo, licença, formato, resolução e projeção | Corpo piloto e orçamento preliminar, sem baixar todos os planetas |
+| Modelo externo funciona no backend atual? | Um GLB pequeno com escala/eixos conhecidos | Formato/subconjunto suportado ou necessidade de adaptador |
+| Streaming mantém navegação fluida? | Um objeto, sequência temporal conhecida e teste com atraso/desconexão | Limites iniciais de frequência, buffer e trabalho por quadro |
+| Qual fonte climática agrega valor? | Uma variável, uma região e um horário por fonte candidata | Primeiro adaptador e custo de rede/decodificação, sem prometer mapa global |
+
+Cada investigação termina com evidência e decisão registrada; não vira uma
+refatoração aberta nem uma tentativa de integrar todas as fontes ao mesmo tempo.
+
+### 12.6 Fora das primeiras entregas
+
+- Catálogo enorme de APIs antes de exercitar uma integração de ponta a ponta.
+- Dependência de Google Maps/Earth ou Ventusky para entregar mapas/clima básicos.
+- Fotorealismo igualmente detalhado para todas as luas, independentemente da
+  existência de imagens; preservar a meta de catálogo completo com limitações explícitas.
+- Telemetria real de Starship como requisito para provar streaming e acompanhamento.
+- Modelo de IA, voz ou agente autônomo embutido; primeiro oferecer API e exemplo externo.
+- Plugins binários, ECS completo, serviços separados ou reescrita total do render.
+- Servidor remoto público, arbitragem sofisticada entre muitos clientes e modo
+  headless completo; manter fronteiras arquiteturais que permitam evoluí-los depois.
+- Efeitos caros, nuvens volumétricas e simulação dinâmica de foguetes sem requisito
+  próprio e orçamento de desempenho validado.
+
+### 12.7 Regras para manter a priorização útil
+
+- Concluir cada fatia com um uso demonstrável, documentação proporcional e
+  validação; evitar meses de fundação sem quarto objeto ou primeiro cliente.
+- Medir desempenho desde M0 e repetir medições nas entregas que mudarem o custo
+  de render/rede/memória. Precisão e desempenho são critérios transversais, não etapas finais.
+- Validar Linux e Windows nos marcos que alterarem build/API/runtime, além dos
+  testes e comparações visuais pertinentes a cada mudança.
+- Rever valor e esforço depois de M0, M2B e do primeiro planeta/provedor. Promover
+  features utilizadas e adiar expansões sem caso concreto, sem apagar requisitos.
+- Manter status, dependência e critério de conclusão ao transformar um item em
+  tarefa de implementação. Estimar prazo somente depois de reduzir a incerteza.
+- Não gerar `dist` a cada mudança. Este documento permanece no repositório e
+  não deve ser incluído na distribuição.
+
+## 13. Decisões a fechar antes de implementar cada etapa
+
+- Novo padrão de intensidade lunar e duração final das transições, após comparação visual.
+- Escopo de cada entrega de luas, fontes disponíveis e representação das regiões sem imagens.
+- Resolução máxima por corpo e tamanho aceitável da biblioteca estática ampliada.
+- Referenciais, convenção de atitude e formato temporal do contrato `v1`.
+- Política de controle da câmera para múltiplos clientes e usuário local.
+- Limites de streaming, atraso de apresentação e comportamento com dados antigos.
+- Formatos de modelos/camadas do primeiro MVP e primeiros provedores suportados.
+- Necessidade futura de operação sem janela; manter possibilidade arquitetural,
+  sem exigir um modo headless completo para entregar o primeiro módulo gRPC.
+
+Esses pontos podem ser resolvidos por etapa. Não bloqueiam o registro do plano
+nem justificam implementar antecipadamente todo o desenho aqui proposto.

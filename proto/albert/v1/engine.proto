@@ -1,0 +1,62 @@
+syntax = "proto3";
+package albert.v1;
+// All physical quantities use SI. Positions/velocities are geocentric ICRF.
+// UTC timestamps are Unix seconds, not arrival times. Quaternion XYZW rotates
+// model-local axes into ICRF. No implicit frame conversions are performed.
+message Empty {}
+message Vector3 { double x=1; double y=2; double z=3; }
+message Quaternion { double x=1; double y=2; double z=3; double w=4; }
+enum ReferenceFrame { REFERENCE_FRAME_UNSPECIFIED=0; GEOCENTRIC_ICRF=1; }
+message State {
+  double utc_unix_seconds=1;
+  Vector3 position_meters=2;
+  optional Vector3 velocity_meters_per_second=3;
+  optional Quaternion attitude=4;
+  ReferenceFrame frame=5;
+}
+message Geometry {
+  enum Shape { SHAPE_UNSPECIFIED=0; SPHERE=1; BOX=2; CYLINDER=3; }
+  Shape shape=1;
+  // Full diameters/extents along local X,Y,Z. Cylinder axis is local Y.
+  Vector3 size_meters=2;
+  optional uint32 color_rgb=3;
+}
+message Object {
+  string id=1; string name=2; string source=3;
+  Geometry geometry=4; State state=5;
+  bool builtin=6; bool visible=7; bool stale=8;
+  double radius_meters=9;
+}
+message CreateObjectRequest { string id=1; string name=2; string source=3; Geometry geometry=4; State initial_state=5; }
+message ObjectRequest { string id=1; }
+message VisibilityRequest { string id=1; bool visible=2; }
+// Up to 256 strictly increasing samples. Previously accepted timestamps must
+// not be repeated. A rejected batch never partially changes an object's state.
+message StateBatch { string id=1; repeated State samples=2; }
+// This acknowledges application on the owner thread, not just enqueueing.
+message Applied { uint64 revision=1; }
+message Camera { string target_id=1; Vector3 position_meters=2; double distance_meters=3; bool transitioning=4; }
+message Scene { uint64 revision=1; double utc_unix_seconds=2; repeated Object objects=3; Camera camera=4; }
+message FocusRequest { string id=1; bool reset_zoom=2; }
+message OrbitRequest { double azimuth_radians=1; double elevation_radians=2; optional double distance_scale=3; }
+message StreamSummary { uint64 applied_batches=1; uint64 revision=2; }
+message Capabilities { repeated ReferenceFrame frames=1; uint32 max_objects=2; uint32 max_samples_per_batch=3; repeated Geometry.Shape shapes=4; }
+service SceneService {
+  rpc GetScene(Empty) returns (Scene);
+  rpc GetCapabilities(Empty) returns (Capabilities);
+  rpc CreateObject(CreateObjectRequest) returns (Applied);
+  rpc RemoveObject(ObjectRequest) returns (Applied);
+  rpc SetVisibility(VisibilityRequest) returns (Applied);
+  rpc PushStates(StateBatch) returns (Applied);
+  // Backpressure: up to 32 pending batches per stream, with a bounded global
+  // queue. Summary counts applied batches. Rendering uses time interpolation
+  // and holds the last state after stream loss.
+  rpc StreamStates(stream StateBatch) returns (StreamSummary);
+}
+service CameraService {
+  // Tracking keeps manual orbit and zoom available. Reserved context IDs:
+  // @earth-moon and @system. Removing the tracked object focuses Earth.
+  rpc Focus(FocusRequest) returns (Applied);
+  rpc Orbit(OrbitRequest) returns (Applied);
+  rpc GetCamera(Empty) returns (Camera);
+}

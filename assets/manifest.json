@@ -1,0 +1,70 @@
+{
+  "snapshot": "2026-10-12",
+  "files": [
+    {
+      "path": "countries.geojson",
+      "sha256": "239eec57ac17f100a11e2536cffc56752c318b50ae765b0918ff7aab4ce8f255",
+      "bytes": 13287234,
+      "source": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson",
+      "license": "Public data; see README.md"
+    },
+    {
+      "path": "stars.csv",
+      "sha256": "0b9a68e632574d37e23deafca6e0a875278966ce6201058dd867b51ad5744a23",
+      "bytes": 427008,
+      "source": "https://raw.githubusercontent.com/astronexus/HYG-Database/main/hyg/CURRENT/hygdata_v41.csv",
+      "license": "CC BY-SA 4.0"
+    },
+    {
+      "path": "cloud-colormap.json",
+      "sha256": "c38e57338da23668b6d53b14f59a3b36442c1a5640fcb7069083d0a487cd1ecb",
+      "bytes": 1394,
+      "source": "https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml",
+      "license": "Public data; see README.md"
+    },
+    {
+      "path": "fonts/Inter.ttf",
+      "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+      "bytes": 876576,
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf",
+      "license": "SIL Open Font License 1.1"
+    },
+    {
+      "path": "fonts/OFL.txt",
+      "sha256": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57",
+      "bytes": 4377,
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/OFL.txt",
+      "license": "SIL Open Font License 1.1"
+    },
+    {
+      "path": "highres-sources.json",
+      "bytes": 11619,
+      "sha256": "b1ddec644d56dff45bea33eecb3061e4a5a6297d8f9b7fb821a4a0fd447a199b",
+      "source": "Project source plan; original URLs and credits listed in this file",
+      "license": "Source metadata; imagery retains original credits",
+      "processing": "Source plan for reproducible download, optimization and packaging"
+    },
+    {
+      "path": "imagery/manifest.json",
+      "bytes": 650,
+      "sha256": "f5619bac593d7fada88a85d24ac15d184f530ef7f24d365054125ca5fc39dcf9",
+      "source": "Generated from the source plan in highres-sources.json",
+      "license": "Imagery retains the credits in the packed SOURCES.json",
+      "processing": "Ordered Git LFS parts; lossless assembly into visuals.pak"
+    },
+    {
+      "path": "branding/albert.png",
+      "sha256": "af49b5a85a07ba52445c9e36e054271b84da95d60437e541036948bc8f9460ad",
+      "bytes": 248412,
+      "source": "Generated for Albert Engine with the built-in imagegen tool; see docs/BRANDING.md",
+      "license": "Albert Engine project artwork"
+    },
+    {
+      "path": "branding/albert.ico",
+      "sha256": "30f760d8c9c6b593ec5ac96e50af462781c690d6e748d938bd8b972dd96810bd",
+      "bytes": 372526,
+      "source": "Generated for Albert Engine with the built-in imagegen tool; see docs/BRANDING.md",
+      "license": "Albert Engine project artwork"
+    }
+  ]
+}

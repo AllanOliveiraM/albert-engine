@@ -1,0 +1,35 @@
+file(GET_RUNTIME_DEPENDENCIES
+    EXECUTABLES "${CMAKE_INSTALL_PREFIX}/AlbertEngine"
+    RESOLVED_DEPENDENCIES_VAR dependencies
+    UNRESOLVED_DEPENDENCIES_VAR unresolved
+    PRE_EXCLUDE_REGEXES "^linux-vdso" "^ld-linux"
+    POST_EXCLUDE_REGEXES "/lib(c|m|pthread|dl|rt|resolv)\\.so(\\..*)?$" "/ld-linux[^/]*$")
+if(unresolved)
+    message(FATAL_ERROR "Bibliotecas nao resolvidas: ${unresolved}")
+endif()
+foreach(dependency IN LISTS dependencies)
+    file(INSTALL "${dependency}"
+        DESTINATION "${CMAKE_INSTALL_PREFIX}/lib"
+        TYPE SHARED_LIBRARY FOLLOW_SYMLINK_CHAIN)
+endforeach()
+
+# Include notices for the shared libraries on the supported Debian/Ubuntu and
+# Fedora build hosts. Source-library licenses are installed separately.
+file(GLOB notices LIST_DIRECTORIES FALSE
+    "/usr/share/doc/libssl*/copyright" "/usr/share/doc/openssl/copyright"
+    "/usr/share/doc/libstdc++*/copyright" "/usr/share/doc/libgcc*/copyright"
+    "/usr/share/doc/gcc-*-base/copyright")
+foreach(notice IN LISTS notices)
+    get_filename_component(directory "${notice}" DIRECTORY)
+    get_filename_component(package "${directory}" NAME)
+    file(INSTALL "${notice}"
+        DESTINATION "${CMAKE_INSTALL_PREFIX}/licenses/system/${package}"
+        TYPE FILE)
+endforeach()
+foreach(package IN ITEMS openssl-libs libgcc libstdc++)
+    if(IS_DIRECTORY "/usr/share/licenses/${package}")
+        file(INSTALL "/usr/share/licenses/${package}"
+            DESTINATION "${CMAKE_INSTALL_PREFIX}/licenses/system"
+            TYPE DIRECTORY)
+    endif()
+endforeach()

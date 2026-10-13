@@ -1,0 +1,8 @@
+# Debian 12 provides a glibc 2.36 baseline for the portable Linux folder.
+FROM debian:12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake ninja-build pkg-config ca-certificates \
+    libssl-dev xorg-dev libglu1-mesa-dev g++-mingw-w64-x86-64-posix python3 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /work
+ENTRYPOINT ["/bin/bash"]
