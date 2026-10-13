@@ -1,4 +1,5 @@
 #include "providers/horizons.hpp"
+#include "providers/small_bodies.hpp"
 #include "core/astro_time.hpp"
 #include "core/time.hpp"
 #include <atomic>
@@ -14,8 +15,17 @@ int main(int argc,char** argv){try{
     if(argc>1&&std::string(argv[1])=="--network"){
         const double now=albert::time::clock().utcSeconds();
         const auto value=horizons().query({499,"500@399",now-60,now+1800,"5 min"});
-        std::cout<<"Horizons real Mars OK: "<<value.points.size()<<" ICRF/SI samples, fetched UTC "<<value.fetchedUtc<<'\n';return 0;
+        const auto discoveries=SmallBodies{}.search("Apophis");require(discoveries.size()==1&&discoveries[0].radiusMeters>0,"Real SBDB lookup failed");
+        const auto asteroid=horizons().query({discoveries[0].spkId,"500@399",now-60,now+1800,"5 min"});require(asteroid.points.size()>2,"SBDB SPK identity failed Horizons lookup");
+        std::cout<<"SBDB real Apophis + Horizons OK; Horizons real Mars OK: "<<value.points.size()<<" ICRF/SI samples, fetched UTC "<<value.fetchedUtc<<'\n';return 0;
     }
+    const auto small=parseSmallBodies(R"({"signature":{"version":"1.3"},"object":{"des":"433","fullname":"433 Eros","spkid":"20000433"},"phys_par":[{"name":"diameter","value":"16.84","units":"km"}]})");
+    require(small.size()==1&&small[0].spkId==20000433&&std::abs(small[0].radiusMeters-8420)<1e-8,"SBDB target/diameter units lost");
+    require(smallBodyDesignation(smallBodyCatalogId("2024 YR4"))=="2024 YR4","SBDB designation ID failed round trip");
+    rejects([]{smallBodyDesignation("sbdb.zz");});rejects([]{smallBodyCatalogId(std::string(41,'a'));});
+    rejects([]{parseSmallBodies(R"({"signature":{"version":"2.0"}})");});
+    auto matches=parseSmallBodies(R"({"signature":{"version":"1.3"},"list":[{"pdes":"141P","name":"141P/Machholz 2"},{"pdes":"141P-A","name":"141P-A/Machholz 2"}]})");require(matches.size()==2&&matches[0].spkId==0&&matches[0].radiusMeters==0,"Ambiguous SBDB match invented a target or diameter");
+    SmallBodies smallProvider([](const std::string& url,albert::DownloadProgress*){require(url.find("2024%20YR4")!=std::string::npos,"SBDB query not escaped");return R"({"signature":{"version":"1.3"},"object":{"des":"2024 YR4","fullname":"2024 YR4","spkid":"54321"}})";});require(smallProvider.resolve("2024 YR4").radiusMeters==0,"Missing diameter not preserved");
     auto values=parseVectors(fixture);require(values.size()==2&&values[0].positionMeters.x==1e11&&values[0].velocityMetersPerSecond.x==4000.,"Provider did not normalize SI quantities");
     rejects([&]{parseVectors("ambiguous search result");});rejects([&]{parseVectors("$$SOE\n2451545,date,1,2\n$$EOE");});
     auto invalid=fixture;invalid.replace(invalid.find("100000000"),9,"nan");rejects([&]{parseVectors(invalid);});
@@ -23,6 +33,7 @@ int main(int argc,char** argv){try{
     invalid=fixture;invalid.replace(invalid.find("100000000"),9,"1000oops");rejects([&]{parseVectors(invalid);});
     Query request{499,"500@399",946728000,946728600,"5 min"};const auto url=horizonsURL(request);
     require(url.find("REF_PLANE=FRAME")!=std::string::npos&&url.find("TIME_TYPE=TDB")!=std::string::npos&&url.find("OUT_UNITS=KM-S")!=std::string::npos,"Reference frame/time/units are implicit");
+    auto asteroidRequest=request;asteroidRequest.target=20099942;require(horizonsURL(asteroidRequest).find("DES%3D%2020099942%3B")!=std::string::npos,"SBDB SPK was treated as a Horizons record number");
     auto bad=request;bad.center="500@evil";rejects([&]{horizonsURL(bad);});bad=request;bad.step="1 min&COMMAND=10";rejects([&]{horizonsURL(bad);});bad=request;bad.endUtc=std::numeric_limits<double>::quiet_NaN();rejects([&]{horizonsURL(bad);});
     for(double utc:{946728000.,1483228801.,1791886400.,2200000000.})require(std::abs(albert::astro::tdbToUtc(albert::astro::utcToTdb(utc))-utc)<.0001,"UTC/TAI/TT/TDB round trip lost precision");
     std::atomic_int calls=0,active=0,maximum=0;std::atomic<double> mono=0;

@@ -101,6 +101,9 @@ service CatalogService {
   // First catalog: known Solar System bodies, real Horizons positions and
   // explicit simplified spheres. Detailed bundled bodies are not replaced.
   rpc ListObjects(CatalogQuery) returns (CatalogList);
+  // Explicit online SBDB lookup by name/designation; up to 50 matches.
+  // Run off the render thread. Unknown diameter is reported as radius 0.
+  rpc SearchObjects(CatalogQuery) returns (CatalogList);
   // Returns an asynchronous job; TRACKING confirms owner-thread application.
   // Imported objects are refreshed automatically until removed from the scene.
   rpc ImportObject(ImportCatalogObjectRequest) returns (CatalogJob);

@@ -10,6 +10,7 @@
 #include "regional.hpp"
 #include "uploads.hpp"
 #include "solids.hpp"
+#include "lighting.hpp"
 #include <future>
 
 #include <array>
@@ -36,6 +37,7 @@ struct VisualSettings {
     float moonAssistIntensity = .25f;
     bool earthAssist = false;
     float earthAssistIntensity = .22f;
+    AuxiliaryLights auxiliary;
     bool shadows = true;
     bool borders = false;
     int quality = 1; // 0: one framebuffer pixel per logical pixel; 1: up to 2x.

@@ -46,8 +46,8 @@
     },
     {
       "path": "imagery/manifest.json",
-      "bytes": 727,
-      "sha256": "766374feff29312e8f266d9b15e0bbc37638bfb10b81f630a7d0021fec813984",
+      "bytes": 780,
+      "sha256": "b9a00b35b2f9244cae0a1d61a86d546df356da52551b1404612396e0bc6cb4e3",
       "source": "Generated from the source plan in highres-sources.json",
       "license": "Imagery retains the credits in the packed SOURCES.json",
       "processing": "Ordered Git LFS parts; lossless assembly into visuals.pak"
@@ -81,6 +81,21 @@
       "processing": "SHA-256 verified Git LFS parts; one distribution container",
       "bytes": 489,
       "sha256": "9da536bac2997c3c6851a68379e9e8a78ee95586c6009185746474329c1e8f57"
+    },
+    {
+      "path": "imagery/solar/manifest.json",
+      "source": "Generated imagery archive manifest",
+      "license": "Credits in the packed source records",
+      "processing": "SHA-256 verified Git LFS parts; one distribution container",
+      "bytes": 323,
+      "sha256": "dba27e86f5ed57bcfd6a02a4067b0835f2097258ab01c4f2218ff82f6ef54d91"
+    },
+    {
+      "path": "solar-sources.json",
+      "bytes": 4122,
+      "sha256": "3d01941bfce2e18c2b049c8c03742df65bd54e9912460df83fcdd13e3d46a803",
+      "source": "NASA VTAD/JPL visual resources",
+      "license": "Credits and limits in source inventory"
     }
   ]
 }

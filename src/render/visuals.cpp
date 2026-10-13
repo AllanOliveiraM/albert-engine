@@ -188,7 +188,7 @@ albert::DecodedAssets albert::loadVisualAssets(const std::filesystem::path& dire
     result.moonHeight=pack->image("moon-height",GeoRegion{},1024,progress);
     for(const auto& body:core::naturalBodies()){
         const std::string id(body.id);
-        if(pack->contains(id+"-day")&&pack->contains(id+"-height"))result.surfaces.push_back({id,pack->image(id+"-day",{},2048,progress),pack->image(id+"-height",{},512,progress)});
+        if(pack->contains(id+"-day"))result.surfaces.push_back({id,pack->image(id+"-day",{},2048,progress),pack->contains(id+"-height")?pack->image(id+"-height",{},512,progress):Image(std::vector<float>{0,0,0,1},1,1),pack->contains(id+"-ring")?std::optional<Image>(pack->image(id+"-ring",{0,0,1,1},4096,progress)):std::nullopt});
     }
     // A visual ocean mask inferred from the day map, not elevation or terrain.
     const auto& day = *result.images[0];

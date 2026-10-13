@@ -12,6 +12,7 @@ int main(int argc,char** argv){try{
     if(!channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(5)))throw std::runtime_error("Abra AlbertEngine --rpc antes de executar o exemplo");
     auto catalog=api::CatalogService::NewStub(channel);
     if(argc<3){Context c;api::CatalogList result;check(catalog->ListObjects(&c,{},&result));for(const auto& item:result.items())std::cout<<item.id()<<" — "<<item.name()<<(item.present_in_scene()?" (na cena)":" (esfera simplificada)")<<'\n';return 0;}
+    if(std::string(argv[2])=="--search"&&argc>3){Context c;c.set_deadline(std::chrono::system_clock::now()+std::chrono::seconds(25));api::CatalogQuery query;query.set_query(argv[3]);api::CatalogList result;check(catalog->SearchObjects(&c,query,&result));for(const auto& item:result.items())std::cout<<item.id()<<" — "<<item.name()<<" radius="<<item.reference_radius_meters()<<" m; "<<item.representation()<<'\n';return 0;}
     if(std::string(argv[2])=="--jobs"){Context c;api::CatalogJobs result;check(catalog->GetJobs(&c,{},&result));for(const auto& job:result.jobs())std::cout<<job.id()<<" "<<job.object_id()<<" stage="<<job.stage()<<" "<<job.error()<<'\n';return 0;}
     if(std::string(argv[2])=="--remove"&&argc>3){auto scene=api::SceneService::NewStub(channel);Context c;api::ObjectRequest request;request.set_id(argv[3]);api::Applied applied;check(scene->RemoveObject(&c,request,&applied));return 0;}
     {Context c;api::CatalogList list;api::CatalogQuery q;q.set_query(argv[2]);check(catalog->ListObjects(&c,q,&list));

@@ -23,6 +23,9 @@
   "extensions": [
     {
       "manifest": "mercury/manifest.json"
+    },
+    {
+      "manifest": "solar/manifest.json"
     }
   ]
 }

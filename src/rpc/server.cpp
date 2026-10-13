@@ -7,6 +7,7 @@
 #include "albert/v1/engine.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
 #include <chrono>
+#include <thread>
 #include <deque>
 #include <stdexcept>
 namespace albert::rpc {
@@ -132,11 +133,17 @@ public:
         auto lower=[](std::string text){for(auto& c:text)c=static_cast<char>(std::tolower(static_cast<unsigned char>(c)));return text;};
         const auto query=lower(request->query());const auto snapshot=bridge_.snapshot();
         for(const auto& item:catalog::entries()){
-            if(!query.empty()&&lower(std::string(item.id)+" "+std::string(item.name)).find(query)==std::string::npos)continue;
-            auto* result=out->add_items();result->set_id(std::string(item.id));result->set_name(std::string(item.name));result->set_provider("NASA/JPL Horizons");result->set_reference_radius_meters(item.radiusMeters);result->set_representation("simplified sphere; not photorealistic imagery");
+            if(!query.empty()&&lower(std::string(item.id)+" "+item.name).find(query)==std::string::npos)continue;
+            auto* result=out->add_items();result->set_id(std::string(item.id));result->set_name(item.name);result->set_provider("NASA/JPL Horizons");result->set_reference_radius_meters(item.radiusMeters);const auto present=snapshot?std::find_if(snapshot->objects.begin(),snapshot->objects.end(),[&](const auto& o){return o.id==item.id;}):std::vector<core::Object>::const_iterator{};
+            result->set_representation(snapshot&&present!=snapshot->objects.end()&&present->builtin?"bundled NASA visual imagery; resolution/registration limits in source records":"simplified sphere; not photorealistic imagery");
             result->set_present_in_scene(snapshot&&std::any_of(snapshot->objects.begin(),snapshot->objects.end(),[&](const auto& o){return o.id==item.id;}));
         }
         return grpc::Status::OK;
+    }
+    grpc::Status SearchObjects(grpc::ServerContext* context,const api::CatalogQuery* request,api::CatalogList* out) override{
+        if(!catalog_)return {grpc::StatusCode::UNAVAILABLE,"Catalog is not enabled"};
+        DownloadProgress progress;std::jthread cancellation([&](std::stop_token stop){while(!stop.stop_requested()){if(context->IsCancelled()){progress.cancelled=true;break;}std::this_thread::sleep_for(std::chrono::milliseconds(20));}});
+        return catalogCall([&]{for(const auto& item:catalog_->search(request->query(),&progress)){auto* value=out->add_items();value->set_id(item.id);value->set_name(item.name);value->set_provider("NASA/JPL SBDB + Horizons");value->set_reference_radius_meters(item.radiusMeters);value->set_representation(item.radiusMeters>0?"simplified sphere; measured/reference diameter":"simplified sphere; diameter unknown; illustrative radius on import");}});
     }
     template<class F>grpc::Status catalogCall(F fn){
         if(!catalog_)return {grpc::StatusCode::UNAVAILABLE,"Catalog is not enabled"};

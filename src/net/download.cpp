@@ -77,7 +77,7 @@ std::string httpGet(const std::string& url, DownloadProgress* progress,HttpOptio
     curl_easy_setopt(curl.get(), CURLOPT_LOW_SPEED_LIMIT, 100L);
     curl_easy_setopt(curl.get(), CURLOPT_LOW_SPEED_TIME, 20L);
     curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "AlbertEngine/0.2");
+    curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "AlbertEngine/0.2 (+https://github.com/AllanOliveiraM/albert-engine)");
     if (progress) {
         curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
         curl_easy_setopt(curl.get(), CURLOPT_XFERINFOFUNCTION, reportProgress);

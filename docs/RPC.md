@@ -59,7 +59,7 @@ Para compilar somente o programa visual, configure `-DALBERT_RPC=OFF`.
 | `CatalogService` | `ListObjects`, `ImportObject`, `GetJob`, `GetJobs`, `RetryJob` |
 
 `GetCapabilities` informa os formatos e limites realmente suportados. IDs dos
-corpos embarcados: `earth`, `moon`, `sun`, `mercury`. Eles não podem ser removidos nem ter
+corpos embarcados: `earth`, `moon`, `sun`, `mercury`, `venus`, `mars`, `jupiter`, `saturn`, `uranus`, `neptune`. Eles não podem ser removidos nem ter
 seus estados substituídos por um cliente. Os alvos especiais `@earth-moon` e
 `@system` enquadram as vistas de contexto.
 
@@ -72,21 +72,19 @@ nos próximos cortes. O primeiro suporte a modelos está descrito abaixo.
 
 ## Catálogo interno e importação automática
 
-Em **☰ → Dados → Adicionar objetos**, escolha um corpo e clique em **Adicionar e
-ver**. A mesma operação está disponível por gRPC; o Albert consulta a fonte,
+No seletor da barra superior, pesquise um corpo e clique no resultado com **+**. A mesma operação está disponível por gRPC; o Albert consulta a fonte,
 cria o objeto e renova suas posições sem exigir consultas externas pelo cliente.
 
 ```sh
 ./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051
-./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 mars
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 europa
 ./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 --jobs
-./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 --remove mars
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 --remove europa
 ```
 
 No Windows, o cliente fica em
 `build\windows\src\rpc\Release\albert_catalog_client.exe`.
-O catálogo inicial contém Sol, Terra, Lua, Mercúrio, Vênus, Marte, Júpiter,
-Saturno, Urano, Netuno e Plutão. `ListObjects.query` filtra nomes/IDs. Importações
+O catálogo local contém 71 corpos: Sol, oito planetas, Lua, Plutão e 60 luas adicionais. `ListObjects.query` filtra nomes/IDs. Importações
 sem assets embarcados usam **esferas simplificadas**, com raio de referência;
 não prometem imagens, anéis, relevo ou orientação detalhada. Um corpo embarcado
 já existente pode ser focado diretamente.
@@ -110,12 +108,35 @@ própria. Remover interrompe o acompanhamento automático. Falhas posteriores
 ficam em `DEGRADED`, preservam a última curva e retentam com espera de 15–300 s;
 fora da cobertura, o último estado é mantido e marcado desatualizado.
 
-O serviço limita a oito importações na fila, 16 acompanhamentos e 64 operações
+O serviço limita a 16 importações na fila, 128 acompanhamentos e 256 operações
 no histórico. O adaptador Horizons é compartilhado com o render, serializa as
 consultas, mantém até 32 tabelas em memória e valida cobertura, ordem e valores.
 Cache de cinco minutos para tabelas curtas e 24 horas para órbitas; respostas
-HTTP têm limite de 4 MiB e 30 s. Nenhuma consulta ocorre por quadro. A busca
-remota de objetos arbitrários e novos provedores continuam no roadmap.
+HTTP têm limite de 4 MiB e 30 s. Nenhuma consulta ocorre por quadro. `SearchObjects({query:"Apophis"})` consulta a NASA/JPL SBDB (API 1.3).
+A pesquisa é explícita, por nome/designação; aceita até 40 caracteres ASCII,
+incluindo `*` para padrões, e retorna até 50 resultados. `ListObjects` continua
+local: são 71 corpos, incluindo 60 luas. A UI usa os mesmos serviços.
+
+Use o `id` retornado por `SearchObjects` em `ImportObject`; IDs `sbdb.` codificam
+a designação e são opacos para clientes. O worker resolve o SPK e busca seus
+vetores pelo Horizons usando `DES=<SPK>;`, sem confundir SPK com número de registro.
+A origem continua dentro do Albert. `reference_radius_meters=0` significa diâmetro
+indisponível: a importação usa raio visual de 1 km, declarado em `Object.source`.
+Tamanhos conhecidos vêm do diâmetro SBDB em km; esferas não representam a forma real.
+
+SBDB e Horizons compartilham uma fila de acesso à rede. SBDB limita respostas a
+2 MiB/20 s, conserva até 32 pesquisas por cinco minutos, verifica a versão e aceita cancelamento. Consultas não rodam na thread
+gráfica. Clientes devem configurar prazo de pelo menos 25 s e evitar pesquisas
+por tecla; ampliar resultados exige refinar a consulta. Outros provedores seguem
+no roadmap: não há agregação de centenas de fontes nesta entrega.
+
+```sh
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 --search Apophis
+# Copie o ID retornado para importar e acompanhar:
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 sbdb.3939393432
+```
+
+Referência: [NASA/JPL SBDB API](https://ssd-api.jpl.nasa.gov/doc/sbdb.html).
 
 ## Modelos externos GLB
 

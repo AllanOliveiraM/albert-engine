@@ -487,3 +487,25 @@ visibilidade, limites e remoção de referências. `rpc_commands` testa o servi�
 real e distingue a visibilidade de objetos da visibilidade de camadas. O teste
 OpenGL verifica marcadores atrás/à frente de uma caixa, transição, precisão a
 1e11 m e linhas sobre relevo de 6 km, incluindo oclusão do lado oposto da Terra.
+
+
+## Expansão planetária e pesquisa de objetos
+
+Os oito planetas usam o registro comum; os seis novos mapas e limites estão em
+`assets/solar-sources.json`. `scripts/prepare-solar-assets.py` requer Pillow/NumPy,
+verifica fontes e empacota UVs reprojetadas dos modelos NASA. A biblioteca continua
+única no build. `scripts/import-planet-frames.py` regenera orientação/raios pck00011;
+fixtures de CSPICE são independentes. Não há DEM artificial derivado de imagens.
+
+`providers/small_bodies` consulta SBDB API 1.3, valida respostas e resolve designações
+em SPK/diâmetro. `catalog::Manager::search` atende à UI assíncrona e a `SearchObjects`.
+IDs SBDB são opacos; o worker confirma o SPK antes de buscar vetores Horizons com
+`DES=<SPK>;`. A cena declara quando o diâmetro é desconhecido e o tamanho é visual.
+Limites: 50 resultados/pesquisa, cache de 32 por cinco minutos, HTTP 2 MiB/20 s,
+16 importações na fila, 128 acompanhamentos e 256 registros. Acesso JPL serializado.
+
+O seletor superior reúne a cena e os catálogos sem controles duplicados. Curva de
+voo de quinta ordem em `animation.hpp`, duração limitada por escala/distância e
+exposição fotográfica gradual. Materiais auxiliares PBR preservam a iluminação
+solar, têm brilho individual por instância e permanecem desativados por padrão.
+Buffers de geometria de modelos continuam compartilhados.

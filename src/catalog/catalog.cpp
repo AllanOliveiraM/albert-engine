@@ -15,7 +15,9 @@ const Entry known[]{
     {"mercury","Mercurio",199,2439400.,0xaaaaa3},{"venus","Venus",299,6051800.,0xdbbe8e},
     {"mars","Marte",499,3389500.,0xc59279},{"jupiter","Jupiter",599,69911000.,0xcfbaa5},
     {"saturn","Saturno",699,58232000.,0xd8c49d},{"uranus","Urano",799,25362000.,0x98c3c8},
-    {"neptune","Netuno",899,24622000.,0x6487bb},{"pluto","Plutao",999,1188300.,0xb6aba0}};
+    {"neptune","Netuno",899,24622000.,0x6487bb},{"pluto","Plutao",999,1188300.,0xb6aba0},
+#include "moons.inc"
+};
 bool running(Stage s){return s!=Stage::Failed&&s!=Stage::Removed;}
 bool exists(const std::shared_ptr<const core::Snapshot>& snapshot,const std::string& id){return snapshot&&std::any_of(snapshot->objects.begin(),snapshot->objects.end(),[&](const auto& o){return o.id==id;});}
 }
@@ -23,11 +25,11 @@ std::span<const Entry> entries(){return known;}
 const Entry& entry(std::string_view id){for(const auto& e:known)if(e.id==id)return e;throw std::out_of_range("Unknown catalog item");}
 const char* stageName(Stage s){switch(s){case Stage::Queued:return "Na fila";case Stage::Loading:return "Buscando posicoes";case Stage::Applying:return "Preparando objeto";case Stage::Tracking:return "Atualizacao automatica";case Stage::Degraded:return "Aguardando a fonte";case Stage::Failed:return "Falha ao importar";case Stage::Removed:return "Objeto removido";}return "";}
 struct Manager::Impl {
-    struct Record {Import request;Job job;bool created=false;double due=0;unsigned failures=0;};
-    core::Bridge& bridge;providers::Horizons& provider;Now utcNow;
+    struct Record {Import request;Job job;bool created=false;double due=0;unsigned failures=0;std::optional<Entry> resolved;};
+    core::Bridge& bridge;providers::Horizons& provider;providers::SmallBodies smallBodies;Now utcNow;
     mutable std::mutex mutex;std::condition_variable changed;std::map<std::uint64_t,Record> records;
     std::uint64_t sequence=0;bool closed=false;DownloadProgress progress;std::jthread worker;
-    Impl(core::Bridge& b,providers::Horizons& p,Now clock):bridge(b),provider(p),utcNow(std::move(clock)){
+    Impl(core::Bridge& b,providers::Horizons& p,Now clock,providers::SmallBodies::Transport discovery):bridge(b),provider(p),smallBodies(std::move(discovery)),utcNow(std::move(clock)){
         if(!utcNow)utcNow=[](){return time::clock().utcSeconds();};
         worker=std::jthread([this](std::stop_token stop){run(stop);});
     }
@@ -56,7 +58,11 @@ struct Manager::Impl {
                 selected->second.job.stage=Stage::Loading;work=selected->second;
             }
             try{
-                const auto& item=entry(work.request.catalogId);const double utc=utcNow();
+                if(!work.resolved){
+                    if(work.request.catalogId.starts_with("sbdb.")){const auto body=smallBodies.resolve(providers::smallBodyDesignation(work.request.catalogId),&progress);work.resolved=Entry{work.request.catalogId,body.name,body.spkId,body.radiusMeters,0xa79e92};}
+                    else work.resolved=entry(work.request.catalogId);
+                }
+                const auto& item=*work.resolved;const double utc=utcNow();
                 if(!work.created&&exists(bridge.snapshot(),work.job.objectId))throw std::invalid_argument("Object ID already exists in the scene");
                 const auto table=provider.query({item.horizonsId,"500@399",std::max(0.,utc-60),utc+1800,"5 min"},&progress);
                 std::vector<core::Sample> samples;samples.reserve(table.points.size());
@@ -64,8 +70,9 @@ struct Manager::Impl {
                 if(samples.size()>core::Scene::maxSamples)throw std::length_error("Provider history exceeds scene limit");
                 {std::lock_guard lock(mutex);records.at(work.job.id).job.stage=Stage::Applying;}
                 core::Reply applied;
-                if(!work.created){core::Object object;object.id=work.job.objectId;object.name=item.name;object.source="NASA/JPL Horizons target="+std::to_string(item.horizonsId)+"; simplified sphere";object.providerManaged=true;
-                    object.appearance={core::Shape::Sphere,{item.radiusMeters*2,item.radiusMeters*2,item.radiusMeters*2},work.request.color.value_or(item.color)};object.samples=std::move(samples);
+                if(!work.created){core::Object object;object.id=work.job.objectId;object.name=item.name;object.source=(work.request.catalogId.starts_with("sbdb.")?"NASA/JPL SBDB + Horizons target=":"NASA/JPL Horizons target=")+std::to_string(item.horizonsId)+"; simplified sphere";object.providerManaged=true;
+                    if(item.radiusMeters==0)object.source+="; diameter unknown, illustrative radius 1000 m";
+                    const double diameter=item.radiusMeters>0?item.radiusMeters*2:2000.;object.appearance={core::Shape::Sphere,{diameter,diameter,diameter},work.request.color.value_or(item.color)};object.samples=std::move(samples);
                     applied=apply(core::Create{std::move(object)},stop);work.created=true;work.job.revision=applied.revision;
                     if(work.request.focus)applied=apply(core::Focus{work.job.objectId,false},stop);
                 }else applied=apply(core::Replace{work.job.objectId,std::move(samples)},stop);
@@ -81,18 +88,18 @@ struct Manager::Impl {
     }catch(const std::exception& e){std::lock_guard lock(mutex);closed=true;for(auto& [id,r]:records){(void)id;if(running(r.job.stage)){r.job.stage=Stage::Failed;r.job.error=e.what();}}}
     }
 };
-Manager::Manager(core::Bridge& b,providers::Horizons& p,Now now):impl_(std::make_unique<Impl>(b,p,std::move(now))){}
+Manager::Manager(core::Bridge& b,providers::Horizons& p,Now now,providers::SmallBodies::Transport discovery):impl_(std::make_unique<Impl>(b,p,std::move(now),std::move(discovery))){}
 Manager::~Manager(){close();}
 void Manager::close(){if(!impl_)return;{std::lock_guard lock(impl_->mutex);impl_->closed=true;impl_->progress.cancelled=true;}impl_->worker.request_stop();impl_->changed.notify_all();if(impl_->worker.joinable())impl_->worker.join();}
 std::uint64_t Manager::importObject(Import r){
-    const auto& item=entry(r.catalogId);if(r.objectId.empty())r.objectId=item.id;
+    if(r.catalogId.starts_with("sbdb."))providers::smallBodyDesignation(r.catalogId);else entry(r.catalogId);if(r.objectId.empty())r.objectId=r.catalogId;
     if(!core::validObjectId(r.objectId)||(r.color&&*r.color>0xffffff))throw std::invalid_argument("Invalid catalog presentation");
     std::lock_guard lock(impl_->mutex);if(impl_->closed)throw std::runtime_error("Catalog is shutting down");
     size_t active=0,queued=0;
     for(const auto& [id,record]:impl_->records){(void)id;if(running(record.job.stage)){++active;if(record.job.stage==Stage::Queued)++queued;if(record.job.objectId==r.objectId)throw std::invalid_argument("Object already has a catalog operation");}}
-    if(active>=16||queued>=8)throw std::length_error("Catalog operation limit reached");
-    if(impl_->records.size()>=64){const auto old=std::find_if(impl_->records.begin(),impl_->records.end(),[](const auto& pair){return !running(pair.second.job.stage);});if(old!=impl_->records.end())impl_->records.erase(old);}
-    const auto id=++impl_->sequence;Job job{id,r.catalogId,r.objectId,Stage::Queued,{},0,0,0};impl_->records.emplace(id,Impl::Record{std::move(r),std::move(job),false,time::monotonicSeconds(),0});impl_->changed.notify_all();return id;
+    if(active>=128||queued>=16)throw std::length_error("Catalog operation limit reached");
+    if(impl_->records.size()>=256){const auto old=std::find_if(impl_->records.begin(),impl_->records.end(),[](const auto& pair){return !running(pair.second.job.stage);});if(old!=impl_->records.end())impl_->records.erase(old);}
+    const auto id=++impl_->sequence;Job job{id,r.catalogId,r.objectId,Stage::Queued,{},0,0,0};impl_->records.emplace(id,Impl::Record{std::move(r),std::move(job),false,time::monotonicSeconds(),0,{}});impl_->changed.notify_all();return id;
 }
 std::vector<Job> Manager::jobs()const{std::lock_guard lock(impl_->mutex);std::vector<Job> result;for(const auto& [id,r]:impl_->records){(void)id;result.push_back(r.job);}return result;}
 Job Manager::job(std::uint64_t id)const{std::lock_guard lock(impl_->mutex);return impl_->records.at(id).job;}
@@ -102,4 +109,12 @@ bool Manager::active()const{std::lock_guard lock(impl_->mutex);return std::any_o
 namespace albert::catalog {
 std::uint64_t Manager::retry(std::uint64_t id){Import request;{std::lock_guard lock(impl_->mutex);request=impl_->records.at(id).request;}return importObject(std::move(request));}
 bool Manager::busy()const{std::lock_guard lock(impl_->mutex);return std::any_of(impl_->records.begin(),impl_->records.end(),[](const auto& r){return r.second.job.stage==Stage::Queued||r.second.job.stage==Stage::Loading||r.second.job.stage==Stage::Applying;});}
+}
+
+namespace albert::catalog {
+std::vector<Entry> Manager::search(const std::string& query,DownloadProgress* progress){
+    const auto bodies=impl_->smallBodies.search(query,progress);std::vector<Entry> result;
+    for(const auto& body:bodies)result.push_back({providers::smallBodyCatalogId(body.designation),body.name,body.spkId,body.radiusMeters,0xa79e92});
+    return result;
+}
 }

@@ -1,4 +1,5 @@
 #include "horizons.hpp"
+#include "small_bodies.hpp"
 #include "core/astro_time.hpp"
 #include "core/time.hpp"
 #include <curl/curl.h>
@@ -19,7 +20,7 @@ double stepSeconds(const std::string& step){
 }
 Query normalize(Query q){
     const double step=stepSeconds(q.step);
-    if(q.target==0||std::abs(static_cast<long long>(q.target))>2000000000LL||(q.center!="500@399"&&q.center!="500@10")||!std::isfinite(q.startUtc)||!std::isfinite(q.endUtc)||q.startUtc<0||q.endUtc<=q.startUtc||q.endUtc-q.startUtc>400.*86400.||q.endUtc>1e11)throw std::invalid_argument("Invalid Horizons query");
+    if(q.target==0||std::abs(static_cast<long long>(q.target))>2000000000LL||(q.center!="500@399"&&q.center!="500@10")||!std::isfinite(q.startUtc)||!std::isfinite(q.endUtc)||q.startUtc< -1e10||q.endUtc<=q.startUtc||q.endUtc-q.startUtc>100000.*86400.||q.endUtc>1e11)throw std::invalid_argument("Invalid Horizons query");
     q.startUtc=std::floor(q.startUtc/step)*step;q.endUtc=std::ceil(q.endUtc/step)*step;
     if((q.endUtc-q.startUtc)/step>8190)throw std::length_error("Horizons query exceeds sample limit");return q;
 }
@@ -41,12 +42,12 @@ std::vector<Point> parseVectors(const std::string& text){
 std::string horizonsURL(const Query& request){
     const auto q=normalize(request);
     auto epoch=[](double utc){std::ostringstream out;out<<"'JD"<<std::fixed<<std::setprecision(9)<<astro::utcToTdb(utc)<<"'";return out.str();};
-    const std::pair<std::string,std::string> args[]={{"format","text"},{"COMMAND","'"+std::to_string(q.target)+"'"},{"OBJ_DATA","NO"},{"MAKE_EPHEM","YES"},{"EPHEM_TYPE","VECTORS"},{"CENTER","'"+q.center+"'"},{"REF_PLANE","FRAME"},{"REF_SYSTEM","ICRF"},{"OUT_UNITS","KM-S"},{"VEC_TABLE","2"},{"VEC_LABELS","NO"},{"VEC_CORR","NONE"},{"CSV_FORMAT","YES"},{"TIME_TYPE","TDB"},{"START_TIME",epoch(q.startUtc)},{"STOP_TIME",epoch(q.endUtc+stepSeconds(q.step))},{"STEP_SIZE","'"+q.step+"'"}};
+    const std::pair<std::string,std::string> args[]={{"format","text"},{"COMMAND","'"+(q.target>=1000000?"DES= "+std::to_string(q.target)+";":std::to_string(q.target))+"'"},{"OBJ_DATA","NO"},{"MAKE_EPHEM","YES"},{"EPHEM_TYPE","VECTORS"},{"CENTER","'"+q.center+"'"},{"REF_PLANE","FRAME"},{"REF_SYSTEM","ICRF"},{"OUT_UNITS","KM-S"},{"VEC_TABLE","2"},{"VEC_LABELS","NO"},{"VEC_CORR","NONE"},{"CSV_FORMAT","YES"},{"TIME_TYPE","TDB"},{"START_TIME",epoch(q.startUtc)},{"STOP_TIME",epoch(q.endUtc+stepSeconds(q.step))},{"STEP_SIZE","'"+q.step+"'"}};
     std::string url="https://ssd.jpl.nasa.gov/api/horizons.api?";for(const auto& [key,value]:args){if(url.back()!='?')url+='&';url+=key+'='+encode(value);}return url;
 }
 struct Horizons::Impl {
     struct Entry {Table table;double fetchedMono,lastUse,ttl;};
-    Transport transport;Now utcNow,monotonicNow;std::mutex mutex;std::timed_mutex gate;std::map<std::string,Entry> cache;
+    Transport transport;Now utcNow,monotonicNow;std::mutex mutex;std::map<std::string,Entry> cache;
     explicit Impl(Transport value,Now utc,Now mono):transport(std::move(value)),utcNow(std::move(utc)),monotonicNow(std::move(mono)){
         if(curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK)throw std::runtime_error("Horizons HTTP initialization failed");
         if(!utcNow)utcNow=[](){return time::clock().utcSeconds();};
@@ -61,7 +62,7 @@ Table Horizons::query(Query request,DownloadProgress* progress){
     request=normalize(std::move(request));const auto key=horizonsURL(request);const double ttl=request.endUtc-request.startUtc>86400.?86400.:300.;
     auto cached=[&]()->std::optional<Table>{std::lock_guard lock(impl_->mutex);const auto i=impl_->cache.find(key);const double now=impl_->monotonicNow();if(i==impl_->cache.end()||now-i->second.fetchedMono>i->second.ttl)return {};i->second.lastUse=now;auto value=i->second.table;value.fromCache=true;return value;};
     if(progress)progress->checkCancelled();if(auto value=cached())return *value;
-    std::unique_lock lock(impl_->gate,std::defer_lock);
+    std::unique_lock lock(jplRequestGate(),std::defer_lock);
     while(!lock.try_lock_for(std::chrono::milliseconds(100)))if(progress)progress->checkCancelled();
     if(progress)progress->checkCancelled();if(auto value=cached())return *value;
     auto points=parseVectors(impl_->transport(key,progress));

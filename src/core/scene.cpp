@@ -39,7 +39,7 @@ void Scene::include(const NaturalBody& body){
     if(naturalBody(body.id)!=&body)throw std::invalid_argument("Unknown built-in body definition");
     if(objects_.size()>=maxObjects)throw std::length_error("Scene object limit reached");
     if(objects_.contains(std::string(body.id)))throw std::invalid_argument("Built-in body already registered");
-    Object o;o.id=body.id;o.name=body.name;o.source="NASA/JPL Horizons; NASA/USGS MESSENGER; IAU/NAIF pck00011";
+    Object o;o.id=body.id;o.name=body.name;o.source="NASA/JPL Horizons; NASA bundled imagery; IAU/NAIF pck00011";
     o.builtin=true;o.appearance.shape=Shape::Builtin;o.radiusMeters=body.radiusMeters;
     o.appearance.sizeMeters={2*body.radiusMeters,2*body.radiusMeters,2*body.radiusMeters};
     o.defaultDistanceMeters=body.radiusMeters*4;o.minDistanceMeters=body.radiusMeters*1.05;

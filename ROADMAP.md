@@ -118,7 +118,7 @@ Nenhuma distribuição foi gerada.
 por gRPC, materiais sólidos PBR, hierarquia local, escala física, câmera e estados
 pelo contrato existente. Decodificação fora da thread gráfica, limites explícitos,
 validação de intervalos/índices/valores/ciclos e remoção protegida de assets em uso.
-Geometria/material compartilham buffers entre instâncias. Cliente e gerador de
+Geometrias compartilham buffers entre instâncias; materiais por instância permitem luz auxiliar independente. Cliente e gerador de
 veículo ilustrativo incluídos; texturas, animações de peças e importação glTF
 completa continuam pendentes. Corrigida a recriação de IDs e a direção da luz
 para acompanhar o alvo focado. 20 testes Linux, gráficos e uso integrado com
@@ -134,9 +134,44 @@ removê-lo remove suas camadas. Limites explícitos e buffers reutilizados.
 passaram. Build MinGW e testes de camadas/RPC/gráficos pelo Wine também
 passaram. Cliente de exemplo incluído; rótulos, polígonos e GeoJSON seguem pendentes.
 
-**Sequência:** camadas raster/clima, evolução dos modelos e dos vetores; M6
-amplia planetas/sistemas progressivamente. M7 continua pendente. NTS/leap seconds
-integrais permanecem no endurecimento de F23. Nenhuma distribuição foi gerada.
+**M6 — primeiro lote dos oito planetas implementado.** Vênus, Marte, Júpiter,
+Saturno, Urano e Netuno têm mapas NASA locais; coeficientes de rotação completos
+pck00011 e achatamento, verificados contra CSPICE em três épocas por planeta.
+Saturno inclui perfil RGBA de anéis e sombra do planeta nos anéis. Exposição
+fotográfica suaviza a mudança de irradiância entre os alvos. Mapas adicionais
+pesam 5,52 MB, com resoluções 1K–4K; não incluem DEM nem cartografia de feições
+validada. Fontes/limites em [PLANETARY_ASSETS.md](docs/PLANETARY_ASSETS.md).
+Luas detalhadas, mais resolução e demais anéis permanecem pendentes.
+
+**M4/F22 — expansão inicial do catálogo implementada.** Catálogo local com 71
+corpos, incluindo 60 luas. Busca online NASA/JPL SBDB por nome/designação,
+resultado limitado a 50, IDs estáveis, diâmetros quando conhecidos e resolução
+SPK correta no Horizons. Pesquisa explícita fora da thread gráfica, cancelamento,
+cache limitado e fila compartilhada JPL. Importações preservam estados/validade
+sob o provedor. UI e gRPC `SearchObjects` compartilham a implementação.
+Ausência de diâmetro é explícita; esfera ilustrativa não representa a forma real.
+Este corte integra SBDB/Horizons; outros provedores continuam no backlog.
+
+**UX — seletor único e transições orgânicas implementados.** Barra superior com
+busca agrupada e importação; removida a seleção duplicada no menu. Vistas de
+conjunto no mesmo seletor. Mudança de foco com curva de mínima variação de
+aceleração, velocidade/aceleração nulas nos extremos e duração de 2,2–4,8 s
+por escala e distância. Captura do voo conserva a câmera exibida, sem salto de
+inércia. Luz auxiliar independente para todos os corpos com lado escuro e modelos,
+desligada inicialmente, com fade reversível. Sol continua autoemissivo.
+
+**Sequência atual, por solicitação do usuário:** ampliar a qualidade dos mapas
+planetários, embarcar luas detalhadas por sistema e completar anéis; ampliar o
+catálogo e os provedores com busca e importação verificáveis. Camadas raster/clima
+e demais M5 seguem pendentes, após essa expansão. M7 continua pendente;
+NTS/leap seconds integrais permanecem no endurecimento de F23.
+Validação deste lote: 21 testes Linux passaram; regressões gráficas verificaram
+fades hemisféricos e materiais independentes. Build MinGW e testes de corpos,
+provedores, catálogo/RPC e gráficos passaram pelo Wine. Teste integrado Linux
+renderizou os seis planetas novos, pesquisou/importou Europa e Apophis com dados
+reais e verificou Escape sem encerrar o programa. Capturas usam software OpenGL;
+GPU física, Windows nativo e cartografia de feições permanecem sem validação.
+Nenhuma distribuição foi gerada.
 
 ## 1. Visão e decisões de produto
 
@@ -749,7 +784,7 @@ refatoração aberta nem uma tentativa de integrar todas as fontes ao mesmo temp
 
 ### 12.6 Fora das primeiras entregas
 
-- Catálogo enorme de APIs antes de exercitar uma integração de ponta a ponta.
+- Catálogo de provedores sem adaptadores exercitados de ponta a ponta; expansão agora priorizada após Horizons/SBDB.
 - Dependência de Google Maps/Earth ou Ventusky para entregar mapas/clima básicos.
 - Fotorealismo igualmente detalhado para todas as luas, independentemente da
   existência de imagens; preservar a meta de catálogo completo com limitações explícitas.

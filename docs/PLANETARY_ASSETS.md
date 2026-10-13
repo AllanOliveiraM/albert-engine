@@ -85,3 +85,50 @@ A conferência integrada Linux abriu Mercúrio com seus assets reais, aproximou 
 câmera, importou Marte pelo catálogo, orbitou manualmente e removeu o alvo.
 O ambiente gráfico usa llvmpipe; desempenho em GPU física e Windows nativo ainda
 exigem conferência específica. Nenhuma distribuição foi gerada.
+
+## Oito planetas — expansão inicial
+
+`assets/solar-sources.json` fixa URLs, SHA-256, créditos e limites dos seis novos
+planetas. Imagens NASA VTAD são extraídas dos GLBs oficiais. Júpiter/Saturno usam
+atlas de cubo: o processamento reamostra as UVs reais da malha por triângulo,
+sem esticar o atlas como se fosse um mapa cilíndrico. As originais permanecem
+em `asset-packs/solar/`; o arquivo otimizado adicional pesa 5.516.824 bytes.
+O build reúne os três arquivos lógicos em um único `visuals.pak` (~4,55 GB).
+
+Resoluções: Vênus/Marte 1440×720; Júpiter/Saturno 4096×2048 após reprojeção;
+Urano/Netuno 1024×512. Blocos com gutter, mipmaps e recortes seguem o caminho
+existente de upload gradual. Não há ganho de detalhe além da fonte, nem DEM
+nesses seis corpos: o relevo fica zero explicitamente, sem derivá-lo do brilho.
+Vênus representa topo atmosférico, não superfície por radar. Os gigantes usam
+texturas de visualização estáticas, sem afirmação de clima atual ou albedo
+calibrado. A longitude das feições depende do registro visual original e ainda
+não possui validação cartográfica independente; o eixo/rotação física têm.
+
+Raios equatoriais/polares e orientação vêm de NAIF pck00011, incluindo termos
+periódicos de Marte/Júpiter/Netuno. `scripts/import-planet-frames.py` gera os
+coeficientes em C++; fixtures independentes CSPICE cobrem três épocas por planeta.
+O achatamento é geométrico. A iluminação mantém a variação solar com a distância;
+a exposição fotográfica adapta-se suavemente ao planeta focado.
+
+Anéis de Saturno: perfil RGBA do mesmo recurso NASA, raio interno 1,23 e externo
+2,3309 vezes o raio equatorial, plano equatorial, transparência e sombra do planeta
+sobre os anéis. É um primeiro modelo visual: sombra dos anéis no planeta, dispersão
+física de partículas e anéis dos demais gigantes continuam pendentes.
+
+Para reproduzir (Python 3 com Pillow >= 9.1 e NumPy >= 1.24; também incluídos
+em `scripts/Dockerfile.assets`):
+
+```sh
+python3 scripts/prepare-solar-assets.py
+# Com as fontes já baixadas e verificadas:
+python3 scripts/prepare-solar-assets.py --offline
+python3 scripts/import-planet-frames.py --source asset-packs/solar/sources/pck00011.tpc
+```
+
+O script publica `assets/imagery/solar`, atualiza manifests e conserva os arquivos
+anteriores intactos. `asset-packs/` é ignorada pelo Git. O pacote novo é versionado
+com Git LFS. Não é necessário regenerar distribuições.
+
+Fontes: [NASA 3D Resources](https://science.nasa.gov/3d-resources/),
+[Mars/Viking](https://science.nasa.gov/3d-resources/mars/),
+[NAIF pck00011](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc).

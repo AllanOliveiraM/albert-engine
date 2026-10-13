@@ -19,6 +19,11 @@ void require(bool condition,const char* message) {
 }
 void controls() {
     const albert::VisualSettings settings;
+    require(albert::flightEase(-1)==0 && albert::flightEase(2)==1,"Flight endpoints unclamped");
+    require(albert::flightEase(.01f)<.00002f && albert::flightEase(.99f)>.99998f,"Flight ramp is abrupt");
+    float previous=0;for(int i=0;i<=1000;++i){const float t=i/1000.f, value=albert::flightEase(t);require(value>=previous-1e-6f && std::abs(value+albert::flightEase(1-t)-1)<2e-6f,"Flight curve reverses or is asymmetric");previous=value;}
+    require(albert::flightDuration(10,1e6f)<=4.8f && albert::flightDuration(0,0)>2.f,"Flight duration unbounded or too short");
+    require(!albert::AuxiliaryLight{}.enabled,"Generic auxiliary light must start disabled");
     require(!settings.earthAssist && !settings.moonAssist,"Auxiliary lights must start disabled");
     require(!settings.clouds,"Live clouds must start disabled");
     require(albert::regionRelevant({170,-10,190,10},{-185,-10,-175,10}),"Moving across the date line cancelled a useful crop");
@@ -188,7 +193,13 @@ void graphics() {
     albert::SceneObjects modelObjects(*modelWorld);modelObjects.sync(modelRegistry,100,{1e11,0,0});
     auto modelCamera=OrthographicCamera::create(-1e-6f,1e-6f,1e-6f,-1e-6f,1e-9f,1e-3f);modelCamera->position.set(0,1e-5f,0);modelCamera->up.set(0,0,-1);modelCamera->lookAt(Vector3(0,0,-3.f/6378137.f));renderer.render(*modelWorld,*modelCamera);pixels=renderer.readRGBPixels();
     require(std::any_of(pixels.begin(),pixels.end(),[](auto p){return p>20;}),"Imported model hierarchy/material did not render");
-    auto secondVehicle=vehicle;secondVehicle.id="second-model";secondVehicle.samples.front().positionMeters.x+=1000;modelRegistry.create(secondVehicle);modelObjects.sync(modelRegistry,100,{1e11,0,0});require(modelObjects.nodes().at("model")->children.front()->as<Mesh>()->geometry()==modelObjects.nodes().at("second-model")->children.front()->as<Mesh>()->geometry(),"Model instances duplicated GPU geometry");modelRegistry.remove("second-model");modelObjects.sync(modelRegistry,100,{1e11,0,0});
+    auto secondVehicle=vehicle;secondVehicle.id="second-model";secondVehicle.samples.front().positionMeters.x+=1000;modelRegistry.create(secondVehicle);modelObjects.sync(modelRegistry,100,{1e11,0,0});require(modelObjects.nodes().at("model")->children.front()->as<Mesh>()->geometry()==modelObjects.nodes().at("second-model")->children.front()->as<Mesh>()->geometry(),"Model instances duplicated GPU geometry");auto* firstAid=modelObjects.nodes().at("model")->children.front()->as<Mesh>()->material()->as<ShaderMaterial>();auto* secondAid=modelObjects.nodes().at("second-model")->children.front()->as<Mesh>()->material()->as<ShaderMaterial>();
+    require(firstAid!=secondAid,"Model instances share mutable auxiliary materials");
+    albert::AuxiliaryLights modelAid;modelAid["model"].enabled=true;modelObjects.updateLighting(*modelCamera,Vector3(0,-1,0),modelAid,1.f);
+    require(firstAid->uniforms.at("auxiliaryStrength").value<float>()>.24f&&secondAid->uniforms.at("auxiliaryStrength").value<float>()==0,"Auxiliary light leaked between model instances");
+    modelAid["model"].enabled=false;modelObjects.updateLighting(*modelCamera,Vector3(0,-1,0),modelAid,1.f);
+    require(firstAid->uniforms.at("auxiliaryStrength").value<float>()==0,"Model auxiliary fade out failed");
+    modelRegistry.remove("second-model");modelObjects.sync(modelRegistry,100,{1e11,0,0});
     auto previous=modelObjects.nodes().at("model");modelRegistry.remove("model");vehicle.appearance.shape=albert::core::Shape::Box;vehicle.appearance.modelId.clear();modelRegistry.create(vehicle);modelObjects.sync(modelRegistry,100,{1e11,0,0});require(modelObjects.nodes().at("model")!=previous,"Recreated ID retained obsolete mesh/resources");
     modelRegistry.remove("model");modelRegistry.removeModel("triangle");modelObjects.sync(modelRegistry,100,{1e11,0,0});renderer.render(*modelWorld,*modelCamera);pixels=renderer.readRGBPixels();require(std::all_of(pixels.begin(),pixels.end(),[](auto p){return p==0;}),"Removed model retained visible GPU geometry");
     auto annotation=[&](double origin){
@@ -217,6 +228,11 @@ void graphics() {
     const int lit=pixels[3*(96*192+96)];require(lit>20,"Solid body solar shader failed to render");
     solids.update(renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
     require(pixels[3*(96*192+96)]<3,"Solid body's night hemisphere is lit without solar incidence");
+    albert::AuxiliaryLights auxiliary;auxiliary["mercury"].enabled=true;
+    solids.update(renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,0.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]<3,"Auxiliary light appeared before its fade");
+    solids.update(renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]>15,"Solid auxiliary light did not reveal the night hemisphere");
+    solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(std::abs(int(renderer.readRGBPixels()[3*(96*192+96)])-lit)<3,"Auxiliary light changed the day hemisphere");
+    auxiliary["mercury"].enabled=false;solids.update(renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]<3,"Solid auxiliary light remained enabled after fade out");
     albert::RegionalImages solidRegion;solidRegion.body="mercury";solidRegion.day=rgba(230);solidRegion.height=height(1000);
     albert::prepareRegionalImages(solidRegion);solids.stage(std::move(solidRegion));
     for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);

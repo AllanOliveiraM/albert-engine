@@ -45,7 +45,7 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
             progress.stage("Lendo detalhes incluidos",0);
             result.day=pack->image(body+"-day",region,4096,progress);
             if(body=="earth") result.night=pack->image("earth-night",region,4096,progress);
-            result.height=pack->image(body+"-height",region,1024,progress);
+            result.height=pack->contains(body+"-height")?pack->image(body+"-height",region,1024,progress):Image(std::vector<float>{0,0,0,1},1,1);
             if(result.day) {
                 auto& image=*result.day;auto& rgba=image.data();
                 std::vector<unsigned char> rough(rgba.size(),255);

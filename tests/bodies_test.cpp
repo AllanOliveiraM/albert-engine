@@ -21,6 +21,12 @@ int main(){try{
         for(int col=0;col<3;++col){const double values[]{columns[col].x,columns[col].y,columns[col].z};
             for(int row=0;row<3;++row)require(std::abs(values[row]-fixture.m[row][col])<2e-11,"Orientation differs from independent CSPICE reference");}
     }
+    struct PlanetFixture {const char* body;double jd;double m[3][3];};
+    const PlanetFixture planets[]{
+#include "planet_frames_fixture.inc"
+    };
+    require(naturalBodies().size()==7,"Missing a Solar System planet");
+    for(const auto& fixture:planets){const auto* definition=naturalBody(fixture.body);require(definition&&definition->polarRadiusMeters>0&&definition->polarRadiusMeters<=definition->radiusMeters,"Invalid planetary dimensions");const auto frame=bodyFrame(*definition,fixture.jd);const Vector columns[]{frame.prime,frame.east,frame.pole};for(int col=0;col<3;++col){const double values[]{columns[col].x,columns[col].y,columns[col].z};for(int row=0;row<3;++row)require(std::abs(values[row]-fixture.m[row][col])<2e-9,"Planet orientation differs from CSPICE");}}
     require(std::abs(surfaceRadius("mercury")-2439400.)<.001,"DEM datum radius changed");
     std::cout<<"Bodies OK: descriptors, built-in protection and IAU Mercury orientation/libration against CSPICE at four epochs\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

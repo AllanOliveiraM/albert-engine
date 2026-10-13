@@ -24,8 +24,10 @@ espaciais**. Você pode navegar pela interface ou conectar outro programa à API
 gRPC para criar objetos, transmitir seus movimentos e acompanhar um alvo com a
 câmera. A renderização, a navegação e as animações ficam dentro do Albert.
 
-Hoje, o conteúdo embarcado inclui **Terra, Lua, Sol e Mercúrio**. O catálogo interno permite
-importar outros planetas com posições reais e visual simplificado. Objetos
+Hoje, o conteúdo embarcado inclui **os oito planetas, a Lua e o Sol**, com
+mapas locais e anéis de Saturno. O catálogo contém **71 corpos**, incluindo
+60 luas adicionais, e consulta a base **NASA/JPL SBDB** para encontrar asteroides
+e cometas por nome ou designação. Objetos importados sem mapas usam visual simplificado. Objetos
 próprios podem ser criados pela API como esferas, caixas, cilindros ou modelos GLB estáticos.
 Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 [roadmap](ROADMAP.md).
@@ -49,8 +51,7 @@ Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 
 ## Como funciona
 
-**O tempo e os dados definem a cena.** O Albert consulta as posições do Sol e
-da Lua e as trajetórias da Terra e Lua no Horizons. Entre consultas, interpola
+**O tempo e os dados definem a cena.** O Albert consulta as posições e trajetórias dos corpos embarcados no Horizons. Entre consultas, interpola
 as amostras para manter o movimento contínuo. A orientação dos corpos usa
 transformações astronômicas; a Terra considera o modelo WGS84.
 
@@ -74,6 +75,10 @@ alvo para preservar detalhes pequenos em distâncias astronômicas.
 ativadas, o Albert consulta mosaicos de satélite, mostra a data em **Dados** e
 mantém um cache de downloads. O limite padrão é 2 GB e pode ser ajustado no menu.
 A aparência solar e os mosaicos de superfície são referências estáticas.
+Nos novos planetas, os mapas ainda têm resoluções de 1K a 4K e não incluem
+relevo medido. Os gigantes e Vênus usam referências visuais de atmosfera;
+as nuvens desses corpos não são atualizadas ao vivo. Consulte
+[fontes e limites dos mapas](docs/PLANETARY_ASSETS.md).
 
 **A interface e o gRPC compartilham a mesma cena.** Um cliente externo pode
 criar um veículo, enviar sua posição e orientação e solicitar acompanhamento.
@@ -143,14 +148,16 @@ as imagens e não precisa de Git LFS.
 
 ## Navegar e ajustar a imagem
 
-- Escolha **Terra**, **Lua**, **Sol** ou **Tudo** na barra superior.
+- Clique no nome do objeto na barra superior: busque planetas e luas ou escolha **Tudo**.
+- Para asteroides e cometas, digite um nome/designação e clique em **Buscar asteroides e cometas online**.
+- Clique em um resultado com **+** para adicionar e acompanhar suas posições automaticamente.
 - Arraste para girar e use a roda do mouse para aproximar.
 - Use o botão **Restaurar zoom**, no canto inferior direito, para voltar à distância inicial.
 - Abra **☰ → Cena** para ajustar atmosfera, nuvens, cidades, fronteiras, sombras e órbitas.
 - Ative **Nuvens em tempo real** em **Cena** para buscar as observações automaticamente.
-- O brilho auxiliar da Terra e Lua ajuda a enxergar o lado escuro; começa desligado e é ajustável.
+- O brilho auxiliar de cada objeto com lado escuro ajuda a enxergar o lado escuro; começa desligado e é ajustável.
 - Em **Dados**, acompanhe as atualizações, retente consultas e gerencie o cache.
-- Em **Dados → Adicionar objetos**, importe planetas com posições reais; os que ainda não têm imagens embarcadas aparecem como esferas simplificadas.
+- Em **Dados → Consultas do catálogo**, acompanhe importações e tente novamente após falhas.
 - Em **Dados → Manutenção dos arquivos**, recarregue as texturas ou limpe e baixe as nuvens novamente.
 
 ## Programar cenas com gRPC

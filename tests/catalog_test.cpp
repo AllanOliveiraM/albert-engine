@@ -13,6 +13,8 @@ namespace api=albert::v1;
 using namespace albert;
 void require(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 int main(){try{
+    require(catalog::entries().size()==71,"Planet/moon catalog incomplete");
+    require(catalog::entry("europa").horizonsId==502&&catalog::entry("triton").radiusMeters>1e6,"Moon source identifiers/dimensions lost");
     constexpr double utc=946728000.;
     std::atomic<double> now=utc;std::atomic_bool failRequests=false;
     providers::Horizons provider([&](const std::string&,DownloadProgress*){if(failRequests)throw std::runtime_error("fixture network unavailable");return "$$SOE\n2451544.9,date,100000000,2,3,4,5,6,\n2451545.1,date,100000010,4,6,4,5,6,\n$$EOE\n";},[&]{return now.load();});
@@ -30,7 +32,7 @@ int main(){try{
             if(!holdSnapshot)bridge.publish(registry.snapshot(now.load(),camera));std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
-    catalog::Manager manager(bridge,provider,[&]{return now.load();});
+    catalog::Manager manager(bridge,provider,[&]{return now.load();},[](const std::string&,DownloadProgress*){return R"({"signature":{"version":"1.3"},"object":{"des":"433","fullname":"433 Eros","spkid":"20000433"},"phys_par":[{"name":"diameter","value":"16.84","units":"km"}]})";});
     const auto id=manager.importObject({"mars",{},true,{}});
     auto await=[&](std::uint64_t job,catalog::Stage expected){const double end=time::monotonicSeconds()+3.;catalog::Job result;
         do{result=manager.job(job);if(result.stage==expected)return result;if(result.stage==catalog::Stage::Failed)throw std::runtime_error(result.error);std::this_thread::sleep_for(std::chrono::milliseconds(5));}while(time::monotonicSeconds()<end);
@@ -52,6 +54,7 @@ int main(){try{
     {grpc::ClientContext context;api::CatalogQuery q;q.set_query("MARTE");api::CatalogList list;require(client->ListObjects(&context,q,&list).ok()&&list.items_size()==1&&list.items(0).present_in_scene(),"Catalog discovery/presence RPC failed");}
     {grpc::ClientContext context;api::ImportCatalogObjectRequest request;request.set_catalog_id("venus");api::CatalogJob response;require(client->ImportObject(&context,request,&response).ok(),"Catalog import RPC failed");await(response.id(),catalog::Stage::Tracking);}
     {grpc::ClientContext context;api::CatalogJobRequest request;request.set_id(id);api::CatalogJob response;require(client->GetJob(&context,request,&response).ok()&&response.stage()==api::CatalogJob::TRACKING&&response.applied_revision()==job.revision,"Catalog job RPC lost application state");}
+    {grpc::ClientContext context;api::CatalogQuery request;request.set_query("Eros");api::CatalogList results;require(client->SearchObjects(&context,request,&results).ok()&&results.items_size()==1&&results.items(0).reference_radius_meters()==8420,"SBDB discovery RPC failed");grpc::ClientContext importContext;api::ImportCatalogObjectRequest import;import.set_catalog_id(results.items(0).id());api::CatalogJob imported;require(client->ImportObject(&importContext,import,&imported).ok(),"SBDB import RPC failed");await(imported.id(),catalog::Stage::Tracking);}
     {grpc::ClientContext context;api::CatalogJobRequest request;request.set_id(999999);api::CatalogJob response;require(client->GetJob(&context,request,&response).error_code()==grpc::StatusCode::NOT_FOUND,"Unknown catalog job accepted");}
 #endif
     auto removal=bridge.submit(core::Remove{"mars"});require(removal.result.get().code==core::Code::Ok,"Imported object removal failed");await(id,catalog::Stage::Removed);
