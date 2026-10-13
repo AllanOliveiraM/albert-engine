@@ -16,6 +16,9 @@ int main(){try{
             bridge.drain([&](Command& command){std::visit([&](auto& value){using T=std::decay_t<decltype(value)>;
                 if constexpr(std::is_same_v<T,Create>)registry.create(std::move(value.object));
                 else if constexpr(std::is_same_v<T,Remove>){registry.remove(value.id);if(camera.target==value.id)camera.target="earth";}
+                else if constexpr(std::is_same_v<T,CreateLayer>)registry.createLayer(std::move(value.layer));
+                else if constexpr(std::is_same_v<T,RemoveLayer>)registry.removeLayer(value.id);
+                else if constexpr(std::is_same_v<T,LayerVisibility>)registry.layerVisible(value.id,value.enabled);
                 else if constexpr(std::is_same_v<T,InstallModel>)registry.installModel(std::move(value.model));
                 else if constexpr(std::is_same_v<T,RemoveModel>)registry.removeModel(value.id);
                 else if constexpr(std::is_same_v<T,Visibility>)registry.visible(value.id,value.enabled);
@@ -62,6 +65,11 @@ int main(){try{
     {grpc::ClientContext c;api::FocusRequest request;request.set_id(create.id());require(camera->Focus(&c,request,&applied).ok(),"Model focus failed");}
     {grpc::ClientContext c;api::ObjectRequest request;request.set_id(create.id());require(scene->RemoveObject(&c,request,&applied).ok(),"Model object removal failed");}
     {grpc::ClientContext c;api::ObjectRequest request;request.set_id(asset.id());require(assets->RemoveModel(&c,request,&applied).ok(),"Unused model removal failed");}
+    auto layers=api::LayerService::NewStub(channel);api::CreateLayerRequest layer;layer.set_id("rpc-layer");layer.set_name("Geographic fixture");layer.set_frame(api::CreateLayerRequest::EARTH_SURFACE);layer.set_kind(api::CreateLayerRequest::POLYLINE);layer.add_geographic_points()->set_longitude_degrees(179);layer.add_geographic_points()->set_longitude_degrees(-179);
+    {grpc::ClientContext c;require(layers->CreateLayer(&c,layer,&applied).ok(),"Layer create RPC failed");}
+    {grpc::ClientContext c;api::VisibilityRequest request;request.set_id(layer.id());request.set_visible(false);require(layers->SetVisibility(&c,request,&applied).ok(),"Layer visibility routed to object service");}
+    {bool found=false;for(int i=0;i<100&&!found;++i){grpc::ClientContext c;api::Layers result;require(layers->ListLayers(&c,{},&result).ok(),"Layer query failed");if(result.layers_size()==1){const auto& l=result.layers(0);found=l.id()==layer.id()&&!l.visible()&&l.anchor_id()=="earth"&&l.point_count()==41;}if(!found)std::this_thread::sleep_for(std::chrono::milliseconds(1));}require(found,"Layer metadata/snapshot lost");}
+    {grpc::ClientContext c;api::ObjectRequest request;request.set_id(layer.id());require(layers->RemoveLayer(&c,request,&applied).ok(),"Layer removal RPC failed");}
     bridge.close();{grpc::ClientContext c;require(scene->CreateObject(&c,create,&applied).error_code()==grpc::StatusCode::UNAVAILABLE,"Shutdown did not reject commands");}
     std::cout<<"gRPC OK: create/focus/stream/remove, validation, revisions, snapshots and shutdown\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

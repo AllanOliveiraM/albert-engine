@@ -54,6 +54,7 @@ Para compilar somente o programa visual, configure `-DALBERT_RPC=OFF`.
 | `SceneService` | `GetScene`, `GetCapabilities`, `CreateObject`, `RemoveObject`, `SetVisibility`, `PushStates`, `StreamStates` |
 | `CameraService` | `Focus`, `Orbit`, `GetCamera` |
 | `TimeService` | `GetTime` |
+| `LayerService` | `CreateLayer`, `ListLayers`, `SetVisibility`, `RemoveLayer` |
 | `AssetService` | `RegisterModel`, `ListModels`, `RemoveModel` |
 | `CatalogService` | `ListObjects`, `ImportObject`, `GetJob`, `GetJobs`, `RetryJob` |
 
@@ -162,6 +163,54 @@ compartilhada entre instâncias e liberada quando o asset removido deixa o rende
 Os assets externos duram apenas a sessão. IDs podem ser reutilizados depois da
 remoção; o render reconhece a nova instância e substitui os recursos anteriores.
 Referência de formato: [especificação Khronos glTF 2.0](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html).
+
+## Camadas vetoriais — pontos e linhas
+
+`LayerService.CreateLayer` cria `POINTS` ou `POLYLINE` com ID, nome, fonte,
+cor RGB e largura em pixels lógicos. Os pontos são marcadores circulares;
+as linhas seguem a ordem fornecida. O objeto continua sendo gerenciado pela
+cena. `ListLayers` consulta metadados; `SetVisibility` e `RemoveLayer` aplicam
+alterações na thread gráfica e conservam transições suaves. A UI oferece os
+mesmos controles em **☰ → Cena → Camadas**, incluindo a fonte.
+
+Escolha um referencial explicitamente:
+
+| `frame` | Dados enviados | Comportamento |
+| --- | --- | --- |
+| `GEOCENTRIC_ICRF` | `positions_meters`, sem `anchor_id` | Pontos espaciais em metros/double; a origem gráfica acompanha a câmera |
+| `OBJECT_LOCAL` | `positions_meters` e `anchor_id` | Metros nos eixos físicos locais do objeto; acompanha posição/atitude e visibilidade, sem herdar a escala visual da malha |
+| `EARTH_SURFACE` | `geographic_points` em longitude/latitude, graus | Terra WGS84; acompanha rotação e relevo global/regional exibido. `anchor_id` pode ser omitido ou `earth` |
+
+Para a Terra, longitude é positiva para leste, −180° a 180°; latitude geodética,
+−90° a 90°. `clearance_meters` define o afastamento sobre o terreno exibido,
+padrão 100 m, de 0 a 1.000.000 m. Não representa uma altitude observada. Linhas
+são subdivididas a cada no máximo 0,05° em latitude/longitude, usando a passagem
+curta pela linha de data. Essa interpolação cartográfica não calcula uma rota
+geodésica nem uma trajetória orbital. Forneça os vértices adequados ao dado real.
+
+Os eixos de `OBJECT_LOCAL` correspondem aos usados na atitude do objeto. Nos
+corpos embarcados, são os eixos físicos fixos ao corpo: X no meridiano zero,
+Y a 90° leste, Z no polo norte. A superfície geográfica neste corte suporta
+somente a Terra. Modelos externos conservam seus próprios eixos locais.
+
+Limites: **64 camadas**, 2.048 pontos de entrada por chamada, até 16.384 pontos
+após subdivisão por camada e 32.768 no conjunto da cena. A preparação geográfica
+ocorre antes de enfileirar o comando; snapshots não copiam a geometria completa.
+Buffers ancorados são reutilizados entre quadros. Pontos/linhas participam do
+teste de profundidade; não se tornam visíveis através de corpos opacos.
+Remover o objeto de referência remove também suas camadas. IDs de camadas
+formam um espaço separado dos IDs de objetos. Alterações geométricas requerem
+remover e recriar a camada neste primeiro corte.
+
+```sh
+./build/linux/src/rpc/albert_layers_client 127.0.0.1:50051
+./build/linux/src/rpc/albert_layers_client 127.0.0.1:50051 --remove
+```
+
+No Windows, use `build\windows\src\rpc\Release\albert_layers_client.exe`.
+O exemplo marca três localizações no Brasil e desenha uma linha ilustrativa;
+não representa uma rota real. Polígonos, rótulos, importação GeoJSON, ícones
+personalizados e camadas raster ainda são próximas entregas.
 
 ## Coordenadas e tempo
 

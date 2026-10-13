@@ -69,6 +69,19 @@ void Scene::create(Object o){
     for(size_t i=1;i<o.samples.size();++i)if(o.samples[i].utcSeconds<=o.samples[i-1].utcSeconds)throw std::invalid_argument("Samples must have increasing timestamps");
     o.instance=revision_+1;const auto id=o.id;objects_.emplace(id,std::move(o));++revision_;
 }
+void Scene::createLayer(Layer layer){
+    if(!validObjectId(layer.id)||layer.name.empty()||layer.name.size()>256||layer.source.size()>512||!layer.data||layer.data->positions.empty()||layer.data->positions.size()>maxLayerPoints||layer.color>0xffffff||!std::isfinite(layer.widthPixels)||layer.widthPixels<1||layer.widthPixels>32||!std::isfinite(layer.clearanceMeters)||layer.clearanceMeters<0||layer.clearanceMeters>1e6)throw std::invalid_argument("Invalid layer");
+    if(layer.kind!=LayerKind::Points&&layer.kind!=LayerKind::Polyline)throw std::invalid_argument("Invalid layer geometry");
+    if(layer.frame!=LayerFrame::GeocentricICRF&&layer.frame!=LayerFrame::ObjectLocal&&layer.frame!=LayerFrame::EarthSurface)throw std::invalid_argument("Invalid layer frame");
+    if(layer.kind==LayerKind::Polyline&&layer.data->positions.size()<2)throw std::invalid_argument("Polyline requires two points");
+    if(layer.frame==LayerFrame::GeocentricICRF){if(!layer.anchor.empty())throw std::invalid_argument("Geocentric layer must not have an anchor");}else{get(layer.anchor);if(layer.frame==LayerFrame::EarthSurface&&layer.anchor!="earth")throw std::invalid_argument("Surface layers currently support Earth only");}
+    if(layers_.contains(layer.id))throw std::invalid_argument("Layer ID already exists");std::size_t count=layer.data->positions.size();for(const auto& [id,l]:layers_){(void)id;count+=l.data->positions.size();}
+    if(layers_.size()>=maxLayers||count>maxSceneLayerPoints)throw std::length_error("Layer resource limit reached");
+    for(const auto& p:layer.data->positions)if(!finite(p)||length(p)>1e15)throw std::invalid_argument("Invalid layer vertex");
+    layer.instance=revision_+1;const auto id=layer.id;layers_.emplace(id,std::move(layer));++revision_;
+}
+void Scene::removeLayer(const std::string& id){if(!layers_.erase(id))throw std::out_of_range("Unknown layer");++revision_;}
+void Scene::layerVisible(const std::string& id,bool visible){layers_.at(id).visible=visible;++revision_;}
 void Scene::installModel(std::shared_ptr<const Model> model){
     if(!model||!validObjectId(model->id)||model->parts.empty()||model->sourceBytes>maxModelBytes||model->vertices>maxModelVertices||model->triangles>maxModelTriangles)throw std::invalid_argument("Invalid decoded model");
     if(models_.contains(model->id))throw std::invalid_argument("Model ID already exists");if(models_.size()>=32)throw std::length_error("Model asset limit reached");models_.emplace(model->id,std::move(model));++revision_;
@@ -76,7 +89,7 @@ void Scene::installModel(std::shared_ptr<const Model> model){
 void Scene::removeModel(const std::string& id){
     if(!models_.contains(id))throw std::out_of_range("Unknown model");for(const auto& [objectId,o]:objects_){(void)objectId;if(o.appearance.modelId==id)throw std::invalid_argument("Model is still used by a scene object");}models_.erase(id);++revision_;
 }
-void Scene::remove(const ObjectId& id){if(get(id).builtin)throw std::invalid_argument("Built-in objects cannot be removed");objects_.erase(id);++revision_;}
+void Scene::remove(const ObjectId& id){if(get(id).builtin)throw std::invalid_argument("Built-in objects cannot be removed");objects_.erase(id);for(auto i=layers_.begin();i!=layers_.end();)if(i->second.anchor==id)i=layers_.erase(i);else ++i;++revision_;}
 void Scene::visible(const ObjectId& id,bool enabled){if(get(id).builtin)throw std::invalid_argument("Built-in visibility is managed by the renderer");objects_.at(id).visible=enabled;++revision_;}
 void Scene::samples(const ObjectId& id,std::vector<Sample> values){
     if(get(id).builtin||get(id).providerManaged)throw std::invalid_argument("Object state is managed by an astronomy provider");
@@ -112,5 +125,5 @@ Evaluated Scene::evaluate(const ObjectId& id,double now) const{
     if(a.attitude&&b->attitude)r.attitude=blend(*a.attitude,*b->attitude,t);
     return {r,false};
 }
-Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera,{},{}};result.clock.utcSeconds=now;for(const auto& [id,m]:models_)result.models.push_back({id,m->source,m->sourceBytes,m->vertices,m->triangles,m->sizeUnits,m->radiusUnits});for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}
+Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera,{},{},{}};result.clock.utcSeconds=now;for(const auto& [id,l]:layers_)result.layers.push_back({id,l.name,l.source,l.anchor,l.kind,l.frame,l.data->positions.size(),l.color,l.widthPixels,l.clearanceMeters,l.visible});for(const auto& [id,m]:models_)result.models.push_back({id,m->source,m->sourceBytes,m->vertices,m->triangles,m->sizeUnits,m->radiusUnits});for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}
 }

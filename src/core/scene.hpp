@@ -34,13 +34,28 @@ struct Evaluated {Sample state;bool stale=false;};
 struct CameraState {ObjectId target="earth";Vector positionMeters;double distanceMeters=0;bool transitioning=false;};
 struct Model;
 struct ModelInfo {std::string id,source;std::size_t bytes=0,vertices=0,triangles=0;Vector size;double radius=0;};
-struct Snapshot {std::uint64_t revision=0;double utcSeconds=0;std::vector<Object> objects;CameraState camera;time::Status clock;std::vector<ModelInfo> models;};
+enum class LayerKind {Points,Polyline};
+enum class LayerFrame {GeocentricICRF,ObjectLocal,EarthSurface};
+struct Geographic {double longitude=0,latitude=0;};
+struct LayerData {std::vector<Vector> positions;};
+struct Layer {
+    std::string id,name,source,anchor;LayerKind kind=LayerKind::Points;LayerFrame frame=LayerFrame::GeocentricICRF;
+    std::uint32_t color=0x66d9ee;float widthPixels=6;double clearanceMeters=100;
+    bool visible=true;std::uint64_t instance=0;std::shared_ptr<const LayerData> data;
+};
+struct LayerInfo {std::string id,name,source,anchor;LayerKind kind;LayerFrame frame;std::size_t points=0;std::uint32_t color;float widthPixels;double clearanceMeters;bool visible;};
+struct Snapshot {std::uint64_t revision=0;double utcSeconds=0;std::vector<Object> objects;CameraState camera;time::Status clock;std::vector<ModelInfo> models;std::vector<LayerInfo> layers;};
 struct NaturalBody;
 class Scene {
 public:
     static constexpr size_t maxObjects=2048,maxSamples=256;
     Scene();
+    static constexpr std::size_t maxLayers=64,maxLayerInputPoints=2048,maxLayerPoints=16384,maxSceneLayerPoints=32768;
     void create(Object object);
+    void createLayer(Layer);
+    void removeLayer(const std::string& id);
+    void layerVisible(const std::string& id,bool visible);
+    const std::map<std::string,Layer>& layers()const{return layers_;}
     void installModel(std::shared_ptr<const Model>);
     void removeModel(const std::string& id);
     const std::map<std::string,std::shared_ptr<const Model>>& models()const{return models_;}
@@ -59,6 +74,7 @@ public:
 private:
     std::map<ObjectId,Object> objects_;
     std::map<std::string,std::shared_ptr<const Model>> models_;
+    std::map<std::string,Layer> layers_;
     std::uint64_t revision_=0;
 };
 bool validObjectId(std::string_view id);

@@ -22,6 +22,7 @@
 #include "paths.hpp"
 #include "borders.hpp"
 #include "objects.hpp"
+#include "layers.hpp"
 #include "asset_pack.hpp"
 #include "solids.hpp"
 #include "core/bridge.hpp"
@@ -820,6 +821,7 @@ int albert::runRenderer(int argc, char** argv) {
         std::unique_ptr<albert::rpc::Server> rpc;
 #endif
         albert::SceneObjects objects(*scene);
+        albert::VectorLayers vectorLayers(*scene);
         objects.bind("earth",earth);objects.bind("moon",moon);objects.bind("sun",sun);
         for(const auto& [id,node]:solids.nodes()){registry.include(*albert::core::naturalBody(id));objects.bind(id,node);}
         albert::core::Vector sceneOrigin;
@@ -1045,6 +1047,11 @@ int albert::runRenderer(int argc, char** argv) {
                         ImGui::TextDisabled("Distancias e tamanhos em escala real.");
                         ImGui::TextColored(ImVec4(.29f,.67f,.79f,1), "Passado: linha continua com fade");
                         ImGui::TextColored(ImVec4(.94f,.70f,.40f,1), "Futuro: linha tracejada com fade");
+                    }
+                    if(!registry.layers().empty()&&ImGui::CollapsingHeader("Camadas")){
+                        std::optional<std::string> remove;
+                        for(const auto& [id,layer]:registry.layers()){ImGui::PushID(id.c_str());bool visible=layer.visible;if(ImGui::Checkbox("##Visibilidade",&visible))registry.layerVisible(id,visible);ImGui::SameLine();ImGui::TextWrapped("%s",layer.name.c_str());if(!layer.source.empty())ImGui::TextWrapped("Fonte: %s",layer.source.c_str());if(ImGui::SmallButton("Remover"))remove=id;ImGui::PopID();}
+                        if(remove)registry.removeLayer(*remove);
                     }
                     if (focus == targets::Moon || focus == targets::Earth) {
                         const bool lunar=focus == targets::Moon;
@@ -1465,6 +1472,9 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::Replace>)registry.replace(value.id,std::move(value.values));
                     else if constexpr(std::is_same_v<T,albert::core::InstallModel>)registry.installModel(std::move(value.model));
                     else if constexpr(std::is_same_v<T,albert::core::RemoveModel>)registry.removeModel(value.id);
+                    else if constexpr(std::is_same_v<T,albert::core::CreateLayer>)registry.createLayer(std::move(value.layer));
+                    else if constexpr(std::is_same_v<T,albert::core::RemoveLayer>)registry.removeLayer(value.id);
+                    else if constexpr(std::is_same_v<T,albert::core::LayerVisibility>)registry.layerVisible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Focus>) setFocus(value.id,value.reset);
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
@@ -1756,6 +1766,7 @@ int albert::runRenderer(int argc, char** argv) {
                 material->uniforms.at("nearClip").setValue(camera->nearPlane);
                 material->uniforms.at("visibility").setValue(borderVisibility);
             }
+            vectorLayers.update(registry,objects,sceneOrigin,Vector2(display.x,display.y),camera->nearPlane,dt,[&](ShaderMaterial& material){planets.updateBorderMaterial(material,camera->position);});
             if(rpcPort||catalog.active()) {
                 const double r=albert::core::earthRadiusMeters;
                 auto snapshot=registry.snapshot(frameTime.utcSeconds,{focus,

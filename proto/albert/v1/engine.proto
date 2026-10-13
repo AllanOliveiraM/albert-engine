@@ -52,7 +52,7 @@ message Scene { uint64 revision=1; double utc_unix_seconds=2; repeated Object ob
 message FocusRequest { string id=1; bool reset_zoom=2; }
 message OrbitRequest { double azimuth_radians=1; double elevation_radians=2; optional double distance_scale=3; }
 message StreamSummary { uint64 applied_batches=1; uint64 revision=2; }
-message Capabilities { repeated ReferenceFrame frames=1; uint32 max_objects=2; uint32 max_samples_per_batch=3; repeated Geometry.Shape shapes=4; bool catalog_available=5; uint32 max_model_bytes=6; }
+message Capabilities { repeated ReferenceFrame frames=1; uint32 max_objects=2; uint32 max_samples_per_batch=3; repeated Geometry.Shape shapes=4; bool catalog_available=5; uint32 max_model_bytes=6; uint32 max_layers=7; uint32 max_layer_input_points=8; }
 service SceneService {
   rpc GetScene(Empty) returns (Scene);
   rpc GetCapabilities(Empty) returns (Capabilities);
@@ -123,4 +123,29 @@ service AssetService {
   rpc ListModels(Empty) returns (ModelAssets);
   // Remove dependent scene objects first. Asset IDs are immutable while used.
   rpc RemoveModel(ObjectRequest) returns (Applied);
+}
+
+message GeographicPoint { double longitude_degrees=1; double latitude_degrees=2; }
+message CreateLayerRequest {
+  enum Kind { KIND_UNSPECIFIED=0; POINTS=1; POLYLINE=2; }
+  enum Frame { FRAME_UNSPECIFIED=0; GEOCENTRIC_ICRF=1; OBJECT_LOCAL=2; EARTH_SURFACE=3; }
+  string id=1; string name=2; string source=3; string anchor_id=4;
+  Kind kind=5; Frame frame=6;
+  repeated Vector3 positions_meters=7; repeated GeographicPoint geographic_points=8;
+  optional uint32 color_rgb=9; optional float width_pixels=10;
+  // Earth surface only: positive clearance over the displayed terrain.
+  optional double clearance_meters=11;
+}
+message Layer {
+  string id=1; string name=2; string source=3; string anchor_id=4;
+  CreateLayerRequest.Kind kind=5; CreateLayerRequest.Frame frame=6;
+  uint32 point_count=7; uint32 color_rgb=8; float width_pixels=9;
+  double clearance_meters=10; bool visible=11;
+}
+message Layers { repeated Layer layers=1; }
+service LayerService {
+  rpc CreateLayer(CreateLayerRequest) returns (Applied);
+  rpc ListLayers(Empty) returns (Layers);
+  rpc SetVisibility(VisibilityRequest) returns (Applied);
+  rpc RemoveLayer(ObjectRequest) returns (Applied);
 }

@@ -3,6 +3,8 @@
 #include "paths.hpp"
 #include "visuals.hpp"
 #include "objects.hpp"
+#include "layers.hpp"
+#include "core/layers.hpp"
 #include "core/model.hpp"
 #include "model_fixture.hpp"
 #include <algorithm>
@@ -189,6 +191,24 @@ void graphics() {
     auto secondVehicle=vehicle;secondVehicle.id="second-model";secondVehicle.samples.front().positionMeters.x+=1000;modelRegistry.create(secondVehicle);modelObjects.sync(modelRegistry,100,{1e11,0,0});require(modelObjects.nodes().at("model")->children.front()->as<Mesh>()->geometry()==modelObjects.nodes().at("second-model")->children.front()->as<Mesh>()->geometry(),"Model instances duplicated GPU geometry");modelRegistry.remove("second-model");modelObjects.sync(modelRegistry,100,{1e11,0,0});
     auto previous=modelObjects.nodes().at("model");modelRegistry.remove("model");vehicle.appearance.shape=albert::core::Shape::Box;vehicle.appearance.modelId.clear();modelRegistry.create(vehicle);modelObjects.sync(modelRegistry,100,{1e11,0,0});require(modelObjects.nodes().at("model")!=previous,"Recreated ID retained obsolete mesh/resources");
     modelRegistry.remove("model");modelRegistry.removeModel("triangle");modelObjects.sync(modelRegistry,100,{1e11,0,0});renderer.render(*modelWorld,*modelCamera);pixels=renderer.readRGBPixels();require(std::all_of(pixels.begin(),pixels.end(),[](auto p){return p==0;}),"Removed model retained visible GPU geometry");
+    auto annotation=[&](double origin){
+        auto world=Scene::create();world->background=Color(0x000000);world->add(AmbientLight::create(Color(0xffffff),1.f));
+        albert::core::Scene registry;albert::core::Object box;box.id="anchor";box.name="Anchor";box.appearance.shape=albert::core::Shape::Box;box.appearance.sizeMeters={.5,.5,.5};box.appearance.color=0x224466;box.samples={{100,{origin,0,0}}};registry.create(box);
+        albert::SceneObjects objects(*world);objects.sync(registry,100,{origin,0,0});albert::VectorLayers layers(*world);
+        auto camera=OrthographicCamera::create(-2e-7f,2e-7f,2e-7f,-2e-7f,1e-9f,1e-3f);camera->position.z=1e-5f;camera->lookAt(Vector3());renderer.render(*world,*camera);const auto original=renderer.readRGBPixels();
+        albert::core::Layer point;point.id="marker";point.name="Marker";point.color=0xff0000;point.widthPixels=12;std::vector<albert::core::Vector> coordinates{{origin,.4,0}};registry.createLayer(albert::core::prepareLayer(point,coordinates));
+        auto update=[&](float dt){layers.update(registry,objects,{origin,0,0},Vector2(192,192),camera->nearPlane,dt,[](ShaderMaterial&){});renderer.render(*world,*camera);return renderer.readRGBPixels();};
+        require(update(1)==original,"Spatial marker rendered through an opaque object");registry.removeLayer(point.id);update(1);coordinates[0].y=-.4;registry.createLayer(albert::core::prepareLayer(point,coordinates));const auto marked=update(1);
+        require(marked[3*(96*192+96)]>original[3*(96*192+96)]+50,"Marker in front failed to render");registry.layerVisible(point.id,false);require(update(0)==marked,"Layer hide did not preserve its transition");require(update(1)==original,"Layer hide did not settle");registry.removeLayer(point.id);require(update(1)==original,"Removed layer damaged the scene");return marked;
+    };
+    require(annotation(0)==annotation(1e11),"Spatial layers lost precision at astronomical distances");
+    auto surfaceWorld=Scene::create();surfaceWorld->background=Color(0x000000);albert::PlanetVisuals surfacePlanets(*surfaceWorld,assets());surfacePlanets.moon->visible=false;surfacePlanets.sun->visible=false;
+    auto surfaceCamera=OrthographicCamera::create(-.04f,.04f,.04f,-.04f,.01f,10.f);surfaceCamera->position.set(0,0,3);surfaceCamera->lookAt(Vector3());albert::VisualSettings surfaceSettings;surfaceSettings.atmosphere=surfaceSettings.clouds=surfaceSettings.nightLights=false;surfacePlanets.update(Vector3(0,0,1),surfaceCamera->position,surfaceSettings,1.f);
+    albert::core::Scene surfaceRegistry;albert::SceneObjects surfaceObjects(*surfaceWorld);surfaceObjects.bind("earth",surfacePlanets.earth);albert::VectorLayers surfaceLayers(*surfaceWorld);
+    albert::core::Layer surfaceLine;surfaceLine.id="surface-line";surfaceLine.name="Surface line";surfaceLine.kind=albert::core::LayerKind::Polyline;surfaceLine.frame=albert::core::LayerFrame::EarthSurface;surfaceLine.widthPixels=3;
+    std::vector<albert::core::Geographic> coordinates{{-91,0},{-89,0}};surfaceRegistry.createLayer(albert::core::prepareLayer(surfaceLine,{},coordinates));
+    auto surfaceDraw=[&]{surfaceLayers.update(surfaceRegistry,surfaceObjects,{},Vector2(192,192),surfaceCamera->nearPlane,1.f,[&](ShaderMaterial& material){surfacePlanets.updateBorderMaterial(material,surfaceCamera->position);});renderer.render(*surfaceWorld,*surfaceCamera);return renderer.readRGBPixels();};
+    require(cyanPixels(surfaceDraw(),30,162,85,107)>60,"Geographic line did not follow 6 km terrain");surfaceRegistry.removeLayer(surfaceLine.id);surfaceDraw();coordinates={{89,0},{91,0}};surfaceRegistry.createLayer(albert::core::prepareLayer(surfaceLine,{},coordinates));require(cyanPixels(surfaceDraw(),30,162,85,107)==0,"Far-side surface line leaked through Earth");
     auto solidScene=Scene::create();solidScene->background=Color(0x000000);
     auto solidCamera=PerspectiveCamera::create(45,1,.001f,30000.f);solidCamera->position.set(0,0,1.5f);solidCamera->lookAt(Vector3());
     std::vector<albert::SurfaceAssets> surfaceAssets;surfaceAssets.push_back({"mercury",rgba(120),height(0)});

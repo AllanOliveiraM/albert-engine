@@ -469,3 +469,21 @@ a inicialização de buffers gráficos continua sujeita ao custo do driver.
 Os limites e o exemplo estão em [RPC.md](RPC.md). A validação local com
 AddressSanitizer/UndefinedBehaviorSanitizer também exercitou 5.000 mutações
 determinísticas de GLB, sem erros de memória/comportamento indefinido.
+
+## Camadas vetoriais — primeiro corte
+
+`core/layers` prepara coordenadas e subdivisão cartográfica; `Scene` controla
+IDs, limites e propriedade das camadas. A API aplica os mesmos comandos usados
+pela UI. `render/layers` desenha faixas e marcadores com tamanho em pixels,
+antialiasing, profundidade e transições. Camadas ancoradas copiam posição/rotação
+do alvo e conservam buffers; coordenadas ICRF são convertidas de double apenas
+após subtrair a origem gráfica. A superfície terrestre reutiliza as texturas de
+relevo e a transformação WGS84 das fronteiras. Materiais espaciais usam um shader
+sem amostradores de terreno; os materiais terrestres renovam os bindings também
+durante a transição de remoção, evitando referências a texturas já substituídas.
+
+`vector_layers` verifica WGS84, linha de data, precisão SI, validação atômica,
+visibilidade, limites e remoção de referências. `rpc_commands` testa o serviço
+real e distingue a visibilidade de objetos da visibilidade de camadas. O teste
+OpenGL verifica marcadores atrás/à frente de uma caixa, transição, precisão a
+1e11 m e linhas sobre relevo de 6 km, incluindo oclusão do lado oposto da Terra.

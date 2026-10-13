@@ -76,11 +76,12 @@ std::shared_ptr<ShaderMaterial> albert::borderMaterial() {
         attribute vec3 nextPosition;
         attribute float lineSide, orbitTime, nextTime;
         uniform vec2 viewport;
-        uniform float nearClip, surfaceOffset, detailEnabled;
+        uniform float nearClip, surfaceOffset, detailEnabled, clampSurface, widthPixels;
         uniform sampler2D heightMap, detailHeightMap;
         uniform vec4 detailBounds;
         noperspective varying float vSide;
         vec3 surface(vec3 point) {
+            if(clampSurface<0.5)return point;
             const vec3 axes=vec3(1.0,6356.752314245/6378.137,1.0);
             vec3 radial=normalize(point/axes);
             float latitude=atan(radial.y,axes.y*length(radial.xz));
@@ -105,22 +106,26 @@ std::shared_ptr<ShaderMaterial> albert::borderMaterial() {
             vec4 clip=projectionMatrix*p,other=projectionMatrix*q;
             vec2 direction=(other.xy/other.w-clip.xy/clip.w)*viewport;
             vec2 normal=vec2(-direction.y,direction.x)/max(length(direction),0.0001);
-            clip.xy+=normal*lineSide*3.0/viewport*clip.w;
+            clip.xy+=normal*lineSide*widthPixels/viewport*clip.w;
             gl_Position=clip;
         }
     )";
     material->fragmentShader=R"(
         uniform float visibility;
+        uniform vec3 lineColor;
         noperspective varying float vSide;
         void main() {
             float coverage=1.0-smoothstep(0.3,0.95,abs(vSide));
-            gl_FragColor=vec4(vec3(0.60,0.73,0.82),coverage*0.75*visibility);
+            gl_FragColor=vec4(lineColor,coverage*0.75*visibility);
             #include <encodings_fragment>
         }
     )";
     material->uniforms.emplace("viewport",Uniform(Vector2(1280,720)));
     material->uniforms.emplace("nearClip",Uniform(.01f));
     material->uniforms.emplace("visibility",Uniform(0.f));
+    material->uniforms.emplace("clampSurface",Uniform(1.f));
+    material->uniforms.emplace("widthPixels",Uniform(3.f));
+    material->uniforms.emplace("lineColor",Uniform(Vector3(.60f,.73f,.82f)));
     material->uniforms.emplace("surfaceOffset",Uniform(.00005f));
     material->uniforms.emplace("heightMap",Uniform(static_cast<Texture*>(nullptr)));
     material->uniforms.emplace("detailHeightMap",Uniform(static_cast<Texture*>(nullptr)));

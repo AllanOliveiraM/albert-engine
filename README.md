@@ -42,6 +42,7 @@ Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 | Céu | Estrelas baseadas em catálogo astronômico, com posições e brilhos relativos |
 | Nuvens | Observações de satélite opcionais, atualizadas automaticamente quando ativadas |
 | Navegação | Foco por objeto, órbita manual, zoom e transições animadas |
+| Camadas | Pontos e linhas programáveis, inclusive sobre o relevo terrestre, com controle no menu |
 | Catálogo interno | Importação de planetas pela interface ou gRPC, com posições reais e acompanhamento automático |
 | Controle externo | API gRPC local para consultar a cena, importar GLB estático, criar/remover objetos e transmitir posição, velocidade e orientação |
 | Distribuição | Executável portátil para Linux e Windows, com a biblioteca visual acompanhando o programa |
@@ -176,8 +177,9 @@ O [guia gRPC](docs/RPC.md) traz os comandos Windows, contrato, coordenadas,
 limites, streaming e remoção do exemplo.
 
 Essa base permite construir integradores de simulação, ferramentas educativas
-e clientes para assistentes de IA. O primeiro catálogo interno já reutiliza o Horizons. O suporte inicial a GLB estático também está disponível. Texturas/animação de
-modelos, camadas geográficas e novas fontes públicas são próximas entregas.
+e clientes para assistentes de IA. O primeiro catálogo interno já reutiliza o Horizons. O suporte inicial a GLB estático também está disponível. Pontos e linhas geográficas também podem ser adicionados por gRPC.
+Texturas/animação de modelos, polígonos, rótulos, camadas raster e novas fontes
+públicas são próximas entregas.
 
 ## Criar uma versão para compartilhar
 

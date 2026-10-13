@@ -1,5 +1,6 @@
 #include "server.hpp"
 #include "core/model.hpp"
+#include "core/layers.hpp"
 #include "catalog/catalog.hpp"
 #include <cctype>
 #include <algorithm>
@@ -69,7 +70,7 @@ public:
         clockStatus(s->clock,out);return grpc::Status::OK;
     }
     grpc::Status GetCapabilities(grpc::ServerContext*,const api::Empty*,api::Capabilities* out) override{
-        out->set_catalog_available(catalog_!=nullptr);out->set_max_model_bytes(core::maxModelBytes);out->add_frames(api::GEOCENTRIC_ICRF);out->set_max_objects(core::Scene::maxObjects);out->set_max_samples_per_batch(core::Scene::maxSamples);
+        out->set_catalog_available(catalog_!=nullptr);out->set_max_model_bytes(core::maxModelBytes);out->set_max_layers(core::Scene::maxLayers);out->set_max_layer_input_points(core::Scene::maxLayerInputPoints);out->add_frames(api::GEOCENTRIC_ICRF);out->set_max_objects(core::Scene::maxObjects);out->set_max_samples_per_batch(core::Scene::maxSamples);
         for(auto shape:{api::Geometry::SPHERE,api::Geometry::BOX,api::Geometry::CYLINDER,api::Geometry::MODEL})out->add_shapes(shape);return grpc::Status::OK;
     }
     grpc::Status CreateObject(grpc::ServerContext* c,const api::CreateObjectRequest* r,api::Applied* out) override{
@@ -78,6 +79,17 @@ public:
             o.appearance={static_cast<core::Shape>(g.shape()),vector(g.size_meters()),g.has_color_rgb()?g.color_rgb():0x77cddd};o.appearance.modelId=g.model_id();o.appearance.metersPerUnit=g.has_meters_per_model_unit()?g.meters_per_model_unit():1.;o.samples.push_back(sample(r->initial_state()));return apply(c,core::Create{std::move(o)},out);
         }catch(const std::exception& e){return {grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     }
+    grpc::Status CreateLayer(grpc::ServerContext* c,const api::CreateLayerRequest* r,api::Applied* out){
+        try{if(r->kind()<api::CreateLayerRequest::POINTS||r->kind()>api::CreateLayerRequest::POLYLINE||r->frame()<api::CreateLayerRequest::GEOCENTRIC_ICRF||r->frame()>api::CreateLayerRequest::EARTH_SURFACE||r->positions_meters_size()>static_cast<int>(core::Scene::maxLayerInputPoints)||r->geographic_points_size()>static_cast<int>(core::Scene::maxLayerInputPoints))throw std::invalid_argument("Invalid layer kind/frame/count");
+            if(r->has_clearance_meters()&&r->frame()!=api::CreateLayerRequest::EARTH_SURFACE)throw std::invalid_argument("Terrain clearance requires Earth surface frame");
+            core::Layer l;l.id=r->id();l.name=r->name();l.source=r->source();l.anchor=r->anchor_id();l.kind=static_cast<core::LayerKind>(r->kind()-1);l.frame=static_cast<core::LayerFrame>(r->frame()-1);l.color=r->has_color_rgb()?r->color_rgb():0x66d9ee;l.widthPixels=r->has_width_pixels()?r->width_pixels():(l.kind==core::LayerKind::Points?8.f:3.f);l.clearanceMeters=r->has_clearance_meters()?r->clearance_meters():100.;
+            std::vector<core::Vector> positions;std::vector<core::Geographic> geographic;for(const auto& p:r->positions_meters())positions.push_back(vector(p));for(const auto& p:r->geographic_points())geographic.push_back({p.longitude_degrees(),p.latitude_degrees()});return apply(c,core::CreateLayer{core::prepareLayer(std::move(l),positions,geographic)} ,out);
+        }catch(const std::length_error& e){return {grpc::StatusCode::RESOURCE_EXHAUSTED,e.what()};}catch(const std::exception& e){return {grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    }
+    grpc::Status ListLayers(grpc::ServerContext*,const api::Empty*,api::Layers* out){
+        const auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};for(const auto& l:s->layers){auto* v=out->add_layers();v->set_id(l.id);v->set_name(l.name);v->set_source(l.source);v->set_anchor_id(l.anchor);v->set_kind(static_cast<api::CreateLayerRequest::Kind>(int(l.kind)+1));v->set_frame(static_cast<api::CreateLayerRequest::Frame>(int(l.frame)+1));v->set_point_count(l.points);v->set_color_rgb(l.color);v->set_width_pixels(l.widthPixels);v->set_clearance_meters(l.clearanceMeters);v->set_visible(l.visible);}return grpc::Status::OK;
+    }
+    grpc::Status RemoveLayer(grpc::ServerContext* c,const api::ObjectRequest* r,api::Applied* out){return apply(c,core::RemoveLayer{r->id()},out);}
     grpc::Status RegisterModel(grpc::ServerContext* c,const api::RegisterModelRequest* r,api::Applied* out) override{
         try{const auto& bytes=r->glb();auto model=core::decodeModel(r->id(),r->source(),{reinterpret_cast<const unsigned char*>(bytes.data()),bytes.size()});return apply(c,core::InstallModel{std::move(model)},out);}
         catch(const std::length_error& e){return {grpc::StatusCode::RESOURCE_EXHAUSTED,e.what()};}catch(const std::exception& e){return {grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
@@ -140,11 +152,20 @@ private:core::Bridge& bridge_;catalog::Manager* catalog_;
 
 };
 }
-struct Server::Impl {core::Bridge& bridge;Services services;std::unique_ptr<grpc::Server> server;int port=0;explicit Impl(core::Bridge& b,catalog::Manager* c):bridge(b),services(b,c){}};
+struct LayerServices final:api::LayerService::Service {
+    Services& services;
+    explicit LayerServices(Services& s):services(s){}
+    grpc::Status CreateLayer(grpc::ServerContext* c,const api::CreateLayerRequest* r,api::Applied* out)override{return services.CreateLayer(c,r,out);}
+    grpc::Status ListLayers(grpc::ServerContext* c,const api::Empty* r,api::Layers* out)override{return services.ListLayers(c,r,out);}
+    grpc::Status RemoveLayer(grpc::ServerContext* c,const api::ObjectRequest* r,api::Applied* out)override{return services.RemoveLayer(c,r,out);}
+    grpc::Status SetVisibility(grpc::ServerContext* c,const api::VisibilityRequest* r,api::Applied* out)override{return services.apply(c,core::LayerVisibility{r->id(),r->visible()},out);}
+};
+struct Server::Impl {core::Bridge& bridge;Services services;LayerServices layers;std::unique_ptr<grpc::Server> server;int port=0;explicit Impl(core::Bridge& b,catalog::Manager* c):bridge(b),services(b,c),layers(services){}};
 Server::Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog):impl_(std::make_unique<Impl>(bridge,catalog)){
     if(port>65535)throw std::invalid_argument("Invalid gRPC port");grpc::ServerBuilder builder;
     builder.AddListeningPort("127.0.0.1:"+std::to_string(port),grpc::InsecureServerCredentials(),&impl_->port);
     builder.RegisterService(static_cast<api::SceneService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CameraService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::TimeService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CatalogService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::AssetService::Service*>(&impl_->services));
+    builder.RegisterService(&impl_->layers);
     builder.SetMaxReceiveMessageSize(1024*1024);builder.SetMaxSendMessageSize(4*1024*1024);
     grpc::ResourceQuota quota;quota.SetMaxThreads(16);quota.Resize(64*1024*1024);builder.SetResourceQuota(quota);
     builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::NUM_CQS,1);

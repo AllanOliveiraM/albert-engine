@@ -124,10 +124,19 @@ completa continuam pendentes. Corrigida a recriação de IDs e a direção da lu
 para acompanhar o alvo focado. 20 testes Linux, gráficos e uso integrado com
 GLB real passaram; build MinGW e testes de modelos/RPC pelo Wine passaram.
 
-**Sequência:** próximos cortes de M5 são camadas vetoriais/raster e evolução dos
-modelos. M6 amplia planetas/sistemas progressivamente; M7 continua pendente.
-NTS/leap seconds integrais permanecem no endurecimento de F23. Nenhuma
-redistribuição foi gerada.
+**M5/F13 — primeiro corte de camadas vetoriais entregue.** Pontos e polilinhas
+por gRPC, coordenadas ICRF ou locais a um objeto e superfície terrestre WGS84.
+Cor, espessura, fonte, visibilidade e remoção aparecem no serviço e na UI.
+Geometria geográfica preparada fora da thread gráfica, passagem curta pela linha
+de data, relevo global/regional e oclusão. Camadas locais acompanham o alvo;
+removê-lo remove suas camadas. Limites explícitos e buffers reutilizados.
+21 testes Linux e regressões gráficas de precisão, oclusão e terreno de 6 km
+passaram. Build MinGW e testes de camadas/RPC/gráficos pelo Wine também
+passaram. Cliente de exemplo incluído; rótulos, polígonos e GeoJSON seguem pendentes.
+
+**Sequência:** camadas raster/clima, evolução dos modelos e dos vetores; M6
+amplia planetas/sistemas progressivamente. M7 continua pendente. NTS/leap seconds
+integrais permanecem no endurecimento de F23. Nenhuma distribuição foi gerada.
 
 ## 1. Visão e decisões de produto
 

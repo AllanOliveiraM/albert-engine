@@ -83,3 +83,7 @@ set_tests_properties(catalog_import PROPERTIES TIMEOUT 15)
 add_executable(model_test model_test.cpp)
 target_link_libraries(model_test PRIVATE albert_core nlohmann_json::nlohmann_json)
 add_test(NAME external_models COMMAND model_test)
+
+add_executable(layers_test layers_test.cpp)
+target_link_libraries(layers_test PRIVATE albert_core)
+add_test(NAME vector_layers COMMAND layers_test)
