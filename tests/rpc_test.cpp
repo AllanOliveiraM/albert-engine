@@ -1,4 +1,5 @@
 #include "rpc/server.hpp"
+#include "model_fixture.hpp"
 #include "albert/v1/engine.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
 #include <chrono>
@@ -15,6 +16,8 @@ int main(){try{
             bridge.drain([&](Command& command){std::visit([&](auto& value){using T=std::decay_t<decltype(value)>;
                 if constexpr(std::is_same_v<T,Create>)registry.create(std::move(value.object));
                 else if constexpr(std::is_same_v<T,Remove>){registry.remove(value.id);if(camera.target==value.id)camera.target="earth";}
+                else if constexpr(std::is_same_v<T,InstallModel>)registry.installModel(std::move(value.model));
+                else if constexpr(std::is_same_v<T,RemoveModel>)registry.removeModel(value.id);
                 else if constexpr(std::is_same_v<T,Visibility>)registry.visible(value.id,value.enabled);
                 else if constexpr(std::is_same_v<T,Append>)registry.samples(value.id,std::move(value.values));
                 else if constexpr(std::is_same_v<T,Focus>){registry.get(value.id);camera.target=value.id;registry.cameraChanged();}
@@ -49,6 +52,16 @@ int main(){try{
     {grpc::ClientContext c;api::StateBatch batch;batch.set_id(create.id());batch.add_samples()->CopyFrom(*state);require(scene->PushStates(&c,batch,&applied).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Old streaming sample accepted");}
     {grpc::ClientContext c;api::ObjectRequest request;request.set_id(create.id());require(scene->RemoveObject(&c,request,&applied).ok(),"Remove RPC failed");}
     {grpc::ClientContext c;api::ObjectRequest request;request.set_id("missing");require(scene->RemoveObject(&c,request,&applied).error_code()==grpc::StatusCode::NOT_FOUND,"Missing object error was lost");}
+    auto assets=api::AssetService::NewStub(channel);api::RegisterModelRequest asset;asset.set_id("rpc-model");asset.set_source("Generated fixture");const auto bytes=model_fixture::glb();asset.set_glb(bytes.data(),bytes.size());
+    {grpc::ClientContext c;require(assets->RegisterModel(&c,asset,&applied).ok(),"Model registration failed");}
+    {grpc::ClientContext c;api::ModelAssets models;require(assets->ListModels(&c,{},&models).ok(),"Model listing failed");}
+    create.set_id("model-object");g=create.mutable_geometry();g->set_shape(api::Geometry::MODEL);g->set_model_id(asset.id());g->set_meters_per_model_unit(30);
+    {grpc::ClientContext c;require(scene->CreateObject(&c,create,&applied).ok(),"Model object creation failed");}
+    {grpc::ClientContext c;api::ObjectRequest request;request.set_id(asset.id());require(assets->RemoveModel(&c,request,&applied).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Asset removed while in use");}
+    {grpc::ClientContext c;api::StateBatch batch;batch.set_id(create.id());auto* s=batch.add_samples();s->CopyFrom(*state);s->set_utc_unix_seconds(101);require(scene->PushStates(&c,batch,&applied).ok(),"Model streaming state failed");}
+    {grpc::ClientContext c;api::FocusRequest request;request.set_id(create.id());require(camera->Focus(&c,request,&applied).ok(),"Model focus failed");}
+    {grpc::ClientContext c;api::ObjectRequest request;request.set_id(create.id());require(scene->RemoveObject(&c,request,&applied).ok(),"Model object removal failed");}
+    {grpc::ClientContext c;api::ObjectRequest request;request.set_id(asset.id());require(assets->RemoveModel(&c,request,&applied).ok(),"Unused model removal failed");}
     bridge.close();{grpc::ClientContext c;require(scene->CreateObject(&c,create,&applied).error_code()==grpc::StatusCode::UNAVAILABLE,"Shutdown did not reject commands");}
     std::cout<<"gRPC OK: create/focus/stream/remove, validation, revisions, snapshots and shutdown\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

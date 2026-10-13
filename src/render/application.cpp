@@ -1463,6 +1463,8 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::Visibility>) registry.visible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Append>) registry.samples(value.id,std::move(value.values));
                     else if constexpr(std::is_same_v<T,albert::core::Replace>)registry.replace(value.id,std::move(value.values));
+                    else if constexpr(std::is_same_v<T,albert::core::InstallModel>)registry.installModel(std::move(value.model));
+                    else if constexpr(std::is_same_v<T,albert::core::RemoveModel>)registry.removeModel(value.id);
                     else if constexpr(std::is_same_v<T,albert::core::Focus>) setFocus(value.id,value.reset);
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
@@ -1526,9 +1528,10 @@ int albert::runRenderer(int argc, char** argv) {
             sun->position.copy(sunPosition);
             moon->position.copy(moonPosition);
 
-            Vector3 direction = sunPosition;direction.sub(earthPosition);
+            lightTarget->position.copy(targetFor(focus));
+            Vector3 direction = sunPosition;direction.sub(lightTarget->position);
+            if(direction.lengthSq()<1e-12f){lightTarget->position.copy(earthPosition);direction.copy(sunPosition).sub(earthPosition);}
             direction.normalize();
-            lightTarget->position.copy(focus == targets::Moon ? moonPosition : earthPosition);
             sunlight->position.copy(direction).multiplyScalar(150.f).add(lightTarget->position);
             sun->lookAt(earthPosition);
             moon->setRotationFromMatrix(albert::moonOrientation(tdb));

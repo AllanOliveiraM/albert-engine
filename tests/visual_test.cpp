@@ -3,6 +3,8 @@
 #include "paths.hpp"
 #include "visuals.hpp"
 #include "objects.hpp"
+#include "core/model.hpp"
+#include "model_fixture.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -178,6 +180,15 @@ void graphics() {
     };
     const auto near=generic(0),far=generic(1e11);
     require(near==far && std::any_of(near.begin(),near.end(),[](auto value){return value>20;}),"Camera-relative rendering lost sub-metre geometry at astronomical distances");
+    auto modelWorld=Scene::create();modelWorld->background=Color(0x000000);modelWorld->add(AmbientLight::create(Color(0xffffff),2.f));
+    albert::core::Scene modelRegistry;modelRegistry.installModel(albert::core::decodeModel("triangle","Fixture",model_fixture::glb()));
+    albert::core::Object vehicle;vehicle.id="model";vehicle.name="Model";vehicle.appearance.shape=albert::core::Shape::Model;vehicle.appearance.modelId="triangle";vehicle.samples={{100,{1e11,0,0}}};modelRegistry.create(vehicle);
+    albert::SceneObjects modelObjects(*modelWorld);modelObjects.sync(modelRegistry,100,{1e11,0,0});
+    auto modelCamera=OrthographicCamera::create(-1e-6f,1e-6f,1e-6f,-1e-6f,1e-9f,1e-3f);modelCamera->position.set(0,1e-5f,0);modelCamera->up.set(0,0,-1);modelCamera->lookAt(Vector3(0,0,-3.f/6378137.f));renderer.render(*modelWorld,*modelCamera);pixels=renderer.readRGBPixels();
+    require(std::any_of(pixels.begin(),pixels.end(),[](auto p){return p>20;}),"Imported model hierarchy/material did not render");
+    auto secondVehicle=vehicle;secondVehicle.id="second-model";secondVehicle.samples.front().positionMeters.x+=1000;modelRegistry.create(secondVehicle);modelObjects.sync(modelRegistry,100,{1e11,0,0});require(modelObjects.nodes().at("model")->children.front()->as<Mesh>()->geometry()==modelObjects.nodes().at("second-model")->children.front()->as<Mesh>()->geometry(),"Model instances duplicated GPU geometry");modelRegistry.remove("second-model");modelObjects.sync(modelRegistry,100,{1e11,0,0});
+    auto previous=modelObjects.nodes().at("model");modelRegistry.remove("model");vehicle.appearance.shape=albert::core::Shape::Box;vehicle.appearance.modelId.clear();modelRegistry.create(vehicle);modelObjects.sync(modelRegistry,100,{1e11,0,0});require(modelObjects.nodes().at("model")!=previous,"Recreated ID retained obsolete mesh/resources");
+    modelRegistry.remove("model");modelRegistry.removeModel("triangle");modelObjects.sync(modelRegistry,100,{1e11,0,0});renderer.render(*modelWorld,*modelCamera);pixels=renderer.readRGBPixels();require(std::all_of(pixels.begin(),pixels.end(),[](auto p){return p==0;}),"Removed model retained visible GPU geometry");
     auto solidScene=Scene::create();solidScene->background=Color(0x000000);
     auto solidCamera=PerspectiveCamera::create(45,1,.001f,30000.f);solidCamera->position.set(0,0,1.5f);solidCamera->lookAt(Vector3());
     std::vector<albert::SurfaceAssets> surfaceAssets;surfaceAssets.push_back({"mercury",rgba(120),height(0)});

@@ -450,3 +450,22 @@ falhas, recuperação, snapshots atrasados, propriedade do estado, remoção e R
 `http_transport` exercita servidor HTTP local, truncamento, limite de
 resposta e cancelamento. As consultas públicas reais são verificações separadas:
 `providers_test --network`.
+
+## Modelos externos — primeiro corte
+
+`core/model` decodifica um subconjunto GLB estático para geometria validada e
+materiais sólidos. Não chama loaders com acesso a arquivos externos. O trabalho
+ocorre no RPC antes de enfileirar `InstallModel`; a cena conserva assets imutáveis
+e metadados pequenos nos snapshots. O render compartilha buffers por asset,
+instancia peças, conserva a origem do modelo e aplica a mesma transformação
+ICRF e origem flutuante dos outros objetos. Estados não retransmitem geometria.
+
+`external_models` verifica limites, hierarquia/reflexão, PBR, bytes inválidos,
+URIs, ciclos, escala física e ciclo de vida. `rpc_commands` inclui registro,
+consulta, criação/foco/estado e remoção de modelo/asset por transporte real.
+O teste gráfico também exercita GLB a 100 milhões de km, remoção e recriação de
+ID. O orçamento deste primeiro corte é para modelos pequenos sem texturas;
+a inicialização de buffers gráficos continua sujeita ao custo do driver.
+Os limites e o exemplo estão em [RPC.md](RPC.md). A validação local com
+AddressSanitizer/UndefinedBehaviorSanitizer também exercitou 5.000 mutações
+determinísticas de GLB, sem erros de memória/comportamento indefinido.

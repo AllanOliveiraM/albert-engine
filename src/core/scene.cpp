@@ -1,5 +1,6 @@
 #include "scene.hpp"
 #include "bodies.hpp"
+#include "model.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -52,16 +53,28 @@ void Scene::create(Object o){
     if(!validObjectId(o.id))throw std::invalid_argument("Invalid object ID");
     if(objects_.contains(o.id))throw std::invalid_argument("Object ID already exists");
     if(objects_.size()>=maxObjects)throw std::length_error("Scene object limit reached");
+    if(o.appearance.shape==Shape::Model){
+        const auto& model=*models_.at(o.appearance.modelId);const double scale=o.appearance.metersPerUnit;
+        if(!std::isfinite(scale)||scale<=0||scale>1e10||model.radiusUnits*scale<.05||model.radiusUnits*scale>1e10)throw std::invalid_argument("Invalid model physical scale");
+        o.appearance.sizeMeters=model.sizeUnits*scale;o.radiusMeters=model.radiusUnits*scale;
+    }else if(!o.appearance.modelId.empty())throw std::invalid_argument("Model ID requires model geometry");
     if(o.name.empty()||o.name.size()>256||o.source.size()>512||o.builtin||o.appearance.shape==Shape::Builtin||
-       o.appearance.shape<Shape::Sphere||o.appearance.shape>Shape::Cylinder||!finite(o.appearance.sizeMeters)||std::min({o.appearance.sizeMeters.x,o.appearance.sizeMeters.y,o.appearance.sizeMeters.z})<.1||
+       o.appearance.shape<Shape::Sphere||o.appearance.shape>Shape::Model||!finite(o.appearance.sizeMeters)||(o.appearance.shape!=Shape::Model&&std::min({o.appearance.sizeMeters.x,o.appearance.sizeMeters.y,o.appearance.sizeMeters.z})<.1)||
        std::max({o.appearance.sizeMeters.x,o.appearance.sizeMeters.y,o.appearance.sizeMeters.z})>1e10||o.appearance.color>0xffffff)throw std::invalid_argument("Invalid object presentation");
     if(o.appearance.shape==Shape::Sphere)o.radiusMeters=.5*std::max({o.appearance.sizeMeters.x,o.appearance.sizeMeters.y,o.appearance.sizeMeters.z});
-    else o.radiusMeters=.5*length(o.appearance.sizeMeters);
+    else if(o.appearance.shape!=Shape::Model)o.radiusMeters=.5*length(o.appearance.sizeMeters);
     o.defaultDistanceMeters=o.radiusMeters*4;o.minDistanceMeters=o.radiusMeters*1.05;
     if(o.samples.empty()||o.samples.size()>maxSamples)throw std::invalid_argument("Initial samples required");
     for(auto& s:o.samples)validate(s);
     for(size_t i=1;i<o.samples.size();++i)if(o.samples[i].utcSeconds<=o.samples[i-1].utcSeconds)throw std::invalid_argument("Samples must have increasing timestamps");
-    const auto id=o.id;objects_.emplace(id,std::move(o));++revision_;
+    o.instance=revision_+1;const auto id=o.id;objects_.emplace(id,std::move(o));++revision_;
+}
+void Scene::installModel(std::shared_ptr<const Model> model){
+    if(!model||!validObjectId(model->id)||model->parts.empty()||model->sourceBytes>maxModelBytes||model->vertices>maxModelVertices||model->triangles>maxModelTriangles)throw std::invalid_argument("Invalid decoded model");
+    if(models_.contains(model->id))throw std::invalid_argument("Model ID already exists");if(models_.size()>=32)throw std::length_error("Model asset limit reached");models_.emplace(model->id,std::move(model));++revision_;
+}
+void Scene::removeModel(const std::string& id){
+    if(!models_.contains(id))throw std::out_of_range("Unknown model");for(const auto& [objectId,o]:objects_){(void)objectId;if(o.appearance.modelId==id)throw std::invalid_argument("Model is still used by a scene object");}models_.erase(id);++revision_;
 }
 void Scene::remove(const ObjectId& id){if(get(id).builtin)throw std::invalid_argument("Built-in objects cannot be removed");objects_.erase(id);++revision_;}
 void Scene::visible(const ObjectId& id,bool enabled){if(get(id).builtin)throw std::invalid_argument("Built-in visibility is managed by the renderer");objects_.at(id).visible=enabled;++revision_;}
@@ -99,5 +112,5 @@ Evaluated Scene::evaluate(const ObjectId& id,double now) const{
     if(a.attitude&&b->attitude)r.attitude=blend(*a.attitude,*b->attitude,t);
     return {r,false};
 }
-Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera,{}};result.clock.utcSeconds=now;for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}
+Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera,{},{}};result.clock.utcSeconds=now;for(const auto& [id,m]:models_)result.models.push_back({id,m->source,m->sourceBytes,m->vertices,m->triangles,m->sizeUnits,m->radiusUnits});for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}
 }

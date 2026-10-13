@@ -114,9 +114,20 @@ de Mercúrio e importou Marte da fonte pública, mantendo órbita/zoom manuais e
 remoção do alvo. GPU física e Windows nativo ainda precisam de validação própria.
 Nenhuma distribuição foi gerada.
 
-**Sequência:** M5 em cortes independentes: primeiro conteúdo externo visual,
-seguido de camadas; M6 amplia planetas/sistemas progressivamente. M7 continua
-pendente. NTS/leap seconds integrais permanecem no endurecimento de F23.
+**M5/F12 — primeiro corte de modelos externos entregue.** Registro de GLB estático
+por gRPC, materiais sólidos PBR, hierarquia local, escala física, câmera e estados
+pelo contrato existente. Decodificação fora da thread gráfica, limites explícitos,
+validação de intervalos/índices/valores/ciclos e remoção protegida de assets em uso.
+Geometria/material compartilham buffers entre instâncias. Cliente e gerador de
+veículo ilustrativo incluídos; texturas, animações de peças e importação glTF
+completa continuam pendentes. Corrigida a recriação de IDs e a direção da luz
+para acompanhar o alvo focado. 20 testes Linux, gráficos e uso integrado com
+GLB real passaram; build MinGW e testes de modelos/RPC pelo Wine passaram.
+
+**Sequência:** próximos cortes de M5 são camadas vetoriais/raster e evolução dos
+modelos. M6 amplia planetas/sistemas progressivamente; M7 continua pendente.
+NTS/leap seconds integrais permanecem no endurecimento de F23. Nenhuma
+redistribuição foi gerada.
 
 ## 1. Visão e decisões de produto
 

@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "core/model.hpp"
 #include "catalog/catalog.hpp"
 #include <cctype>
 #include <algorithm>
@@ -41,7 +42,7 @@ void clockStatus(const time::Status& s,api::ClockStatus* out){
     out->set_authenticated(s.authenticated);out->set_synchronizing(s.synchronizing);out->set_error(s.error);
     out->set_generation(s.generation);out->set_pending_correction_seconds(s.correctionSeconds);
 }
-class Services final:public api::SceneService::Service,public api::CameraService::Service,public api::TimeService::Service,public api::CatalogService::Service {
+class Services final:public api::SceneService::Service,public api::CameraService::Service,public api::TimeService::Service,public api::CatalogService::Service,public api::AssetService::Service {
 public:
     explicit Services(core::Bridge& bridge,catalog::Manager* catalog):bridge_(bridge),catalog_(catalog){}
     grpc::Status apply(grpc::ServerContext* context,core::Command command,api::Applied* out){
@@ -59,7 +60,7 @@ public:
         clockStatus(s->clock,out->mutable_clock());
         out->set_revision(s->revision);out->set_utc_unix_seconds(s->utcSeconds);camera(s->camera,out->mutable_camera());
         for(const auto& o:s->objects){auto* result=out->add_objects();result->set_id(o.id);result->set_name(o.name);result->set_source(o.source);result->set_builtin(o.builtin);result->set_visible(o.visible);result->set_radius_meters(o.radiusMeters);result->set_provider_managed(o.providerManaged);
-            auto* g=result->mutable_geometry();g->set_shape(static_cast<api::Geometry::Shape>(o.appearance.shape));vector(o.appearance.sizeMeters,g->mutable_size_meters());g->set_color_rgb(o.appearance.color);
+            auto* g=result->mutable_geometry();g->set_shape(static_cast<api::Geometry::Shape>(o.appearance.shape));vector(o.appearance.sizeMeters,g->mutable_size_meters());g->set_color_rgb(o.appearance.color);g->set_model_id(o.appearance.modelId);if(o.appearance.shape==core::Shape::Model)g->set_meters_per_model_unit(o.appearance.metersPerUnit);
             if(!o.samples.empty()){sample(o.samples.back(),result->mutable_state());result->set_stale(s->utcSeconds<o.samples.back().utcSeconds||s->utcSeconds-o.samples.back().utcSeconds>1.);}}
         return grpc::Status::OK;
     }
@@ -68,14 +69,22 @@ public:
         clockStatus(s->clock,out);return grpc::Status::OK;
     }
     grpc::Status GetCapabilities(grpc::ServerContext*,const api::Empty*,api::Capabilities* out) override{
-        out->set_catalog_available(catalog_!=nullptr);out->add_frames(api::GEOCENTRIC_ICRF);out->set_max_objects(core::Scene::maxObjects);out->set_max_samples_per_batch(core::Scene::maxSamples);
-        for(auto shape:{api::Geometry::SPHERE,api::Geometry::BOX,api::Geometry::CYLINDER})out->add_shapes(shape);return grpc::Status::OK;
+        out->set_catalog_available(catalog_!=nullptr);out->set_max_model_bytes(core::maxModelBytes);out->add_frames(api::GEOCENTRIC_ICRF);out->set_max_objects(core::Scene::maxObjects);out->set_max_samples_per_batch(core::Scene::maxSamples);
+        for(auto shape:{api::Geometry::SPHERE,api::Geometry::BOX,api::Geometry::CYLINDER,api::Geometry::MODEL})out->add_shapes(shape);return grpc::Status::OK;
     }
     grpc::Status CreateObject(grpc::ServerContext* c,const api::CreateObjectRequest* r,api::Applied* out) override{
         try{core::Object o;o.id=r->id();o.name=r->name();o.source=r->source();const auto& g=r->geometry();
-            if(g.shape()<api::Geometry::SPHERE||g.shape()>api::Geometry::CYLINDER)throw std::invalid_argument("Unsupported geometry");
-            o.appearance={static_cast<core::Shape>(g.shape()),vector(g.size_meters()),g.has_color_rgb()?g.color_rgb():0x77cddd};o.samples.push_back(sample(r->initial_state()));return apply(c,core::Create{std::move(o)},out);
+            if(g.shape()<api::Geometry::SPHERE||g.shape()>api::Geometry::MODEL)throw std::invalid_argument("Unsupported geometry");
+            o.appearance={static_cast<core::Shape>(g.shape()),vector(g.size_meters()),g.has_color_rgb()?g.color_rgb():0x77cddd};o.appearance.modelId=g.model_id();o.appearance.metersPerUnit=g.has_meters_per_model_unit()?g.meters_per_model_unit():1.;o.samples.push_back(sample(r->initial_state()));return apply(c,core::Create{std::move(o)},out);
         }catch(const std::exception& e){return {grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    }
+    grpc::Status RegisterModel(grpc::ServerContext* c,const api::RegisterModelRequest* r,api::Applied* out) override{
+        try{const auto& bytes=r->glb();auto model=core::decodeModel(r->id(),r->source(),{reinterpret_cast<const unsigned char*>(bytes.data()),bytes.size()});return apply(c,core::InstallModel{std::move(model)},out);}
+        catch(const std::length_error& e){return {grpc::StatusCode::RESOURCE_EXHAUSTED,e.what()};}catch(const std::exception& e){return {grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    }
+    grpc::Status RemoveModel(grpc::ServerContext* c,const api::ObjectRequest* r,api::Applied* out) override{return apply(c,core::RemoveModel{r->id()},out);}
+    grpc::Status ListModels(grpc::ServerContext*,const api::Empty*,api::ModelAssets* out) override{
+        const auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};for(const auto& model:s->models){auto* v=out->add_assets();v->set_id(model.id);v->set_source(model.source);v->set_bytes(model.bytes);v->set_vertices(model.vertices);v->set_triangles(model.triangles);vector(model.size,v->mutable_size_model_units());v->set_radius_model_units(model.radius);}return grpc::Status::OK;
     }
     grpc::Status RemoveObject(grpc::ServerContext* c,const api::ObjectRequest* r,api::Applied* out) override{return apply(c,core::Remove{r->id()},out);}
     grpc::Status SetVisibility(grpc::ServerContext* c,const api::VisibilityRequest* r,api::Applied* out) override{return apply(c,core::Visibility{r->id(),r->visible()},out);}
@@ -135,7 +144,7 @@ struct Server::Impl {core::Bridge& bridge;Services services;std::unique_ptr<grpc
 Server::Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog):impl_(std::make_unique<Impl>(bridge,catalog)){
     if(port>65535)throw std::invalid_argument("Invalid gRPC port");grpc::ServerBuilder builder;
     builder.AddListeningPort("127.0.0.1:"+std::to_string(port),grpc::InsecureServerCredentials(),&impl_->port);
-    builder.RegisterService(static_cast<api::SceneService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CameraService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::TimeService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CatalogService::Service*>(&impl_->services));
+    builder.RegisterService(static_cast<api::SceneService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CameraService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::TimeService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CatalogService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::AssetService::Service*>(&impl_->services));
     builder.SetMaxReceiveMessageSize(1024*1024);builder.SetMaxSendMessageSize(4*1024*1024);
     grpc::ResourceQuota quota;quota.SetMaxThreads(16);quota.Resize(64*1024*1024);builder.SetResourceQuota(quota);
     builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::NUM_CQS,1);

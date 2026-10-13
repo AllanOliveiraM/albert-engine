@@ -54,6 +54,7 @@ Para compilar somente o programa visual, configure `-DALBERT_RPC=OFF`.
 | `SceneService` | `GetScene`, `GetCapabilities`, `CreateObject`, `RemoveObject`, `SetVisibility`, `PushStates`, `StreamStates` |
 | `CameraService` | `Focus`, `Orbit`, `GetCamera` |
 | `TimeService` | `GetTime` |
+| `AssetService` | `RegisterModel`, `ListModels`, `RemoveModel` |
 | `CatalogService` | `ListObjects`, `ImportObject`, `GetJob`, `GetJobs`, `RetryJob` |
 
 `GetCapabilities` informa os formatos e limites realmente suportados. IDs dos
@@ -61,12 +62,12 @@ corpos embarcados: `earth`, `moon`, `sun`, `mercury`. Eles não podem ser removi
 seus estados substituídos por um cliente. Os alvos especiais `@earth-moon` e
 `@system` enquadram as vistas de contexto.
 
-Objetos externos aceitam esfera, caixa e cilindro, com dimensões físicas e cor
+Objetos externos aceitam esfera, caixa, cilindro e modelo GLB registrado, com dimensões físicas e cor
 RGB. O eixo do cilindro é o Y local; a esfera admite dimensões diferentes por
 eixo. Nomes não precisam ser únicos; IDs precisam. Ao remover o objeto focado,
 a câmera volta à Terra. Ocultar um objeto preserva seu estado e o acompanhamento.
-Modelos, imagens externas e trajetórias de objetos externos desenhadas serão
-acrescentados nos próximos marcos.
+Imagens externas e trajetórias de objetos externos desenhadas serão acrescentadas
+nos próximos cortes. O primeiro suporte a modelos está descrito abaixo.
 
 ## Catálogo interno e importação automática
 
@@ -114,6 +115,53 @@ consultas, mantém até 32 tabelas em memória e valida cobertura, ordem e valor
 Cache de cinco minutos para tabelas curtas e 24 horas para órbitas; respostas
 HTTP têm limite de 4 MiB e 30 s. Nenhuma consulta ocorre por quadro. A busca
 remota de objetos arbitrários e novos provedores continuam no roadmap.
+
+## Modelos externos GLB
+
+O primeiro corte aceita **GLB 2 estático, opaco e sem texturas**: triângulos,
+`POSITION`/`NORMAL` float32, índices uint8/16/32, hierarquia local com TRS ou
+matrizes afins e materiais PBR de cor sólida. Normais ausentes usam faces planas.
+A hierarquia é aplicada à geometria no registro; animação de peças, skins,
+morph targets, compressão/extensões, transparência, emissivos, imagens e URIs
+externas são rejeitados explicitamente. Não é um importador geral de glTF.
+
+`AssetService.RegisterModel` recebe ID, proveniência `source` e bytes GLB.
+A decodificação/validação acontece na thread do transporte; a thread da cena
+registra o recurso imutável. O arquivo não é salvo nem acessa disco/rede.
+`ListModels` retorna metadados do último quadro. Há limite de **32 assets,
+768 KiB por GLB, 16.384 vértices, 32.768 triângulos, 64 primitivas e 128 nós**;
+instâncias de uma malha no arquivo contam no orçamento decodificado.
+JSON limita-se a 128 KiB, profundidade 64; hierarquia limita-se a 32 níveis.
+
+Em `CreateObject.geometry`, use `shape=MODEL`, `model_id` e opcionalmente
+`meters_per_model_unit` (padrão 1). O modelo conserva sua origem, eixos locais,
+cores e proporções; `size_meters`/`color_rgb` destinam-se às primitivas. O Albert
+calcula raio e distâncias da câmera a partir da geometria e da escala física.
+A atitude do objeto gira os eixos do modelo para ICRF, como nos demais objetos.
+
+Crie e carregue uma demonstração pequena:
+
+```sh
+python3 scripts/create-demo-model.py
+./build/linux/src/rpc/albert_model_client build/demo-vehicle.glb 127.0.0.1:50051
+```
+
+No Windows, use `python` e
+`build\windows\src\rpc\Release\albert_model_client.exe`.
+O gerador produz um veículo **ilustrativo**, sem telemetria ou modelo de missão.
+O cliente registra `example-model`, cria `example-vehicle` em posição sintética
+e pede foco. Órbita e zoom manuais continuam disponíveis. Atualize o veículo
+pelos mesmos `PushStates`/`StreamStates`; isso não exige reenviar o GLB.
+
+```sh
+./build/linux/src/rpc/albert_model_client --remove 127.0.0.1:50051
+```
+
+Remova objetos dependentes antes de `RemoveModel`. A geometria/material GPU é
+compartilhada entre instâncias e liberada quando o asset removido deixa o render.
+Os assets externos duram apenas a sessão. IDs podem ser reutilizados depois da
+remoção; o render reconhece a nova instância e substitui os recursos anteriores.
+Referência de formato: [especificação Khronos glTF 2.0](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html).
 
 ## Coordenadas e tempo
 

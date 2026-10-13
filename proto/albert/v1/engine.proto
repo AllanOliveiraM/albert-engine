@@ -15,11 +15,13 @@ message State {
   ReferenceFrame frame=5;
 }
 message Geometry {
-  enum Shape { SHAPE_UNSPECIFIED=0; SPHERE=1; BOX=2; CYLINDER=3; }
+  enum Shape { SHAPE_UNSPECIFIED=0; SPHERE=1; BOX=2; CYLINDER=3; MODEL=4; }
   Shape shape=1;
   // Full diameters/extents along local X,Y,Z. Cylinder axis is local Y.
   Vector3 size_meters=2;
   optional uint32 color_rgb=3;
+  // MODEL uses a registered GLB asset; its own colors and local origin.
+  string model_id=4; optional double meters_per_model_unit=5;
 }
 message Object {
   string id=1; string name=2; string source=3;
@@ -50,7 +52,7 @@ message Scene { uint64 revision=1; double utc_unix_seconds=2; repeated Object ob
 message FocusRequest { string id=1; bool reset_zoom=2; }
 message OrbitRequest { double azimuth_radians=1; double elevation_radians=2; optional double distance_scale=3; }
 message StreamSummary { uint64 applied_batches=1; uint64 revision=2; }
-message Capabilities { repeated ReferenceFrame frames=1; uint32 max_objects=2; uint32 max_samples_per_batch=3; repeated Geometry.Shape shapes=4; bool catalog_available=5; }
+message Capabilities { repeated ReferenceFrame frames=1; uint32 max_objects=2; uint32 max_samples_per_batch=3; repeated Geometry.Shape shapes=4; bool catalog_available=5; uint32 max_model_bytes=6; }
 service SceneService {
   rpc GetScene(Empty) returns (Scene);
   rpc GetCapabilities(Empty) returns (Capabilities);
@@ -105,4 +107,20 @@ service CatalogService {
   rpc GetJob(CatalogJobRequest) returns (CatalogJob);
   rpc GetJobs(Empty) returns (CatalogJobs);
   rpc RetryJob(CatalogJobRequest) returns (CatalogJob);
+}
+
+message RegisterModelRequest { string id=1; string source=2; bytes glb=3; }
+message ModelAsset {
+  string id=1; string source=2; uint64 bytes=3;
+  uint32 vertices=4; uint32 triangles=5;
+  Vector3 size_model_units=6; double radius_model_units=7;
+}
+message ModelAssets { repeated ModelAsset assets=1; }
+service AssetService {
+  // Bounded static opaque GLB 2; embedded geometry, local hierarchy and PBR
+  // solid materials. Textures, animations, skins and extensions are rejected.
+  rpc RegisterModel(RegisterModelRequest) returns (Applied);
+  rpc ListModels(Empty) returns (ModelAssets);
+  // Remove dependent scene objects first. Asset IDs are immutable while used.
+  rpc RemoveModel(ObjectRequest) returns (Applied);
 }

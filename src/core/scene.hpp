@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -20,24 +21,29 @@ struct Sample {
     std::optional<Quaternion> attitude; // Local axes -> geocentric ICRF, XYZW.
     bool hasVelocity=false;
 };
-enum class Shape {Builtin,Sphere,Box,Cylinder};
-struct Appearance {Shape shape=Shape::Sphere;Vector sizeMeters{1000,1000,1000};std::uint32_t color=0x77cddd;};
+enum class Shape {Builtin,Sphere,Box,Cylinder,Model};
+struct Appearance {Shape shape=Shape::Sphere;Vector sizeMeters{1000,1000,1000};std::uint32_t color=0x77cddd;std::string modelId;double metersPerUnit=1;};
 struct Object {
     ObjectId id;std::string name,source;
     Appearance appearance;
     double radiusMeters=500,defaultDistanceMeters=2000,minDistanceMeters=550;
-    bool builtin=false,visible=true,providerManaged=false;
+    bool builtin=false,visible=true,providerManaged=false;std::uint64_t instance=0;
     std::vector<Sample> samples;
 };
 struct Evaluated {Sample state;bool stale=false;};
 struct CameraState {ObjectId target="earth";Vector positionMeters;double distanceMeters=0;bool transitioning=false;};
-struct Snapshot {std::uint64_t revision=0;double utcSeconds=0;std::vector<Object> objects;CameraState camera;time::Status clock;};
+struct Model;
+struct ModelInfo {std::string id,source;std::size_t bytes=0,vertices=0,triangles=0;Vector size;double radius=0;};
+struct Snapshot {std::uint64_t revision=0;double utcSeconds=0;std::vector<Object> objects;CameraState camera;time::Status clock;std::vector<ModelInfo> models;};
 struct NaturalBody;
 class Scene {
 public:
     static constexpr size_t maxObjects=2048,maxSamples=256;
     Scene();
     void create(Object object);
+    void installModel(std::shared_ptr<const Model>);
+    void removeModel(const std::string& id);
+    const std::map<std::string,std::shared_ptr<const Model>>& models()const{return models_;}
     void include(const NaturalBody& body);
     void remove(const ObjectId& id);
     void visible(const ObjectId& id,bool enabled);
@@ -52,6 +58,7 @@ public:
     std::uint64_t revision() const{return revision_;}
 private:
     std::map<ObjectId,Object> objects_;
+    std::map<std::string,std::shared_ptr<const Model>> models_;
     std::uint64_t revision_=0;
 };
 bool validObjectId(std::string_view id);
