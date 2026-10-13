@@ -21,7 +21,9 @@
           "tile_size": 1440,
           "longitude": "east-positive, -180 to 180; planetocentric latitude",
           "lighting": "Monochrome reflectance mosaic, photometrically normalized; acquisition morphology remains. Not a true-color photograph.",
-          "epoch": "MESSENGER mission mosaic, 2016 release"
+          "epoch": "MESSENGER mission mosaic, 2016 release",
+          "sha256": "d99379dab05a0d00abd91e16bd045317abf063f64adc7783d9086efda42463ca",
+          "bytes": 4246799091
         },
         {
           "id": "messenger-usgs-dem-2016-v1",

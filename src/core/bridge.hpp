@@ -10,9 +10,10 @@
 namespace albert::core {
 struct Create {Object object;};struct Remove {ObjectId id;};struct Visibility {ObjectId id;bool enabled;};
 struct Append {ObjectId id;std::vector<Sample> values;};
+struct Replace {ObjectId id;std::vector<Sample> values;};
 struct Focus {ObjectId id;bool reset=false;};
 struct Orbit {double azimuthRadians=0,elevationRadians=0,distanceScale=1;};
-using Command=std::variant<Create,Remove,Visibility,Append,Focus,Orbit>;
+using Command=std::variant<Create,Remove,Visibility,Append,Replace,Focus,Orbit>;
 enum class Code {Ok,Invalid,NotFound,Exhausted,Unavailable,Cancelled};
 struct Reply {Code code=Code::Ok;std::string message;std::uint64_t revision=0;};
 struct Ticket {std::future<Reply> result;std::shared_ptr<std::atomic_bool> cancelled;};

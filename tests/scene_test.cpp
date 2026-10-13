@@ -11,6 +11,7 @@ template<class F>void rejects(F fn){bool rejected=false;try{fn();}catch(const st
 Object object(){Object o;o.id="test";o.name="Test";o.samples={{100,{1e11,0,0},{10,0,0},Quaternion{0,0,0,1},true},{102,{1e11+20,0,0},{10,0,0},Quaternion{0,0,0,-1},true}};return o;}
 int main(){try{
     Scene scene;require(scene.objects().size()==3,"Built-ins missing");scene.create(object());
+    scene.builtinState("moon",{100,{1,2,3}});require(scene.evaluate("moon",104).stale,"Expired built-in state was reported fresh");
     auto s=scene.evaluate("test",101);require(std::abs(s.state.positionMeters.x-(1e11+10))<1e-5,"Interpolation lost metre precision");
     require(s.state.attitude&&std::abs(s.state.attitude->w-1)<1e-9,"Antipodal quaternion interpolation failed");
     require(scene.evaluate("test",104).state.positionMeters.x==1e11+20&&scene.evaluate("test",104).stale,"Disconnected stream extrapolated forever");

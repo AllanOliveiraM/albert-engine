@@ -1,4 +1,7 @@
 #include "server.hpp"
+#include "catalog/catalog.hpp"
+#include <cctype>
+#include <algorithm>
 #include "albert/v1/engine.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
 #include <chrono>
@@ -38,9 +41,9 @@ void clockStatus(const time::Status& s,api::ClockStatus* out){
     out->set_authenticated(s.authenticated);out->set_synchronizing(s.synchronizing);out->set_error(s.error);
     out->set_generation(s.generation);out->set_pending_correction_seconds(s.correctionSeconds);
 }
-class Services final:public api::SceneService::Service,public api::CameraService::Service,public api::TimeService::Service {
+class Services final:public api::SceneService::Service,public api::CameraService::Service,public api::TimeService::Service,public api::CatalogService::Service {
 public:
-    explicit Services(core::Bridge& bridge):bridge_(bridge){}
+    explicit Services(core::Bridge& bridge,catalog::Manager* catalog):bridge_(bridge),catalog_(catalog){}
     grpc::Status apply(grpc::ServerContext* context,core::Command command,api::Applied* out){
         auto ticket=bridge_.submit(std::move(command));return await(context,ticket,out);
     }
@@ -55,9 +58,9 @@ public:
         const auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};
         clockStatus(s->clock,out->mutable_clock());
         out->set_revision(s->revision);out->set_utc_unix_seconds(s->utcSeconds);camera(s->camera,out->mutable_camera());
-        for(const auto& o:s->objects){auto* result=out->add_objects();result->set_id(o.id);result->set_name(o.name);result->set_source(o.source);result->set_builtin(o.builtin);result->set_visible(o.visible);result->set_radius_meters(o.radiusMeters);
+        for(const auto& o:s->objects){auto* result=out->add_objects();result->set_id(o.id);result->set_name(o.name);result->set_source(o.source);result->set_builtin(o.builtin);result->set_visible(o.visible);result->set_radius_meters(o.radiusMeters);result->set_provider_managed(o.providerManaged);
             auto* g=result->mutable_geometry();g->set_shape(static_cast<api::Geometry::Shape>(o.appearance.shape));vector(o.appearance.sizeMeters,g->mutable_size_meters());g->set_color_rgb(o.appearance.color);
-            if(!o.samples.empty()){sample(o.samples.back(),result->mutable_state());result->set_stale(!o.builtin&&(s->utcSeconds<o.samples.back().utcSeconds||s->utcSeconds-o.samples.back().utcSeconds>1.));}}
+            if(!o.samples.empty()){sample(o.samples.back(),result->mutable_state());result->set_stale(s->utcSeconds<o.samples.back().utcSeconds||s->utcSeconds-o.samples.back().utcSeconds>1.);}}
         return grpc::Status::OK;
     }
     grpc::Status GetTime(grpc::ServerContext*,const api::Empty*,api::ClockStatus* out) override{
@@ -65,7 +68,7 @@ public:
         clockStatus(s->clock,out);return grpc::Status::OK;
     }
     grpc::Status GetCapabilities(grpc::ServerContext*,const api::Empty*,api::Capabilities* out) override{
-        out->add_frames(api::GEOCENTRIC_ICRF);out->set_max_objects(core::Scene::maxObjects);out->set_max_samples_per_batch(core::Scene::maxSamples);
+        out->set_catalog_available(catalog_!=nullptr);out->add_frames(api::GEOCENTRIC_ICRF);out->set_max_objects(core::Scene::maxObjects);out->set_max_samples_per_batch(core::Scene::maxSamples);
         for(auto shape:{api::Geometry::SPHERE,api::Geometry::BOX,api::Geometry::CYLINDER})out->add_shapes(shape);return grpc::Status::OK;
     }
     grpc::Status CreateObject(grpc::ServerContext* c,const api::CreateObjectRequest* r,api::Applied* out) override{
@@ -98,14 +101,41 @@ public:
     grpc::Status Focus(grpc::ServerContext* c,const api::FocusRequest* r,api::Applied* out) override{return apply(c,core::Focus{r->id(),r->reset_zoom()},out);}
     grpc::Status Orbit(grpc::ServerContext* c,const api::OrbitRequest* r,api::Applied* out) override{return apply(c,core::Orbit{r->azimuth_radians(),r->elevation_radians(),r->has_distance_scale()?r->distance_scale():1.},out);}
     grpc::Status GetCamera(grpc::ServerContext*,const api::Empty*,api::Camera* out) override{auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};camera(s->camera,out);return grpc::Status::OK;}
-private:core::Bridge& bridge_;
+    static void catalogJob(const catalog::Job& job,api::CatalogJob* out){
+        out->set_id(job.id);out->set_catalog_id(job.catalogId);out->set_object_id(job.objectId);out->set_stage(static_cast<api::CatalogJob::Stage>(job.stage));
+        out->set_error(job.error);out->set_fetched_utc_unix_seconds(job.fetchedUtc);out->set_valid_until_utc_unix_seconds(job.validUntilUtc);out->set_applied_revision(job.revision);
+    }
+    grpc::Status ListObjects(grpc::ServerContext*,const api::CatalogQuery* request,api::CatalogList* out) override{
+        if(!catalog_)return {grpc::StatusCode::UNAVAILABLE,"Catalog is not enabled"};
+        if(request->query().size()>128)return {grpc::StatusCode::INVALID_ARGUMENT,"Catalog query exceeds limit"};
+        auto lower=[](std::string text){for(auto& c:text)c=static_cast<char>(std::tolower(static_cast<unsigned char>(c)));return text;};
+        const auto query=lower(request->query());const auto snapshot=bridge_.snapshot();
+        for(const auto& item:catalog::entries()){
+            if(!query.empty()&&lower(std::string(item.id)+" "+std::string(item.name)).find(query)==std::string::npos)continue;
+            auto* result=out->add_items();result->set_id(std::string(item.id));result->set_name(std::string(item.name));result->set_provider("NASA/JPL Horizons");result->set_reference_radius_meters(item.radiusMeters);result->set_representation("simplified sphere; not photorealistic imagery");
+            result->set_present_in_scene(snapshot&&std::any_of(snapshot->objects.begin(),snapshot->objects.end(),[&](const auto& o){return o.id==item.id;}));
+        }
+        return grpc::Status::OK;
+    }
+    template<class F>grpc::Status catalogCall(F fn){
+        if(!catalog_)return {grpc::StatusCode::UNAVAILABLE,"Catalog is not enabled"};
+        try{fn();return grpc::Status::OK;}catch(const std::out_of_range& e){return {grpc::StatusCode::NOT_FOUND,e.what()};}catch(const std::length_error& e){return {grpc::StatusCode::RESOURCE_EXHAUSTED,e.what()};}catch(const std::invalid_argument& e){return {grpc::StatusCode::INVALID_ARGUMENT,e.what()};}catch(const std::exception& e){return {grpc::StatusCode::UNAVAILABLE,e.what()};}
+    }
+    grpc::Status ImportObject(grpc::ServerContext*,const api::ImportCatalogObjectRequest* request,api::CatalogJob* out) override{
+        return catalogCall([&]{catalog::Import value{request->catalog_id(),request->object_id(),request->focus_camera(),{}};if(request->has_color_rgb())value.color=request->color_rgb();catalogJob(catalog_->job(catalog_->importObject(std::move(value))),out);});
+    }
+    grpc::Status GetJob(grpc::ServerContext*,const api::CatalogJobRequest* request,api::CatalogJob* out) override{return catalogCall([&]{catalogJob(catalog_->job(request->id()),out);});}
+    grpc::Status GetJobs(grpc::ServerContext*,const api::Empty*,api::CatalogJobs* out) override{return catalogCall([&]{for(const auto& job:catalog_->jobs())catalogJob(job,out->add_jobs());});}
+    grpc::Status RetryJob(grpc::ServerContext*,const api::CatalogJobRequest* request,api::CatalogJob* out) override{return catalogCall([&]{catalogJob(catalog_->job(catalog_->retry(request->id())),out);});}
+private:core::Bridge& bridge_;catalog::Manager* catalog_;
+
 };
 }
-struct Server::Impl {core::Bridge& bridge;Services services;std::unique_ptr<grpc::Server> server;int port=0;explicit Impl(core::Bridge& b):bridge(b),services(b){}};
-Server::Server(core::Bridge& bridge,unsigned port):impl_(std::make_unique<Impl>(bridge)){
+struct Server::Impl {core::Bridge& bridge;Services services;std::unique_ptr<grpc::Server> server;int port=0;explicit Impl(core::Bridge& b,catalog::Manager* c):bridge(b),services(b,c){}};
+Server::Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog):impl_(std::make_unique<Impl>(bridge,catalog)){
     if(port>65535)throw std::invalid_argument("Invalid gRPC port");grpc::ServerBuilder builder;
     builder.AddListeningPort("127.0.0.1:"+std::to_string(port),grpc::InsecureServerCredentials(),&impl_->port);
-    builder.RegisterService(static_cast<api::SceneService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CameraService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::TimeService::Service*>(&impl_->services));
+    builder.RegisterService(static_cast<api::SceneService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CameraService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::TimeService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CatalogService::Service*>(&impl_->services));
     builder.SetMaxReceiveMessageSize(1024*1024);builder.SetMaxSendMessageSize(4*1024*1024);
     grpc::ResourceQuota quota;quota.SetMaxThreads(16);quota.Resize(64*1024*1024);builder.SetResourceQuota(quota);
     builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::NUM_CQS,1);

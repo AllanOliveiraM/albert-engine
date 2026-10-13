@@ -46,8 +46,8 @@
     },
     {
       "path": "imagery/manifest.json",
-      "bytes": 650,
-      "sha256": "f5619bac593d7fada88a85d24ac15d184f530ef7f24d365054125ca5fc39dcf9",
+      "bytes": 727,
+      "sha256": "766374feff29312e8f266d9b15e0bbc37638bfb10b81f630a7d0021fec813984",
       "source": "Generated from the source plan in highres-sources.json",
       "license": "Imagery retains the credits in the packed SOURCES.json",
       "processing": "Ordered Git LFS parts; lossless assembly into visuals.pak"
@@ -68,11 +68,19 @@
     },
     {
       "path": "planetary-sources.json",
-      "bytes": 2238,
-      "sha256": "69b9aec3b1d31d47499fa165a24723d478465773d7ff44c58de0176470f622f4",
+      "bytes": 2357,
+      "sha256": "ec13e78ec69ce1e4de48aee431e16d8d5700c9c535e1138ebd624910646a8cee",
       "source": "NASA/PDS and USGS product inventory",
       "license": "Provenance and terms in the source plan",
       "processing": "Declared source grids, datum, credits and physical encoding"
+    },
+    {
+      "path": "imagery/mercury/manifest.json",
+      "source": "Generated imagery archive manifest",
+      "license": "Credits in the packed source records",
+      "processing": "SHA-256 verified Git LFS parts; one distribution container",
+      "bytes": 489,
+      "sha256": "9da536bac2997c3c6851a68379e9e8a78ee95586c6009185746474329c1e8f57"
     }
   ]
 }

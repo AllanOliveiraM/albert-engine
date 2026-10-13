@@ -54,9 +54,10 @@ Para compilar somente o programa visual, configure `-DALBERT_RPC=OFF`.
 | `SceneService` | `GetScene`, `GetCapabilities`, `CreateObject`, `RemoveObject`, `SetVisibility`, `PushStates`, `StreamStates` |
 | `CameraService` | `Focus`, `Orbit`, `GetCamera` |
 | `TimeService` | `GetTime` |
+| `CatalogService` | `ListObjects`, `ImportObject`, `GetJob`, `GetJobs`, `RetryJob` |
 
 `GetCapabilities` informa os formatos e limites realmente suportados. IDs dos
-corpos embarcados: `earth`, `moon`, `sun`. Eles não podem ser removidos nem ter
+corpos embarcados: `earth`, `moon`, `sun`, `mercury`. Eles não podem ser removidos nem ter
 seus estados substituídos por um cliente. Os alvos especiais `@earth-moon` e
 `@system` enquadram as vistas de contexto.
 
@@ -64,8 +65,55 @@ Objetos externos aceitam esfera, caixa e cilindro, com dimensões físicas e cor
 RGB. O eixo do cilindro é o Y local; a esfera admite dimensões diferentes por
 eixo. Nomes não precisam ser únicos; IDs precisam. Ao remover o objeto focado,
 a câmera volta à Terra. Ocultar um objeto preserva seu estado e o acompanhamento.
-Modelos, imagens externas, trajetórias desenhadas e provedores de catálogo
-serão acrescentados nos próximos marcos; não são simulados por campos ignorados.
+Modelos, imagens externas e trajetórias de objetos externos desenhadas serão
+acrescentados nos próximos marcos.
+
+## Catálogo interno e importação automática
+
+Em **☰ → Dados → Adicionar objetos**, escolha um corpo e clique em **Adicionar e
+ver**. A mesma operação está disponível por gRPC; o Albert consulta a fonte,
+cria o objeto e renova suas posições sem exigir consultas externas pelo cliente.
+
+```sh
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 mars
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 --jobs
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 --remove mars
+```
+
+No Windows, o cliente fica em
+`build\windows\src\rpc\Release\albert_catalog_client.exe`.
+O catálogo inicial contém Sol, Terra, Lua, Mercúrio, Vênus, Marte, Júpiter,
+Saturno, Urano, Netuno e Plutão. `ListObjects.query` filtra nomes/IDs. Importações
+sem assets embarcados usam **esferas simplificadas**, com raio de referência;
+não prometem imagens, anéis, relevo ou orientação detalhada. Um corpo embarcado
+já existente pode ser focado diretamente.
+
+`ImportObject` aceita ID do catálogo, ID opcional para a cena, cor opcional e
+pedido de foco. Retorna uma operação assíncrona; acompanhe `GetJob` até `TRACKING`,
+`FAILED` ou `REMOVED`. `APPLYING` ainda não significa que o objeto apareceu;
+`applied_revision` identifica a revisão efetivamente aplicada. O foco acompanha
+o alvo sem impedir órbita/zoom manuais. `GetJobs` e `RetryJob` também atendem à UI.
+
+As posições são vetores geométricos ICRF do NASA/JPL Horizons, convertidos de
+km/km/s e TDB para metros, m/s e UTC. A consulta cobre aproximadamente 30 minutos
+adiante, com amostras de cinco minutos e renovação a cada cinco minutos.
+`fetched_utc_unix_seconds` e `valid_until_utc_unix_seconds` informam a origem
+temporal dos dados. A esfera não constitui um modelo físico detalhado do corpo.
+
+`Object.provider_managed` identifica estados sob controle do provedor: clientes
+podem focar, ocultar e remover essas importações, mas `PushStates`/`StreamStates`
+são rejeitados para elas. Crie outro ID externo para transmitir uma trajetória
+própria. Remover interrompe o acompanhamento automático. Falhas posteriores
+ficam em `DEGRADED`, preservam a última curva e retentam com espera de 15–300 s;
+fora da cobertura, o último estado é mantido e marcado desatualizado.
+
+O serviço limita a oito importações na fila, 16 acompanhamentos e 64 operações
+no histórico. O adaptador Horizons é compartilhado com o render, serializa as
+consultas, mantém até 32 tabelas em memória e valida cobertura, ordem e valores.
+Cache de cinco minutos para tabelas curtas e 24 horas para órbitas; respostas
+HTTP têm limite de 4 MiB e 30 s. Nenhuma consulta ocorre por quadro. A busca
+remota de objetos arbitrários e novos provedores continuam no roadmap.
 
 ## Coordenadas e tempo
 

@@ -5,7 +5,7 @@ ROOT=pathlib.Path(__file__).resolve().parents[1]
 def module(name,file):
     spec=importlib.util.spec_from_file_location(name,ROOT/'scripts'/file);result=importlib.util.module_from_spec(spec);spec.loader.exec_module(result);return result
 
-def prepare(name,download=True,selected=None):
+def prepare(name,download=True,selected=None,publish=True):
     from osgeo import gdal
     import math
     gdal.UseExceptions();gdal.SetCacheMax(384*1024*1024)
@@ -56,8 +56,9 @@ def prepare(name,download=True,selected=None):
     provenance.write_text(json.dumps(dict(body=body,sources=sources),indent=2,ensure_ascii=False)+'\n')
     files.append(dict(path=provenance.relative_to(public).as_posix(),bytes=provenance.stat().st_size,sha256=hashlib.sha256(provenance.read_bytes()).hexdigest()))
     (public/'manifest.json').write_text(json.dumps(dict(schema='albert-tiled-assets-v1',version='v1',static=True,layers=layers,files=files),indent=2)+'\n')
-    pack.create_pack(root,name)
+    if publish:pack.create_pack(root,name)
+    else:print("Prepared body imagery; publication deferred.",flush=True)
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('body');parser.add_argument('--process-only',action='store_true');parser.add_argument('--layer',action='append');args=parser.parse_args()
-    prepare(args.body,not args.process_only,args.layer)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('body');parser.add_argument('--process-only',action='store_true');parser.add_argument('--layer',action='append');parser.add_argument('--prepare-only',action='store_true');args=parser.parse_args()
+    prepare(args.body,not args.process_only,args.layer,not args.prepare_only)

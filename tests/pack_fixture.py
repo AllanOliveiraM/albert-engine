@@ -55,6 +55,9 @@ with tempfile.TemporaryDirectory(prefix='albert-pack-') as directory:
     original=combined.read_bytes();assert original.startswith(base.read_bytes())
     argument='Z:'+str(combined).replace('/','\\') if any(pathlib.Path(s).name=='wine' for s in command) else str(combined)
     subprocess.run([*command,argument,'--collection'],check=True)
+    broken=root/'broken-trailer.pak';broken.write_bytes(original[:-8]+b'BADMAGIC')
+    invalid_argument='Z:'+str(broken).replace('/','\\') if any(pathlib.Path(s).name=='wine' for s in command) else str(broken)
+    subprocess.run([*command,invalid_argument,'--invalid'],check=True)
     # A failed assembly leaves the previously complete library intact.
     extra.with_suffix('.pakpart').write_bytes(b'broken')
     previous=combined.read_bytes()

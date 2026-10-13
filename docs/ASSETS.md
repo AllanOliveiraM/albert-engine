@@ -1,9 +1,10 @@
 # Biblioteca visual incluída
 
 A biblioteca completa está versionada em **`assets/imagery/`** usando Git LFS.
-São três partes de até 1 GiB, reunidas automaticamente em `visuals.pak` durante
+São cinco partes de até 1 GiB, reunidas automaticamente em `visuals.pak` durante
 o build, com verificação SHA-256 de cada parte e do resultado completo.
-O arquivo final tem **2.855.439.799 bytes (2,86 GB / 2,66 GiB)**.
+O arquivo final tem **4.549.090.604 bytes (4,55 GB / 4,24 GiB)**: biblioteca
+original de 2,86 GB e Mercúrio de 1,69 GB, com índice de coleção.
 As partes preservam exatamente os mesmos bytes; não reduzem a qualidade.
 
 Quem clona o projeto com Git LFS não precisa gerar as imagens novamente.
@@ -137,8 +138,8 @@ Os três blocos originais permanecem intactos; a montagem verifica cada arquivo
 e acrescenta um índice de coleção ao final de **um único `visuals.pak`**.
 Não é necessário extrair imagens nem carregar todos os planetas na GPU.
 
-A infraestrutura de Mercúrio está implementada; a inclusão do pacote de superfície
-em alta resolução depende da conclusão/verificação do download e processamento.
+Mercúrio está incluído: superfície MESSENGER 92160 × 46080 e DEM 23040 × 11520,
+cinco níveis por camada, 3.411 entradas e 1.693.650.662 bytes no pacote adicional.
 O executável só cadastra o corpo quando suas camadas estão efetivamente presentes.
 Não substitui assets ausentes por imagens de outro planeta.
 

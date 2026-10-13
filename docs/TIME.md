@@ -66,7 +66,8 @@ leap second (`LI=1/2`) é conservadoramente rejeitado nesta primeira versão,
 marcando degradação se não houver quorum; `LI=3` também é rejeitado. A passagem
 pelo segundo intercalar com precisão integral ainda é uma pendência explícita,
 não uma escala suavizada apresentada como UTC. As conversões UTC/TAI/TT/TDB
-continuam no ERFA; DUT1 e movimento polar ainda usam as aproximações já
+usam ERFA em `core/astro_time`, incluindo `eraDtdb` geocêntrico e conversão
+inversa para timestamps UTC recebidos do Horizons. DUT1 e movimento polar ainda usam as aproximações já
 documentadas pelo projeto. Timestamp recebido de um integrador permanece
 inalterado. Data local muito incorreta ainda pode impedir HTTPS por validade
 dos certificados do sistema; corrigir o relógio interno não altera essa política.

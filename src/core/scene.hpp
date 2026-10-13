@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 namespace albert::core {
 using ObjectId=std::string;
@@ -25,7 +26,7 @@ struct Object {
     ObjectId id;std::string name,source;
     Appearance appearance;
     double radiusMeters=500,defaultDistanceMeters=2000,minDistanceMeters=550;
-    bool builtin=false,visible=true;
+    bool builtin=false,visible=true,providerManaged=false;
     std::vector<Sample> samples;
 };
 struct Evaluated {Sample state;bool stale=false;};
@@ -41,6 +42,7 @@ public:
     void remove(const ObjectId& id);
     void visible(const ObjectId& id,bool enabled);
     void samples(const ObjectId& id,std::vector<Sample> values);
+    void replace(const ObjectId& id,std::vector<Sample> values);
     void builtinState(const ObjectId& id,Sample value);
     const Object& get(const ObjectId& id) const;
     const std::map<ObjectId,Object>& objects() const{return objects_;}
@@ -52,5 +54,6 @@ private:
     std::map<ObjectId,Object> objects_;
     std::uint64_t revision_=0;
 };
+bool validObjectId(std::string_view id);
 void validate(Sample& sample);
 }

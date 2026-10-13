@@ -11,6 +11,10 @@ int main(int argc,char** argv) {
     try {
         require(argc==2 || argc==3,"Pack fixture argument missing");
         const std::filesystem::path path(argv[1]);
+        if(argc==3&&std::string(argv[2])=="--invalid"){
+            bool rejected=false;try{albert::AssetPack invalid(path);}catch(const std::exception&){rejected=true;}
+            require(rejected,"Corrupted collection trailer accepted");return 0;
+        }
         albert::AssetPack pack(path);albert::DownloadProgress progress;
         const auto globe=pack.image("earth-day",{},4,progress);
         require(globe.width()==4 && globe.height()==2,"Coarse LOD dimensions");

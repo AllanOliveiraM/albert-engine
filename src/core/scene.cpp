@@ -47,8 +47,9 @@ void Scene::include(const NaturalBody& body){
 const Object& Scene::get(const ObjectId& id) const{
     const auto it=objects_.find(id);if(it==objects_.end())throw std::out_of_range("Unknown object: "+id);return it->second;
 }
+bool validObjectId(std::string_view id){return !id.empty()&&id.size()<=96&&id.front()!='@'&&std::all_of(id.begin(),id.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='-'||c=='_'||c=='.';});}
 void Scene::create(Object o){
-    if(o.id.empty()||o.id.size()>96||o.id.front()=='@'||!std::all_of(o.id.begin(),o.id.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='-'||c=='_'||c=='.';}))throw std::invalid_argument("Invalid object ID");
+    if(!validObjectId(o.id))throw std::invalid_argument("Invalid object ID");
     if(objects_.contains(o.id))throw std::invalid_argument("Object ID already exists");
     if(objects_.size()>=maxObjects)throw std::length_error("Scene object limit reached");
     if(o.name.empty()||o.name.size()>256||o.source.size()>512||o.builtin||o.appearance.shape==Shape::Builtin||
@@ -65,7 +66,7 @@ void Scene::create(Object o){
 void Scene::remove(const ObjectId& id){if(get(id).builtin)throw std::invalid_argument("Built-in objects cannot be removed");objects_.erase(id);++revision_;}
 void Scene::visible(const ObjectId& id,bool enabled){if(get(id).builtin)throw std::invalid_argument("Built-in visibility is managed by the renderer");objects_.at(id).visible=enabled;++revision_;}
 void Scene::samples(const ObjectId& id,std::vector<Sample> values){
-    if(get(id).builtin)throw std::invalid_argument("Built-in state is managed by astronomy providers");
+    if(get(id).builtin||get(id).providerManaged)throw std::invalid_argument("Object state is managed by an astronomy provider");
     if(values.empty()||values.size()>maxSamples)throw std::invalid_argument("Invalid sample batch size");
     for(auto& v:values)validate(v);
     for(size_t i=1;i<values.size();++i)if(values[i].utcSeconds<=values[i-1].utcSeconds)throw std::invalid_argument("Samples must be ordered");
@@ -76,12 +77,18 @@ void Scene::samples(const ObjectId& id,std::vector<Sample> values){
     if(target.size()>maxSamples)target.erase(target.begin(),target.end()-maxSamples);
     ++revision_;
 }
+void Scene::replace(const ObjectId& id,std::vector<Sample> values){
+    const auto& o=get(id);if(o.builtin||!o.providerManaged)throw std::invalid_argument("Only provider-managed objects accept provider replacement");
+    if(values.empty()||values.size()>maxSamples)throw std::invalid_argument("Invalid provider sample batch");
+    for(auto& s:values)validate(s);for(size_t i=1;i<values.size();++i)if(values[i].utcSeconds<=values[i-1].utcSeconds)throw std::invalid_argument("Provider samples must be ordered");
+    objects_.at(id).samples=std::move(values);++revision_;
+}
 void Scene::builtinState(const ObjectId& id,Sample s){validate(s);auto& o=objects_.at(id);if(!o.builtin)throw std::invalid_argument("Object is not built in");o.samples.assign(1,std::move(s));}
 Evaluated Scene::evaluate(const ObjectId& id,double now) const{
     if(!std::isfinite(now))throw std::invalid_argument("Invalid evaluation time");
     const auto& o=get(id);if(o.samples.empty())return {{},true};const auto& v=o.samples;
     if(now<=v.front().utcSeconds)return {v.front(),now<v.front().utcSeconds};
-    if(now>=v.back().utcSeconds)return {v.back(),!o.builtin&&now-v.back().utcSeconds>1.};
+    if(now>=v.back().utcSeconds)return {v.back(),now-v.back().utcSeconds>1.};
     const auto b=std::upper_bound(v.begin(),v.end(),now,[](double t,const Sample& s){return t<s.utcSeconds;});const auto& a=*(b-1);
     const double dt=b->utcSeconds-a.utcSeconds,t=(now-a.utcSeconds)/dt;
     Sample r=a;r.utcSeconds=now;

@@ -26,6 +26,9 @@
 #include "solids.hpp"
 #include "core/bridge.hpp"
 #include "core/time.hpp"
+#include "core/astro_time.hpp"
+#include "providers/horizons.hpp"
+#include "catalog/catalog.hpp"
 #ifdef ALBERT_HAS_RPC
 #include "rpc/server.hpp"
 #endif
@@ -44,6 +47,7 @@
 #include <iostream>
 #include <optional>
 #include <map>
+#include <set>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -125,9 +129,7 @@ namespace targets {
 const Focus Earth="earth",Moon="moon",Sun="sun",EarthMoon="@earth-moon",Overview="@system";
 }
 
-double radians(double deg) {
-    return deg * PI / 180.0;
-}
+
 
 Vector3 graphical(Vec3 p) {
     return {
@@ -141,6 +143,8 @@ void append(std::vector<float>& out, Vec3 p) {
     auto v = graphical(p);
     out.insert(out.end(), {v.x, v.y, v.z});
 }
+
+double radians(double degrees){return degrees*PI/180.;}
 
 Vec3 geodetic(double latDeg, double lonDeg, double h = 0) {
     double lat = radians(latDeg);
@@ -167,38 +171,8 @@ double jdUTC() {
     return 2440587.5 + albert::time::clock().utcSeconds()/86400.;
 }
 
-double jdTT(double utc) {
-    int year, month, day;
-    double fraction;
-
-    if (eraJd2cal(
-        2400000.5, utc - 2400000.5,
-        &year, &month, &day, &fraction
-    ) != 0) {
-        throw std::runtime_error("Data UTC invalida");
-    }
-
-    double leap = 0;
-
-    if (eraDat(year, month, day, fraction, &leap) < 0) {
-        throw std::runtime_error("Erro na escala UTC");
-    }
-
-    return utc + (leap + 32.184) / 86400.0;
-}
-
-double jdTDB(double utc) {
-    double tt = jdTT(utc);
-
-    double g = radians(
-        357.53 + 0.9856003 * (tt - 2451545.0)
-    );
-
-    return tt + (
-        0.001658 * std::sin(g) +
-        0.000014 * std::sin(2 * g)
-    ) / 86400.0;
-}
+double jdTT(double utc){return albert::astro::julianTT(utc);}
+double jdTDB(double utc){return albert::astro::julianTDB(utc);}
 
 Matrix4 earthOrientation(double utc) {
     double tt = jdTT(utc);
@@ -235,142 +209,11 @@ Matrix4 earthOrientation(double utc) {
 
 using albert::httpGet;
 
-std::string encode(const std::string& value) {
-    CURL* curl = curl_easy_init();
-    if (!curl) throw std::runtime_error("CURL indisponivel");
-
-    char* escaped = curl_easy_escape(
-        curl, value.c_str(), static_cast<int>(value.size())
-    );
-
-    if (!escaped) {
-        curl_easy_cleanup(curl);
-        throw std::runtime_error("Erro na URL");
-    }
-
-    std::string result(escaped);
-    curl_free(escaped);
-    curl_easy_cleanup(curl);
+std::vector<State> queryHorizons(int body,const std::string& center,double start,double end,const std::string& step,albert::DownloadProgress* progress=nullptr){
+    const auto table=albert::providers::horizons().query({body,center,(start-2440587.5)*86400.,(end-2440587.5)*86400.,step},progress);
+    std::vector<State> result;result.reserve(table.points.size());
+    for(const auto& point:table.points)result.push_back({point.jdTDB,{point.positionMeters.x/1000.,point.positionMeters.y/1000.,point.positionMeters.z/1000.},{point.velocityMetersPerSecond.x/1000.,point.velocityMetersPerSecond.y/1000.,point.velocityMetersPerSecond.z/1000.}});
     return result;
-}
-
-std::string dateString(double unixSeconds) {
-    std::time_t t =
-        static_cast<std::time_t>(std::floor(unixSeconds));
-
-    const auto utc = albert::utcTime(t);
-
-    std::ostringstream out;
-    out << std::put_time(&utc, "%Y-%m-%d %H:%M:%S");
-    return out.str();
-}
-
-// ----------------------------------------
-// JPL Horizons
-// ----------------------------------------
-
-std::string horizonsURL(
-    int body,
-    const std::string& center,
-    double startUTC,
-    double endUTC,
-    const std::string& step
-) {
-    auto tdbSeconds = [](double utc) {
-        return (jdTDB(utc) - 2440587.5) * 86400.0;
-    };
-
-    std::vector<std::pair<std::string, std::string>> args = {
-        {"format", "text"},
-        {"COMMAND", "'" + std::to_string(body) + "'"},
-        {"OBJ_DATA", "NO"},
-        {"MAKE_EPHEM", "YES"},
-        {"EPHEM_TYPE", "VECTORS"},
-        {"CENTER", "'" + center + "'"},
-        {"REF_PLANE", "FRAME"},
-        {"REF_SYSTEM", "ICRF"},
-        {"OUT_UNITS", "KM-S"},
-        {"VEC_TABLE", "2"},
-        {"VEC_LABELS", "NO"},
-        {"VEC_CORR", "NONE"},
-        {"CSV_FORMAT", "YES"},
-        {"START_TIME", "'" + dateString(tdbSeconds(startUTC)) + "'"},
-        {"STOP_TIME", "'" + dateString(tdbSeconds(endUTC)) + "'"},
-        {"STEP_SIZE", "'" + step + "'"}
-    };
-
-    std::string url =
-        "https://ssd.jpl.nasa.gov/api/horizons.api?";
-
-    for (const auto& [key, value] : args) {
-        if (url.back() != '?') url += "&";
-        url += key + "=" + encode(value);
-    }
-
-    return url;
-}
-
-std::vector<State> parseVectors(const std::string& text) {
-    size_t begin = text.find("$$SOE");
-    size_t end = text.find("$$EOE");
-
-    if (begin == std::string::npos ||
-        end == std::string::npos || end <= begin) {
-        throw std::runtime_error("Resposta Horizons invalida");
-    }
-
-    std::istringstream input(
-        text.substr(begin + 5, end - begin - 5)
-    );
-
-    std::vector<State> states;
-    std::string line;
-
-    while (std::getline(input, line)) {
-        std::stringstream stream(line);
-        std::vector<std::string> fields;
-        std::string field;
-
-        while (std::getline(stream, field, ',')) {
-            fields.push_back(field);
-        }
-
-        if (fields.size() < 8) continue;
-
-        State s;
-        s.jd = std::stod(fields[0]);
-        s.position = {
-            std::stod(fields[2]),
-            std::stod(fields[3]),
-            std::stod(fields[4])
-        };
-        s.velocity = {
-            std::stod(fields[5]),
-            std::stod(fields[6]),
-            std::stod(fields[7])
-        };
-
-        states.push_back(s);
-    }
-
-    if (states.size() < 2) {
-        throw std::runtime_error("Efemerides insuficientes");
-    }
-
-    return states;
-}
-
-std::vector<State> queryHorizons(
-    int body,
-    const std::string& center,
-    double start,
-    double end,
-    const std::string& step,
-    albert::DownloadProgress* progress = nullptr
-) {
-    return parseVectors(
-        httpGet(horizonsURL(body, center, start, end, step), progress)
-    );
 }
 
 Ephemerides loadEphemerides(albert::DownloadProgress* progress = nullptr, int offset = 0) {
@@ -972,6 +815,7 @@ int albert::runRenderer(int argc, char** argv) {
         albert::VisualSettings visualSettings;
         albert::core::Scene registry;
         albert::core::Bridge commands;
+        albert::catalog::Manager catalog(commands,albert::providers::horizons());
 #ifdef ALBERT_HAS_RPC
         std::unique_ptr<albert::rpc::Server> rpc;
 #endif
@@ -1038,7 +882,12 @@ int albert::runRenderer(int argc, char** argv) {
         auto targetFor = [&](const Focus& f) {return albert::renderPosition(registry.evaluate(targetId(f),(jdUTC()-2440587.5)*86400.).state.positionMeters,sceneOrigin);};
         auto distanceFor = [&](const Focus& f) -> float {
             if(f==targets::EarthMoon)return 180.f;
-            if(f==targets::Overview)return 65000.f;
+            if(f==targets::Overview){
+                double extent=0;const double now=timeService.utcSeconds();
+                for(const auto& [id,object]:registry.objects())if(object.visible){const auto p=registry.evaluate(id,now).state.positionMeters;extent=std::max(extent,std::hypot(p.x,p.y,p.z)+object.radiusMeters);}
+                const double angle=std::atan(std::tan(camera->fov*PI/360.)*std::min(1.f,camera->aspect));
+                return static_cast<float>(std::max(65000.,extent/albert::core::earthRadiusMeters/std::sin(angle)*1.15));
+            }
             return static_cast<float>(registry.get(f).defaultDistanceMeters/albert::core::earthRadiusMeters);
         };
         auto radiusFor = [&](const Focus& f) -> float {return f.front()=='@' ? 0.f : static_cast<float>(registry.get(f).radiusMeters/albert::core::earthRadiusMeters);};
@@ -1071,6 +920,7 @@ int albert::runRenderer(int argc, char** argv) {
         float resetZoomProgress = 0.f;
         float detailLoaderAge=0.f,detailLoaderAlpha=0.f;
         int menuPage = 0;
+        int catalogSelection=5;std::string catalogError;
         float zoomTarget = 3.5f, zoomDisplayed = 3.5f;
         // Start with the day/terminator visible, independent of UTC season.
         Vector3 initialSun = graphical(interpolate(ephemerides.sun, jdTDB(jdUTC())));
@@ -1159,7 +1009,7 @@ int albert::runRenderer(int argc, char** argv) {
                 }
                 if(focus.front()!='@' && !registry.get(focus).builtin) {
                     const auto state=registry.evaluate(focus,(jdUTC()-2440587.5)*86400.);
-                    ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : "Dados fornecidos pelo integrador");
+                    ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : registry.get(focus).providerManaged ? "Posicoes reais; visual simplificado" : "Dados fornecidos pelo integrador");
                 }
                 ImGui::TextDisabled("Arraste para girar. Role para aproximar.");
                 if (compact) focusSelector(true);
@@ -1253,6 +1103,27 @@ int albert::runRenderer(int argc, char** argv) {
                         ImGui::BeginDisabled(cloudSync.active || cloudSync.detailActive());
                         if (ImGui::Button("Tentar novamente", ImVec2(-1, 36))) { visualSettings.clouds=true; cloudSync.refresh(); }
                         ImGui::EndDisabled();
+                    }
+                    ImGui::Spacing();
+                    if(ImGui::CollapsingHeader("Adicionar objetos")){
+                        const auto items=albert::catalog::entries();
+                        ImGui::TextWrapped("Catalogo inicial do Sistema Solar. Posicoes reais; esfera simplificada para objetos sem imagens incluidas.");
+                        if(ImGui::BeginCombo("##Catalogo",items[catalogSelection].name.data())){
+                            for(size_t i=0;i<items.size();++i)if(ImGui::Selectable(items[i].name.data(),catalogSelection==static_cast<int>(i)))catalogSelection=static_cast<int>(i);
+                            ImGui::EndCombo();
+                        }
+                        const auto& item=items[catalogSelection];const std::string id(item.id);const bool present=registry.objects().contains(id);
+                        if(ImGui::Button(present?"Ver objeto":"Adicionar e ver",ImVec2(-1,34))){
+                            try{if(present){if(!registry.get(id).builtin&&!registry.get(id).visible)registry.visible(id,true);setFocus(id);}else catalog.importObject({id,{},true,{}});catalogError.clear();}catch(const std::exception& e){catalogError=e.what();}
+                        }
+                        if(!catalogError.empty()){ImGui::TextWrapped("Nao foi possivel concluir. Tente novamente.");if(ImGui::CollapsingHeader("Detalhes da consulta"))ImGui::TextWrapped("%s",catalogError.c_str());}
+                        auto jobs=catalog.jobs();std::set<std::string> shown;
+                        for(auto i=jobs.rbegin();i!=jobs.rend();++i){const auto& job=*i;if(!shown.insert(job.objectId).second)continue;
+                            ImGui::PushID(static_cast<int>(job.id));ImGui::Separator();ImGui::TextWrapped("%s: %s",albert::catalog::entry(job.catalogId).name.data(),albert::catalog::stageName(job.stage));
+                            if(!job.error.empty()){ImGui::TextWrapped(job.stage==albert::catalog::Stage::Degraded?"Ultimos dados mantidos; nova tentativa automatica.":"Consulta indisponivel. Verifique a conexao e tente novamente.");if(ImGui::CollapsingHeader("Detalhes da consulta"))ImGui::TextWrapped("%s",job.error.c_str());}
+                            if(job.stage==albert::catalog::Stage::Failed||job.stage==albert::catalog::Stage::Removed){if(ImGui::Button("Tentar novamente"))try{catalog.retry(job.id);catalogError.clear();}catch(const std::exception& e){catalogError=e.what();}}
+                            ImGui::PopID();
+                        }
                     }
                     ImGui::Spacing();
                     if (ImGui::CollapsingHeader("Cache e detalhes visuais")) {
@@ -1365,7 +1236,7 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::TextDisabled("%02d:%02d:%02d UTC", time.tm_hour, time.tm_min, time.tm_sec);
                 if(timing.quality==albert::time::Quality::Local)ImGui::TextColored(ImVec4(1,.7f,.4f,1),"Horario local");
                 else if(timing.quality!=albert::time::Quality::Synchronized)ImGui::TextColored(ImVec4(1,.7f,.4f,1),"Horario estimado");
-                else if (refreshing || refreshingOrbits || cloudSync.active) ImGui::TextColored(ImVec4(.4f,.85f,.9f,1), "Atualizando dados");
+                else if (refreshing || refreshingOrbits || cloudSync.active || catalog.busy()) ImGui::TextColored(ImVec4(.4f,.85f,.9f,1), "Atualizando dados");
                 else if (!cloudSync.error.empty() || !refreshError.empty()) ImGui::TextColored(ImVec4(1,.7f,.4f,1), "Atualizacao pendente");
                 else ImGui::TextColored(ImVec4(.4f,.85f,.7f,1), "Dados sincronizados");
                 ImGui::End();
@@ -1591,6 +1462,7 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::Remove>) {if(registry.get(value.id).builtin)throw std::invalid_argument("Built-in objects cannot be removed");if(focus==value.id)setFocus(targets::Earth);registry.remove(value.id);}
                     else if constexpr(std::is_same_v<T,albert::core::Visibility>) registry.visible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Append>) registry.samples(value.id,std::move(value.values));
+                    else if constexpr(std::is_same_v<T,albert::core::Replace>)registry.replace(value.id,std::move(value.values));
                     else if constexpr(std::is_same_v<T,albert::core::Focus>) setFocus(value.id,value.reset);
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
@@ -1610,42 +1482,16 @@ int albert::runRenderer(int argc, char** argv) {
             double utc = 2440587.5+frameTime.utcSeconds/86400.;
             double tdb = jdTDB(utc);
 
+            registry.builtinState("earth",{frameTime.utcSeconds,{0,0,0}});
             try {
                 Vec3 sunState = interpolate(ephemerides.sun, tdb);
                 Vec3 moonState = interpolate(ephemerides.moon, tdb);
                 Vec3 earthHelio = interpolate(orbits.earth, tdb);
 
                 const double timestamp=frameTime.utcSeconds;
-                registry.builtinState("earth",{timestamp,{0,0,0}});
                 registry.builtinState("moon",{timestamp,{moonState.x*1000.,moonState.y*1000.,moonState.z*1000.}});
                 registry.builtinState("sun",{timestamp,{sunState.x*1000.,sunState.y*1000.,sunState.z*1000.}});
                 for(const auto& [id,samples]:ephemerides.bodies){const auto value=interpolate(samples,tdb);registry.builtinState(id,{timestamp,{value.x*1000.,value.y*1000.,value.z*1000.}});}
-                const auto nextOriginId=targetId(focus);
-                const auto nextOrigin=registry.evaluate(nextOriginId,timestamp).state.positionMeters;
-                const auto shift=albert::renderPosition(sceneOrigin,nextOrigin);
-                if(originId!=nextOriginId){camera->position.add(shift);controls.target.add(shift);originId=nextOriginId;}
-                if(transition.active)transition.startTarget.add(shift);
-                sceneOrigin=nextOrigin;
-                objects.sync(registry,timestamp,sceneOrigin);
-                earthPosition.copy(earth->position);
-                sunPosition.copy(sun->position);
-                moonPosition.copy(moon->position);
-                bordersObject->position.copy(earthPosition);
-
-                sun->position.copy(sunPosition);
-                moon->position.copy(moonPosition);
-
-                Vector3 direction = sunPosition;direction.sub(earthPosition);
-                direction.normalize();
-                lightTarget->position.copy(focus == targets::Moon ? moonPosition : earthPosition);
-                sunlight->position.copy(direction).multiplyScalar(150.f).add(lightTarget->position);
-                sun->lookAt(earthPosition);
-                moon->setRotationFromMatrix(albert::moonOrientation(tdb));
-
-                auto rotation = earthOrientation(utc);
-                earth->setRotationFromMatrix(rotation);
-                bordersObject->setRotationFromMatrix(rotation);
-
                 // Orbitas heliocentricas convertidas
                 // para a origem geocentrica da cena.
                 earthOrbit->origin=earthHelio;
@@ -1663,6 +1509,34 @@ int albert::runRenderer(int argc, char** argv) {
                 dataValid = false;
                 refreshError = e.what();
             }
+
+            // Provider failure holds built-ins; independent objects and camera still advance.
+            const auto nextOriginId=targetId(focus);
+            const auto nextOrigin=registry.evaluate(nextOriginId,frameTime.utcSeconds).state.positionMeters;
+            const auto shift=albert::renderPosition(sceneOrigin,nextOrigin);
+            if(originId!=nextOriginId){camera->position.add(shift);controls.target.add(shift);originId=nextOriginId;}
+            if(transition.active)transition.startTarget.add(shift);
+            sceneOrigin=nextOrigin;
+            objects.sync(registry,frameTime.utcSeconds,sceneOrigin);
+            earthPosition.copy(earth->position);
+            sunPosition.copy(sun->position);
+            moonPosition.copy(moon->position);
+            bordersObject->position.copy(earthPosition);
+
+            sun->position.copy(sunPosition);
+            moon->position.copy(moonPosition);
+
+            Vector3 direction = sunPosition;direction.sub(earthPosition);
+            direction.normalize();
+            lightTarget->position.copy(focus == targets::Moon ? moonPosition : earthPosition);
+            sunlight->position.copy(direction).multiplyScalar(150.f).add(lightTarget->position);
+            sun->lookAt(earthPosition);
+            moon->setRotationFromMatrix(albert::moonOrientation(tdb));
+
+            auto rotation = earthOrientation(utc);
+            earth->setRotationFromMatrix(rotation);
+            bordersObject->setRotationFromMatrix(rotation);
+
 
             orbitVisibility=albert::animateValue(orbitVisibility,showOrbits ? 1.f : 0.f,dt);
             borderVisibility=albert::animateValue(borderVisibility,visualSettings.borders ? 1.f : 0.f,dt);
@@ -1780,6 +1654,8 @@ int albert::runRenderer(int argc, char** argv) {
 
             stars->position.copy(camera->position);
             const float distance = camera->position.distanceTo(controls.target);
+            controls.maxDistance=std::max(65000.f,distanceFor(targets::Overview)*2.f);
+            camera->farPlane=std::max(100000.f,controls.maxDistance*2.f);
             const float bodyRadius = radiusFor(focus);
             const float clearance = std::max(1e-8f, distance - bodyRadius);
             camera->nearPlane = std::clamp(std::min(distance * .02f, clearance * .25f), 1e-9f, 100.f);
@@ -1877,7 +1753,7 @@ int albert::runRenderer(int argc, char** argv) {
                 material->uniforms.at("nearClip").setValue(camera->nearPlane);
                 material->uniforms.at("visibility").setValue(borderVisibility);
             }
-            if(rpcPort) {
+            if(rpcPort||catalog.active()) {
                 const double r=albert::core::earthRadiusMeters;
                 auto snapshot=registry.snapshot(frameTime.utcSeconds,{focus,
                     {sceneOrigin.x+camera->position.x*r,sceneOrigin.y-camera->position.z*r,sceneOrigin.z+camera->position.y*r},
@@ -1888,7 +1764,7 @@ int albert::runRenderer(int argc, char** argv) {
             ui.render();
 #ifdef ALBERT_HAS_RPC
             if(rpcPort && !rpc && introductionElapsed>=introductionDuration) {
-                rpc=std::make_unique<albert::rpc::Server>(commands,*rpcPort);
+                rpc=std::make_unique<albert::rpc::Server>(commands,*rpcPort,&catalog);
                 std::cout<<"gRPC: 127.0.0.1:"<<rpc->port()<<std::endl;
             }
 #endif
@@ -1900,6 +1776,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
         });
 
+        catalog.close();
         commands.close();
 #ifdef ALBERT_HAS_RPC
         rpc.reset();

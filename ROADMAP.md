@@ -89,16 +89,34 @@ quadros. NTS e tratamento integral de leap second continuam pendentes;
 esta entrega não declara autenticação criptográfica. Políticas e limites em
 [TIME.md](docs/TIME.md).
 
-**Sequência:** M3, o primeiro planeta adicional, e M4, a primeira integração interna de
-dados. Inventário inicial de Mercúrio/Marte em
-[PLANETARY_ASSETS.md](docs/PLANETARY_ASSETS.md); M3 está em andamento: descritor de sólido, orientação IAU validada contra
-CSPICE, Horizons/órbita, shader solar e recortes por corpo implementados. O DEM de
-Mercúrio foi processado; o download da superfície completa ainda está em andamento.
-Pacote adicional mantém os blocos LFS existentes intactos e resulta em um único
-arquivo no build. Os 16 testes Linux, build Windows/MinGW e testes gráficos,
-orientação e pacote via Wine passaram. Mercúrio ainda não está habilitado na
-biblioteca publicada; faltam superfície, pacote e conferência visual final.
-M4–M7 seguem pendentes.
+**M3 — primeiro planeta embarcado entregue.** Mercúrio com superfície MESSENGER
+92160 × 46080, relevo de 16 bits, cinco níveis por camada, orientação IAU/NAIF
+validada contra CSPICE, iluminação solar própria, efemérides/órbita e seleção
+por ID. O pacote adicional tem 1,69 GB; a biblioteca completa, 4,55 GB, continua
+em um arquivo no build. Os blocos LFS anteriores permanecem intactos. Detalhes
+são preparados em worker, enviados em parcelas e revelados com transição de
+textura/relevo; os recursos regionais são liberados ao deixar o corpo.
+Proveniência e limites em [PLANETARY_ASSETS.md](docs/PLANETARY_ASSETS.md).
+
+**M4 — primeiro catálogo interno entregue.** UI e gRPC usam o mesmo serviço para
+listar/importar 11 corpos conhecidos e atualizar posições via Horizons. Corpos
+sem imagens embarcadas usam esferas identificadas como simplificadas. Operações
+assíncronas, limites, cache compartilhado, validade, retentativa, remoção e estados
+sob propriedade do provedor foram implementados. Conversões UTC/TT/TDB usam
+ERFA geocêntrico. Falhas de efemérides dos corpos embarcados não interrompem a
+atualização dos objetos independentes. Contrato/exemplo em [RPC.md](docs/RPC.md).
+
+Validação M3/M4: 19 testes Linux passaram, incluindo HTTP local, cache/cancelamento,
+importação/renovação/falha/recuperação e catálogo por transporte gRPC real.
+Build Windows/MinGW concluído; catálogo, provedores, gráficos e executável
+completo passaram pelo Wine. A conferência gráfica Linux usou imagens reais
+de Mercúrio e importou Marte da fonte pública, mantendo órbita/zoom manuais e
+remoção do alvo. GPU física e Windows nativo ainda precisam de validação própria.
+Nenhuma distribuição foi gerada.
+
+**Sequência:** M5 em cortes independentes: primeiro conteúdo externo visual,
+seguido de camadas; M6 amplia planetas/sistemas progressivamente. M7 continua
+pendente. NTS/leap seconds integrais permanecem no endurecimento de F23.
 
 ## 1. Visão e decisões de produto
 
@@ -650,7 +668,7 @@ Dentro de cada faixa, a ordem indicada é a recomendada, respeitando as dependê
 | F22 | Catálogo amplo de provedores e novas classes de camadas | Valor variável por caso de uso | Média–baixa no conjunto | Grande | Expandir F14/F18 após validar demanda, termos, limites e manutenção de cada fonte |
 
 **Faixas de execução:** M0–M2B e primeiro corte de M2C entregues nos cortes acima;
-NTS/leap second seguem como endurecimento de F23. M3 é a próxima expansão de conteúdo. F11–F20 seguem em
+NTS/leap second seguem como endurecimento de F23. M3/M4 foram entregues nos cortes acima. F12–F20 seguem em
 entregas incrementais após o MVP; F21–F22 como expansão continuada. F07 pode
 ser investigada junto à fundação. Os IDs não impõem uma fila rígida: por exemplo,
 F14 pode preceder F12 se importar objetos existentes tiver mais valor imediato.

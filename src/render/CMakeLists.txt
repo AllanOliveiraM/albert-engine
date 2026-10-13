@@ -10,16 +10,13 @@ target_include_directories(albert_imgui SYSTEM PUBLIC
     ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_link_libraries(albert_imgui PUBLIC glfw ${CMAKE_DL_LIBS})
 
-add_library(albert_download STATIC download.cpp)
-target_link_libraries(albert_download PUBLIC CURL::libcurl)
-target_include_directories(albert_download PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(albert_render STATIC application.cpp solids.cpp objects.cpp visuals.cpp uploads.cpp paths.cpp borders.cpp clouds.cpp asset_pack.cpp cache.cpp regional.cpp wms.cpp)
 target_include_directories(albert_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${threepp_SOURCE_DIR}/src/external/stb ${threepp_SOURCE_DIR}/src/external/glad)
 target_link_libraries(albert_render PRIVATE threepp::threepp
     nlohmann_json::nlohmann_json albert_imgui albert_download
-    Threads::Threads albert_erfa)
-target_link_libraries(albert_render PUBLIC albert_core)
+    Threads::Threads albert_erfa albert_providers albert_catalog)
+target_link_libraries(albert_render PUBLIC albert_core albert_download)
 set(ALBERT_ASSET_PACK "${PROJECT_BINARY_DIR}/imagery/visuals.pak" CACHE FILEPATH "Assembled local imagery library")
 target_compile_definitions(albert_render PRIVATE ALBERT_DEVELOPMENT_PACK_PATH="${ALBERT_ASSET_PACK}")
 if(MSVC)

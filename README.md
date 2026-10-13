@@ -24,8 +24,9 @@ espaciais**. Você pode navegar pela interface ou conectar outro programa à API
 gRPC para criar objetos, transmitir seus movimentos e acompanhar um alvo com a
 câmera. A renderização, a navegação e as animações ficam dentro do Albert.
 
-Hoje, o conteúdo embarcado inclui **Terra, Lua e Sol**. Objetos adicionais podem
-ser criados pela API como esferas, caixas e cilindros. Novos planetas, luas,
+Hoje, o conteúdo embarcado inclui **Terra, Lua, Sol e Mercúrio**. O catálogo interno permite
+importar outros planetas com posições reais e visual simplificado. Objetos
+próprios podem ser criados pela API como esferas, caixas e cilindros. Novos planetas, luas,
 anéis, modelos de veículos, camadas de mapas e provedores de dados estão no
 [roadmap](ROADMAP.md).
 
@@ -37,10 +38,11 @@ anéis, modelos de veículos, camadas de mapas e provedores de dados estão no
 | Escala física | Dimensões e distâncias reais, Terra WGS84 e orientação dos corpos |
 | Visualização | Superfícies detalhadas, relevo regional, iluminação solar, atmosfera terrestre e luzes das cidades |
 | Zoom | Detalhes carregados do disco conforme a região visível e a aproximação |
-| Órbitas | Trajetórias da Terra e Lua, com cores e fades para distinguir passado e futuro |
+| Órbitas | Trajetórias dos corpos embarcados, com cores e fades para distinguir passado e futuro |
 | Céu | Estrelas baseadas em catálogo astronômico, com posições e brilhos relativos |
 | Nuvens | Observações de satélite opcionais, atualizadas automaticamente quando ativadas |
 | Navegação | Foco por objeto, órbita manual, zoom e transições animadas |
+| Catálogo interno | Importação de planetas pela interface ou gRPC, com posições reais e acompanhamento automático |
 | Controle externo | API gRPC local para consultar a cena, criar/remover objetos e transmitir posição, velocidade e orientação |
 | Distribuição | Executável portátil para Linux e Windows, com a biblioteca visual acompanhando o programa |
 
@@ -58,7 +60,7 @@ estão disponíveis pela API. Esta versão ainda não autentica NTP com NTS;
 [funcionamento e limites](docs/TIME.md).
 
 **As imagens estáticas acompanham o aplicativo.** Superfícies, luzes das cidades,
-relevo e referência solar estão em uma biblioteca de **2,86 GB**. Na distribuição,
+relevo e referência solar estão em uma biblioteca de aproximadamente **4,55 GB**. Na distribuição,
 ela fica em um único `assets/visuals.pak`. Aproximar a câmera carrega recortes
 mais detalhados dessa biblioteca; a resolução máxima depende dos dados de origem.
 
@@ -116,7 +118,7 @@ Tenha o Git para Windows com o componente **Git LFS** instalado.
 .\make.cmd run
 ```
 
-O build reúne as três partes das imagens em `visuals.pak` e verifica sua
+O build reúne as partes das imagens em `visuals.pak` e verifica sua
 integridade. Não é necessário juntar os arquivos manualmente nem usar Docker
 na compilação nativa. `make run` prepara apenas o aplicativo; `make test`
 compila e executa os testes. No Windows, use `.\make.cmd test`.
@@ -130,7 +132,7 @@ git lfs install --local
 git lfs pull
 ```
 
-Aguarde o download das três partes, **2,86 GB no total**, e rode novamente
+Aguarde o download dos arquivos, **aproximadamente 4,55 GB no total**, e rode novamente
 `make run` ou `.\make.cmd run`. Se `git lfs` não for reconhecido, repita o setup
 no Linux ou instale o componente Git LFS do Git para Windows.
 
@@ -147,6 +149,7 @@ as imagens e não precisa de Git LFS.
 - Ative **Nuvens em tempo real** em **Cena** para buscar as observações automaticamente.
 - O brilho auxiliar da Terra e Lua ajuda a enxergar o lado escuro; começa desligado e é ajustável.
 - Em **Dados**, acompanhe as atualizações, retente consultas e gerencie o cache.
+- Em **Dados → Adicionar objetos**, importe planetas com posições reais; os que ainda não têm imagens embarcadas aparecem como esferas simplificadas.
 - Em **Dados → Manutenção dos arquivos**, recarregue as texturas ou limpe e baixe as nuvens novamente.
 
 ## Programar cenas com gRPC
@@ -173,8 +176,8 @@ O [guia gRPC](docs/RPC.md) traz os comandos Windows, contrato, coordenadas,
 limites, streaming e remoção do exemplo.
 
 Essa base permite construir integradores de simulação, ferramentas educativas
-e clientes para assistentes de IA. O catálogo interno de APIs públicas, modelos
-externos e camadas geográficas ainda fazem parte das próximas entregas.
+e clientes para assistentes de IA. O primeiro catálogo interno já reutiliza o Horizons. Modelos externos, camadas
+geográficas e novas fontes públicas fazem parte das próximas entregas.
 
 ## Criar uma versão para compartilhar
 
@@ -198,8 +201,8 @@ O núcleo mantém estados físicos em dupla precisão, a renderização usa
 threepp/OpenGL e Dear ImGui, e as integrações usam libcurl, ERFA, JSON e
 gRPC/Protobuf. O CMake declara as versões e os hashes das dependências.
 
-A prioridade seguinte é **tempo confiável**, seguida da expansão gradual dos
-corpos embarcados, provedores internos de dados, modelos e camadas. Cada etapa
+As próximas entregas ampliam os corpos embarcados, modelos externos e camadas,
+além de aprofundar a precisão do tempo e os provedores internos de dados. Cada etapa
 deve preservar precisão, fluidez e compatibilidade Linux/Windows.
 
 - [Roadmap e andamento](ROADMAP.md)

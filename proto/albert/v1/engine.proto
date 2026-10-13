@@ -26,6 +26,7 @@ message Object {
   Geometry geometry=4; State state=5;
   bool builtin=6; bool visible=7; bool stale=8;
   double radius_meters=9;
+  bool provider_managed=10;
 }
 message CreateObjectRequest { string id=1; string name=2; string source=3; Geometry geometry=4; State initial_state=5; }
 message ObjectRequest { string id=1; }
@@ -49,7 +50,7 @@ message Scene { uint64 revision=1; double utc_unix_seconds=2; repeated Object ob
 message FocusRequest { string id=1; bool reset_zoom=2; }
 message OrbitRequest { double azimuth_radians=1; double elevation_radians=2; optional double distance_scale=3; }
 message StreamSummary { uint64 applied_batches=1; uint64 revision=2; }
-message Capabilities { repeated ReferenceFrame frames=1; uint32 max_objects=2; uint32 max_samples_per_batch=3; repeated Geometry.Shape shapes=4; }
+message Capabilities { repeated ReferenceFrame frames=1; uint32 max_objects=2; uint32 max_samples_per_batch=3; repeated Geometry.Shape shapes=4; bool catalog_available=5; }
 service SceneService {
   rpc GetScene(Empty) returns (Scene);
   rpc GetCapabilities(Empty) returns (Capabilities);
@@ -73,4 +74,35 @@ service CameraService {
 service TimeService {
   // Same immutable frame snapshot as GetScene. No OS clock modification.
   rpc GetTime(Empty) returns (ClockStatus);
+}
+
+message CatalogQuery { string query=1; }
+message CatalogItem {
+  string id=1; string name=2; string provider=3;
+  double reference_radius_meters=4; bool present_in_scene=5;
+  string representation=6;
+}
+message CatalogList { repeated CatalogItem items=1; }
+message ImportCatalogObjectRequest {
+  string catalog_id=1; string object_id=2;
+  bool focus_camera=3; optional uint32 color_rgb=4;
+}
+message CatalogJob {
+  enum Stage { QUEUED=0; LOADING=1; APPLYING=2; TRACKING=3; DEGRADED=4; FAILED=5; REMOVED=6; }
+  uint64 id=1; string catalog_id=2; string object_id=3; Stage stage=4;
+  string error=5; double fetched_utc_unix_seconds=6;
+  double valid_until_utc_unix_seconds=7; uint64 applied_revision=8;
+}
+message CatalogJobRequest { uint64 id=1; }
+message CatalogJobs { repeated CatalogJob jobs=1; }
+service CatalogService {
+  // First catalog: known Solar System bodies, real Horizons positions and
+  // explicit simplified spheres. Detailed bundled bodies are not replaced.
+  rpc ListObjects(CatalogQuery) returns (CatalogList);
+  // Returns an asynchronous job; TRACKING confirms owner-thread application.
+  // Imported objects are refreshed automatically until removed from the scene.
+  rpc ImportObject(ImportCatalogObjectRequest) returns (CatalogJob);
+  rpc GetJob(CatalogJobRequest) returns (CatalogJob);
+  rpc GetJobs(Empty) returns (CatalogJobs);
+  rpc RetryJob(CatalogJobRequest) returns (CatalogJob);
 }

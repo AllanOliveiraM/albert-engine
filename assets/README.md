@@ -3,15 +3,17 @@
 As imagens otimizadas ficam em um único **`visuals.pak`**, incluído em cada
 pasta de distribuição. O aplicativo lê blocos diretamente desse contêiner,
 conforme o zoom, sem extrair imagens nem baixar superfícies. O pacote contém
-os níveis globais e regionais, cidades, relevo terrestre/lunar e a imagem solar.
-Suas três partes são versionadas em `imagery/` com Git LFS e reunidas no build.
+os níveis globais e regionais, cidades, relevo terrestre/lunar, a imagem solar e superfície/relevo de Mercúrio.
+Suas partes são versionadas em `imagery/` com Git LFS e reunidas no build.
 O gerador preserva originais e blocos de trabalho em `asset-packs/`, fora do Git;
 esses intermediários não entram na distribuição. Veja [preparação e formato](../docs/ASSETS.md).
 
-`highres-sources.json` declara URLs, datas e créditos da biblioteca. O índice
+`highres-sources.json` e `planetary-sources.json` declaram URLs, datas, checksums
+e créditos da biblioteca. O índice
 interno do pacote guarda dimensões, níveis, codificação do relevo, bytes e SHA-256.
 As fontes são NASA Earth Observatory (Blue Marble 2004, Black Marble 2016),
-NASA/GEBCO08, NASA/GSFC/ASU/LROC WAC, NASA/LOLA e NASA/SDO/HMI.
+NASA/GEBCO08, NASA/GSFC/ASU/LROC WAC, NASA/LOLA, NASA/SDO/HMI e
+NASA/JHUAPL/CIW/USGS MESSENGER.
 São referências estáticas, com os limites e resoluções descritos na documentação.
 O mosaico lunar conserva iluminação da aquisição; o relevo vem de DEM separado.
 A imagem solar é instrumental, representa um hemisfério observado e não mostra

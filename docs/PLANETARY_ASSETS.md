@@ -1,10 +1,10 @@
 # Próximo conteúdo embarcado
 
-Inventário consultado em 13/10/2026. M3 está em andamento: registro adicional,
-orientação IAU, consulta Horizons, órbita, render de sólidos e pipeline de assets
-estão implementados. O DEM original foi baixado e processado; a superfície de
-92160 × 46080 pixels ainda está sendo baixada. Mercúrio só será habilitado quando
-seu pacote completo estiver incluído. Marte e os demais corpos seguem pendentes.
+Inventário consultado em 13/10/2026. Mercúrio está incluído com superfície,
+relevo, orientação IAU, efemérides e órbita reais. O pacote adicional de
+1.693.650.662 bytes foi preparado, verificado e integrado ao arquivo único.
+Marte e os demais corpos detalhados seguem pendentes; o catálogo interno já
+permite importá-los com posições reais e esferas explicitamente simplificadas.
 
 ## Primeiro candidato: Mercúrio
 
@@ -77,6 +77,11 @@ no escopo do roadmap, sem reutilizar mapas de outro corpo como substitutos.
   parcelas e revelados gradualmente. A região detalhada é liberada após deixar
   o corpo, mantendo a imagem global pequena disponível para nova navegação.
 
-Os 16 testes CTest Linux, renderização com fixtures, build MinGW e testes de
-orientação, pacote e gráficos pelo Wine passaram. A conferência com a superfície
-real completa e o tamanho final do pacote ainda dependem da conclusão do download.
+Validação: 19 testes CTest Linux, orientação contra CSPICE em quatro épocas,
+comparação de seis coordenadas do DEM original com os tiles finais, transporte
+gRPC real e importação pública de Marte. Build MinGW concluído; catálogo, provedores, gráficos e execução completa
+também passaram pelo Wine.
+A conferência integrada Linux abriu Mercúrio com seus assets reais, aproximou a
+câmera, importou Marte pelo catálogo, orbitou manualmente e removeu o alvo.
+O ambiente gráfico usa llvmpipe; desempenho em GPU física e Windows nativo ainda
+exigem conferência específica. Nenhuma distribuição foi gerada.

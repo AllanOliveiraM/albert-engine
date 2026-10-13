@@ -51,6 +51,9 @@ int main(int argc, char** argv) {
             if (progress.snapshot().received != 4096 || progress.snapshot().total != 4096) {
                 throw std::runtime_error("Contagem de bytes incorreta");
             }
+            failed=false;
+            try{albert::httpGet(base+"/ok",&progress,{1024,5});}catch(const std::exception& e){failed=std::string(e.what()).find("size limit")!=std::string::npos;}
+            if(!failed)throw std::runtime_error("Limite de resposta HTTP ignorado");
             progress.stage("Cancelando transferencia", 0);
             auto pending = std::async(std::launch::async, [&] {
                 try { albert::httpGet(base + "/slow", &progress); }

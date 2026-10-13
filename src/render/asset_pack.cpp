@@ -83,12 +83,16 @@ albert::AssetPack::AssetPack(fs::path path) {
         if(!stream.read(data.data(),static_cast<std::streamsize>(size)))throw std::runtime_error("Indice visual incompleto");
         const auto manifest=json::parse(data);if(manifest.at("container")!="albert-pack-v1")throw std::runtime_error("Versao visual incompativel");
         const auto start=offset+16+size,available=archiveSize-16-size;
+        std::uint64_t declaredEnd=0;
         for(const auto& entry:manifest.at("files")){
             Entry value{entry.at("offset"),entry.at("bytes"),entry.at("sha256")};
             if(value.bytes>32*1024*1024||value.offset>available||value.bytes>available-value.offset)throw std::runtime_error("Bloco visual fora do arquivo");
+            if(value.offset!=declaredEnd)throw std::runtime_error("Blocos visuais com lacunas ou sobreposicao");
+            declaredEnd=value.offset+value.bytes;
             value.offset+=start;
             if(!index->files.emplace(entry.at("path").get<std::string>(),std::move(value)).second)throw std::runtime_error("Bloco visual duplicado");
         }
+        if(declaredEnd!=available)throw std::runtime_error("Dados extras ou colecao visual incompleta");
         for(const auto& layer:manifest.at("layers")){
             const auto name=layer.at("id").get<std::string>();
             Layer value{layer.at("width"),layer.at("height"),layer.at("tile_size"),layer.at("gutter"),layer.at("max_level"),layer.at("format")};

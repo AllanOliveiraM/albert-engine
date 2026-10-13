@@ -7,12 +7,12 @@
 using namespace threepp;
 namespace {
 std::shared_ptr<Texture> colorTexture(Image image){std::vector<Image> images;images.emplace_back(std::move(image));auto t=Texture::create(std::move(images));t->colorSpace=ColorSpace::NoColorSpace;t->wrapS=TextureWrapping::Repeat;t->anisotropy=8;t->needsUpdate();return t;}
-std::shared_ptr<Texture> heightTexture(Image image){auto t=DataTexture::create(ImageData(std::move(image.data<float>())),image.width(),image.height());t->type=Type::Float;t->minFilter=t->magFilter=Filter::Linear;t->colorSpace=ColorSpace::NoColorSpace;return t;}
+std::shared_ptr<Texture> heightTexture(Image image,bool global=false){auto t=DataTexture::create(ImageData(std::move(image.data<float>())),image.width(),image.height());t->type=Type::Float;t->minFilter=t->magFilter=Filter::Linear;t->colorSpace=ColorSpace::NoColorSpace;if(global)t->wrapS=TextureWrapping::Repeat;return t;}
 std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* mask){
     auto m=ShaderMaterial::create();
     m->vertexShader=R"(
-        uniform sampler2D heightMap;
-        uniform float displacement;
+        uniform sampler2D heightMap,baseHeightMap;
+        uniform float displacement,isPatch,baseRadius,detailBlend;
         uniform vec4 bounds;
         varying vec2 vUv,vGlobalUv;
         varying vec3 vNormal,vPosition;
@@ -20,19 +20,21 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
             vUv=uv;vGlobalUv=bounds.xy+uv*bounds.zw;
             vec3 radial=normalize(position);
             vec3 p=position+radial*texture2D(heightMap,uv).r*displacement;
+            if(isPatch>0.5){float coarse=baseRadius+(texture2D(baseHeightMap,vGlobalUv).r+20.0)/6378137.0;p=radial*mix(coarse,length(position),detailBlend);}
             vec4 view=modelViewMatrix*vec4(p,1.0);
             vNormal=normalize(normalMatrix*radial);vPosition=view.xyz;
             gl_Position=projectionMatrix*view;
         }
     )";
     m->fragmentShader=R"(
-        uniform sampler2D dayMap,baseMap,heightMap,surfaceMask;
+        uniform sampler2D dayMap,baseMap,heightMap,baseHeightMap,surfaceMask;
         uniform vec3 solarDirection;
         uniform float intensity,angularRadius,masked,detailBlend;
         varying vec2 vUv,vGlobalUv;
         varying vec3 vNormal,vPosition;
         const float PI=3.141592653589793;
         vec3 linearColor(vec3 c){return mix(c/12.92,pow((c+0.055)/1.055,vec3(2.4)),step(vec3(0.04045),c));}
+        float terrain(vec2 local,vec2 global){return mix(texture2D(baseHeightMap,global).r,texture2D(heightMap,local).r,detailBlend)/6378137.0;}
         void main(){
             if(masked>0.5&&texture2D(surfaceMask,vGlobalUv).g<0.5)discard;
             vec4 sampleColor=texture2D(dayMap,vUv);
@@ -40,9 +42,9 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
             float blend=detailBlend*smoothstep(0.0,0.025,min(edge.x,edge.y));
             vec3 albedo=linearColor(mix(texture2D(baseMap,vGlobalUv).rgb,sampleColor.rgb,blend));
             vec3 normal=normalize(vNormal),sigmaX=dFdx(vPosition),sigmaY=dFdy(vPosition);
-            float height=texture2D(heightMap,vUv).r/6378137.0;
-            vec2 gradient=vec2(texture2D(heightMap,vUv+dFdx(vUv)).r/6378137.0-height,
-                texture2D(heightMap,vUv+dFdy(vUv)).r/6378137.0-height);
+            float height=terrain(vUv,vGlobalUv);
+            vec2 gradient=vec2(terrain(vUv+dFdx(vUv),vGlobalUv+dFdx(vGlobalUv))-height,
+                terrain(vUv+dFdy(vUv),vGlobalUv+dFdy(vGlobalUv))-height);
             vec3 r1=cross(sigmaY,normal),r2=cross(normal,sigmaX);float determinant=dot(sigmaX,r1);
             normal=normalize(abs(determinant)*normal-sign(determinant)*(gradient.x*r1+gradient.y*r2));
             vec3 light=normalize(solarDirection),view=normalize(-vPosition);
@@ -60,7 +62,7 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
             #include <encodings_fragment>
         }
     )";
-    m->uniforms.emplace("dayMap",Uniform(day));m->uniforms.emplace("baseMap",Uniform(day));m->uniforms.emplace("heightMap",Uniform(height));m->uniforms.emplace("surfaceMask",Uniform(mask));
+    m->uniforms.emplace("dayMap",Uniform(day));m->uniforms.emplace("baseMap",Uniform(day));m->uniforms.emplace("heightMap",Uniform(height));m->uniforms.emplace("baseHeightMap",Uniform(height));m->uniforms.emplace("isPatch",Uniform(0.f));m->uniforms.emplace("baseRadius",Uniform(0.f));m->uniforms.emplace("surfaceMask",Uniform(mask));
     m->uniforms.emplace("bounds",Uniform(Vector4(0,0,1,1)));m->uniforms.emplace("solarDirection",Uniform(Vector3(1,0,0)));
     m->uniforms.emplace("intensity",Uniform(2.4f));m->uniforms.emplace("angularRadius",Uniform(.00465f));
     m->uniforms.emplace("masked",Uniform(0.f));m->uniforms.emplace("detailBlend",Uniform(0.f));m->uniforms.emplace("displacement",Uniform(1.f/6378137.f));
@@ -82,7 +84,7 @@ struct albert::SolidBodies::Surface {
 };
 albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets){
     for(auto& asset:assets){
-        auto s=std::make_unique<Surface>();s->day=colorTexture(std::move(asset.day));s->height=heightTexture(std::move(asset.height));s->mask=colorTexture(Image(std::vector<unsigned char>(4,255),1,1));
+        auto s=std::make_unique<Surface>();s->day=colorTexture(std::move(asset.day));s->height=heightTexture(std::move(asset.height),true);s->mask=colorTexture(Image(std::vector<unsigned char>(4,255),1,1));
         s->material=material(s->day.get(),s->height.get(),s->mask.get());
         s->mesh=Mesh::create(SphereGeometry::create(static_cast<float>(core::surfaceRadius(asset.body)/core::earthRadiusMeters),192,96),s->material);
         nodes_[asset.body]=s->mesh;scene.add(s->mesh);surfaces_[asset.body]=std::move(s);
@@ -100,7 +102,7 @@ void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,
     uploads_.tick(renderer);
     if(pending_&&!uploads_.active()){
         auto images=std::move(*pending_);pending_.reset();auto& s=*surfaces_.at(images.body);s.release();s.region=std::move(images.gpu);
-        s.patchMaterial=material(s.region[0].get(),s.region[3].get(),s.mask.get());s.patchMaterial->uniforms.at("baseMap").setValue(s.day.get());
+        s.patchMaterial=material(s.region[0].get(),s.region[3].get(),s.mask.get());s.patchMaterial->uniforms.at("baseMap").setValue(s.day.get());s.patchMaterial->uniforms.at("baseHeightMap").setValue(s.height.get());s.patchMaterial->uniforms.at("isPatch").setValue(1.f);s.patchMaterial->uniforms.at("baseRadius").setValue(static_cast<float>(core::surfaceRadius(images.body)/core::earthRadiusMeters));
         const auto& r=images.region;s.patchMaterial->uniforms.at("bounds").setValue(Vector4(static_cast<float>((r.west+180.)/360.),static_cast<float>((r.south+90.)/180.),static_cast<float>((r.east-r.west)/360.),static_cast<float>((r.north-r.south)/180.)));
         s.patchMaterial->uniforms.at("displacement").setValue(0.f);s.patch=Mesh::create(std::move(images.geometry),s.patchMaterial);s.mesh->add(s.patch);s.blend=0;
         s.material->uniforms.at("surfaceMask").setValue(s.region[4].get());s.material->uniforms.at("masked").setValue(1.f);

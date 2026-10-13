@@ -247,7 +247,8 @@ de paralaxe, aberração, variabilidade estelar ou brilho fotométrico calibrado
 O tamanho dos pontos é um auxílio visual. A seleção está sob CC BY-SA 4.0,
 conforme `assets/README.md`.
 
-Posições permanecem em km/double até a conversão gráfica. A rotação terrestre
+O núcleo e os provedores mantêm posições SI/double; o adaptador legado de
+órbitas ainda usa km/double até a conversão gráfica. A rotação terrestre
 usa ERFA; DUT1 e movimento polar ainda são zero. A Lua usa a aproximação
 trigonométrica IAU_MOON do NASA/NAIF `pck00011`, validada contra CSPICE; não usa
 PCK lunar binário de alta precisão. Mapas de relevo, vegetação, cidades e manchas
@@ -431,3 +432,21 @@ Nuvens começam desligadas, sem consultas automáticas. Quando ativadas, recorte
 novos se misturam ao anterior com transição temporal, além da margem espacial.
 O loader de detalhes tem atraso de 150 ms, fade e posição fixa acima do botão de
 zoom; não muda o tamanho do painel de estado nem desloca outros controles.
+
+## Provedores e conteúdo interno
+
+`src/net/` compartilha HTTP/cancelamento; `src/providers/` valida e armazena
+vetores Horizons; `src/catalog/` gerencia importações e renovação; `src/core/`
+aplica comandos e interpola estados. UI e gRPC usam o mesmo catálogo. Apenas a
+thread gráfica modifica a cena; o worker aguarda a aplicação e expõe operações
+assíncronas com revisão, fonte, validade e falhas. O render continua atualizando
+objetos independentes quando efemérides de corpos embarcados ficam indisponíveis.
+
+`core/astro_time` usa ERFA para UTC/TAI/TT/TDB e a correção geocêntrica completa
+`eraDtdb`; não usa uma aproximação de dois termos para consultar o Horizons.
+`astronomical_providers` testa conversões, CSV, unidades, cobertura, cache,
+serialização e cancelamento. `catalog_import` testa importação/foco, atualização,
+falhas, recuperação, snapshots atrasados, propriedade do estado, remoção e RPC.
+`http_transport` exercita servidor HTTP local, truncamento, limite de
+resposta e cancelamento. As consultas públicas reais são verificações separadas:
+`providers_test --network`.

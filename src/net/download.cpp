@@ -4,6 +4,7 @@
 
 #include <array>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -31,10 +32,13 @@ void DownloadProgress::checkCancelled() const {
 }
 
 namespace {
+struct Response {std::string bytes;std::size_t limit;bool overflow=false;};
 std::size_t writeString(char* data, std::size_t size, std::size_t count, void* user) noexcept {
     try {
+        auto& response=*static_cast<Response*>(user);
+        if((size&&count>std::numeric_limits<std::size_t>::max()/size)||size*count>response.limit-response.bytes.size()){response.overflow=true;return 0;}
         const auto bytes = size * count;
-        static_cast<std::string*>(user)->append(data, bytes);
+        response.bytes.append(data, bytes);
         return bytes;
     } catch (...) {
         return 0; // Report allocation failures through CURL, never across C ABI.
@@ -54,12 +58,13 @@ int reportProgress(void* user, curl_off_t total, curl_off_t received,
 }
 } // namespace
 
-std::string httpGet(const std::string& url, DownloadProgress* progress) {
+std::string httpGet(const std::string& url, DownloadProgress* progress,HttpOptions options) {
     if (progress) progress->checkCancelled();
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), curl_easy_cleanup);
     if (!curl) throw std::runtime_error("CURL indisponivel");
 
-    std::string response;
+    if(options.maximumBytes==0||options.timeoutSeconds<1||options.timeoutSeconds>90)throw std::invalid_argument("Invalid HTTP limits");
+    Response response{{},options.maximumBytes};
     std::array<char, CURL_ERROR_SIZE> error{};
     curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 1L);
@@ -68,7 +73,7 @@ std::string httpGet(const std::string& url, DownloadProgress* progress) {
     curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl.get(), CURLOPT_ERRORBUFFER, error.data());
     curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, 90L);
+    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, options.timeoutSeconds);
     curl_easy_setopt(curl.get(), CURLOPT_LOW_SPEED_LIMIT, 100L);
     curl_easy_setopt(curl.get(), CURLOPT_LOW_SPEED_TIME, 20L);
     curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
@@ -81,11 +86,12 @@ std::string httpGet(const std::string& url, DownloadProgress* progress) {
 
     const auto code = curl_easy_perform(curl.get());
     if (progress) progress->checkCancelled();
+    if(response.overflow)throw std::runtime_error("HTTP response exceeds configured size limit");
     if (code != CURLE_OK) {
         throw std::runtime_error(std::string("HTTP: ") +
             (error[0] ? error.data() : curl_easy_strerror(code)));
     }
-    return response;
+    return std::move(response.bytes);
 }
 
 } // namespace albert
