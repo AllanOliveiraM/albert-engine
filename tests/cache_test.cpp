@@ -15,6 +15,8 @@ int main(int argc,char**argv) {
     namespace fs=std::filesystem;
     const fs::path root=argv[1];fs::remove_all(root);fs::create_directories(root/"assets");
     fs::create_directories(root/"clouds");
+    fs::create_directories(root/"ephemerides");fs::create_directories(root/"catalog");
+    std::ofstream(root/"ephemerides/current.json")<<"{}";std::ofstream(root/"catalog/current.json")<<"{}";
     auto sparse=[&](const char* name,uintmax_t mb) {
         std::ofstream f(root/name,std::ios::binary);f.seekp(static_cast<std::streamoff>(mb*1024*1024-1));f.put('x');
     };
@@ -24,9 +26,10 @@ int main(int argc,char**argv) {
     albert::Cache cache(root);cache.setLimit(128);
     require(!fs::exists(root/"assets/old.bin"));require(fs::exists(root/"assets/recent.bin"));
     require(fs::exists(root/"clouds/inflight.tmp"));require(fs::exists(root/"unrelated.bin"));
-    require(cache.bytes==70*1024*1024);
+    require(cache.bytes==70*1024*1024+4);
     albert::Cache restored(root);require(restored.limitMB==128);
     restored.clear();require(fs::exists(root/"unrelated.bin"));require(restored.bytes==0);
+    require(!fs::exists(root/"ephemerides")&&!fs::exists(root/"catalog"));
     for(double lon:{-180.,-179.9,0.,179.9,180.}) for(double lat:{-90.,0.,90.}) {
         const auto region=albert::cloudRegion(lon,lat,1.02);
         require(region.south>=-90 && region.north<=90 && region.east-region.west<=360);

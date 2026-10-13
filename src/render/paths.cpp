@@ -31,7 +31,7 @@ std::shared_ptr<ShaderMaterial> albert::orbitMaterial(float horizon) {
         }
     )";
     material->fragmentShader = R"(
-        uniform float present, horizon, dashDays, visibility;
+        uniform float present, horizon, dashDays, visibility, referenceVisibility;
         varying float vTime;
         noperspective varying float vSide;
         // Integral of a periodic pulse. Averaging its footprint preserves
@@ -51,10 +51,15 @@ std::shared_ptr<ShaderMaterial> albert::orbitMaterial(float horizon) {
             float edge=abs(vSide);
             float coverage=1.0-smoothstep(0.35,0.75,edge);
             coverage=max(coverage,0.12*(1.0-smoothstep(0.6,1.0,edge)));
-            gl_FragColor = vec4(color, visibility * coverage * fade * mix(0.78, 0.92 * dash, future));
+            float guide=referenceVisibility*.12*(1.0-smoothstep(.12,.45,edge));
+            float highlight=coverage*fade*mix(.78,.92*dash,future);
+            float alpha=guide+highlight*(1.0-guide);
+            vec3 ink=mix(vec3(.19,.30,.36),color,highlight/max(alpha,.00001));
+            gl_FragColor=vec4(ink,visibility*alpha);
             #include <encodings_fragment>
         }
     )";
+    material->uniforms.emplace("referenceVisibility",Uniform(0.f));
     material->uniforms.emplace("present", Uniform(0.f));
     material->uniforms.emplace("viewport",Uniform(Vector2(1280,720)));
     material->uniforms.emplace("nearClip",Uniform(.01f));

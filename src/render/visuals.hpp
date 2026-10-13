@@ -60,6 +60,7 @@ public:
     void setCloudImage(threepp::Image image);
     void setCloudDetail(threepp::Image image, const GeoRegion& region);
     void setRegionalImages(RegionalImages images);
+    bool releaseDistantDetails(const std::string& focus,const threepp::Vector3& camera,bool enabled,float seconds);
     void updateImageDetail(const threepp::Vector3& camera, bool enabled);
 
     std::shared_ptr<threepp::Mesh> earth, moon, sun;
@@ -93,6 +94,7 @@ private:
     std::array<std::shared_ptr<threepp::Texture>,3> imageDetail_;
     struct DetailedImage { int index; std::optional<threepp::Image> image; std::string error; };
     std::future<DetailedImage> pendingImage_;
+    std::array<float,2> detailIdle_{};
     std::array<bool,3> imageWanted_{}, imageFailed_{};
     std::chrono::steady_clock::time_point imageRetry_{};
 };

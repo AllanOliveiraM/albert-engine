@@ -8,7 +8,7 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/linux",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": "ON" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": "ON", "CMAKE_EXPORT_COMPILE_COMMANDS": "ON" }
     },
     {
       "name": "windows",
@@ -21,8 +21,8 @@
     }
   ],
   "buildPresets": [
-    { "name": "linux", "configurePreset": "linux", "jobs": 4 },
-    { "name": "windows", "configurePreset": "windows", "configuration": "Release", "jobs": 4 }
+    { "name": "linux", "configurePreset": "linux", "jobs": 2 },
+    { "name": "windows", "configurePreset": "windows", "configuration": "Release", "jobs": 2 }
   ],
   "testPresets": [
     { "name": "linux", "configurePreset": "linux", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },

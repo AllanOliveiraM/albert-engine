@@ -3,6 +3,7 @@
 #include "objects.hpp"
 #include "threepp/textures/DataTexture.hpp"
 #include <numbers>
+#include <chrono>
 #include <stdexcept>
 using namespace threepp;
 namespace {
@@ -93,6 +94,7 @@ struct albert::SolidBodies::Surface {
     std::shared_ptr<Texture> day,height,mask;
     std::array<std::shared_ptr<Texture>,5> region;
     float blend=0,inactive=0,fill=0;
+    std::chrono::steady_clock::time_point updated=std::chrono::steady_clock::now();
     void release(){
         material->uniforms.at("masked").setValue(0.f);material->uniforms.at("surfaceMask").setValue(mask.get());
         if(patch){mesh->remove(*patch);patch->geometry()->dispose();patchMaterial->dispose();patch.reset();patchMaterial.reset();}
@@ -126,7 +128,7 @@ void albert::SolidBodies::stage(RegionalImages images){
 void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,const Vector3& sun,double jd,const std::string& focus,bool details,float dt,const AuxiliaryLights& auxiliary){
     uploads_.tick(renderer);
     if(pending_&&!uploads_.active()){
-        auto images=std::move(*pending_);pending_.reset();auto& s=*surfaces_.at(images.body);s.release();s.region=std::move(images.gpu);
+        auto images=std::move(*pending_);pending_.reset();auto& s=*surfaces_.at(images.body);s.release();s.inactive=0;s.region=std::move(images.gpu);
         s.patchMaterial=material(s.region[0].get(),s.region[3].get(),s.mask.get());s.patchMaterial->uniforms.at("baseMap").setValue(s.day.get());s.patchMaterial->uniforms.at("baseHeightMap").setValue(s.height.get());s.patchMaterial->uniforms.at("isPatch").setValue(1.f);s.patchMaterial->uniforms.at("baseRadius").setValue(static_cast<float>(core::surfaceRadius(images.body)/core::earthRadiusMeters));
         const auto& r=images.region;s.patchMaterial->uniforms.at("bounds").setValue(Vector4(static_cast<float>((r.west+180.)/360.),static_cast<float>((r.south+90.)/180.),static_cast<float>((r.east-r.west)/360.),static_cast<float>((r.north-r.south)/180.)));
         s.patchMaterial->uniforms.at("displacement").setValue(0.f);s.patch=Mesh::create(std::move(images.geometry),s.patchMaterial);s.mesh->add(s.patch);s.blend=0;
@@ -148,6 +150,9 @@ void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,
         const auto aid=auxiliary.find(id);s.fill=animateValue(s.fill,aid!=auxiliary.end()&&aid->second.enabled?std::clamp(aid->second.intensity,0.f,1.5f):0.f,dt);
         for(auto* m:{s.material.get(),s.patchMaterial.get()})if(m){m->uniforms.at("cloudSurface").setValue(core::naturalBody(id)->cloudSurface?1.f:0.f);m->uniforms.at("auxiliaryStrength").setValue(s.fill);m->uniforms.at("solarDirection").setValue(light);m->uniforms.at("intensity").setValue(intensity);m->uniforms.at("angularRadius").setValue(angular);}
         s.blend=animateValue(s.blend,1.f,dt);if(s.patchMaterial)s.patchMaterial->uniforms.at("detailBlend").setValue(s.blend);
-        s.inactive=(focus==id&&details)?0.f:s.inactive+dt;if(s.inactive>3.f&&s.patch)s.release();
+        const bool nearby=camera.position.distanceTo(s.mesh->position)<static_cast<float>(core::surfaceRadius(id)/core::earthRadiusMeters)*2.4f;
+        const auto now=std::chrono::steady_clock::now();
+        const float residencySeconds=std::max(dt,std::chrono::duration<float>(now-s.updated).count());s.updated=now;
+        s.inactive=(focus==id&&details&&nearby)?0.f:s.inactive+residencySeconds;if(s.inactive>3.f&&s.patch){s.release();evicted_=true;}
     }
 }

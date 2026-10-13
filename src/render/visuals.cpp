@@ -591,6 +591,23 @@ void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
     patch->castShadow=patch->receiveShadow=true;patch->renderOrder=1;parent->add(patch);
 }
 
+bool albert::PlanetVisuals::releaseDistantDetails(const std::string& focus,const Vector3& camera,bool enabled,float seconds){
+    bool released=false;
+    for(size_t i=0;i<2;++i){auto& parent=i?moon:earth;auto& patch=i?moonDetail_:earthDetail_;
+        const bool wanted=enabled&&focus==(i?"moon":"earth")&&camera.distanceTo(parent->position)<(i?.9f:2.4f);
+        detailIdle_[i]=wanted?0.f:detailIdle_[i]+seconds;
+        if(detailIdle_[i]<3.f||!patch)continue;
+        if(i){moonMaterial_->alphaMap=opaqueMask_;moonMaterial_->needsUpdate();moonDetailMaterial_.reset();}
+        else {earthMaterial_->alphaMap=opaqueMask_;earthMaterial_->needsUpdate();earthDetailBounds_.reset();nightMaterial_->uniforms.at("nightDetailMap").setValue(textures_[1].get());nightMaterial_->uniforms.at("nightDetailEnabled").setValue(0.f);}
+        parent->remove(*patch);patch->geometry()->dispose();patch->material()->dispose();patch.reset();
+        for(size_t slot:i?std::vector<size_t>{2}:std::vector<size_t>{0,1,3})if(regionalTextures_[slot]){regionalTextures_[slot]->dispose();regionalTextures_[slot].reset();}
+        if(regionalHeights_[i]){regionalHeights_[i]->dispose();regionalHeights_[i].reset();}
+        if(surfaceMasks_[i]){surfaceMasks_[i]->dispose();surfaceMasks_[i].reset();}
+        released=true;
+    }
+    return released;
+}
+
 void albert::PlanetVisuals::updateImageDetail(const Vector3& camera, bool enabled) {
     if(!detailError.empty() && std::chrono::steady_clock::now()>=imageRetry_) retryDetails();
     imageWanted_ = {false,enabled && camera.distanceTo(sun->position)<1200.f,false};

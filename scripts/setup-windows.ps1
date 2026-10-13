@@ -3,7 +3,7 @@ param(
     [ValidateSet('setup', 'bootstrap', 'build', 'run', 'test', 'dist', 'clean', 'assets', 'assets-body',
                  'render-build', 'render-run', 'render-test', 'render-dist', 'render-clean')]
     [string]$Task = 'render-dist',
-    [ValidateRange(1, 128)][int]$Jobs = 4,
+    [ValidateRange(1, 128)][int]$Jobs = 2,
     [ValidatePattern('^[a-z][a-z0-9-]{0,63}$')][string]$Body = 'mercury',
     [switch]$Run
 )

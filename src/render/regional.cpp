@@ -48,12 +48,14 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
             result.height=pack->contains(body+"-height")?pack->image(body+"-height",region,1024,progress):Image(std::vector<float>{0,0,0,1},1,1);
             if(result.day) {
                 auto& image=*result.day;auto& rgba=image.data();
-                std::vector<unsigned char> rough(rgba.size(),255);
+                std::vector<unsigned char> rough(body=="earth"?rgba.size():0,255);
                 const auto width=image.width(),height=image.height();
                 for(unsigned y=0;y<height;++y) for(unsigned x=0;x<width;++x) {
                     const size_t at=4*(static_cast<size_t>(y)*width+x);
-                    const float water=std::clamp((rgba[at+2]-rgba[at]*1.15f)/12.f,0.f,1.f);
-                    rough[at]=rough[at+1]=rough[at+2]=static_cast<unsigned char>(220.f-water*170.f);
+                    if(body=="earth"){
+                        const float water=std::clamp((rgba[at+2]-rgba[at]*1.15f)/12.f,0.f,1.f);
+                        rough[at]=rough[at+1]=rough[at+2]=static_cast<unsigned char>(220.f-water*170.f);
+                    }
                     const unsigned edge=std::min({x,y,width-1-x,height-1-y});
                     rgba[at+3]=static_cast<unsigned char>(rgba[at+3]*std::min(1.f,edge/(width*.025f)));
                 }

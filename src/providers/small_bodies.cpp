@@ -1,5 +1,7 @@
 #include "small_bodies.hpp"
 #include "core/time.hpp"
+#include "store.hpp"
+#include "platform.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <charconv>
@@ -11,6 +13,9 @@ std::string encode(const std::string& value){constexpr char hex[]="0123456789ABC
 void valid(const std::string& value){if(value.empty()||value.size()>40||!std::all_of(value.begin(),value.end(),[](unsigned char c){return c>=32&&c<127;}))throw std::invalid_argument("Use a name or designation of 1..40 ASCII characters");}
 }
 std::timed_mutex& jplRequestGate(){static std::timed_mutex mutex;return mutex;}
+SmallBodies::SmallBodies(Transport transport,std::filesystem::path directory):transport_(std::move(transport)),directory_(std::move(directory)){
+    if(!transport_&&directory_.empty())directory_=dataDirectory()/"catalog";
+}
 std::string smallBodyCatalogId(const std::string& designation){valid(designation);std::string id="sbdb.";constexpr char hex[]="0123456789abcdef";for(unsigned char c:designation){id+=hex[c>>4];id+=hex[c&15];}return id;}
 std::string smallBodyDesignation(const std::string& id){if(!id.starts_with("sbdb.")||id.size()<7||id.size()>85||(id.size()-5)%2)throw std::invalid_argument("Invalid small-body catalog ID");std::string result;for(size_t i=5;i<id.size();i+=2){unsigned value=0;const auto [p,ec]=std::from_chars(id.data()+i,id.data()+i+2,value,16);if(ec!=std::errc{}||p!=id.data()+i+2)throw std::invalid_argument("Invalid small-body catalog ID");result+=static_cast<char>(value);}valid(result);return result;}
 std::vector<SmallBody> parseSmallBodies(const std::string& response){
@@ -32,9 +37,14 @@ std::vector<SmallBody> SmallBodies::search(const std::string& query,DownloadProg
     valid(query);std::unique_lock lock(jplRequestGate(),std::defer_lock);while(!lock.try_lock_for(std::chrono::milliseconds(100)))if(progress)progress->checkCancelled();if(progress)progress->checkCancelled();
     const double now=time::monotonicSeconds();const auto found=cache_.find(query);if(found!=cache_.end()&&now-found->second.fetched<300)return found->second.values;
     const std::string url="https://ssd-api.jpl.nasa.gov/sbdb.api?sstr="+encode(query)+"&phys-par=1&no-orbit=1";
-    auto result=parseSmallBodies(transport_?transport_(url,progress):httpGet(url,progress,{2*1024*1024,20}));
+    std::vector<SmallBody> result;bool reused=false;double fetched=now;
+    if(auto saved=loadResponse(directory_,url,2*1024*1024))try{
+        const double age=time::clock().utcSeconds()-saved->fetchedUtc;
+        if(age>=-30&&age<=300){result=parseSmallBodies(saved->payload);reused=true;fetched=now-std::max(0.,age);}
+    }catch(const std::exception&){}
+    if(!reused){const auto response=transport_?transport_(url,progress):httpGet(url,progress,{2*1024*1024,20});result=parseSmallBodies(response);saveResponse(directory_,url,{response,time::clock().utcSeconds()},2*1024*1024);}
     if(cache_.size()>=32){const auto old=std::min_element(cache_.begin(),cache_.end(),[](const auto& a,const auto& b){return a.second.fetched<b.second.fetched;});cache_.erase(old);}
-    cache_[query]={now,result};return result;
+    cache_[query]={fetched,result};return result;
 }
 SmallBody SmallBodies::resolve(const std::string& designation,DownloadProgress* progress){auto result=search(designation,progress);if(result.size()!=1||result.front().spkId==0)throw std::runtime_error("Select a unique SBDB designation before importing");return result.front();}
 }

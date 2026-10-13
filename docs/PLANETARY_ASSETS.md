@@ -129,6 +129,24 @@ O script publica `assets/imagery/solar`, atualiza manifests e conserva os arquiv
 anteriores intactos. `asset-packs/` é ignorada pelo Git. O pacote novo é versionado
 com Git LFS. Não é necessário regenerar distribuições.
 
-Fontes: [NASA 3D Resources](https://science.nasa.gov/3d-resources/),
+O próximo mapa de Marte está em preparação a partir do mosaico Viking do
+NASA Trek. Para baixar ou retomar o snapshot em blocos de 256×256, sem abrir
+o planeta inteiro na RAM (Python 3 e Pillow):
+
+```sh
+python3 scripts/download-mars-tiles.py --level 6 --workers 2
+```
+
+O nível 6 corresponde à grade 32768×16384, com 8192 blocos. O script valida
+dimensões/JPEG dos arquivos existentes, registra seus checksums, repete falhas e só publica
+um manifest final quando o nível escolhido estiver completo. Fila e número
+de trabalhadores são limitados. O download fica em
+`asset-packs/solar/sources/mars-trek/`, fora do Git; ainda precisa ser processado
+e publicado no pacote solar para aparecer no aplicativo. O mapa atual não é
+alterado por esse comando. A maior grade não implica a mesma resolução efetiva
+em todas as regiões nem informação além das observações Viking.
+
+Fontes: [NASA Trek/Mars](https://trek.nasa.gov/tiles/apidoc/trekAPI.html?body=mars),
+[NASA 3D Resources](https://science.nasa.gov/3d-resources/),
 [Mars/Viking](https://science.nasa.gov/3d-resources/mars/),
 [NAIF pck00011](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc).

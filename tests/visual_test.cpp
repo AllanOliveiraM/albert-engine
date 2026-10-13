@@ -23,6 +23,10 @@ void controls() {
     require(albert::flightEase(.01f)<.00002f && albert::flightEase(.99f)>.99998f,"Flight ramp is abrupt");
     float previous=0;for(int i=0;i<=1000;++i){const float t=i/1000.f, value=albert::flightEase(t);require(value>=previous-1e-6f && std::abs(value+albert::flightEase(1-t)-1)<2e-6f,"Flight curve reverses or is asymmetric");previous=value;}
     require(albert::flightDuration(10,1e6f)<=4.8f && albert::flightDuration(0,0)>2.f,"Flight duration unbounded or too short");
+    // Arrival must spend visible time between small and full apparent size;
+    // test a 20:1 framing range and an extreme reset without cancellation.
+    float lastSize=0;for(int i=0;i<=1000;++i){const float t=i/1000.f;const float d=albert::framingDistance(80.f,4.f,albert::flightEase(t));const float size=4.f/d;require(size>=lastSize-1e-6f&&std::abs(size-std::lerp(.05f,1.f,albert::flightEase(t)))<1e-6f,"Planet arrival accelerates in screen space");lastSize=size;}
+    require(albert::framingDistance(1e10f,4.f,1.f)==4.f&&albert::framingDistance(4.f,1e10f,1.f)==1e10f,"Extreme framing endpoint lost precision");
     require(!albert::AuxiliaryLight{}.enabled,"Generic auxiliary light must start disabled");
     require(!settings.earthAssist && !settings.moonAssist,"Auxiliary lights must start disabled");
     require(!settings.clouds,"Live clouds must start disabled");
@@ -134,6 +138,16 @@ void graphics() {
     for(int x=40;x<150;++x) {const int r=pixels[3*(96*192+x)];darkest=std::min(darkest,r);brightest=std::max(brightest,r);}
     require(darkest>40 && brightest-darkest<15,"Subpixel dashes must converge to a stable continuous line");
     scene->remove(*front);
+    material->uniforms.at("present").setValue(1000.f);material->uniforms.at("referenceVisibility").setValue(1.f);
+    scene->add(behind);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(pixels[3*(96*192+25)+2]>2,"Complete orbit guide disappeared outside the highlighted time span");
+    planets.moon->visible=true;renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    const auto occludedGuide=pixels;material->uniforms.at("referenceVisibility").setValue(0.f);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    for(int y=91;y<101;++y)for(int x=83;x<109;++x)for(int c=0;c<3;++c)require(pixels[3*(y*192+x)+c]==occludedGuide[3*(y*192+x)+c],"Complete orbit guide leaked through the lunar terrain");
+    material->uniforms.at("referenceVisibility").setValue(1.f);
+    planets.moon->visible=false;material->uniforms.at("visibility").setValue(0.f);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(pixels[3*(96*192+25)+2]==0,"Hiding orbits retained the complete orbit guide");
+    material->uniforms.at("visibility").setValue(1.f);material->uniforms.at("referenceVisibility").setValue(0.f);scene->remove(*behind);
     planets.earth->position.set(0,0,0);camera->position.set(0,0,1.5f);camera->lookAt(Vector3());
     albert::RegionalImages earthRegion;earthRegion.region={-135,-45,-45,45};
     earthRegion.day=rgba(32,128);earthRegion.height=height(6000.f);
@@ -170,6 +184,16 @@ void graphics() {
     settings.nightLights=true;planets.update(Vector3(0,0,1),camera->position,settings,1.f);
     renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
     require(pixels[3*(96*192+96)]<cloudy-40,"Cloud detail transition did not settle");
+    const auto earthChildren=planets.earth->children.size(),moonChildren=planets.moon->children.size();
+    std::weak_ptr<BufferGeometry> oldEarthDetail=planets.earth->children.back()->as<Mesh>()->geometry(),oldMoonDetail=planets.moon->children.back()->as<Mesh>()->geometry();
+    require(!planets.releaseDistantDetails("sun",camera->position,false,1.f),"Detail eviction ignored its grace interval");
+    require(planets.releaseDistantDetails("sun",camera->position,false,3.f),"Distant Earth/Moon details stayed resident");
+    require(planets.earth->children.size()+1==earthChildren&&planets.moon->children.size()+1==moonChildren&&oldEarthDetail.expired()&&oldMoonDetail.expired(),"Evicted terrain retained mesh resources");
+    settings.clouds=false;planets.update(Vector3(0,0,1),camera->position,settings,1.f);planets.updateBorderMaterial(*borders,camera->position);
+    scene->add(behind);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
+    require(cyanPixels(pixels,83,109,91,101)==0&&pixels[3*(96*192+96)]>0,"Eviction left a hole in the global Earth surface");scene->remove(*behind);
+    albert::RegionalImages reloaded;reloaded.day=rgba(64,128);reloaded.height=height(1000);planets.setRegionalImages(std::move(reloaded));
+    require(planets.earth->children.size()==earthChildren,"Earth details did not reload after eviction");
     auto generic=[&](double origin){
         albert::core::Scene registry;albert::core::Object object;object.id="box";object.name="Box";
         object.appearance.shape=albert::core::Shape::Box;object.appearance.sizeMeters={.5,.5,.5};object.samples.emplace_back(100,albert::core::Vector{origin+.25,0,0});registry.create(object);
@@ -242,6 +266,11 @@ void graphics() {
     require(pixels[3*(96*192+96)]>lit+30,"Solid detail crossfade did not settle");
     solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"earth",true,4.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
     require(std::abs(int(pixels[3*(96*192+96)])-lit)<4,"Solid detail eviction damaged the global surface");
+    require(solids.takeEviction()&&!solids.takeEviction(),"Regional loader was not notified of eviction exactly once");
+    albert::RegionalImages reload;reload.body="mercury";reload.day=rgba(230);reload.height=height(1000);albert::prepareRegionalImages(reload);solids.stage(std::move(reload));
+    for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);
+    solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,4.f);
+    require(solids.takeEviction(),"Zooming out on the same planet retained high-resolution terrain");
     std::cout<<"Graphics OK: incremental upload, terrain occlusion, subpixel paths, borders, cloud fade and precise generic objects\n";
 }
 }

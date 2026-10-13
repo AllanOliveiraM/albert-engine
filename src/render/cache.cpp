@@ -9,7 +9,7 @@ namespace {
 struct Entry { fs::path path; fs::file_time_type used; uintmax_t bytes; };
 std::vector<Entry> entries(const fs::path& directory) {
     std::vector<Entry> result;
-    for(const char* name:{"assets","clouds"}) {
+    for(const char* name:{"assets","clouds","ephemerides","catalog"}) {
         const auto root=directory/name;
         std::error_code ec;
         if(!fs::is_directory(root,ec) || fs::is_symlink(root,ec)) continue;
@@ -61,7 +61,7 @@ void albert::Cache::setLimit(int megabytes) {
 }
 void albert::Cache::clear() {
     error.clear();
-    for(const char* name:{"assets","clouds"}) {
+    for(const char* name:{"assets","clouds","ephemerides","catalog"}) {
         std::error_code ec;
         const auto root=directory_/name;
         if(!fs::is_symlink(root,ec)) fs::remove_all(root,ec);

@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := render-build
 .PHONY: setup bootstrap build run test dist clean render-build render-run render-test render-dist render-clean assets assets-body
 
-JOBS ?= 4
+JOBS ?= 2
 BODY ?= mercury
 ifeq ($(OS),Windows_NT)
 SETUP := powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1 -Task setup

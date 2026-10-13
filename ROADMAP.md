@@ -173,6 +173,40 @@ reais e verificou Escape sem encerrar o programa. Capturas usam software OpenGL;
 GPU física, Windows nativo e cartografia de feições permanecem sem validação.
 Nenhuma distribuição foi gerada.
 
+**Continuação — RAM, cache persistente e navegação.** Builds usam dois trabalhos
+por padrão; a validação local usou um. Configuração de editor corrige caminhos
+antigos e exclui árvores geradas, com orçamento de IntelliSense e instruções
+para limitar o serviço C++ completo. Terra/Lua e demais planetas liberam
+texturas, máscaras e geometria regional após três segundos fora do foco/zoom;
+o carregador permite retomá-las. Linux/glibc devolve páginas livres do alocador
+em um trabalhador limitado, com intervalo mínimo entre tarefas.
+
+Horizons/SBDB persistem respostas validadas, com checksum, tamanho limitado,
+gravação por substituição e recuperação de corrupção. A abertura reutiliza
+tabelas que cobrem o instante atual e renova posições/órbitas em segundo plano.
+As posições incluídas cobrem o próximo dia com amostragem de cinco minutos;
+a renovação continua a cada cinco minutos. Cache expirado não autoriza
+extrapolação. Limpeza e limite no menu incluem esses downloads.
+
+Órbitas planetárias ganharam uma referência contínua sutil em todo o percurso
+amostrado, preservando passado/futuro e oclusão. Objetos e marcadores permitem
+foco por clique, sem confundir arrastos. Escape fecha o menu/popup e preserva
+o aplicativo, inclusive durante carregamento. Voos distantes separam trânsito
+e chegada; o crescimento aparente usa uma rampa suave de enquadramento.
+
+Validação: 21 testes Linux e regressões OpenGL passaram. Build MinGW e testes
+de provedores, cache, gráficos, RPC e catálogo passaram pelo Wine. Teste real
+verificou cliques, arrasto, Escape e chegada gradual. Cache reabriu a simulação
+com HTTP indisponível em cerca de sete segundos. Em uma instância Linux com
+software OpenGL a 1280×800, o RSS inicial foi 785 MiB; na Lua aproximada,
+919 MiB; ao afastar, 840 MiB; pico do cenário, aproximadamente 1 GiB. São
+medições desse cenário, sem caracterizar limite universal ou VRAM de GPU física.
+
+O snapshot Mars/Viking de maior resolução está em preparação, fora do Git;
+o downloader retoma/verifica blocos, limita a fila e usa dois trabalhadores.
+O novo mosaico ainda não substitui o mapa embarcado. Nenhuma distribuição
+foi gerada neste lote.
+
 ## 1. Visão e decisões de produto
 
 O Albert Engine deve oferecer uma simulação astronômica visualmente refinada,

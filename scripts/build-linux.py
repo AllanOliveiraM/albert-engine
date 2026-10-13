@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--jobs", type=int, default=4)
+parser.add_argument("--jobs", type=int, default=2)
 parser.add_argument("--target", default="all")
 args = parser.parse_args()
 if args.jobs < 1:

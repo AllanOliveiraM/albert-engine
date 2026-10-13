@@ -112,7 +112,16 @@ O serviço limita a 16 importações na fila, 128 acompanhamentos e 256 operaç�
 no histórico. O adaptador Horizons é compartilhado com o render, serializa as
 consultas, mantém até 32 tabelas em memória e valida cobertura, ordem e valores.
 Cache de cinco minutos para tabelas curtas e 24 horas para órbitas; respostas
-HTTP têm limite de 4 MiB e 30 s. Nenhuma consulta ocorre por quadro. `SearchObjects({query:"Apophis"})` consulta a NASA/JPL SBDB (API 1.3).
+HTTP têm limite de 4 MiB e 90 s, com cancelamento. Nenhuma consulta ocorre por quadro.
+As respostas validadas são salvas em disco e reutilizadas entre execuções;
+na inicialização, tabelas com até 24 horas podem antecipar a abertura somente
+se cobrirem o instante atual. A cena renova os dados em segundo plano. As
+posições incluídas mantêm amostras a cada cinco minutos para o próximo dia;
+isso não aumenta o intervalo de atualização de cinco minutos. O cache de
+órbitas tem validade normal de 24 horas e o de posições/consultas SBDB,
+cinco minutos. Cada diretório de provedor tem ainda um teto de 128 respostas
+e 64 MiB, dentro do limite de cache configurado pelo usuário.
+`SearchObjects({query:"Apophis"})` consulta a NASA/JPL SBDB (API 1.3).
 A pesquisa é explícita, por nome/designação; aceita até 40 caracteres ASCII,
 incluindo `*` para padrões, e retorna até 50 resultados. `ListObjects` continua
 local: são 71 corpos, incluindo 60 luas. A UI usa os mesmos serviços.

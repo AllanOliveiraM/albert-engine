@@ -1,5 +1,7 @@
 #include "providers/horizons.hpp"
 #include "providers/small_bodies.hpp"
+#include "providers/store.hpp"
+#include "net/sha256.hpp"
 #include "core/astro_time.hpp"
 #include "core/time.hpp"
 #include <atomic>
@@ -7,10 +9,46 @@
 #include <iostream>
 #include <limits>
 #include <thread>
+#include <filesystem>
+#include <fstream>
 using namespace albert::providers;
 void require(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
 template<class F>void rejects(F fn){bool no=false;try{fn();}catch(const std::exception&){no=true;}require(no,"Invalid provider input accepted");}
 const std::string fixture="Header\n$$SOE\n2451545.0, A.D. 2000-Jan-01, 100000000,2,3,4,5,6,\n2451545.1, A.D. 2000-Jan-01, 100000010,4,6,4,5,6,\n$$EOE\n";
+void persistentCache(){
+    namespace fs=std::filesystem;
+    const auto directory=fs::temp_directory_path()/("albert-provider-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {fs::path path;~Cleanup(){std::error_code ec;fs::remove_all(path,ec);}} cleanup{directory};
+    double utc=946728000.;int calls=0;
+    auto transport=[&](const std::string&,albert::DownloadProgress*){++calls;return fixture;};
+    auto now=[&]{return utc;};auto mono=[]{return 0.;};
+    Query query{499,"500@399",utc,utc+600,"5 min"};
+    {Horizons first(transport,now,mono,directory);require(!first.query(query).fromCache&&calls==1,"First response was not fetched");}
+    {Horizons reopened(transport,now,mono,directory);const auto saved=reopened.query(query);require(saved.fromCache&&calls==1&&saved.fetchedUtc==utc,"Restart did not reuse persisted ephemerides");}
+    utc+=400;query.bootstrapCache=true;
+    {Horizons reopened(transport,now,mono,directory);require(reopened.query(query).fromCache&&calls==1,"Startup rejected still-current cached samples");query.forceRefresh=true;require(!reopened.query(query).fromCache&&calls==2,"Background refresh did not replace disk data");}
+    utc+=400;query.bootstrapCache=false;query.forceRefresh=false;
+    {Horizons expired(transport,now,mono,directory);require(!expired.query(query).fromCache&&calls==3,"Expired disk response was treated as fresh");}
+    query.bootstrapCache=true;query.startUtc=946750000.;query.endUtc=946751000.;utc=query.startUtc;
+    {Horizons uncovered(transport,now,mono,directory);rejects([&]{uncovered.query(query);});require(calls==4,"Startup extrapolated an expired position table");}
+    for(const auto& entry:fs::directory_iterator(directory))if(entry.path().extension()==".json"){std::ofstream file(entry.path(),std::ios::trunc);file<<"broken";}
+    utc=946728000.;query={499,"500@399",utc,utc+600,"5 min"};
+    {Horizons corrupted(transport,now,mono,directory);require(!corrupted.query(query).fromCache&&calls==5,"Corrupt disk cache prevented a fresh download");}
+    saveResponse(directory,"checksum",{"payload",utc},1024);
+    const auto stored=directory/(albert::sha256("checksum")+".json");
+    {std::ifstream input(stored);std::string text((std::istreambuf_iterator<char>(input)),{});input.close();text.replace(text.find(":\"payload\"")+2,7,"changed");std::ofstream output(stored);output<<text;}
+    require(!loadResponse(directory,"checksum",1024),"Altered cache passed integrity validation");
+    saveResponse(directory,"oversized",{std::string(2048,'x'),utc},1024);require(!loadResponse(directory,"oversized",1024),"Cache ignored payload bound");
+    auto dayFixture=fixture;dayFixture.replace(dayFixture.find("2451545.1"),9,"2451546.1");
+    int dailyCalls=0;double monotonic=0;Horizons daily([&](const std::string&,albert::DownloadProgress*){++dailyCalls;return dayFixture;},now,[&]{return monotonic;},directory/"day");
+    auto dailyQuery=query;dailyQuery.endUtc=utc+86400.;daily.query(dailyQuery);utc+=301;monotonic=301;
+    require(!daily.query(dailyQuery).fromCache&&dailyCalls==2,"Day-long position table incorrectly received a day-long refresh interval");
+    int searches=0;auto search=[&](const std::string&,albert::DownloadProgress*){++searches;return R"({"signature":{"version":"1.3"},"object":{"des":"433","fullname":"433 Eros","spkid":"20000433"}})";};
+    {SmallBodies first(search,directory/"catalog");require(first.resolve("433").spkId==20000433,"Initial SBDB lookup failed");}
+    {SmallBodies reopened(search,directory/"catalog");require(reopened.resolve("433").spkId==20000433&&searches==1,"Restart ignored persisted catalog lookup");}
+    for(int i=0;i<132;++i)saveResponse(directory/"bounded",std::to_string(i),{"test",utc},1024);
+    require(std::distance(fs::directory_iterator(directory/"bounded"),fs::directory_iterator{})<=128,"Provider cache grew beyond file-count bound");
+}
 int main(int argc,char** argv){try{
     if(argc>1&&std::string(argv[1])=="--network"){
         const double now=albert::time::clock().utcSeconds();
@@ -45,5 +83,6 @@ int main(int argc,char** argv){try{
     albert::DownloadProgress cancelled;cancelled.cancelled=true;rejects([&]{provider.query(request,&cancelled);});
     Horizons incomplete([](const std::string&,albert::DownloadProgress*){return "$$SOE\n2451545.01,date,1,2,3,4,5,6,\n2451545.02,date,1,2,3,4,5,6,\n$$EOE";},[]{return 946728000.;},[]{return 0.;});
     rejects([&]{incomplete.query(request);});
-    std::cout<<"Providers OK: ICRF/SI validation, time scales, response coverage, cache expiry, serialized requests and cancellation\n";return 0;
+    persistentCache();
+    std::cout<<"Providers OK: ICRF/SI validation, time scales, response coverage, persistent bounded cache, refresh, corruption recovery, serialized requests and cancellation\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

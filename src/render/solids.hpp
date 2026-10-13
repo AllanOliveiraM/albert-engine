@@ -6,6 +6,7 @@
 #include "threepp/threepp.hpp"
 #include "threepp/materials/ShaderMaterial.hpp"
 #include <map>
+#include <utility>
 namespace albert {
 struct SurfaceAssets {std::string body;threepp::Image day,height;std::optional<threepp::Image> ring;};
 class SolidBodies {
@@ -14,6 +15,7 @@ public:
     ~SolidBodies();
     bool contains(const std::string& id) const{return nodes_.contains(id);}
     const auto& nodes() const{return nodes_;}
+    bool takeEviction(){return std::exchange(evicted_,false);}
     bool uploading() const{return uploads_.active();}
     void stage(RegionalImages images);
     void update(threepp::GLRenderer&,threepp::PerspectiveCamera&,const threepp::Vector3& sun,double jdTDB,const std::string& focus,bool details,float seconds,const AuxiliaryLights& auxiliary={});
@@ -23,5 +25,6 @@ private:
     std::map<std::string,std::unique_ptr<Surface>> surfaces_;
     std::optional<RegionalImages> pending_;
     TextureUploads uploads_;
+    bool evicted_=false;
 };
 }

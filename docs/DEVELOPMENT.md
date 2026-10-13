@@ -23,6 +23,27 @@ preparam os testes e o cliente de exemplo. Os wrappers Linux/Windows serializam
 configuração e compilação por pasta para evitar dois builds simultâneos.
 Chamadas diretas ao CMake precisam ser coordenadas pelo desenvolvedor.
 O scanner de módulos C++ fica desligado: os fontes usam headers, sem módulos.
+Os builds usam dois trabalhos simultâneos por padrão. Em máquinas com pouca
+RAM, use `make build JOBS=1` ou `.\make.cmd build -Jobs 1`; evite compilar
+Linux e Windows ao mesmo tempo.
+
+A configuração versionada de VS Code aponta para os fontes atuais e exclui
+`build/`, `dist/`, `.tools/` e `asset-packs/` da indexação e dos observadores.
+O IntelliSense tem orçamento de 1024 MB por processo. Para limitar também o
+serviço C++ completo, coloque nas **configurações do usuário** (essas opções
+não aceitam escopo de workspace):
+
+```json
+"C_Cpp.maxMemory": 2048,
+"C_Cpp.maxConcurrentThreads": 2,
+"C_Cpp.intelliSense.maxMemory": 1024,
+"C_Cpp.references.maxMemory": 512,
+"C_Cpp.codeAnalysis.maxMemory": 512
+```
+
+São orçamentos do serviço, não limites rígidos de RSS impostos pelo sistema.
+Se o serviço já estiver usando muita memória, reinicie o VS Code para descartar
+o estado antigo. O CMake gera `build/linux/compile_commands.json` no Linux.
 O wrapper Linux também executa `ninja -t recompact` antes do build, evitando
 recompilações repetidas após corrupção do índice em versões afetadas do Ninja
 ([bug upstream](https://github.com/ninja-build/ninja/issues/2703)). Se entradas

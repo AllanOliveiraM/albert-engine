@@ -70,10 +70,20 @@ mais detalhados dessa biblioteca; a resolução máxima depende dos dados de ori
 segundo plano e divide o envio de texturas à GPU entre quadros, mantendo a
 superfície anterior enquanto a nova fica pronta. A origem gráfica acompanha o
 alvo para preservar detalhes pequenos em distâncias astronômicas.
+Ao afastar a câmera ou mudar de objeto, os recortes de alta resolução são
+liberados após um breve intervalo, reduzindo o consumo de memória.
+
+**Os downloads recentes são reutilizados.** Posições e órbitas ficam salvas
+entre execuções. Se os dados ainda cobrem o horário atual, a cena pode abrir
+com eles e renovar as consultas em segundo plano. Tabelas expiradas ou
+corrompidas são descartadas; o Albert não extrapola posições para esconder
+uma falha de conexão. A primeira abertura ainda precisa buscar os dados.
 
 **As nuvens são observações com atraso.** Elas começam desligadas. Quando
 ativadas, o Albert consulta mosaicos de satélite, mostra a data em **Dados** e
 mantém um cache de downloads. O limite padrão é 2 GB e pode ser ajustado no menu.
+Em **Dados**, você pode consultar o espaço ocupado, limitar ou limpar o cache
+de posições, órbitas, buscas e nuvens sem apagar as imagens incluídas.
 A aparência solar e os mosaicos de superfície são referências estáticas.
 Nos novos planetas, os mapas ainda têm resoluções de 1K a 4K e não incluem
 relevo medido. Os gigantes e Vênus usam referências visuais de atmosfera;
