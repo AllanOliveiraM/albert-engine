@@ -8,6 +8,30 @@ threepp::Vector3 albert::renderPosition(core::Vector p,core::Vector origin){
 }
 albert::SceneObjects::~SceneObjects(){for(auto& [id,model]:models_){(void)id;for(auto& g:model.geometry)g->dispose();for(auto& m:model.materials)m->dispose();}}
 void albert::SceneObjects::bind(const core::ObjectId& id,std::shared_ptr<Mesh> mesh){nodes_.emplace(id,std::move(mesh));}
+std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Scene& registry,Raycaster& ray) const {
+    std::optional<core::ObjectId> picked;
+    float nearest=ray.farPlane;
+    for(const auto& [id,node]:nodes_){
+        const auto& object=registry.get(id);
+        if(!node->visible||!object.visible)continue;
+        float distance=std::numeric_limits<float>::infinity();
+        if(object.appearance.shape==core::Shape::Builtin){
+            // Built-in globes are ellipsoids. Test in local space to retain
+            // oblateness without walking every terrain triangle on hover.
+            node->updateWorldMatrix(true,false);
+            if(!node->geometry()->boundingSphere)node->geometry()->computeBoundingSphere();
+            Matrix4 inverse;inverse.copy(*node->matrixWorld).invert();
+            auto localRay=ray.ray.clone().applyMatrix4(inverse);
+            Vector3 hit;localRay.intersectSphere(*node->geometry()->boundingSphere,hit);
+            if(!hit.isNan())distance=hit.applyMatrix4(*node->matrixWorld).distanceTo(ray.ray.origin);
+        }else{
+            const auto hits=ray.intersectObject(*node,object.appearance.shape==core::Shape::Model);
+            if(!hits.empty())distance=hits.front().distance;
+        }
+        if(distance>=ray.nearPlane&&distance<nearest){nearest=distance;picked=id;}
+    }
+    return picked;
+}
 void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vector origin){
     for(auto it=nodes_.begin();it!=nodes_.end();) {
         if(!registry.objects().contains(it->first)||(!registry.get(it->first).builtin&&instances_[it->first]!=registry.get(it->first).instance)){

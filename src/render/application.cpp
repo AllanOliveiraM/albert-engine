@@ -424,6 +424,7 @@ public:
         reloadAssets_ = reloadAssets;
         bootstrap_ = bootstrap;
         error.clear();
+        animation = {};
         progress.cancelled = false;
         progress.stage("Preparando simulacao", 0);
         pending_ = std::async(std::launch::async, [this, reloadAssets, bootstrap] {
@@ -471,6 +472,12 @@ public:
     bool active = false;
     std::string error;
     albert::DownloadProgress progress;
+    // Only the render thread accesses presentation state.
+    struct Animation {
+        std::string stage;
+        int completed = -1;
+        float overall = 0, individual = 0;
+    } animation;
 
 private:
     fs::path countries_;
@@ -481,9 +488,85 @@ private:
     std::future<LoadedData> pending_;
 };
 
+void drawLoadingBar(float fraction, bool indeterminate, bool animated, const ImVec4& tint) {
+    const auto origin = ImGui::GetCursorScreenPos();
+    const float width = std::max(1.f, ImGui::GetContentRegionAvail().x), height = 6.f;
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
+                        ImGui::GetColorU32(ImVec4(.10f, .16f, .21f, 1.f)), height / 2);
+    float left = 0, right = width * std::clamp(fraction, 0.f, 1.f);
+    if (indeterminate) {
+        const float phase = static_cast<float>(ImGui::GetTime() * .55);
+        const float travel = (phase - std::floor(phase)) * 1.35f - .35f;
+        left = std::max(0.f, travel * width);
+        right = std::min(width, (travel + .35f) * width);
+    }
+    if (right > left) {
+        draw->AddRectFilled(ImVec2(origin.x + left, origin.y),
+                            ImVec2(origin.x + right, origin.y + height), ImGui::GetColorU32(tint), height / 2);
+        if (animated && !indeterminate && right > 1.f) {
+            const float pulse = .08f + .07f * std::sin(static_cast<float>(ImGui::GetTime()) * 3.f);
+            draw->AddRectFilled(origin, ImVec2(origin.x + right, origin.y + height),
+                                ImGui::GetColorU32(ImVec4(1, 1, 1, pulse)), height / 2);
+        }
+    }
+    ImGui::Dummy(ImVec2(width, height));
+}
+
+void drawLoadingLabel(const char* label, const char* value) {
+    const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+    ImGui::TextDisabled("%s", label);
+    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), right - ImGui::CalcTextSize(value).x));
+    ImGui::TextDisabled("%s", value);
+}
+
 void drawDownloadStatus(DataLoader& loader) {
     const auto status = loader.progress.snapshot();
-    ImGui::TextDisabled("CARREGANDO A CENA");
+    const bool failed = !loader.error.empty(), ready = status.completed >= loadSteps();
+    const bool measurable = status.total > 0;
+    const float individual = ready ? 1.f : measurable ?
+        std::clamp(static_cast<float>(status.received) / static_cast<float>(status.total), 0.f, 1.f) : 0.f;
+    auto& animation = loader.animation;
+    if (animation.stage != status.stage || animation.completed != status.completed) {
+        animation.stage = status.stage;
+        animation.completed = status.completed;
+        animation.individual = 0;
+    }
+    const float blend = 1.f - std::exp(-12.f * std::min(ImGui::GetIO().DeltaTime, .1f));
+    const float overall = std::clamp((status.completed + individual) / static_cast<float>(loadSteps()), 0.f, 1.f);
+    animation.overall += (std::max(animation.overall, overall) - animation.overall) * blend;
+    animation.individual += (individual - animation.individual) * blend;
+    if (ready) animation.overall = animation.individual = 1.f;
+
+    const auto indicator = ImGui::GetCursorScreenPos();
+    const float radius = ImGui::GetTextLineHeight() * .34f;
+    const ImVec2 center(indicator.x + radius + 1, indicator.y + ImGui::GetTextLineHeight() * .5f);
+    const auto accent = failed ? ImVec4(1.f, .55f, .45f, 1.f) : ImVec4(.35f, .82f, .91f, 1.f);
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddCircle(center, radius, ImGui::GetColorU32(ImVec4(.16f, .26f, .32f, 1.f)), 24, 1.5f);
+    const float angle = static_cast<float>(ImGui::GetTime()) * 2.8f;
+    draw->PathArcTo(center, radius, ready || failed ? 0.f : angle,
+                    ready || failed ? 6.283185f : angle + 4.3f, 24);
+    draw->PathStroke(ImGui::GetColorU32(accent), 0, 1.5f);
+    ImGui::Dummy(ImVec2(radius * 2 + 2, ImGui::GetTextLineHeight()));
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", failed ? "CARREGAMENTO INTERROMPIDO" : ready ? "CENA PRONTA" : "CARREGANDO A CENA");
+
+    char percentage[32];
+    std::snprintf(percentage, sizeof(percentage), "%d%%", static_cast<int>(animation.overall * 100.f));
+    drawLoadingLabel("Progresso geral", percentage);
+    drawLoadingBar(animation.overall, false, !failed && !ready, accent);
+    ImGui::Spacing();
+    const float stageY = ImGui::GetCursorPosY();
+    ImGui::TextWrapped("%s", status.stage.c_str());
+    // Reserve two lines so long stage names and transfer updates do not move the card.
+    ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), stageY + ImGui::GetTextLineHeight() * 2 + ImGui::GetStyle().ItemSpacing.y));
+    if (measurable || ready)
+        std::snprintf(percentage, sizeof(percentage), "%d%%", static_cast<int>(animation.individual * 100.f));
+    else std::snprintf(percentage, sizeof(percentage), "%s", failed ? "Interrompido" : "Em andamento");
+    drawLoadingLabel("Etapa atual", percentage);
+    drawLoadingBar(animation.individual, !measurable && !ready && !failed, !failed && !ready, accent);
+    ImGui::TextDisabled("Etapa %d de %d", std::min(status.completed + 1, loadSteps()), loadSteps());
     if (!loader.error.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.55f, 0.45f, 1.f));
         ImGui::TextWrapped("Nao foi possivel concluir o carregamento.");
@@ -499,26 +582,6 @@ void drawDownloadStatus(DataLoader& loader) {
             ImGui::TextWrapped("%s", loader.error.c_str());
         }
         return;
-    }
-    ImGui::TextWrapped("%s", status.stage.c_str());
-    ImGui::ProgressBar(static_cast<float>(status.completed) / static_cast<float>(loadSteps()),
-                       ImVec2(-1, 5), "");
-    if (loader.active) {
-        ImGui::TextDisabled("Etapa %d de %d", std::min(status.completed + 1, loadSteps()), loadSteps());
-        if (status.total > 0) {
-            const float fraction = static_cast<float>(status.received) / static_cast<float>(status.total);
-            ImGui::ProgressBar(fraction, ImVec2(-1, 0));
-            ImGui::TextDisabled("%.1f / %.1f MB", status.received / 1e6, status.total / 1e6);
-        } else if (status.received > 0) {
-            if (status.received < 1000000) {
-                ImGui::TextDisabled("%.1f KB recebidos", status.received / 1e3);
-            } else {
-                ImGui::TextDisabled("%.1f MB recebidos", status.received / 1e6);
-            }
-        } else {
-            constexpr const char* activity[] = {".  ", ".. ", "..."};
-            ImGui::TextDisabled("Aguarde%s", activity[static_cast<int>(ImGui::GetTime() * 3) % 3]);
-        }
     }
 }
 
@@ -946,19 +1009,11 @@ int albert::runRenderer(int argc, char** argv) {
             if(transition.arrivalDirection.lengthSq()<1e-12f)transition.arrivalDirection.copy(transition.startOffset);
             if(next==targets::Overview||next==targets::Inner||next==targets::EarthMoon)transition.arrivalDirection.set(.2f,.9f,.7f);
             transition.arrivalDirection.normalize();
-            if(!resetZoom&&next.front()!='@'&&next!=targets::Sun){
-                Vector3 day=targetFor(targets::Sun);day.sub(targetFor(next)).normalize();
-                const float illumination=transition.arrivalDirection.dot(day);
-                if(illumination<.3f){
-                    Vector3 tangent=transition.arrivalDirection;tangent.sub(day.clone().multiplyScalar(illumination));
-                    if(tangent.lengthSq()<1e-6f){tangent.set(0,1,0);if(std::abs(day.y)>.9f)tangent.set(1,0,0);tangent.cross(day);}
-                    transition.arrivalDirection.copy(day).multiplyScalar(.45f).add(tangent.normalize().multiplyScalar(std::sqrt(1.f-.45f*.45f))).normalize();
-                }
-            }
             const float scaleChange = std::abs(std::log(distanceFor(next) / std::max(1e-9f, transition.startOffset.length())));
             const float travel=transition.startTarget.distanceTo(targetFor(next));
             transition.duration = albert::flightDuration(scaleChange,
                 travel/std::max(.01f,radiusFor(next)),resetZoom);
+            if(!resetZoom)transition.duration*=1.15f;
 
             focus = next;registry.cameraChanged();
         };
@@ -1297,16 +1352,14 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::PopStyleVar();
             }
 
-            // Click picking uses physical meshes; small context markers below
-            // add a modest screen-space target without enlarging the bodies.
-            if(!ImGui::GetIO().WantCaptureMouse && !transition.active && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f){
+            // Hover and click use the same nearest visible object.
+            if(!ImGui::GetIO().WantCaptureMouse && !transition.active){
                 const auto mouse=ImGui::GetMousePos();Raycaster ray;ray.setFromCamera(Vector2(mouse.x/display.x*2.f-1.f,1.f-mouse.y/display.y*2.f),*camera);
-                std::string picked;float nearest=std::numeric_limits<float>::infinity();
-                for(const auto& [id,node]:objects.nodes())if(node->visible&&registry.get(id).visible){
-                    const auto hits=ray.intersectObject(*node,registry.get(id).appearance.shape==albert::core::Shape::Model);
-                    if(!hits.empty()&&hits.front().distance<nearest){nearest=hits.front().distance;picked=id;}
+                ray.nearPlane=camera->nearPlane;ray.farPlane=camera->farPlane;
+                if(const auto picked=objects.pick(registry,ray)){
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                    if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(*picked,*picked==focus);
                 }
-                if(!picked.empty())setFocus(picked,picked==focus);
             }
             if (systemView(focus) || focus == targets::EarthMoon) {
                 if(showOrbits) {
@@ -1673,33 +1726,30 @@ int albert::runRenderer(int argc, char** argv) {
                     const float distance=albert::framingDistance(startDistance,destinationDistance,albert::flightEase(progress));
                     controls.target.copy(target);camera->position.copy(target).add(transition.startOffset.clone().normalize().multiplyScalar(distance));
                 }else{
-                    // Retreat while retaining the current subject, then aim along
-                    // one fixed approach axis. Arrival only changes framing.
-                    constexpr float retreatEnd=.18f,transitEnd=.58f;
-                    const float retreatDistance=startDistance*1.8f;
-                    const float arrivalDistance=destinationDistance*16.f;
+                    // Overlap movement and orientation instead of stopping at
+                    // phase boundaries. Context views open directly to their
+                    // final framing, without a distant overshoot and return.
+                    const bool context=transition.destination.front()=='@';
+                    const float retreatDistance=startDistance*1.35f;
+                    Vector3 startEye=transition.startTarget;startEye.add(transition.startOffset);
+                    const float startRange=startEye.distanceTo(target);
+                    const float arrivalDistance=context ? destinationDistance :
+                        std::max(destinationDistance,std::min(destinationDistance*12.f,startRange));
                     Vector3 departure=transition.startTarget;departure.add(transition.startOffset.clone().normalize().multiplyScalar(retreatDistance));
                     Vector3 arrival=target;arrival.add(transition.arrivalDirection.clone().multiplyScalar(arrivalDistance));
-                    if(progress<retreatEnd){
-                        const float t=albert::flightEase(progress/retreatEnd);
-                        controls.target.copy(transition.startTarget);
-                        camera->position.copy(transition.startTarget).add(transition.startOffset.clone().normalize().multiplyScalar(albert::framingDistance(startDistance,retreatDistance,t)));
-                    }else if(progress<transitEnd){
-                        const float t=albert::flightEase((progress-retreatEnd)/(transitEnd-retreatEnd));
-                        camera->position.copy(lerpVector(departure,arrival,t));
-                        // Rotate the gaze before travel builds speed. Orientation
-                        // remains stable at the end of the transit and approach.
-                        const float aim=albert::flightEase(std::min(1.f,(progress-retreatEnd)/.16f));
-                        Vector3 oldDirection=transition.startOffset;oldDirection.negate().normalize();
-                        Vector3 newDirection=transition.arrivalDirection;newDirection.negate();
-                        const auto gaze=arcDirection(oldDirection,newDirection,aim);
-                        const float gazeDistance=std::lerp(retreatDistance,std::max(destinationDistance,camera->position.distanceTo(target)),aim);
-                        controls.target.copy(camera->position).add(gaze.clone().multiplyScalar(gazeDistance));
-                    }else{
-                        const float t=albert::flightEase((progress-transitEnd)/(1.f-transitEnd));
-                        const float distance=albert::framingDistance(arrivalDistance,destinationDistance,t);
-                        controls.target.copy(target);camera->position.copy(target).add(transition.arrivalDirection.clone().multiplyScalar(distance));
-                    }
+                    const float retreat=albert::flightEase(progress/.34f);
+                    const float transit=albert::flightEase((progress-.12f)/(context ? .88f : .62f));
+                    const float approach=context ? 0.f : albert::flightEase((progress-.48f)/.52f);
+                    camera->position.copy(lerpVector(lerpVector(startEye,departure,retreat),arrival,transit));
+                    camera->position.add(transition.arrivalDirection.clone().multiplyScalar(
+                        (albert::framingDistance(arrivalDistance,destinationDistance,approach)-arrivalDistance)*transit));
+                    const float aim=albert::flightEase(progress/(context ? .95f : .70f));
+                    Vector3 oldDirection=transition.startOffset;oldDirection.negate().normalize();
+                    Vector3 newDirection=target;newDirection.sub(camera->position);
+                    const float range=newDirection.length();
+                    if(range<1e-9f)newDirection.copy(transition.arrivalDirection).negate();else newDirection.divideScalar(range);
+                    const auto gaze=arcDirection(oldDirection,newDirection,aim);
+                    controls.target.copy(camera->position).add(gaze.clone().multiplyScalar(std::lerp(startDistance,std::max(1e-9f,range),aim)));
                 }
 
                 controls.minDistance = std::min(.05f,minimumFor(transition.destination));

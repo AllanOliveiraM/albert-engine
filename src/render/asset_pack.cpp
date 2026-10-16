@@ -187,11 +187,12 @@ threepp::Image albert::AssetPack::image(const std::string& name,const GeoRegion&
     std::vector<unsigned char> pixels(elevation ? 0 : static_cast<size_t>(outWidth)*outHeight*4);
     std::vector<float> heights(elevation ? static_cast<size_t>(outWidth)*outHeight*4 : 0);
     unsigned completed=0;
+    // Tiles are work within the caller's stage, not additional global stages.
+    progress.stage("Lendo biblioteca: "+name,progress.snapshot().completed);
     for (const auto& row:rows) for (const auto& col:columns) {
         progress.checkCancelled();
         const int column=solar ? std::clamp(col.tile,0,totalColumns-1) : (col.tile%totalColumns+totalColumns)%totalColumns;
         const auto key="v1/"+name+"/"+std::to_string(level)+"/"+std::to_string(row.tile)+"/"+std::to_string(column)+"."+layer.extension;
-        progress.stage("Lendo biblioteca: "+name,static_cast<int>(completed));
         progress.transfer(completed,rows.size()*columns.size());
         const auto bytes=index_->read(key);
         int tw=0,th=0;

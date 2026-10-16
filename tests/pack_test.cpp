@@ -31,7 +31,11 @@ int main(int argc,char** argv) {
             require(fresh.image("earth-day",{},4,progress).data()[0]==before.data()[0]+20,"New reader missed the replacement archive");
             std::cout<<"Pack: atomic replacement preserves existing readers and updates new readers\n";return 0;
         }
+        progress.stage("Superficie da Terra",5);
         const auto globe=pack.image("earth-day",{},4,progress);
+        const auto loaded=progress.snapshot();
+        require(loaded.completed==5,"Tile reads overwrote the caller's global progress stage");
+        require(loaded.total>1&&loaded.received==loaded.total,"Individual image progress did not finish");
         require(globe.width()==4 && globe.height()==2,"Coarse LOD dimensions");
         require(globe.data()[0]==40 && globe.data()[2]==21,"South row orientation");
         require(globe.data()[4*4+2]==20,"North row orientation");

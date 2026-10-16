@@ -23,6 +23,22 @@ void controls() {
     require(albert::flightEase(.01f)<.00002f && albert::flightEase(.99f)>.99998f,"Flight ramp is abrupt");
     float previous=0;for(int i=0;i<=1000;++i){const float t=i/1000.f, value=albert::flightEase(t);require(value>=previous-1e-6f && std::abs(value+albert::flightEase(1-t)-1)<2e-6f,"Flight curve reverses or is asymmetric");previous=value;}
     require(albert::flightDuration(10,1e6f)<=4.8f && albert::flightDuration(0,0)>2.f,"Flight duration unbounded or too short");
+    {
+        albert::core::Scene registry;auto world=Scene::create();albert::SceneObjects objects(*world);
+        auto earth=Mesh::create(SphereGeometry::create(1.f,16,8));earth->scale.y=.5f;
+        auto moon=Mesh::create(SphereGeometry::create(.3f,16,8));moon->position.z=1.5f;
+        objects.bind("earth",earth);objects.bind("moon",moon);
+        Raycaster ray(Vector3(0,0,4),Vector3(0,0,-1));
+        require(objects.pick(registry,ray)=="moon","Hover did not select the nearest visible globe");
+        moon->visible=false;
+        require(objects.pick(registry,ray)=="earth","Hidden globe blocked object picking");
+        ray.set(Vector3(0,.75f,4),Vector3(0,0,-1));
+        require(!objects.pick(registry,ray),"Hover ignored globe oblateness");
+        ray.set(Vector3(0,0,4),Vector3(0,0,1));
+        require(!objects.pick(registry,ray),"Object behind the camera was clickable");
+        ray.set(Vector3(0,0,4),Vector3(0,0,-1));ray.farPlane=2.f;
+        require(!objects.pick(registry,ray),"Clipped object was clickable");
+    }
     // Arrival must spend visible time between small and full apparent size;
     // test a 20:1 framing range and an extreme reset without cancellation.
     float lastSize=0;for(int i=0;i<=1000;++i){const float t=i/1000.f;const float d=albert::framingDistance(80.f,4.f,albert::flightEase(t));const float size=4.f/d;require(size>=lastSize-1e-6f&&std::abs(size-std::lerp(.05f,1.f,albert::flightEase(t)))<1e-6f,"Planet arrival accelerates in screen space");lastSize=size;}

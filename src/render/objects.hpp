@@ -12,6 +12,7 @@ public:
     void bind(const core::ObjectId& id,std::shared_ptr<threepp::Mesh> mesh);
     void sync(const core::Scene& registry,double utcSeconds,core::Vector origin);
     void updateLighting(threepp::Camera&,const threepp::Vector3& sun,const AuxiliaryLights&,float seconds);
+    std::optional<core::ObjectId> pick(const core::Scene&,threepp::Raycaster&) const;
     const std::map<core::ObjectId,std::shared_ptr<threepp::Mesh>>& nodes() const{return nodes_;}
 private:
     threepp::Scene& scene_;
