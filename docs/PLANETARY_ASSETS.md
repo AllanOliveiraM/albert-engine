@@ -1,10 +1,10 @@
-# Próximo conteúdo embarcado
+# Conteúdo planetário e fontes
 
-Inventário consultado em 13/10/2026. Mercúrio está incluído com superfície,
+Inventário atualizado em 16/10/2026. Mercúrio está incluído com superfície,
 relevo, orientação IAU, efemérides e órbita reais. O pacote adicional de
 1.693.650.662 bytes foi preparado, verificado e integrado ao arquivo único.
-Marte e os demais corpos detalhados seguem pendentes; o catálogo interno já
-permite importá-los com posições reais e esferas explicitamente simplificadas.
+Os oito planetas estão embarcados. A ampliação da qualidade e as luas detalhadas
+seguem em andamento; as luas adicionais do catálogo usam esferas simplificadas.
 
 ## Primeiro candidato: Mercúrio
 
@@ -89,13 +89,15 @@ exigem conferência específica. Nenhuma distribuição foi gerada.
 ## Oito planetas — expansão inicial
 
 `assets/solar-sources.json` fixa URLs, SHA-256, créditos e limites dos seis novos
-planetas. Imagens NASA VTAD são extraídas dos GLBs oficiais. Júpiter/Saturno usam
-atlas de cubo: o processamento reamostra as UVs reais da malha por triângulo,
-sem esticar o atlas como se fosse um mapa cilíndrico. As originais permanecem
-em `asset-packs/solar/`; o arquivo otimizado adicional pesa 5.516.824 bytes.
-O build reúne os três arquivos lógicos em um único `visuals.pak` (~4,55 GB).
+planetas. Imagens NASA VTAD são extraídas dos GLBs oficiais. O atlas de Saturno
+reamostra as UVs reais da malha por triângulo, em faixas de 64 linhas.
+Júpiter usa o [mapa visual de 6000×3000 do NASA GSFC/SVS](https://svs.gsfc.nasa.gov/13007/),
+publicado em 2018, separado das imagens de campo magnético da mesma página.
+As originais permanecem em `asset-packs/solar/`; o arquivo otimizado adicional
+pesa 275.610.368 bytes. O build reúne os três arquivos lógicos em um único
+`visuals.pak` de 4.824.701.012 bytes (~4,82 GB).
 
-Resoluções: Vênus/Marte 1440×720; Júpiter/Saturno 4096×2048 após reprojeção;
+Resoluções: Vênus 1440×720; Marte 32768×16384 (Viking colorizado via NASA Trek); Júpiter 6000×3000; Saturno 4096×2048 após reprojeção;
 Urano/Netuno 1024×512. Blocos com gutter, mipmaps e recortes seguem o caminho
 existente de upload gradual. Não há ganho de detalhe além da fonte, nem DEM
 nesses seis corpos: o relevo fica zero explicitamente, sem derivá-lo do brilho.
@@ -129,7 +131,19 @@ O script publica `assets/imagery/solar`, atualiza manifests e conserva os arquiv
 anteriores intactos. `asset-packs/` é ignorada pelo Git. O pacote novo é versionado
 com Git LFS. Não é necessário regenerar distribuições.
 
-O próximo mapa de Marte está em preparação a partir do mosaico Viking do
+O carregador escolhe o menor nível de origem que preenche a resolução pedida
+e reduz a imagem ao orçamento final; mapas de tamanho não potência de dois
+mantêm esse detalhe. As texturas regionais continuam limitadas a 4096 por eixo,
+sem ampliar artificialmente dados menores. A leitura mantém o arquivo aberto:
+substituições atômicas da biblioteca preservam sessões já abertas. Na montagem
+Linux, os blocos copiados são liberados do cache de arquivos em lotes de 64 MiB.
+
+Validação da preparação: pico de aproximadamente 257 MiB no pacote solar;
+a reprojeção em faixas preservou os pixels da conversão anterior. Regressões
+cobrem blocos parciais, polos, antimeridiano, perfis não geográficos, integridade,
+leitura concorrente e troca atômica da biblioteca.
+
+O mapa de Marte embarcado foi preparado a partir do mosaico Viking do
 NASA Trek. Para baixar ou retomar o snapshot em blocos de 256×256, sem abrir
 o planeta inteiro na RAM (Python 3 e Pillow):
 
@@ -141,12 +155,51 @@ O nível 6 corresponde à grade 32768×16384, com 8192 blocos. O script valida
 dimensões/JPEG dos arquivos existentes, registra seus checksums, repete falhas e só publica
 um manifest final quando o nível escolhido estiver completo. Fila e número
 de trabalhadores são limitados. O download fica em
-`asset-packs/solar/sources/mars-trek/`, fora do Git; ainda precisa ser processado
-e publicado no pacote solar para aparecer no aplicativo. O mapa atual não é
+`asset-packs/solar/sources/mars-trek/`, fora do Git; o snapshot completo de 373.675.690 bytes já foi processado
+e publicado no pacote solar. O mapa atual não é
 alterado por esse comando. A maior grade não implica a mesma resolução efetiva
 em todas as regiões nem informação além das observações Viking.
+
+Depois que o download inteiro terminar, para validar e publicar esse snapshot:
+
+```sh
+python3 scripts/prepare-solar-assets.py --offline \
+  --mars-snapshot asset-packs/solar/sources/mars-trek/manifest.json
+```
+
+Essa etapa exige GDAL >= 3.6, além de Pillow e NumPy. O `Dockerfile.assets` inclui
+essas dependências; exemplo a partir da raiz do projeto:
+
+```sh
+docker build -f scripts/Dockerfile.assets -t albert-assets .
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+  --entrypoint python3 albert-assets scripts/prepare-solar-assets.py --offline \
+  --mars-snapshot asset-packs/solar/sources/mars-trek/manifest.json
+```
+
+O processo verifica todos os blocos antes de publicar, registra o hash do snapshot
+em `solar-sources.json` e inclui sua proveniência no pacote. Usa um mosaico virtual,
+cache GDAL de 128 MiB e um trabalhador; não monta uma imagem global inteira na RAM.
+Um download parcial não substitui o mapa atual. O novo mosaico de 32K está embarcado, sem DEM de Marte. A resolução nominal da grade WMTS é inferior à fonte Viking original de 232 m; não deve ser apresentada como 232 m/pixel.
+
+Teste do gerador com as mesmas dependências:
+
+```sh
+docker run --rm -v "$PWD:/work" --entrypoint python3 albert-assets \
+  tests/solar_assets_fixture.py
+```
 
 Fontes: [NASA Trek/Mars](https://trek.nasa.gov/tiles/apidoc/trekAPI.html?body=mars),
 [NASA 3D Resources](https://science.nasa.gov/3d-resources/),
 [Mars/Viking](https://science.nasa.gov/3d-resources/mars/),
 [NAIF pck00011](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc).
+
+Terra e Lua conservam suas grades de 86400×43200 e 108000×54000. O zoom
+mínimo agora permite aproximadamente 64 km de altitude na Terra e 20 km na Lua;
+os recortes com DEM podem usar até 384×384 segmentos, preparados no worker.
+A resolução da fonte continua sendo o limite: mais zoom não cria detalhes novos.
+
+A malha regional interpola bilinearmente o DEM ao criar vértices; aumentar a
+subdivisão não deve criar degraus de amostragem e faixas nas normais. A Lua
+usa exposição fotográfica própria (2,1), sem alterar a iluminação auxiliar nem
+a direção solar física.

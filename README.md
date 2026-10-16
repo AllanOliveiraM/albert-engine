@@ -24,11 +24,16 @@ espaciais**. Você pode navegar pela interface ou conectar outro programa à API
 gRPC para criar objetos, transmitir seus movimentos e acompanhar um alvo com a
 câmera. A renderização, a navegação e as animações ficam dentro do Albert.
 
-Hoje, o conteúdo embarcado inclui **os oito planetas, a Lua e o Sol**, com
-mapas locais e anéis de Saturno. O catálogo contém **71 corpos**, incluindo
-60 luas adicionais, e consulta a base **NASA/JPL SBDB** para encontrar asteroides
-e cometas por nome ou designação. Objetos importados sem mapas usam visual simplificado. Objetos
-próprios podem ser criados pela API como esferas, caixas, cilindros ou modelos GLB estáticos.
+Hoje, a cena inclui **43 corpos**: o Sol, oito planetas, 25 luas, cinco planetas
+anões, Vesta, Pallas, Halley e 67P. A seleção é local, organizada por categorias,
+e aceita nomes aproximados. Luas adicionais, planetas anões e pequenos corpos
+usam órbitas aproximadas embarcadas e superfícies ilustrativas; os oito planetas
+e a Lua preservam suas efemérides Horizons e mapas próprios.
+Os cinturões de asteroides e Kuiper e a nuvem de Oort são populações visuais
+estatísticas, exibidas conforme a escala, sem representar trajetórias individuais.
+Objetos próprios podem ser criados pela API como esferas, caixas, cilindros ou
+modelos GLB estáticos. Consultas/importações online ficam disponíveis pela API;
+a interface não busca objetos na internet.
 Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 [roadmap](ROADMAP.md).
 
@@ -45,7 +50,7 @@ Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 | Nuvens | Observações de satélite opcionais, atualizadas automaticamente quando ativadas |
 | Navegação | Foco por objeto, órbita manual, zoom e transições animadas |
 | Camadas | Pontos e linhas programáveis, inclusive sobre o relevo terrestre, com controle no menu |
-| Catálogo interno | Importação de planetas pela interface ou gRPC, com posições reais e acompanhamento automático |
+| Catálogo local | Categorias, busca aproximada e foco em corpos já incluídos; objetos adicionais entram pela API |
 | Controle externo | API gRPC local para consultar a cena, importar GLB estático, criar/remover objetos e transmitir posição, velocidade e orientação |
 | Distribuição | Executável portátil para Linux e Windows, com a biblioteca visual acompanhando o programa |
 
@@ -62,7 +67,7 @@ estão disponíveis pela API. Esta versão ainda não autentica NTP com NTS;
 [funcionamento e limites](docs/TIME.md).
 
 **As imagens estáticas acompanham o aplicativo.** Superfícies, luzes das cidades,
-relevo e referência solar estão em uma biblioteca de aproximadamente **4,55 GB**. Na distribuição,
+relevo e referência solar estão em uma biblioteca de aproximadamente **4,82 GB**. Na distribuição,
 ela fica em um único `assets/visuals.pak`. Aproximar a câmera carrega recortes
 mais detalhados dessa biblioteca; a resolução máxima depende dos dados de origem.
 
@@ -85,10 +90,16 @@ mantém um cache de downloads. O limite padrão é 2 GB e pode ser ajustado no m
 Em **Dados**, você pode consultar o espaço ocupado, limitar ou limpar o cache
 de posições, órbitas, buscas e nuvens sem apagar as imagens incluídas.
 A aparência solar e os mosaicos de superfície são referências estáticas.
-Nos novos planetas, os mapas ainda têm resoluções de 1K a 4K e não incluem
+Nos novos planetas, os mapas têm resoluções de 1K a 32K e não incluem
 relevo medido. Os gigantes e Vênus usam referências visuais de atmosfera;
 as nuvens desses corpos não são atualizadas ao vivo. Consulte
 [fontes e limites dos mapas](docs/PLANETARY_ASSETS.md).
+
+**O catálogo offline distingue aproximação de efeméride.** Os 33 corpos
+adicionais são propagados a partir de elementos orbitais osculantes de
+16/10/2026. A aproximação de dois corpos não integra perturbações e sua precisão
+diminui longe dessa época. Os nomes e categorias estão disponíveis sem consultas
+online. [Fontes, reprodução e limites](docs/LOCAL_SYSTEM.md).
 
 **A interface e o gRPC compartilham a mesma cena.** Um cliente externo pode
 criar um veículo, enviar sua posição e orientação e solicitar acompanhamento.

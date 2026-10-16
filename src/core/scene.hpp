@@ -45,7 +45,7 @@ struct Layer {
 };
 struct LayerInfo {std::string id,name,source,anchor;LayerKind kind;LayerFrame frame;std::size_t points=0;std::uint32_t color;float widthPixels;double clearanceMeters;bool visible;};
 struct Snapshot {std::uint64_t revision=0;double utcSeconds=0;std::vector<Object> objects;CameraState camera;time::Status clock;std::vector<ModelInfo> models;std::vector<LayerInfo> layers;};
-struct NaturalBody;
+struct NaturalBody;struct LocalOrbit;
 class Scene {
 public:
     static constexpr size_t maxObjects=2048,maxSamples=256;
@@ -60,6 +60,7 @@ public:
     void removeModel(const std::string& id);
     const std::map<std::string,std::shared_ptr<const Model>>& models()const{return models_;}
     void include(const NaturalBody& body);
+    void include(const LocalOrbit& body);
     void remove(const ObjectId& id);
     void visible(const ObjectId& id,bool enabled);
     void samples(const ObjectId& id,std::vector<Sample> values);

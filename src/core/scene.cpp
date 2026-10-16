@@ -31,7 +31,7 @@ Scene::Scene(){
         o.radiusMeters=earth ? earthRadiusMeters : moon ? 1737400. : 695700000.;
         o.appearance.sizeMeters={o.radiusMeters*2,o.radiusMeters*2,o.radiusMeters*2};
         o.defaultDistanceMeters=(earth ? 3.5 : moon ? 1.1 : 400.)*earthRadiusMeters;
-        o.minDistanceMeters=(earth ? 1.05 : moon ? .30 : 150.)*earthRadiusMeters;
+        o.minDistanceMeters=earth ? earthRadiusMeters*1.01 : moon ? 1737400.+20000. : 150.*earthRadiusMeters;
         const auto id=o.id;objects_.emplace(id,std::move(o));
     }
 }

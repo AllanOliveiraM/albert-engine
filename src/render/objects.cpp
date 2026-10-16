@@ -17,7 +17,7 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
     for(auto i=models_.begin();i!=models_.end();)if(!registry.models().contains(i->first)||registry.models().at(i->first)!=i->second.source){for(auto& g:i->second.geometry)g->dispose();for(auto& m:i->second.materials)m->dispose();i=models_.erase(i);}else ++i;
     for(const auto& [id,o]:registry.objects()){
         if(!nodes_.contains(id)){
-            if(o.builtin)continue;
+            if(o.appearance.shape==core::Shape::Builtin)continue;
             instances_[id]=o.instance;
             if(o.appearance.shape==core::Shape::Model){
                 auto& asset=models_[o.appearance.modelId];

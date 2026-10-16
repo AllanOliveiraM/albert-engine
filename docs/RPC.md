@@ -59,9 +59,9 @@ Para compilar somente o programa visual, configure `-DALBERT_RPC=OFF`.
 | `CatalogService` | `ListObjects`, `ImportObject`, `GetJob`, `GetJobs`, `RetryJob` |
 
 `GetCapabilities` informa os formatos e limites realmente suportados. IDs dos
-corpos embarcados: `earth`, `moon`, `sun`, `mercury`, `venus`, `mars`, `jupiter`, `saturn`, `uranus`, `neptune`. Eles não podem ser removidos nem ter
-seus estados substituídos por um cliente. Os alvos especiais `@earth-moon` e
-`@system` enquadram as vistas de contexto.
+corpos com mapas próprios: `earth`, `moon`, `sun`, `mercury`, `venus`, `mars`, `jupiter`, `saturn`, `uranus`, `neptune`. Eles não podem ser removidos nem ter
+seus estados substituídos por um cliente. Os 33 corpos do catálogo offline também são protegidos. Os alvos especiais `@earth-moon`,
+`@inner-system` e `@system` enquadram as vistas de contexto.
 
 Objetos externos aceitam esfera, caixa, cilindro e modelo GLB registrado, com dimensões físicas e cor
 RGB. O eixo do cilindro é o Y local; a esfera admite dimensões diferentes por
@@ -72,19 +72,20 @@ nos próximos cortes. O primeiro suporte a modelos está descrito abaixo.
 
 ## Catálogo interno e importação automática
 
-No seletor da barra superior, pesquise um corpo e clique no resultado com **+**. A mesma operação está disponível por gRPC; o Albert consulta a fonte,
+A interface pesquisa apenas os corpos incluídos. Importações adicionais são feitas
+por gRPC; o Albert consulta a fonte,
 cria o objeto e renova suas posições sem exigir consultas externas pelo cliente.
 
 ```sh
 ./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051
-./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 europa
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 himalia
 ./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 --jobs
-./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 --remove europa
+./build/linux/src/rpc/albert_catalog_client 127.0.0.1:50051 --remove himalia
 ```
 
 No Windows, o cliente fica em
 `build\windows\src\rpc\Release\albert_catalog_client.exe`.
-O catálogo local contém 71 corpos: Sol, oito planetas, Lua, Plutão e 60 luas adicionais. `ListObjects.query` filtra nomes/IDs. Importações
+O catálogo de importação da API contém 71 corpos: Sol, oito planetas, Lua, Plutão e 60 luas adicionais. `ListObjects.query` filtra nomes/IDs. Importações
 sem assets embarcados usam **esferas simplificadas**, com raio de referência;
 não prometem imagens, anéis, relevo ou orientação detalhada. Um corpo embarcado
 já existente pode ser focado diretamente.
@@ -124,7 +125,7 @@ e 64 MiB, dentro do limite de cache configurado pelo usuário.
 `SearchObjects({query:"Apophis"})` consulta a NASA/JPL SBDB (API 1.3).
 A pesquisa é explícita, por nome/designação; aceita até 40 caracteres ASCII,
 incluindo `*` para padrões, e retorna até 50 resultados. `ListObjects` continua
-local: são 71 corpos, incluindo 60 luas. A UI usa os mesmos serviços.
+local: são 71 corpos, incluindo 60 luas. A busca online foi retirada da UI; estes serviços permanecem disponíveis aos integradores.
 
 Use o `id` retornado por `SearchObjects` em `ImportObject`; IDs `sbdb.` codificam
 a designação e são opacos para clientes. O worker resolve o SPK e busca seus
@@ -337,3 +338,7 @@ e `proto.sha256`, com o SHA-256 de `engine.proto`; diferenças são rejeitadas.
 loopback, criação, foco, streaming, remoção, erros e encerramento. A conferência
 visual integrada é feita à parte. Referência do transporte:
 [documentação oficial gRPC C++](https://grpc.io/docs/languages/cpp/).
+
+A cena padrão inclui 43 corpos. Os 33 adicionais já estão presentes e não precisam
+ser importados. Seus elementos offline e limites constam em [LOCAL_SYSTEM.md](LOCAL_SYSTEM.md).
+A câmera também aceita `@inner-system` para enquadrar os planetas internos.

@@ -67,7 +67,7 @@ service SceneService {
 }
 service CameraService {
   // Tracking keeps manual orbit and zoom available. Reserved context IDs:
-  // @earth-moon and @system. Removing the tracked object focuses Earth.
+  // @earth-moon, @inner-system and @system. Removing an external target focuses Earth.
   rpc Focus(FocusRequest) returns (Applied);
   rpc Orbit(OrbitRequest) returns (Applied);
   rpc GetCamera(Empty) returns (Camera);

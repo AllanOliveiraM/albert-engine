@@ -8,7 +8,7 @@ std::shared_ptr<ShaderMaterial> albert::orbitMaterial(float horizon) {
         attribute float orbitTime, nextTime, lineSide;
         attribute vec3 nextPosition;
         uniform vec2 viewport;
-        uniform float nearClip;
+        uniform float nearClip, strokeWidth;
         varying float vTime;
         noperspective varying float vSide;
         void main() {
@@ -26,12 +26,12 @@ std::shared_ptr<ShaderMaterial> albert::orbitMaterial(float horizon) {
             vec4 clip=projectionMatrix*p, other=projectionMatrix*q;
             vec2 direction=(other.xy/other.w-clip.xy/clip.w)*viewport;
             vec2 perpendicular=vec2(-direction.y,direction.x)/max(length(direction),0.0001);
-            clip.xy += perpendicular*lineSide*4.0/viewport*clip.w;
+            clip.xy += perpendicular*lineSide*strokeWidth/viewport*clip.w;
             gl_Position=clip;
         }
     )";
     material->fragmentShader = R"(
-        uniform float present, horizon, dashDays, visibility, referenceVisibility;
+        uniform float present, horizon, dashDays, visibility, referenceVisibility, strokeWidth;
         varying float vTime;
         noperspective varying float vSide;
         // Integral of a periodic pulse. Averaging its footprint preserves
@@ -51,15 +51,17 @@ std::shared_ptr<ShaderMaterial> albert::orbitMaterial(float horizon) {
             float edge=abs(vSide);
             float coverage=1.0-smoothstep(0.35,0.75,edge);
             coverage=max(coverage,0.12*(1.0-smoothstep(0.6,1.0,edge)));
-            float guide=referenceVisibility*.12*(1.0-smoothstep(.12,.45,edge));
+            // A complete, readable ~1 px guide, independent of highlight width.
+            float guide=referenceVisibility*.42*(1.0-smoothstep(.25,.95,edge*strokeWidth*.5));
             float highlight=coverage*fade*mix(.78,.92*dash,future);
             float alpha=guide+highlight*(1.0-guide);
-            vec3 ink=mix(vec3(.19,.30,.36),color,highlight/max(alpha,.00001));
+            vec3 ink=mix(vec3(.32,.48,.55),color,highlight/max(alpha,.00001));
             gl_FragColor=vec4(ink,visibility*alpha);
             #include <encodings_fragment>
         }
     )";
     material->uniforms.emplace("referenceVisibility",Uniform(0.f));
+    material->uniforms.emplace("strokeWidth",Uniform(4.f));
     material->uniforms.emplace("present", Uniform(0.f));
     material->uniforms.emplace("viewport",Uniform(Vector2(1280,720)));
     material->uniforms.emplace("nearClip",Uniform(.01f));

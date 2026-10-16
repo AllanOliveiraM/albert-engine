@@ -15,25 +15,27 @@
     },
     {
       "id": "mars",
-      "filename": "mars.tif",
-      "url": "https://assets.science.nasa.gov/content/dam/science/cds/3d/resources/image/mars/Mars.tif",
-      "sha256": "fb094158273b465ba4c017be9d13e266a86921f3aa7ac0eb99d6943e0f3e5f47",
-      "bytes": 3137136,
+      "filename": "mars-trek/manifest.json",
+      "url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/",
+      "sha256": "b6ec12961b151c14fe5b4215ebc0560c605bc55fda0cd584fd7679aa3358051c",
+      "bytes": 1204325,
       "cube_atlas": false,
-      "credit": "NASA/JPL/Caltech/USGS Viking",
-      "product": "https://science.nasa.gov/3d-resources/mars/",
-      "limits": "Static visualization texture, not live weather or calibrated albedo. No DEM. Longitude phase is visual; surface features are not guaranteed to follow current IAU cartographic registration."
+      "credit": "NASA/JPL/USGS Viking MDIM 2.1; NASA Trek",
+      "product": "https://trek.nasa.gov/tiles/apidoc/trekAPI.html?body=mars",
+      "limits": "Static colorized Viking mosaic. WMTS grid 32768 x 16384; effective resolution/coverage vary. No DEM or current weather. Longitude registration requires independent validation.",
+      "kind": "wmts-snapshot",
+      "level": 6
     },
     {
       "id": "jupiter",
-      "filename": "jupiter.glb",
-      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/j/Jupiter_1_142984.glb",
-      "sha256": "8edc4e9b88b73ca1b125a258f0ecaef7fc6494a7cadda37704af459a119f4870",
-      "bytes": 11479456,
-      "cube_atlas": true,
-      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
-      "product": "https://science.nasa.gov/resource/jupiter-3d-model/",
-      "limits": "Static visualization texture, not live weather or calibrated albedo. No DEM. Longitude phase is visual; surface features are not guaranteed to follow current IAU cartographic registration."
+      "filename": "jupiter-6000.png",
+      "url": "https://svs.gsfc.nasa.gov/vis/a010000/a013000/a013007/Jupiter_Map_Offset.png",
+      "sha256": "d830d81602ebe9d82755df2562c025d08a1bbca1cac91a5d2cc3920014c31f5a",
+      "bytes": 14510599,
+      "cube_atlas": false,
+      "credit": "NASA's Goddard Space Flight Center / Scientific Visualization Studio",
+      "product": "https://svs.gsfc.nasa.gov/13007/",
+      "limits": "Static visible-cloud map published in 2018, 6000 x 3000. No magnetic-field overlay, current weather, DEM or calibrated albedo. Map longitude offset is inherited from the visualization; feature phase is not independently validated."
     },
     {
       "id": "saturn",

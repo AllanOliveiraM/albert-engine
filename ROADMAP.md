@@ -1,12 +1,47 @@
 # Albert Engine — plano de evolução
 
-Documento de planejamento e acompanhamento, atualizado em **13/10/2026**.
+Documento de planejamento e acompanhamento, atualizado em **16/10/2026**.
 A seção de andamento registra as entregas realizadas. Os demais requisitos
 formam o backlog para entregas incrementais conforme as prioridades acordadas.
 Este documento reúne os pedidos, a proposta de arquitetura
 e os critérios para orientar as próximas implementações.
 
 ### Andamento
+
+**16/10 — navegação e conteúdo local (novo corte).** Retirada a busca/importação
+online da interface; serviços continuam na API. Cena padrão com 43 corpos,
+agrupamento por categoria, nomes aproximados (acentos/transposição), prioridade
+por correspondência e distância heliocêntrica para desempate. As 24 novas luas,
+cinco planetas anões, dois asteroides e dois cometas usam elementos Horizons
+embarcados e propagação de dois corpos explicitamente aproximada. Os oito
+planetas e a Lua mantêm o caminho de efemérides existente. Texturas e formas
+próprias desses novos corpos continuam pendentes; esferas não são fotorealismo.
+
+Órbita completa agora tem guia fina mais visível, além dos destaques locais de
+passado/futuro. Traços crescem moderadamente com a aproximação. Vista dos
+planetas internos, etiquetas clicáveis para luas com oclusão, câmera em fases
+(afastar, alinhar, aproximar), conservando o easing. Cinturão principal, Kuiper
+e nuvem de Oort entram como populações visuais estatísticas opcionais, sem
+catálogo individual nem afirmação de densidade aparente real.
+
+Marte passa de 1440×720 para 32768×16384 (Viking colorizado/Trek); Júpiter passa
+para 6000×3000 (GSFC/SVS). Pacote solar de 275.610.368 bytes, biblioteca reunida
+~4,82 GB. Geradores com processamento em faixas/VRT, validação de todos os blocos,
+leitor concorrente com arquivo fixado e montagem que libera cache de arquivos
+em lotes de 64 MiB. LOD escolhe fonte suficiente para o orçamento, sem ampliar
+artificialmente. Terra/Lua: zoom mínimo ~64/20 km e malha regional até 384×384.
+
+Validação automatizada: 22 testes CTest Linux, gerador de assets e teste OpenGL
+passaram. MinGW e testes de pacote, catálogo offline e gráficos no Wine passaram.
+Conferência integrada validou as vistas de escala, clique em Dione, busca de
+Europa com “euorpa”, foco/zoom em Marte, Lua e Terra. Pico observado de cerca
+de 1,02 GiB com llvmpipe. Execução completa Windows pelo Wine também passou.
+Amostragem bilinear do DEM evita degraus artificiais ao subdividir a malha;
+exposição fotográfica lunar própria e origem gráfica na câmera durante viagens.
+GPU física e Windows nativo ainda exigem validação. Nenhuma dist gerada.
+Detalhes e limites em [LOCAL_SYSTEM.md](docs/LOCAL_SYSTEM.md) e
+[PLANETARY_ASSETS.md](docs/PLANETARY_ASSETS.md).
+
 
 **M0 — correções implementadas; validação local concluída em 13/10/2026.**
 

@@ -8,7 +8,8 @@
 #include <string>
 
 namespace albert {
-// Immutable index; each read owns its stream. No extraction and no disk cache.
+// Immutable index/file handle survives atomic replacement. Short synchronized
+// reads; decoding stays parallel. No extraction and no complete-file RAM copy.
 class AssetPack {
 public:
     explicit AssetPack(std::filesystem::path path);

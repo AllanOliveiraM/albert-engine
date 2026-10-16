@@ -30,6 +30,12 @@ void controls() {
     require(!albert::AuxiliaryLight{}.enabled,"Generic auxiliary light must start disabled");
     require(!settings.earthAssist && !settings.moonAssist,"Auxiliary lights must start disabled");
     require(!settings.clouds,"Live clouds must start disabled");
+    albert::RegionalImages slope;slope.body="moon";slope.region={-10,-10,10,10};
+    slope.day=Image(std::vector<unsigned char>(4,255),1,1);
+    slope.height=Image(std::vector<float>{0,0,0,1,1000,1000,1000,1,0,0,0,1,1000,1000,1000,1},2,2);
+    albert::prepareRegionalImages(slope);const auto* terrainVertices=slope.geometry->getAttribute<float>("position");
+    const unsigned center=96*193+96;const float radius=std::hypot(terrainVertices->getX(center),terrainVertices->getY(center),terrainVertices->getZ(center));
+    require(std::abs(radius-(1737400.f+520.f)/6378137.f)<1e-7f,"Regional terrain introduced nearest-neighbour terraces");
     require(albert::regionRelevant({170,-10,190,10},{-185,-10,-175,10}),"Moving across the date line cancelled a useful crop");
     require(albert::regionSufficient({170,-10,190,10},{-189,-9,-171,9}),"Existing overlapping detail was not reused");
     require(!albert::regionSufficient({-30,-30,30,30},{-5,-5,5,5}),"Zooming did not request finer detail");
@@ -140,7 +146,7 @@ void graphics() {
     scene->remove(*front);
     material->uniforms.at("present").setValue(1000.f);material->uniforms.at("referenceVisibility").setValue(1.f);
     scene->add(behind);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
-    require(pixels[3*(96*192+25)+2]>2,"Complete orbit guide disappeared outside the highlighted time span");
+    require(pixels[3*(96*192+25)+2]>24,"Complete orbit guide disappeared outside the highlighted time span");
     planets.moon->visible=true;renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
     const auto occludedGuide=pixels;material->uniforms.at("referenceVisibility").setValue(0.f);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
     for(int y=91;y<101;++y)for(int x=83;x<109;++x)for(int c=0;c<3;++c)require(pixels[3*(y*192+x)+c]==occludedGuide[3*(y*192+x)+c],"Complete orbit guide leaked through the lunar terrain");

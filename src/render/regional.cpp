@@ -93,7 +93,8 @@ void albert::prepareRegionalImages(RegionalImages& images) {
     images.surfaceMask=Image(std::move(mask),maskWidth,maskHeight);
     const float radians=static_cast<float>(pi/180.);
     const float radius=static_cast<float>(core::surfaceRadius(images.body)/core::earthRadiusMeters);
-    constexpr unsigned segments=192;
+    const unsigned segments=images.body=="earth"||images.body=="moon" ?
+        std::clamp(std::max(images.day->width(),images.day->height())/8,192u,384u):192u;
     auto geometry=SphereGeometry::create(radius,segments,segments,
         static_cast<float>(region.west+180.)*radians,static_cast<float>(region.east-region.west)*radians,
         static_cast<float>(90.-region.north)*radians,static_cast<float>(region.north-region.south)*radians);
@@ -101,8 +102,14 @@ void albert::prepareRegionalImages(RegionalImages& images) {
         const auto& height=*images.height;
         auto* position=geometry->getAttribute<float>("position");
         for(unsigned y=0;y<=segments;++y) for(unsigned x=0;x<=segments;++x) {
-            const unsigned px=x*(height.width()-1)/segments,py=(segments-y)*(height.height()-1)/segments;
-            const float meters=height.data<float>()[4*(static_cast<size_t>(py)*height.width()+px)];
+            // Interpolate the measured DEM. Nearest-neighbour vertices create
+            // terraces/striped normals when the mesh is denser than its source.
+            const double px=double(x)*(height.width()-1)/segments,py=double(segments-y)*(height.height()-1)/segments;
+            const unsigned x0=static_cast<unsigned>(px),y0=static_cast<unsigned>(py);
+            const unsigned x1=std::min(x0+1,height.width()-1),y1=std::min(y0+1,height.height()-1);
+            auto altitude=[&](unsigned a,unsigned b){return height.data<float>()[4*(static_cast<size_t>(b)*height.width()+a)];};
+            const float meters=std::lerp(std::lerp(altitude(x0,y0),altitude(x1,y0),float(px-x0)),
+                std::lerp(altitude(x0,y1),altitude(x1,y1),float(px-x0)),float(py-y0));
             const unsigned i=y*(segments+1)+x;
             Vector3 point(position->getX(i),position->getY(i),position->getZ(i));
             if(images.body=="earth") {

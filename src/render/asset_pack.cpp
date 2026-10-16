@@ -7,11 +7,55 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <vector>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 namespace {
+// Keep the opened archive, so an atomic asset update cannot pair an old index
+// with bytes from a new file. Only the short seek/read is serialized.
+class ArchiveFile {
+public:
+    explicit ArchiveFile(const fs::path& path){
+#ifdef _WIN32
+        handle_=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_RANDOM_ACCESS,nullptr);
+        LARGE_INTEGER length{};
+        if(handle_==INVALID_HANDLE_VALUE)throw std::runtime_error("Biblioteca visuals.pak ausente");
+        if(!GetFileSizeEx(handle_,&length)||length.QuadPart<0){CloseHandle(handle_);handle_=INVALID_HANDLE_VALUE;throw std::runtime_error("Tamanho da biblioteca indisponivel");}
+        size=static_cast<std::uint64_t>(length.QuadPart);
+#else
+        stream_.open(path,std::ios::binary|std::ios::ate);
+        if(!stream_)throw std::runtime_error("Biblioteca visuals.pak ausente. Execute make assets e copie a distribuicao completa.");
+        const auto length=stream_.tellg();if(length<0)throw std::runtime_error("Tamanho da biblioteca indisponivel");size=static_cast<std::uint64_t>(length);
+#endif
+    }
+    ~ArchiveFile(){
+#ifdef _WIN32
+        if(handle_!=INVALID_HANDLE_VALUE)CloseHandle(handle_);
+#endif
+    }
+    void read(std::uint64_t offset,void* output,std::size_t amount) const {
+        if(offset>size||amount>size-offset)throw std::runtime_error("Leitura fora da biblioteca visual");
+        std::lock_guard lock(mutex_);
+#ifdef _WIN32
+        LARGE_INTEGER position{};position.QuadPart=static_cast<LONGLONG>(offset);DWORD count=0;
+        if(amount>MAXDWORD||!SetFilePointerEx(handle_,position,nullptr,FILE_BEGIN)||!ReadFile(handle_,output,static_cast<DWORD>(amount),&count,nullptr)||count!=amount)throw std::runtime_error("Biblioteca visual incompleta");
+#else
+        stream_.clear();stream_.seekg(static_cast<std::streamoff>(offset));
+        if(!stream_.read(static_cast<char*>(output),static_cast<std::streamsize>(amount)))throw std::runtime_error("Biblioteca visual incompleta");
+#endif
+    }
+    std::string read(std::uint64_t offset,std::size_t amount) const {std::string bytes(amount,'\0');read(offset,bytes.data(),amount);return bytes;}
+    std::uint64_t size=0;
+private:
+    mutable std::mutex mutex_;
+#ifdef _WIN32
+    HANDLE handle_=INVALID_HANDLE_VALUE;
+#else
+    mutable std::ifstream stream_;
+#endif
+};
 struct Entry { std::uint64_t offset, bytes; std::string sha; };
 struct Layer {
     int width,height,tile,gutter,level;std::string extension;
@@ -32,36 +76,32 @@ std::vector<Span> spans(const std::vector<Axis>& coordinates) {
 }
 
 struct albert::AssetPack::Index {
-    fs::path path;
+    std::shared_ptr<ArchiveFile> archive;
     std::uint64_t size=0;
     std::map<std::string,Entry> files;
     std::map<std::string,Layer> layers;
     std::string read(const std::string& name) const {
         const auto& entry=files.at(name);
-        std::ifstream stream(path,std::ios::binary);
-        stream.seekg(static_cast<std::streamoff>(entry.offset));
-        std::string data(static_cast<size_t>(entry.bytes),'\0');
-        if (!stream.read(data.data(),static_cast<std::streamsize>(data.size())) || sha256(data)!=entry.sha)
+        auto data=archive->read(entry.offset,static_cast<size_t>(entry.bytes));
+        if (sha256(data)!=entry.sha)
             throw std::runtime_error("Biblioteca visual corrompida: "+name+". Restaure visuals.pak.");
         return data;
     }
 };
 
 albert::AssetPack::AssetPack(fs::path path) {
-    auto index=std::make_shared<Index>();index->path=std::move(path);
-    std::ifstream stream(index->path,std::ios::binary);
-    if (!stream) throw std::runtime_error("Biblioteca visuals.pak ausente. Execute make assets e copie a distribuicao completa.");
-    index->size=fs::file_size(index->path);
+    auto index=std::make_shared<Index>();index->archive=std::make_shared<ArchiveFile>(path);
+    index->size=index->archive->size;
     auto integer=[](const unsigned char* p){std::uint64_t n=0;for(int i=0;i<8;++i)n|=std::uint64_t(p[i])<<(i*8);return n;};
     std::vector<std::pair<std::uint64_t,std::uint64_t>> archives;
     std::uint64_t payloadEnd=index->size;
     if(index->size>=16){
-        unsigned char footer[16]{};stream.seekg(static_cast<std::streamoff>(index->size-16));stream.read(reinterpret_cast<char*>(footer),16);
+        unsigned char footer[16]{};index->archive->read(index->size-16,footer,16);
         if(std::string_view(reinterpret_cast<char*>(footer+8),8)=="ALBRTPX1"){
             const auto length=integer(footer);
             if(length>16*1024*1024||length>index->size-16)throw std::runtime_error("Indice da colecao visual invalido");
-            payloadEnd=index->size-16-length;stream.seekg(static_cast<std::streamoff>(payloadEnd));
-            std::string data(static_cast<size_t>(length),'\0');if(!stream.read(data.data(),static_cast<std::streamsize>(length)))throw std::runtime_error("Colecao visual incompleta");
+            payloadEnd=index->size-16-length;
+            const auto data=index->archive->read(payloadEnd,static_cast<size_t>(length));
             const auto collection=json::parse(data);
             if(collection.at("container")!="albert-pack-collection-v1"||collection.at("archives").empty()||collection.at("archives").size()>256)throw std::runtime_error("Colecao visual incompativel");
             std::uint64_t end=0;
@@ -76,11 +116,9 @@ albert::AssetPack::AssetPack(fs::path path) {
     if(archives.empty())archives.emplace_back(0,index->size);
     for(const auto& [offset,archiveSize]:archives){
         if(archiveSize<16)throw std::runtime_error("Arquivo visual incompleto");
-        stream.clear();stream.seekg(static_cast<std::streamoff>(offset));char magic[8]{};unsigned char length[8]{};
-        stream.read(magic,8);stream.read(reinterpret_cast<char*>(length),8);const auto size=integer(length);
-        if(std::string_view(magic,8)!="ALBRTPK1"||size>16*1024*1024||size>archiveSize-16)throw std::runtime_error("Formato de visuals.pak invalido");
-        std::string data(static_cast<size_t>(size),'\0');
-        if(!stream.read(data.data(),static_cast<std::streamsize>(size)))throw std::runtime_error("Indice visual incompleto");
+        unsigned char header[16]{};index->archive->read(offset,header,16);const auto size=integer(header+8);
+        if(std::string_view(reinterpret_cast<char*>(header),8)!="ALBRTPK1"||size>16*1024*1024||size>archiveSize-16)throw std::runtime_error("Formato de visuals.pak invalido");
+        const auto data=index->archive->read(offset+16,static_cast<size_t>(size));
         const auto manifest=json::parse(data);if(manifest.at("container")!="albert-pack-v1")throw std::runtime_error("Versao visual incompativel");
         const auto start=offset+16+size,available=archiveSize-16-size;
         std::uint64_t declaredEnd=0;
@@ -124,12 +162,15 @@ threepp::Image albert::AssetPack::image(const std::string& name,const GeoRegion&
     const double spanX=region.east-region.west,spanY=region.north-region.south;
     if (!maximum || maximum>4096 || !std::isfinite(west) || !std::isfinite(north) || !std::isfinite(spanX) || !std::isfinite(spanY) || std::abs(west)>720 || spanX<=0 || spanX>fullWidth+1e-8 || spanY<=0 || spanY>fullHeight+1e-8)
         throw std::runtime_error("Regiao visual invalida");
-    int level=layer.level;
-    while (level>0 && (std::ceil(spanX/fullWidth*(layer.width>>(layer.level-level)))>maximum || std::ceil(spanY/fullHeight*(layer.height>>(layer.level-level)))>maximum)) --level;
+    // Choose the smallest source level that can fill the requested texture,
+    // then resample into the fixed budget. Choosing the level below the budget
+    // loses detail, especially with non-power-of-two planetary mosaics.
+    int level=0;
+    while(level<layer.level && std::max(spanX/fullWidth*(layer.width>>(layer.level-level)),spanY/fullHeight*(layer.height>>(layer.level-level)))<maximum)++level;
     const int width=layer.width>>(layer.level-level),height=layer.height>>(layer.level-level);
     const double scale=std::min({1.,maximum/(spanX/fullWidth*width),maximum/(spanY/fullHeight*height)});
-    const unsigned outWidth=std::max(1u,static_cast<unsigned>(std::ceil(spanX/fullWidth*width*scale)));
-    const unsigned outHeight=std::max(1u,static_cast<unsigned>(std::ceil(spanY/fullHeight*height*scale)));
+    const unsigned outWidth=std::max(1u,std::min(maximum,static_cast<unsigned>(std::ceil(spanX/fullWidth*width*scale))));
+    const unsigned outHeight=std::max(1u,std::min(maximum,static_cast<unsigned>(std::ceil(spanY/fullHeight*height*scale))));
     std::vector<Axis> xs(outWidth),ys(outHeight);
     for (unsigned x=0;x<outWidth;++x) {
         const double pixel=(west+(x+.5)*spanX/outWidth)/fullWidth*width-.5;
