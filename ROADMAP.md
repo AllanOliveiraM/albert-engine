@@ -13,7 +13,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Expandir mapas próprios, formas e relevo das luas por sistema | Lua terrestre detalhada; nove luas de Júpiter/Saturno com mapas NASA/VTAD e orientação IAU; demais luas ilustrativas; generalizar eclipses além de Terra/Lua |
+| **Alta — 1** | Fobos/Deimos primeiro; depois completar mapas, formas e relevo das luas pendentes | Lua terrestre detalhada; 16 luas adicionais com mapas NASA/VTAD e orientação IAU; demais luas ilustrativas; generalizar eclipses além de Terra/Lua |
 | **Alta — 2** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 3** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
 | **Alta — 4** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
@@ -25,6 +25,16 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
 
 ### Andamento
+
+**16/10 — luas dos sistemas externos.** Ariel, Umbriel, Titânia, Oberon, Miranda,
+Tritão e Caronte recebem mapas próprios NASA/VTAD e orientação IAU, incluindo
+rotação retrógrada e termos periódicos. São 16 luas adicionais com mapas; pacote
+conjunto de 38,13 MB. Cobertura parcial e resolução limitada ficam explícitas
+na UI e no inventário. Regiões uniformes/borradas não são apresentadas como
+terreno medido. Os sete mapas variam de 1024×512 a 4096×2048; sem DEM.
+Restam Fobos/Deimos (formas, imagens e orientação observadas), Mimas (atlas),
+Titã (atmosfera), Hyperion/Phoebe (formas observadas), Nereida/Proteus, relevo
+e efemérides mais precisas e eclipses adicionais.
 
 **16/10 — mapas das luas de Saturno.** Encélado, Tétis, Dione, Reia e Jápeto
 recebem mapas próprios NASA/VTAD de 4096×2048 e orientação IAU pck00011,

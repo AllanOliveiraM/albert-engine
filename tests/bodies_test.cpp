@@ -32,10 +32,11 @@ int main(){try{
     const PlanetFixture moons[]{
 #include "moon_frames_fixture.inc"
     };
-    require(surfaceBodies().size()==16&&naturalBodies().size()==7,"Surface catalogue changed online planet provider scope");
+    require(surfaceBodies().size()==23&&naturalBodies().size()==7,"Surface catalogue changed online planet provider scope");
     for(const auto& fixture:moons){const auto* definition=surfaceBody(fixture.body);require(definition&&!naturalBody(fixture.body)&&category(fixture.body)==Category::Moon,"Textured moon was reclassified as a planet");
         require(surfaceRadius(fixture.body)==localOrbit(fixture.body)->radius,"Surface and orbital/collision radii disagree");
         const auto frame=bodyFrame(*definition,fixture.jd);const Vector columns[]{frame.prime,frame.east,frame.pole};
         for(int col=0;col<3;++col){const double values[]{columns[col].x,columns[col].y,columns[col].z};for(int row=0;row<3;++row)require(std::abs(values[row]-fixture.m[row][col])<2e-9,"Moon orientation differs from CSPICE");}}
-    std::cout<<"Bodies OK: descriptors, built-in protection and IAU Mercury orientation/libration against CSPICE at four epochs\n";return 0;
+    require(surfaceBody("triton")->meridian[1]<0&&surfaceBody("miranda")->partialMap&&surfaceBody("charon")->partialMap,"Retrograde rotation or partial imagery metadata lost");
+    std::cout<<"Bodies OK: planets and mapped moons against CSPICE at four epochs, radii, ownership and partial coverage\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

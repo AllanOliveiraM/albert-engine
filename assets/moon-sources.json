@@ -154,6 +154,132 @@
       ],
       "credit": "NASA Visualization Technology Applications and Development (VTAD)",
       "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+    },
+    {
+      "id": "ariel",
+      "filename": "ariel.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/a/Ariel_1_1158.glb",
+      "bytes": 1364104,
+      "sha256": "b7a5cd8ad3d48687cc3162861971a76a19fe9fad4726563e24b6cc917e9bd858",
+      "product": "https://science.nasa.gov/resource/ariel-3d-model/",
+      "name": "Ariel",
+      "horizons_id": 701,
+      "radius_m": 578900,
+      "grid": [
+        2048,
+        1024
+      ],
+      "partial_map": true,
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
+    },
+    {
+      "id": "umbriel",
+      "filename": "umbriel.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/u/Umbriel_1_1169.glb",
+      "bytes": 606920,
+      "sha256": "b523de7d1406289d540369c635d0b13576460c1fa85a885352afc71c3f118d71",
+      "product": "https://science.nasa.gov/resource/umbriel-3d-model/",
+      "name": "Umbriel",
+      "horizons_id": 702,
+      "radius_m": 584700,
+      "grid": [
+        1024,
+        512
+      ],
+      "partial_map": true,
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
+    },
+    {
+      "id": "titania",
+      "filename": "titania.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/t/Titania_1_1577.glb",
+      "bytes": 1932572,
+      "sha256": "08556622082b283f2f52c9214636c22acf27300889374dd37197f11a4448324c",
+      "product": "https://science.nasa.gov/resource/titania-3d-model/",
+      "name": "Titania",
+      "horizons_id": 703,
+      "radius_m": 788900,
+      "grid": [
+        2048,
+        1024
+      ],
+      "partial_map": true,
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
+    },
+    {
+      "id": "oberon",
+      "filename": "oberon.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/o/Oberon_1_1523.glb",
+      "bytes": 1518548,
+      "sha256": "7b42c417e523db2a22c744cd471587c26f07581564dae7c3b0c20986eea93add",
+      "product": "https://science.nasa.gov/resource/oberon-3d-model/",
+      "name": "Oberon",
+      "horizons_id": 704,
+      "radius_m": 761400,
+      "grid": [
+        2048,
+        1024
+      ],
+      "partial_map": true,
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
+    },
+    {
+      "id": "miranda",
+      "filename": "miranda.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/m/Miranda_1_472.glb",
+      "bytes": 688936,
+      "sha256": "5a4d24c5fb237ae6d21d1a58857efb32fd0e53162754f17e4156618a541c4c57",
+      "product": "https://science.nasa.gov/resource/miranda-3d-model/",
+      "name": "Miranda",
+      "horizons_id": 705,
+      "radius_m": 235833.333333,
+      "grid": [
+        1024,
+        512
+      ],
+      "partial_map": true,
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
+    },
+    {
+      "id": "triton",
+      "filename": "triton.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/t/Triton_1_2707.glb",
+      "bytes": 6865548,
+      "sha256": "a25df7ee7fe8679e3da8cca7f1a09ec7241ad5e0c7ad97a39f057b8c1a0043ce",
+      "product": "https://science.nasa.gov/resource/triton-3d-model/",
+      "name": "Tritao",
+      "horizons_id": 801,
+      "radius_m": 1352600,
+      "grid": [
+        4096,
+        2048
+      ],
+      "partial_map": true,
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
+    },
+    {
+      "id": "charon",
+      "filename": "charon.glb",
+      "url": "https://science.nasa.gov/wp-content/uploads/2023/09/Charon_1_2.glb",
+      "bytes": 473760,
+      "sha256": "3677525ff10e15f3d9cd0f0152801ed27ac3c277f8aad15056fe01cba20b2dbe",
+      "product": "https://science.nasa.gov/resource/charon-3d-model/",
+      "name": "Caronte",
+      "horizons_id": 901,
+      "radius_m": 606000,
+      "grid": [
+        1264,
+        632
+      ],
+      "partial_map": true,
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
     }
   ]
 }

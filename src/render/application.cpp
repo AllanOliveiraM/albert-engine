@@ -1169,7 +1169,8 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::TextColored(ImVec4(.5f,.86f,.93f,1), "%s", focusName(focus));
                 if(focus.front()!='@' && albert::core::localOrbit(focus)) {
                     ImGui::TextDisabled("Orbita aproximada offline");
-                    ImGui::TextWrapped(solids.contains(focus)?"Mapa NASA/VTAD do objeto; resolucao e cobertura variam. Sem relevo medido.":albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
+                    const auto* surface=albert::core::surfaceBody(focus);
+                    ImGui::TextWrapped(solids.contains(focus)?(surface&&surface->partialMap?"Mapa parcial NASA/VTAD. Areas uniformes ou borradas podem nao ter observacoes. Sem relevo medido.":"Mapa NASA/VTAD do objeto; resolucao e cobertura variam. Sem relevo medido."):albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
                 }
                 if(focus==targets::Moon&&eclipses.lunarActive())ImGui::TextWrapped("Eclipse lunar: luz atmosferica avermelhada aproximada.");
                 if(focus.front()!='@' && !registry.get(focus).builtin) {

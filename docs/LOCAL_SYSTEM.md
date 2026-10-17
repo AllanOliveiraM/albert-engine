@@ -33,7 +33,7 @@ São elipses de dois corpos, propagadas localmente. Luas são relativas a seus
 planetas; os demais são heliocêntricos. Perturbações, precessão e forças não
 gravitacionais não são integradas. Não são efemérides precisas em tempo real;
 o erro cresce com a distância temporal à época de referência. A interface
-identifica a aproximação ao focar esses corpos. Nove luas de Júpiter e Saturno
+identifica a aproximação ao focar esses corpos. Dezesseis luas adicionais
 têm mapas próprios NASA/VTAD, orientação IAU e detalhes regionais por zoom.
 Os demais usam esferas de referência ou formas rochosas artísticas descritas
 abaixo, sem reutilizar fotografias de outros objetos. Mais mapas/modelos observados
@@ -55,7 +55,7 @@ independente de vetores Horizons, além de verificar fechamento, limites radiais
 referencial do planeta principal e busca aproximada. Essa comparação valida a
 conversão dos elementos; não mede o erro de propagação fora da época inicial.
 
-## Mapas das luas de Júpiter e Saturno
+## Mapas das luas
 
 As fontes e limitações estão em `assets/moon-sources.json`: [Io](https://science.nasa.gov/resource/io-3d-model/),
 [Europa](https://science.nasa.gov/resource/europa-3d-model/),
@@ -69,11 +69,29 @@ Não representam atividade atual nem albedo calibrado. O registro da longitude
 da textura contra marcos IAU ainda exige validação; a orientação do corpo usa
 o modelo IAU `pck00011`, incluindo termos periódicos, testado contra CSPICE.
 
+Os sistemas externos também têm mapas próprios, com **cobertura parcial**:
+
+| Lua | Fonte NASA/VTAD | Resolução da imagem |
+| --- | --- | --- |
+| Ariel | [Modelo NASA](https://science.nasa.gov/resource/ariel-3d-model/) | 2048×1024 |
+| Umbriel | [Modelo NASA](https://science.nasa.gov/resource/umbriel-3d-model/) | 1024×512 |
+| Titânia | [Modelo NASA](https://science.nasa.gov/resource/titania-3d-model/) | 2048×1024 |
+| Oberon | [Modelo NASA](https://science.nasa.gov/resource/oberon-3d-model/) | 2048×1024 |
+| Miranda | [Modelo NASA](https://science.nasa.gov/resource/miranda-3d-model/) | 1024×512 |
+| Tritão | [Modelo NASA](https://science.nasa.gov/resource/triton-3d-model/) | 4096×2048 |
+| Caronte | [Modelo NASA](https://science.nasa.gov/resource/charon-3d-model/) | 1264×632 |
+
+Áreas uniformes/borradas refletem lacunas ou baixa definição da fonte; não são
+observações de terreno liso. A interface avisa ao focar esses corpos. A contagem
+de pixels não garante essa resolução em toda a superfície. Não há DEM nem
+atividade atmosférica/geológica em tempo real. A orientação de Tritão preserva
+a rotação retrógrada e todos os termos periódicos publicados no kernel.
+
 O build comum já reúne `assets/imagery/moons/` à biblioteca única. Não baixa mapas
 dessas luas em runtime. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **34.983.581 bytes**.
+todas as luas na RAM. O pacote adicional ocupa **38.131.729 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -83,7 +101,9 @@ versionados. O processo preserva os pacotes de Terra/Lua/Sol e planetas.
 
 Mimas ainda exige reprojetar seu atlas de dois hemisférios; o globo atmosférico
 de Titã requer um tratamento próprio. Hyperion e Phoebe continuam artísticos.
-As demais luas ainda não têm mapas próprios embarcados.
+Fobos/Deimos ainda usam formas artísticas e órbitas aproximadas; faltam seus
+modelos, imagens e orientação observados. Nereida e Proteus também permanecem
+sem mapas próprios embarcados.
 
 ## Formas artísticas dos pequenos corpos
 
