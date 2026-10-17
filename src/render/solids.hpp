@@ -20,6 +20,9 @@ public:
     bool hazy(const std::string& id) const;        // Opaque visible haze (Titan).
     bool surfaceView(const std::string& id) const; // Haze faded out to show the surface map.
     void showSurface(const std::string& id,bool surface);
+    bool faintRings(const std::string& id) const;   // Jupiter, Uranus, Neptune.
+    bool ringsEnhanced(const std::string& id) const;
+    void enhanceRings(const std::string& id,bool enhanced); // Exposure stretch, off by default.
     std::shared_ptr<const threepp::BVH> picker(const std::string& id) const;
     bool takeEviction(){return std::exchange(evicted_,false);}
     bool uploading() const{return uploads_.active();}

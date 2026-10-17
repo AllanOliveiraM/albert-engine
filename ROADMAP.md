@@ -15,7 +15,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | --- | --- | --- |
 | **Alta — 1** | ~~Completar as luas~~ — concluído em 17/10/2026 | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion/Proteu com formas medidas (Hipérion e Proteu sem mapa; Hipérion com orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
 | **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P (Rosetta), Halley (Giotto/Vega), Vesta e Ceres (Dawn: mosaico + relevo) medidos; Pallas ainda artística; coma/caudas dependem do seletor de data (Média 5); melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
-| **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
+| **Alta — 3** | ~~Anéis de Júpiter, Urano e Netuno~~ — entregue em 17/10/2026 | Perfis das tabelas do PDS, espalhamento simples com sombra do planeta, realce opcional; faltam arcos de Adams, excentricidades e cor das partículas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
 | **Alta — 5** | Validar GPU física, Windows nativo (inclui a versão leve e seus downloads) e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
 | **Média — 1** | Efemérides/orientações locais mais precisas para luas e pequenos corpos, avaliando SPICE | Catálogo adicional usa propagação aproximada de dois corpos |
@@ -83,6 +83,14 @@ Todas as 25 luas têm agora representação própria, com os limites de cada fon
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — anéis de Júpiter, Urano e Netuno.** Raios, larguras e profundidades ópticas
+das tabelas do PDS Ring-Moon Systems Node, num perfil que preserva a largura equivalente
+dos anéis estreitos, com espalhamento de camada fina (partículas escuras e poeira de
+espalhamento frontal) e a sombra do planeta. No brilho físico são quase invisíveis, como
+na realidade; o painel do planeta oferece um realce identificado, como uma longa
+exposição. Validação: 27 testes Linux, perfil e brilho no OpenGL (Xvfb e Wine) e
+programa real em Júpiter, Urano e Netuno.
 
 **17/10 — Plutão com mosaico e relevo da New Horizons.** Mosaico global e modelo de
 terreno publicados pela USGS, no sistema IAU, com detalhe por zoom. O sul, em noite

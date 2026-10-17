@@ -47,6 +47,8 @@ em cinza neutro.
 O cometa 67P usa a forma medida pela câmera OSIRIS da Rosetta, com a cor escura do
 núcleo medida pela missão; Halley usa a forma estimada com as imagens da Giotto e
 das Vega, muito incerta, com rotação ilustrativa.
+Júpiter, Urano e Netuno têm os anéis das tabelas do PDS, tênues como na realidade, com
+uma opção de realce no painel do planeta.
 Titã aparece como em luz visível, coberta pela névoa alaranjada; a superfície em
 infravermelho (938 nm) da Cassini é uma opção identificada no painel.
 Os oito planetas e a Lua preservam suas efemérides Horizons

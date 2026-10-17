@@ -574,8 +574,17 @@ L, 20° N (registro IAU conferido). Pacote 227 MB. Artefato visível no zoom: fa
 ondulações da fonte no lado distante de baixa resolução (não do processamento;
 conferido com projeção ortográfica do polo norte e sombreamento do DEM).
 
-Próxima ação concreta: conferir o CI dos últimos commits; depois, pela prioridade,
-**seletor de data da simulação** (ROADMAP Média 5, destrava coma/caudas) ou os itens
-Alta 3–5 (anéis de Júpiter/Urano/Netuno; Plutão; validação em Windows nativo) (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
+Anéis de Júpiter, Urano e Netuno (Alta 3, entregue): `src/render/ring_systems.*` com
+as tabelas do PDS Ring-Moon Systems Node; perfil de 8192 faixas (τ médio por faixa,
+canais R macroscópico/G poeira, float com mipmaps); `thinRings` em `solids.cpp`: camada
+fina em espalhamento simples (lado iluminado e transmitido), Lambert (albedo 0,03) +
+Henyey-Greenstein (ϖ0 0,5, g 0,7), sombra do planeta, aditivo. Físico por padrão (quase
+invisível); "Realçar anéis tênues" no painel aplica `ringStretch` (I/F de referência
+→ 0,25), animado em escala log. Testes: largura equivalente/posição do ε (CPU); no
+OpenGL, físico ≤ 2/255, realce visível e poeira mais brilhante contra o Sol (Linux e
+Wine). Sem arcos de Adams, excentricidade/inclinação e cor das partículas.
+
+Próxima ação concreta: conferir o CI dos últimos commits; depois **seletor de data da
+simulação** (ROADMAP Média 5, destrava coma/caudas) e a validação em Windows nativo (Alta 5) (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
 `register-moon-map.py`). Depois coma/caudas com atividade coerente com a distância
 heliocêntrica (Halley perto do afélio em 2026 não deve ter coma).

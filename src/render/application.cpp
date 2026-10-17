@@ -1206,6 +1206,10 @@ int albert::runRenderer(int argc, char** argv) {
                 }
                 if(focus==targets::Moon&&eclipses.lunarActive())ImGui::TextWrapped("Eclipse lunar: luz atmosferica avermelhada aproximada.");
                 if(solids.hazy(focus)){bool surface=solids.surfaceView(focus);if(ImGui::Checkbox("Superficie em infravermelho (938 nm)",&surface))solids.showSurface(focus,surface);}
+                if(solids.faintRings(focus)){
+                    bool enhanced=solids.ringsEnhanced(focus);if(ImGui::Checkbox("Realcar aneis tenues",&enhanced))solids.enhanceRings(focus,enhanced);
+                    ImGui::PushTextWrapPos(0);ImGui::TextDisabled(enhanced?"Brilho esticado, como em longa exposicao; proporcoes mantidas.":"Aneis escuros ou de poeira: quase invisiveis em luz visivel.");ImGui::PopTextWrapPos();
+                }
                 if(focus.front()!='@' && !registry.get(focus).builtin) {
                     const auto state=registry.evaluate(focus,(jdUTC()-2440587.5)*86400.);
                     ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : registry.get(focus).providerManaged ? "Posicoes reais; visual simplificado" : "Dados fornecidos pelo integrador");

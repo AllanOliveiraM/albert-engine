@@ -114,8 +114,24 @@ a exposição fotográfica adapta-se suavemente ao planeta focado.
 
 Anéis de Saturno: perfil RGBA do mesmo recurso NASA, raio interno 1,23 e externo
 2,3309 vezes o raio equatorial, plano equatorial, transparência e sombra do planeta
-sobre os anéis. É um primeiro modelo visual: sombra dos anéis no planeta, dispersão
-física de partículas e anéis dos demais gigantes continuam pendentes.
+sobre os anéis. É um primeiro modelo visual: sombra dos anéis no planeta e dispersão
+física de partículas continuam pendentes.
+
+Anéis de Júpiter, Urano e Netuno (`src/render/ring_systems.*`): raios, larguras e
+profundidades ópticas normais das tabelas do PDS Ring-Moon Systems Node (de Pater et
+al. 2018; Nicholson et al. 2018; Showalter e Lissauer 2006; Porco et al. 1995). O
+perfil é uma textura de 8192 faixas com a profundidade óptica média de cada faixa,
+separada em partículas macroscópicas e poeira, para que anéis mais estreitos que uma
+faixa (Urano: 1,5–9 km) mantenham a largura equivalente; mipmaps evitam serrilhado de
+longe. A luz segue uma camada fina em espalhamento simples, vista do lado iluminado ou
+do lado oposto: partículas muito escuras (albedo geométrico 0,03, fase de esfera de
+Lambert) e poeira de albedo 0,5 com Henyey-Greenstein g = 0,7, em cinza neutro, com a
+sombra do planeta. No brilho físico, esses anéis são quase invisíveis em luz visível,
+como na realidade; a opção **Realçar anéis tênues**, no painel do planeta, estica o
+brilho de cada sistema até o trecho mais brilhante chegar a I/F 0,25, como uma longa
+exposição, preservando as proporções e a geometria (a poeira fica muito mais brilhante
+contra o Sol). Não são desenhados: arcos de Adams, excentricidades e inclinações (o ε
+de Urano varia ±400 km), Arago e a cor real das partículas.
 
 Para reproduzir (Python 3 com Pillow >= 9.1 e NumPy >= 1.24; também incluídos
 em `scripts/Dockerfile.assets`):

@@ -1,6 +1,7 @@
 #include "solids.hpp"
 #include "animation.hpp"
 #include "objects.hpp"
+#include "ring_systems.hpp"
 #include "threepp/textures/DataTexture.hpp"
 #include <numbers>
 #include <chrono>
@@ -109,6 +110,48 @@ std::shared_ptr<ShaderMaterial> hazeShell(){
         })";
     return m;
 }
+// Faint ring systems (Jupiter, Uranus, Neptune): an optically thin slab in single
+// scattering, seen from the lit or the unlit side, with dark macroscopic particles
+// (Lambert-sphere phase) and forward-scattering dust (Henyey-Greenstein), the planet's
+// shadow, and additive light. Profile texels hold band-averaged normal optical depths.
+std::shared_ptr<ShaderMaterial> thinRings(Texture* profile,float inner,float outer,float radius,const albert::RingSystem& system){
+    auto m=ShaderMaterial::create();m->side=Side::Double;m->transparent=true;m->depthWrite=false;m->blending=Blending::Additive;
+    m->uniforms={{"profile",Uniform(profile)},{"inner",Uniform(inner)},{"outer",Uniform(outer)},{"radius",Uniform(radius)},{"localSun",Uniform(Vector3(1,0,0))},
+        {"localCamera",Uniform(Vector3(0,1,0))},{"irradiance",Uniform(1.f)},{"incidence",Uniform(1.f)},{"gain",Uniform(1.f)},
+        {"particleAlbedo",Uniform(system.particleAlbedo)},{"dustAlbedo",Uniform(system.dustAlbedo)},{"dustG",Uniform(system.dustAsymmetry)}};
+    m->vertexShader=R"(varying vec3 point;void main(){point=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);})";
+    m->fragmentShader=R"(
+      uniform sampler2D profile;uniform float inner,outer,radius,irradiance,gain,particleAlbedo,dustAlbedo,dustG;uniform vec3 localSun,localCamera;varying vec3 point;
+      const float PI=3.141592653589793;
+      float lambert(float a){return (sin(a)+(PI-a)*cos(a))/PI;}
+      float henyey(float c){float d=1.0+dustG*dustG-2.0*dustG*c;return (1.0-dustG*dustG)/(d*sqrt(d));}
+      // I/F of a slab per unit (single-scattering albedo x phase / 4).
+      float slab(float tau,float mu,float mu0,bool lit){
+        if(tau<=0.0)return 0.0;
+        if(lit)return mu0/(mu+mu0)*(1.0-exp(-tau*(1.0/mu+1.0/mu0)));
+        return abs(mu-mu0)<1e-4?tau/mu*exp(-tau/mu):mu0/(mu-mu0)*(exp(-tau/mu)-exp(-tau/mu0));
+      }
+      void main(){
+        float u=(length(point.xz)-inner)/(outer-inner);if(u<0.0||u>1.0)discard;
+        vec2 tau=texture2D(profile,vec2(u,0.5)).rg;
+        vec3 l=normalize(localSun),v=normalize(localCamera-point);
+        float mu0=max(abs(l.y),1e-3),mu=max(abs(v.y),1e-3);bool lit=l.y*v.y>0.0;
+        float c=clamp(dot(l,v),-1.0,1.0),alpha=acos(c);
+        vec3 p=point/radius;float b=dot(p,l),q=dot(p,p)-1.0,disc=b*b-q,edge=max(fwidth(disc),1e-5);
+        float shadow=1.0-step(0.0,-b)*smoothstep(-edge,edge,disc);
+        float reflectance=particleAlbedo*lambert(alpha)*slab(tau.r,mu,mu0,lit)+dustAlbedo*henyey(-c)/4.0*slab(tau.g,mu,mu0,lit);
+        gl_FragColor=vec4(vec3(reflectance*shadow*gain*irradiance/PI),1.0);
+        #include <tonemapping_fragment>
+        #include <encodings_fragment>
+      })";
+    return m;
+}
+std::shared_ptr<Texture> ringProfileTexture(const albert::RingProfile& profile){
+    std::vector<float> texels;texels.reserve(profile.tau.size()*2);
+    for(size_t i=0;i<profile.tau.size();i+=2)texels.insert(texels.end(),{profile.tau[i],profile.tau[i+1],0.f,1.f});
+    const auto width=static_cast<unsigned>(profile.tau.size()/2);auto t=DataTexture::create(ImageData(std::move(texels)),width,1);
+    t->type=Type::Float;t->magFilter=Filter::Linear;t->minFilter=Filter::LinearMipmapLinear;t->generateMipmaps=true;t->colorSpace=ColorSpace::NoColorSpace;t->needsUpdate();return t;
+}
 std::shared_ptr<ShaderMaterial> rings(Texture* profile,float radius){
     auto m=ShaderMaterial::create();m->side=Side::Double;m->transparent=true;m->depthWrite=false;
     m->uniforms={{"profile",Uniform(profile)},{"radius",Uniform(radius)},{"localSun",Uniform(Vector3(1,0,0))},{"irradiance",Uniform(1.f)},{"incidence",Uniform(1.f)}};
@@ -128,7 +171,7 @@ std::shared_ptr<ShaderMaterial> rings(Texture* profile,float radius){
 }
 struct albert::SolidBodies::Surface {
     std::shared_ptr<Mesh> mesh,patch,ring,shell;std::shared_ptr<ShaderMaterial> shellMaterial;float haze=0,hazeTarget=0;
-    std::shared_ptr<Texture> ringTexture;std::shared_ptr<ShaderMaterial> ringMaterial;
+    std::shared_ptr<Texture> ringTexture;std::shared_ptr<ShaderMaterial> ringMaterial;float ringStretch=0,ringGain=1,ringGainTarget=1;
     std::shared_ptr<ShaderMaterial> material,patchMaterial;
     std::shared_ptr<Texture> day,height,mask;
     std::array<std::shared_ptr<Texture>,5> region;
@@ -159,6 +202,14 @@ albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets)
             s->ringTexture=colorTexture(std::move(*asset.ring));const float r=static_cast<float>(definition->radiusMeters/core::earthRadiusMeters);
             s->ringMaterial=rings(s->ringTexture.get(),r);auto geometry=RingGeometry::create(r*1.23f,r*2.3309f,256);
             geometry->rotateX(-std::numbers::pi_v<float>*.5f);s->ring=Mesh::create(geometry,s->ringMaterial);s->mesh->add(s->ring);
+        }else if(const auto* system=ringSystem(asset.body)){
+            const auto profile=ringProfile(*system,8192);const float km=static_cast<float>(1000./core::earthRadiusMeters);
+            const float inner=static_cast<float>(profile.innerKm)*km,outer=static_cast<float>(profile.outerKm)*km;
+            s->ringTexture=ringProfileTexture(profile);s->ringMaterial=thinRings(s->ringTexture.get(),inner,outer,static_cast<float>(definition->radiusMeters/core::earthRadiusMeters),*system);
+            auto geometry=RingGeometry::create(inner,outer,512);geometry->rotateX(-std::numbers::pi_v<float>*.5f);
+            s->ring=Mesh::create(geometry,s->ringMaterial);s->ring->renderOrder=2;s->mesh->add(s->ring);
+            // Display stretch bringing the brightest band to I/F 0.25, only when enhanced.
+            s->ringStretch=.25f/std::max(ringReferenceReflectance(*system,profile),1e-12f);
         }
         if(definition->hazeAltitudeMeters>0){
             // Visible-light haze starts on; the measured surface map is an opt-in view.
@@ -173,6 +224,9 @@ albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets)
 }
 albert::SolidBodies::~SolidBodies()=default;
 bool albert::SolidBodies::measuredShape(const std::string& id) const{return surfaces_.contains(id)&&bool(surfaces_.at(id)->picker);}
+bool albert::SolidBodies::faintRings(const std::string& id) const{return surfaces_.contains(id)&&surfaces_.at(id)->ringStretch>0;}
+bool albert::SolidBodies::ringsEnhanced(const std::string& id) const{return faintRings(id)&&surfaces_.at(id)->ringGainTarget>1;}
+void albert::SolidBodies::enhanceRings(const std::string& id,bool enhanced){if(faintRings(id))surfaces_.at(id)->ringGainTarget=enhanced?surfaces_.at(id)->ringStretch:1.f;}
 bool albert::SolidBodies::hazy(const std::string& id) const{return surfaces_.contains(id)&&bool(surfaces_.at(id)->shell);}
 bool albert::SolidBodies::surfaceView(const std::string& id) const{return hazy(id)&&surfaces_.at(id)->hazeTarget<.5f;}
 void albert::SolidBodies::showSurface(const std::string& id,bool surface){if(hazy(id))surfaces_.at(id)->hazeTarget=surface?0.f:1.f;}
@@ -207,6 +261,9 @@ void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,
             const Vector3 pole=convert(frame.pole);const float incidence=std::abs(light.clone().normalize().dot(pole));
             s.ringMaterial->uniforms.at("localSun").setValue(local);s.ringMaterial->uniforms.at("incidence").setValue(incidence);
             s.ringMaterial->uniforms.at("irradiance").setValue(static_cast<float>(2.4*std::pow(149597870700./distance,2)));
+            if(s.ringMaterial->uniforms.contains("localCamera")){Vector3 eye=camera.position;eye.applyMatrix4(inverse);s.ringMaterial->uniforms.at("localCamera").setValue(eye);
+                // Fade in log space: the stretch spans up to ~1e5.
+                s.ringGain=std::exp(animateValue(std::log(s.ringGain),std::log(s.ringGainTarget),dt));s.ringMaterial->uniforms.at("gain").setValue(s.ringGain);}
         }
         light.transformDirection(camera.matrixWorldInverse);
         const float intensity=static_cast<float>(2.4*std::pow(149597870700./distance,2)),angular=static_cast<float>(std::asin(std::min(1.,695700000./distance)));

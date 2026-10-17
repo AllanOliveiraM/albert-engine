@@ -6,6 +6,7 @@
 #include "asset_pack.hpp"
 #include "core/bodies.hpp"
 #include "rocks.hpp"
+#include "ring_systems.hpp"
 #include "eclipses.hpp"
 #include "layers.hpp"
 #include "core/layers.hpp"
@@ -46,6 +47,15 @@ void controls() {
         require(albert::solarVisibility({},V{0,0,149597870700},695700000.,V{0,0,350000000},1737400.)==0.,"Solar umbra did not reach Earth");
     }
     require(albert::artisticRock("67p")&&albert::artisticRock("halley")&&albert::artisticRock("vesta")&&!albert::artisticRock("moon")&&!albert::artisticRock("titan"),"Artistic rocks replaced a photographic or spherical moon");
+    {   // Faint ring profiles keep each ring's equivalent width and position (PDS Ring-Moon Systems Node).
+        const auto* uranus=albert::ringSystem("uranus");
+        require(uranus&&albert::ringSystem("jupiter")&&albert::ringSystem("neptune")&&!albert::ringSystem("saturn"),"Faint ring systems changed");
+        const auto profile=albert::ringProfile(*uranus,8192);const double step=(profile.outerKm-profile.innerKm)/8192;double dense=0,expected=0;
+        for(size_t i=0;i<profile.tau.size();i+=2)dense+=profile.tau[i]*step;
+        for(const auto& b:uranus->bands)if(!b.dust)expected+=b.tau*(b.outerKm-b.innerKm);
+        require(std::abs(dense-expected)<1e-4*expected,"Ring profile lost equivalent width");
+        require(profile.tau[2*static_cast<size_t>((51149-profile.innerKm)/step)]>.9f&&albert::ringReferenceReflectance(*uranus,profile)>0,"Epsilon ring misplaced");
+    }
     {   // Measured small bodies are built-in solids; without their library assets they fall back to rocks.
         albert::core::Scene registry;auto world=Scene::create();albert::SceneObjects objects(*world);auto solid=Mesh::create(SphereGeometry::create(.5f,8,4));
         registry.include(*albert::core::localOrbit("hyperion"));registry.include(*albert::core::localOrbit("phoebe"));objects.bind("phoebe",solid);objects.sync(registry,0,{});
@@ -327,6 +337,26 @@ void graphics() {
     solids.update(renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]>15,"Solid auxiliary light did not reveal the night hemisphere");
     solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(std::abs(int(renderer.readRGBPixels()[3*(96*192+96)])-lit)<3,"Auxiliary light changed the day hemisphere");
     auxiliary["mercury"].enabled=false;solids.update(renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]<3,"Solid auxiliary light remained enabled after fade out");
+    {   // Jupiter's dusty rings: invisible at physical brightness, visible when enhanced, and far
+        // brighter seen against the Sun (forward scattering) than with it behind the camera.
+        auto ringScene=Scene::create();ringScene->background=Color(0x000000);
+        std::vector<albert::SurfaceAssets> ringAssets;ringAssets.push_back({"jupiter",rgba(120),height(0)});
+        albert::SolidBodies ringed(*ringScene,std::move(ringAssets));require(ringed.faintRings("jupiter")&&!ringed.faintRings("missing"),"Jupiter lost its faint rings");
+        const float earth=static_cast<float>(albert::core::earthRadiusMeters),r=static_cast<float>(albert::core::surfaceRadius("jupiter"))/earth;
+        auto view=PerspectiveCamera::create(20,1,r*.01f,r*1000);
+        auto shot=[&](float side,bool enhanced){
+            ringed.enhanceRings("jupiter",enhanced);
+            ringed.update(renderer,*view,Vector3(0,0,20000),2451545.,"jupiter",false,1.f);auto node=ringed.nodes().at("jupiter");node->updateMatrixWorld();
+            Vector3 normal(0,1,0);normal.transformDirection(*node->matrixWorld);Vector3 point(125750000.f/earth,0,0);point.applyMatrix4(*node->matrixWorld);
+            view->position.copy(point).add(normal.clone().multiplyScalar(r*2));view->lookAt(point);view->updateMatrixWorld();
+            const auto sun=point.clone().add(normal.clone().multiplyScalar(side*20000.f));
+            for(int i=0;i<4;++i)ringed.update(renderer,*view,sun,2451545.,"jupiter",false,10.f);
+            renderer.render(*ringScene,*view);return int(renderer.readRGBPixels()[3*(96*192+96)]);
+        };
+        const int physical=shot(1,false),back=shot(1,true),forward=shot(-1,true);
+        require(physical<=2&&back>physical+5&&forward>back+20,"Faint ring brightness, enhancement or forward scattering is wrong");
+        ringed.enhanceRings("jupiter",false);
+    }
     albert::RegionalImages solidRegion;solidRegion.body="mercury";solidRegion.day=rgba(230);solidRegion.height=height(1000);
     albert::prepareRegionalImages(solidRegion);solids.stage(std::move(solidRegion));
     for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);
