@@ -1204,6 +1204,7 @@ int albert::runRenderer(int argc, char** argv) {
                     ImGui::TextWrapped("%s",surface&&!surface->notice.empty()&&solids.contains(focus)?std::string(surface->notice).c_str():solids.measuredShape(focus)?"Forma observada DSK; mosaico Viking. Registro da imagem sobre o modelo ainda nao validado.":solids.contains(focus)?(surface&&surface->axesMeters[0]>0?"Mosaico Viking NASA/JPL/USGS; forma elipsoidal de referencia IAU. Sem relevo medido.":surface&&surface->partialMap?"Mapa parcial NASA. Areas uniformes ou borradas podem nao ter observacoes. Sem relevo medido.":"Mapa NASA do objeto; resolucao e cobertura variam. Sem relevo medido."):albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
                 }
                 if(focus==targets::Moon&&eclipses.lunarActive())ImGui::TextWrapped("Eclipse lunar: luz atmosferica avermelhada aproximada.");
+                if(solids.hazy(focus)){bool surface=solids.surfaceView(focus);if(ImGui::Checkbox("Superficie em infravermelho (938 nm)",&surface))solids.showSurface(focus,surface);}
                 if(focus.front()!='@' && !registry.get(focus).builtin) {
                     const auto state=registry.evaluate(focus,(jdUTC()-2440587.5)*86400.);
                     ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : registry.get(focus).providerManaged ? "Posicoes reais; visual simplificado" : "Dados fornecidos pelo integrador");
@@ -2044,7 +2045,7 @@ int albert::runRenderer(int argc, char** argv) {
                 const double latitude=std::asin(std::clamp(local.y/local.length(),-1.f,1.f))*180./PI;
                 const double lon=albert::longitude(std::atan2(local.z,-local.x)*180./PI-180.);
                 regional.request(albert::viewRegion(lon,latitude,local.length(),1737.4/6378.137,camera->aspect,camera->fov,1.40625),"moon");
-            } else if(visualSettings.quality&&solids.contains(focus)&&camera->position.distanceTo(solids.nodes().at(focus)->position)<radiusFor(focus)*2.2f){
+            } else if(visualSettings.quality&&solids.contains(focus)&&(!solids.hazy(focus)||solids.surfaceView(focus))&&camera->position.distanceTo(solids.nodes().at(focus)->position)<radiusFor(focus)*2.2f){
                 Vector3 local=camera->position;solids.nodes().at(focus)->worldToLocal(local);
                 const double latitude=std::asin(std::clamp(local.y/local.length(),-1.f,1.f))*180./PI;
                 const double lon=albert::longitude(std::atan2(local.z,-local.x)*180./PI-180.);

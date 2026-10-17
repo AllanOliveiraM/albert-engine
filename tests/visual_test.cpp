@@ -333,6 +333,14 @@ void graphics() {
         auto camera=PerspectiveCamera::create(45,1,.001f,30000.f);camera->position.set(0,0,radius*4);camera->lookAt(Vector3());
         moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);
         require(renderer.readRGBPixels()[3*(96*192+96)]>20,"Local moon surface did not render");
+        if(moons.hazy(id)){
+            // Visible haze hides the grey test map behind its orange colour; the
+            // surface view fades it out and shows the map again.
+            const auto hazy=renderer.readRGBPixels();require(hazy[3*(96*192+96)]>2*hazy[3*(96*192+96)+2]+10,"Visible haze did not cover the surface");
+            moons.showSurface(id,true);for(int i=0;i<40;++i)moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,.05f);renderer.render(*world,*camera);
+            const auto surface=renderer.readRGBPixels();require(std::abs(int(surface[3*(96*192+96)])-int(surface[3*(96*192+96)+2]))<12&&moons.surfaceView(id),"Surface view did not reveal the map");
+            moons.showSurface(id,false);
+        }
         Raycaster ray;ray.setFromCamera(Vector2(0,0),*camera);require(objects.pick(registry,ray)==id,"Textured local moon cannot be picked");
         auto node=moons.nodes().at(id);node->geometry()->computeBoundingSphere();require(std::abs(node->geometry()->boundingSphere->radius-radius)<1e-5f,"Moon radius scaled twice");
         if(definition.axesMeters[0]>0){const auto& axes=definition.axesMeters;const double r=definition.radiusMeters;

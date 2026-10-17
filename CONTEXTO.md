@@ -2,12 +2,13 @@
 
 **Estado em 17/10/2026 (manhã), continuação por Claude Opus 5.5.** Entregues nesta
 sessão: correções do Windows no CI, cache de LFS/compilação no CI, **Mimas**
-completo e o **download dos assets por níveis** (versão leve). Próximo: luas
-restantes, na ordem Titã → Hipérion/Febe → Proteu → Nereida; depois cometas.
+completo, o **download dos assets por níveis** (versão leve), correções da revisão
+do Codex e **Titã** (névoa visível + superfície em 938 nm). Próximo: Hipérion/Febe →
+Proteu → Nereida; depois cometas.
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
-e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem cinco corpos pendentes.**
+e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem quatro corpos pendentes.**
 Atualizar este arquivo ao concluir essa etapa, conforme pedido do Allan, e a cada
 entrega relevante.
 
@@ -151,7 +152,7 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
 
 ## Estado entregue
 
-- 43 corpos selecionáveis: Sol, oito planetas, 25 luas (20 com imagens próprias), cinco planetas anões,
+- 43 corpos selecionáveis: Sol, oito planetas, 25 luas (21 com imagens próprias), cinco planetas anões,
   Vesta/Pallas e Halley/67P.
 - Seletor por categorias, busca aproximada com acentos/transposições e desempate
   por distância heliocêntrica. Clique em corpos/labels de luas, cursor pointer,
@@ -189,12 +190,12 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
 
 ## Luas — qualidade real e lacunas
 
-20 das 25 luas têm imagens próprias, incluindo a Lua terrestre. As 19 adicionais:
+21 das 25 luas têm imagens próprias, incluindo a Lua terrestre. As 20 adicionais:
 
 | Grupo | Corpos / fonte atual |
 | --- | --- |
 | Júpiter | Io/Europa 4096×2048; Ganimedes/Calisto 2048×1024, NASA VTAD |
-| Saturno | Mimas 6356×3178 Cassini PIA18437 + forma Gaskell; Encélado/Tétis/Dione/Reia/Jápeto 4096×2048, NASA VTAD |
+| Saturno | Mimas 6356×3178 Cassini PIA18437 + forma Gaskell; Titã névoa visível + 938 nm PIA22770 5760×2880; Encélado/Tétis/Dione/Reia/Jápeto 4096×2048, NASA VTAD |
 | Urano | Ariel/Titânia/Oberon 2048×1024; Umbriel/Miranda 1024×512, cobertura parcial |
 | Outros | Tritão 4096×2048 e Caronte 1264×632, cobertura parcial |
 | Marte | Fobos/Deimos, mosaicos Viking 1440×720 e modelos DSK medidos |
@@ -235,8 +236,10 @@ aproximada de dois corpos. Planetas e Lua preservam os provedores existentes.
 ## Próxima fila, por valor/viabilidade
 
 1. ~~Download dos assets por níveis~~ — entregue (seção acima).
-2. **Titã:** atmosfera e aparência visível próprias; não usar mapa infravermelho
-   da superfície como fotografia em luz visível sem identificação.
+2. ~~Titã~~ — entregue: padrão em luz visível (cor de PIA06230, albedo 0,22, névoa
+   principal H = 60 km e camada alta a 400 km com Henyey-Greenstein g = 0,65); opção
+   "Superfície em infravermelho (938 nm)" com PIA22770, registro conferido em 12
+   feições. `NaturalBody::hazeAlbedo/hazeAltitudeMeters`, `SolidBodies::showSurface`.
 3. **Hipérion/Febe:** imagens e formas observadas; substituir o procedural onde
    houver modelo confiável, preservando escala, picking e segurança da câmera.
 4. **Proteu:** fontes disponíveis e cobertura limitada explicitadas.
@@ -290,8 +293,8 @@ Esse empacotamento dificulta abertura casual; não é DRM.
 Originais e intermediários ficam em `asset-packs/`, ignorados. Não espalhar cópias
 de imagens pelo projeto; documentação/capas ficam em `docs/images/`.
 
-Pacote adicional das 19 luas: **65.474.691 bytes**. Biblioteca reunida neste build:
-**4.890.175.742 bytes** (~4,89 GB decimal). Ao regenerar, as 432 entradas anteriores
+Pacote adicional das 20 luas: **68.972.875 bytes**. Biblioteca reunida neste build:
+**4.893.673.926 bytes** (~4,89 GB decimal); essencial da versão leve: 63,3 MB. Ao regenerar, as 432 entradas anteriores
 saíram idênticas; só `SOURCES.json` mudou e entraram 130 entradas de Mimas. Não confundir disco com RAM/VRAM:
 recortes são limitados e descartáveis; as duas malhas/BVH permanecem residentes.
 Após mudar o inventário, regenerar pacote/hashes coerentes. Nunca versionar
@@ -366,6 +369,10 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
   (MinGW). App real em modo leve: cena em 16,9 s, 19 containers em 235 s a 25 MB/s,
   foco à frente, retomada com Range após reinício, pico RSS ~1,06–1,20 GB (llvmpipe).
 
-Próxima ação concreta: conferir o Actions (Windows MSVC com `NOMINMAX` e cache de
-`_deps`), depois iniciar **Titã**, mantendo inventário, pacote, testes e
-documentação sincronizados.
+- Titã: 27 CTests Linux; OpenGL (névoa cobre o mapa, modo superfície o revela) no
+  Linux e no Wine; `bodies_test` contra CSPICE no Wine; app real no Xvfb em fase
+  moderada e contra o Sol (`build/titan-preview-*.png`).
+
+Próxima ação concreta: conferir o Actions do último commit (Windows MSVC agora
+compila; ver testes), rodar a revisão do Codex sobre Titã/correções, e então
+**Hipérion/Febe**, mantendo inventário, pacote, testes e documentação sincronizados.

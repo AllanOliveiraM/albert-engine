@@ -192,6 +192,37 @@
       "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
     },
     {
+      "id": "titan",
+      "name": "Tita",
+      "horizons_id": 606,
+      "radius_m": 2574800,
+      "kind": "image",
+      "filename": "PIA22770.tif",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia22/pia22770/PIA22770.tif",
+      "bytes": 10946022,
+      "sha256": "63cb2442772dd9256ac24c1026f341bc827d527707e7a4b8dc4eb51cfb229ec4",
+      "grid": [
+        5760,
+        2880
+      ],
+      "projection": {
+        "west_edge_lon": 0
+      },
+      "credit": "NASA/JPL-Caltech/University of Arizona (Cassini ISS)",
+      "product": "https://science.nasa.gov/resource/titan-mosaic-the-surface-under-the-haze/",
+      "limits": "Global Cassini ISS mosaic at 938 nm (PIA22770, 2018): calibrated normal albedo of the surface seen through the haze in the near infrared, 16 pixels per degree. Not the visible-light appearance, which is the haze shown by default. Published grid: east longitude 0-360 left to right; registration checked against IAU gazetteer craters (Menrva, Sinlap, Selk, Ksa, Hano, Afekan) and lakes. No DEM.",
+      "haze": {
+        "albedo_linear": [
+          0.317,
+          0.21,
+          0.029
+        ],
+        "altitude_m": 400000,
+        "reference": "Chromaticity of the lit disc in the Cassini ISS natural colour composite PIA06230 (red/green/violet filters, phase 56 deg), linear RGB (0.570, 0.378, 0.052), scaled to a visible geometric albedo of 0.22. The detached high haze is a translucent bluish shell at about 400 km with forward scattering; its altitude changed with season during Cassini. Approximate visual model, not radiative transfer."
+      },
+      "notice": "Luz visivel: nevoa alaranjada com cor de imagem Cassini em cor natural; a superficie so aparece em infravermelho. Opcao abaixo: superficie em 938 nm."
+    },
+    {
       "id": "iapetus",
       "filename": "iapetus.glb",
       "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/Iapetus_1_1471.glb",

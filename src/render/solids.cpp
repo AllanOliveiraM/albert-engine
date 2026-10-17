@@ -30,7 +30,8 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
     m->fragmentShader=R"(
         uniform sampler2D dayMap,baseMap,heightMap,baseHeightMap,surfaceMask;
         uniform vec3 solarDirection;
-        uniform float intensity,angularRadius,masked,detailBlend,auxiliaryStrength,cloudSurface,shapeSurface;
+        uniform float intensity,angularRadius,masked,detailBlend,auxiliaryStrength,cloudSurface,shapeSurface,haze;
+        uniform vec3 hazeAlbedo;
         uniform vec4 bounds;
         varying vec2 vUv,vGlobalUv;
         varying vec3 vNormal,vPosition;
@@ -61,7 +62,11 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
             float lo=min(nl,nv),hi=max(nl,nv);
             float rough=0.70122+0.38017*gamma*sqrt(max(0.0,1.0-lo*lo))*sqrt(max(0.0,1.0-hi*hi))/max(hi,0.02);
             float aid=auxiliaryStrength*(intensity/2.4)*(1.0-smoothstep(-0.10,0.0,dot(normalize(vNormal),light)));
-            gl_FragColor=vec4(albedo*(intensity*max(irradiance,0.0)*mix(rough,1.0,cloudSurface)/PI+aid),1.0);
+            // Opaque haze (Titan in visible light): its own colour, and scattering
+            // carries light past the geometric terminator.
+            float hazeLight=pow(clamp((dot(normalize(vNormal),light)+0.35)/1.35,0.0,1.0),1.3);
+            float direct=mix(max(irradiance,0.0)*mix(rough,1.0,cloudSurface),hazeLight,haze);
+            gl_FragColor=vec4(mix(albedo,hazeAlbedo,haze)*(intensity*direct/PI+aid),1.0);
             #include <tonemapping_fragment>
             #include <encodings_fragment>
         }
@@ -70,7 +75,38 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
     m->uniforms.emplace("bounds",Uniform(Vector4(0,0,1,1)));m->uniforms.emplace("solarDirection",Uniform(Vector3(1,0,0)));
     m->uniforms.emplace("cloudSurface",Uniform(0.f));m->uniforms.emplace("intensity",Uniform(2.4f));m->uniforms.emplace("angularRadius",Uniform(.00465f));
     m->uniforms.emplace("auxiliaryStrength",Uniform(0.f));m->uniforms.emplace("masked",Uniform(0.f));m->uniforms.emplace("detailBlend",Uniform(0.f));m->uniforms.emplace("displacement",Uniform(1.f/6378137.f));
-    m->uniforms.emplace("shapeSurface",Uniform(0.f));
+    m->uniforms.emplace("shapeSurface",Uniform(0.f));m->uniforms.emplace("haze",Uniform(0.f));m->uniforms.emplace("hazeAlbedo",Uniform(Vector3()));
+    return m;
+}
+// Translucent haze around an opaque hazy body, integrated along each view ray from
+// its closest approach: main haze with a scale height, a thin detached layer above,
+// lit where sunlight reaches and scattered forward (Henyey-Greenstein).
+std::shared_ptr<ShaderMaterial> hazeShell(){
+    auto m=ShaderMaterial::create();m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
+    m->uniforms={{"centre",Uniform(Vector3())},{"radius",Uniform(1.f)},{"altitude",Uniform(.1f)},{"scale",Uniform(.02f)},{"layer",Uniform(.01f)},
+        {"solarDirection",Uniform(Vector3(1,0,0))},{"intensity",Uniform(2.4f)},{"visibility",Uniform(1.f)},{"inside",Uniform(0.f)},{"hazeAlbedo",Uniform(Vector3())}};
+    m->vertexShader=R"(varying vec3 vPosition;void main(){vec4 view=modelViewMatrix*vec4(position,1.0);vPosition=view.xyz;gl_Position=projectionMatrix*view;})";
+    m->fragmentShader=R"(
+        uniform vec3 centre,solarDirection,hazeAlbedo;uniform float radius,altitude,scale,layer,intensity,visibility,inside;varying vec3 vPosition;
+        const float PI=3.141592653589793,G=0.65;
+        float phase(float c){float d=1.0+G*G-2.0*G*c;return (1.0-G*G)/(4.0*PI*d*sqrt(d));}
+        void main(){
+            if((inside<0.5)!=gl_FrontFacing)discard; // One surface per ray, inside or outside.
+            vec3 d=normalize(vPosition),l=normalize(solarDirection);float t0=dot(centre,d);vec3 q=t0*d-centre;
+            float b=length(q),h=b-radius;
+            // Column in scale heights: grazing (Chapman) above the limb, one-sided over the disc.
+            float mu=sqrt(max(0.0,1.0-(b/radius)*(b/radius)));
+            float main=h>=0.0?exp(-h/scale)*sqrt(2.0*PI*(radius+h)/scale):1.0/max(mu,0.05);
+            float top=exp(-pow((h-altitude)/layer,2.0))*sqrt(2.0*PI*(radius+max(h,0.0))/layer);
+            float lit=smoothstep(-0.25,0.05,dot(b>0.0?q/b:-d,l));
+            // Forward peak normalised to 1, plus a small isotropic part: faint at moderate
+            // phase (thin bluish limb), bright only when backlit.
+            float forward=0.15+0.85*phase(dot(l,d))/phase(1.0);
+            vec3 colour=hazeAlbedo*(1.0-exp(-0.025*main))+vec3(0.10,0.17,0.36)*(1.0-exp(-0.02*top));
+            gl_FragColor=vec4(colour*intensity*visibility*lit*forward/PI,1.0);
+            #include <tonemapping_fragment>
+            #include <encodings_fragment>
+        })";
     return m;
 }
 std::shared_ptr<ShaderMaterial> rings(Texture* profile,float radius){
@@ -91,7 +127,7 @@ std::shared_ptr<ShaderMaterial> rings(Texture* profile,float radius){
 
 }
 struct albert::SolidBodies::Surface {
-    std::shared_ptr<Mesh> mesh,patch,ring;
+    std::shared_ptr<Mesh> mesh,patch,ring,shell;std::shared_ptr<ShaderMaterial> shellMaterial;float haze=0,hazeTarget=0;
     std::shared_ptr<Texture> ringTexture;std::shared_ptr<ShaderMaterial> ringMaterial;
     std::shared_ptr<ShaderMaterial> material,patchMaterial;
     std::shared_ptr<Texture> day,height,mask;
@@ -105,7 +141,7 @@ struct albert::SolidBodies::Surface {
         if(patch){mesh->remove(*patch);patch->geometry()->dispose();patchMaterial->dispose();patch.reset();patchMaterial.reset();}
         for(auto& t:region)if(t){t->dispose();t.reset();}
     }
-    ~Surface(){if(ring){ring->geometry()->dispose();ringMaterial->dispose();ringTexture->dispose();}release();day->dispose();height->dispose();mask->dispose();material->dispose();mesh->geometry()->dispose();}
+    ~Surface(){if(ring){ring->geometry()->dispose();ringMaterial->dispose();ringTexture->dispose();}if(shell){shell->geometry()->dispose();shellMaterial->dispose();}release();day->dispose();height->dispose();mask->dispose();material->dispose();mesh->geometry()->dispose();}
 };
 albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets){
     for(auto& asset:assets){
@@ -124,11 +160,22 @@ albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets)
             s->ringMaterial=rings(s->ringTexture.get(),r);auto geometry=RingGeometry::create(r*1.23f,r*2.3309f,256);
             geometry->rotateX(-std::numbers::pi_v<float>*.5f);s->ring=Mesh::create(geometry,s->ringMaterial);s->mesh->add(s->ring);
         }
+        if(definition->hazeAltitudeMeters>0){
+            // Visible-light haze starts on; the measured surface map is an opt-in view.
+            const auto& a=definition->hazeAlbedo;s->haze=s->hazeTarget=1.f;s->shellMaterial=hazeShell();
+            const double r=definition->radiusMeters;s->shellMaterial->uniforms.at("hazeAlbedo").setValue(Vector3(a[0],a[1],a[2]));
+            s->shell=Mesh::create(SphereGeometry::create(static_cast<float>((r+definition->hazeAltitudeMeters*1.25)/r*core::surfaceRadius(asset.body)/core::earthRadiusMeters),96,48),s->shellMaterial);
+            s->shell->renderOrder=2;s->mesh->add(s->shell);
+            s->material->uniforms.at("hazeAlbedo").setValue(Vector3(a[0],a[1],a[2]));
+        }
         nodes_[asset.body]=s->mesh;scene.add(s->mesh);surfaces_[asset.body]=std::move(s);
     }
 }
 albert::SolidBodies::~SolidBodies()=default;
 bool albert::SolidBodies::measuredShape(const std::string& id) const{return surfaces_.contains(id)&&bool(surfaces_.at(id)->picker);}
+bool albert::SolidBodies::hazy(const std::string& id) const{return surfaces_.contains(id)&&bool(surfaces_.at(id)->shell);}
+bool albert::SolidBodies::surfaceView(const std::string& id) const{return hazy(id)&&surfaces_.at(id)->hazeTarget<.5f;}
+void albert::SolidBodies::showSurface(const std::string& id,bool surface){if(hazy(id))surfaces_.at(id)->hazeTarget=surface?0.f:1.f;}
 std::shared_ptr<const BVH> albert::SolidBodies::picker(const std::string& id) const{return surfaces_.at(id)->picker;}
 void albert::SolidBodies::stage(RegionalImages images){
     if(uploads_.active()||!surfaces_.contains(images.body)||!images.day)return;
@@ -164,7 +211,16 @@ void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,
         light.transformDirection(camera.matrixWorldInverse);
         const float intensity=static_cast<float>(2.4*std::pow(149597870700./distance,2)),angular=static_cast<float>(std::asin(std::min(1.,695700000./distance)));
         const auto aid=auxiliary.find(id);s.fill=animateValue(s.fill,aid!=auxiliary.end()&&aid->second.enabled?std::clamp(aid->second.intensity,0.f,1.5f):0.f,dt);
-        for(auto* m:{s.material.get(),s.patchMaterial.get()})if(m){m->uniforms.at("cloudSurface").setValue(core::surfaceBody(id)->cloudSurface?1.f:0.f);m->uniforms.at("auxiliaryStrength").setValue(s.fill);m->uniforms.at("solarDirection").setValue(light);m->uniforms.at("intensity").setValue(intensity);m->uniforms.at("angularRadius").setValue(angular);}
+        if(s.shell){
+            s.haze=animateValue(s.haze,s.hazeTarget,dt);s.shell->visible=s.haze>.001f;
+            const auto* d=core::surfaceBody(id);const float r=static_cast<float>(core::surfaceRadius(id)/core::earthRadiusMeters),k=static_cast<float>(core::surfaceRadius(id)/d->radiusMeters/core::earthRadiusMeters);
+            s.mesh->updateMatrixWorld();Vector3 centre;centre.setFromMatrixPosition(*s.mesh->matrixWorld);centre.applyMatrix4(camera.matrixWorldInverse);
+            auto& u=s.shellMaterial->uniforms;u.at("centre").setValue(centre);u.at("radius").setValue(r);u.at("altitude").setValue(static_cast<float>(d->hazeAltitudeMeters)*k);
+            u.at("scale").setValue(60000.f*k);u.at("layer").setValue(25000.f*k);u.at("visibility").setValue(s.haze);
+            u.at("inside").setValue(centre.length()<r+static_cast<float>(d->hazeAltitudeMeters*1.25)*k?1.f:0.f);
+        }
+        for(auto* m:{s.material.get(),s.patchMaterial.get()})if(m){m->uniforms.at("haze").setValue(s.haze);m->uniforms.at("hazeAlbedo").setValue(s.material->uniforms.at("hazeAlbedo").value<Vector3>());m->uniforms.at("cloudSurface").setValue(core::surfaceBody(id)->cloudSurface?1.f:0.f);m->uniforms.at("auxiliaryStrength").setValue(s.fill);m->uniforms.at("solarDirection").setValue(light);m->uniforms.at("intensity").setValue(intensity);m->uniforms.at("angularRadius").setValue(angular);}
+        if(s.shell){auto& u=s.shellMaterial->uniforms;u.at("solarDirection").setValue(light);u.at("intensity").setValue(intensity);}
         s.blend=animateValue(s.blend,1.f,dt);if(s.patchMaterial)s.patchMaterial->uniforms.at("detailBlend").setValue(s.blend);else if(s.picker&&s.region[0])s.material->uniforms.at("detailBlend").setValue(s.blend);
         const bool nearby=camera.position.distanceTo(s.mesh->position)<static_cast<float>(core::surfaceRadius(id)/core::earthRadiusMeters)*2.4f;
         const auto now=std::chrono::steady_clock::now();

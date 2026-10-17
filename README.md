@@ -29,12 +29,14 @@ câmera. A renderização, a navegação e as animações ficam dentro do Albert
 Hoje, a cena inclui **43 corpos**: o Sol, oito planetas, 25 luas, cinco planetas
 anões, Vesta, Pallas, Halley e 67P. A seleção é local, organizada por categorias,
 e aceita nomes aproximados. Luas adicionais, planetas anões e pequenos corpos
-usam órbitas aproximadas embarcadas. Dezenove luas adicionais já têm mapas
+usam órbitas aproximadas embarcadas. Vinte luas adicionais já têm mapas
 próprios NASA, detalhes por zoom e orientação IAU; outras superfícies adicionais
 continuam ilustrativas. Fobos e Deimos usam modelos de forma medidos de missões,
 com mapas Viking; o alinhamento das imagens sobre esses modelos ainda exige validação.
 Mimas usa a forma medida de Gaskell e o mosaico Cassini em cores realçadas,
 reprojetado e alinhado à forma, com conferência por crateras catalogadas pela IAU.
+Titã aparece como em luz visível, coberta pela névoa alaranjada; a superfície em
+infravermelho (938 nm) da Cassini é uma opção identificada no painel.
 Os oito planetas e a Lua preservam suas efemérides Horizons
 e mapas próprios.
 Os cinturões de asteroides e Kuiper e a nuvem de Oort são populações visuais

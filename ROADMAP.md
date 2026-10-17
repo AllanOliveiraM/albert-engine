@@ -13,7 +13,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Completar Titã, Hipérion, Febe, Proteu e Nereida | Lua terrestre detalhada; 19 luas adicionais com mapas/IAU; Fobos/Deimos/Mimas com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
+| **Alta — 1** | Completar Hipérion, Febe, Proteu e Nereida | Lua terrestre detalhada; 20 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
 | **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion/Febe já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
 | **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
@@ -67,23 +67,35 @@ o critério é a forma do corpo, não deformar todos os objetos indistintamente.
 
 ### Ordem das luas pendentes
 
-Das 25 luas do catálogo, 20 têm mapas próprios, incluindo a Lua terrestre.
+Das 25 luas do catálogo, 21 têm mapas próprios, incluindo a Lua terrestre.
 Isso não significa geometria, relevo, cor ou cobertura completos.
 
 Fobos e Deimos já têm modelos medidos DSK; registro dos mosaicos Viking sobre
 as malhas ainda requer conferência cartográfica. A próxima fila é:
 
 1. ~~**Mimas**~~ — entregue em 17/10/2026: forma medida e mosaico registrado.
-2. **Titã:** aparência atmosférica própria; distinguir visão visível de mapas da superfície.
+2. ~~**Titã**~~ — entregue em 17/10/2026: névoa visível e superfície em 938 nm opcional.
 3. **Hipérion e Febe:** modelos irregulares e imagens próprios, substituindo o procedural.
 4. **Proteu:** modelo e cobertura de imagens disponíveis, explicitando lacunas.
 5. **Nereida:** representação limitada aos dados disponíveis, sem inventar detalhes observados.
 
-Os cinco corpos ainda sem mapas/modelos próprios embarcados são Titã,
-Hipérion, Febe, Proteu e Nereida. A forma artística e a esfera de referência
+Os quatro corpos ainda sem mapas/modelos próprios embarcados são Hipérion, Febe,
+Proteu e Nereida. A forma artística e a esfera de referência
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — Titã em luz visível e superfície em 938 nm.** Por padrão, névoa opaca
+alaranjada com cor medida na composição Cassini em cor natural (PIA06230), luz além
+do terminador e casca de névoa: limbo difuso e camada alta azulada com espalhamento
+frontal, tênue em fase moderada e brilhante contra o Sol. Opção identificada no
+painel: mosaico Cassini ISS de 938 nm (PIA22770), registro conferido em 12 feições
+do Gazetteer. Detalhe regional só no modo superfície. Testes de névoa/superfície no
+OpenGL (Linux e Wine) e orientação contra CSPICE. Pacote das luas: 68,97 MB.
+
+**17/10 — revisão do Codex e CI Windows.** Três achados confirmados e corrigidos
+(verificação SHA-256 dos containers em disco, refresh após troca de foco, release de
+assets completa antes da versão). O build MSVC compilou e linkou pela primeira vez.
 
 **17/10 — download dos assets por níveis.** Versão leve com `assets/catalog.json`:
 essencial de 63 MB na tela de carregamento, 18 containers por corpo/nível em

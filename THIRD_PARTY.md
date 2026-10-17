@@ -53,6 +53,9 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - NASA/JPL-Caltech/Space Science Institute/Lunar and Planetary Institute, mosaico
   de Paul Schenk: mapa global de Mimas PIA18437 em cores realçadas,
   https://science.nasa.gov/photojournal/color-maps-of-mimas-2014.
+- NASA/JPL-Caltech/University of Arizona (Cassini ISS): mosaico global de Titã em
+  938 nm PIA22770, https://photojournal.jpl.nasa.gov/catalog/PIA22770; cor da névoa
+  medida em NASA/JPL/Space Science Institute PIA06230.
 
 Dados dinâmicos:
 

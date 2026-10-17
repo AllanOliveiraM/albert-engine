@@ -608,7 +608,9 @@ limita a câmera; `shapeDimensionsMeters` informa as dimensões físicas da malh
 O gerador suporta imagens 2:1 além de GLB e argumentos periódicos de grau 2 em Marte.
 Um campo `projection` no inventário descreve mapas publicados fora da convenção do
 Albert: borda oeste da imagem, deslocamento de longitude e latitude planetográfica
-(`tan_latitude_scale`). O gerador reamostra esses mapas com interpolação cúbica
+(`tan_latitude_scale`). O campo `haze` (Titã) descreve albedo linear e altitude da
+névoa visível: `SolidBodies` mistura a névoa ao mapa por um fator animado e acrescenta
+uma casca aditiva integrada por raio; `showSurface()` alterna para o mapa da superfície. O gerador reamostra esses mapas com interpolação cúbica
 separável para latitude planetocêntrica e longitude leste −180…180. O campo
 `notice` do inventário vira o aviso exibido pela interface para aquela fonte.
 

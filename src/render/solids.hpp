@@ -17,6 +17,9 @@ public:
     bool contains(const std::string& id) const{return nodes_.contains(id);}
     const auto& nodes() const{return nodes_;}
     bool measuredShape(const std::string& id) const;
+    bool hazy(const std::string& id) const;        // Opaque visible haze (Titan).
+    bool surfaceView(const std::string& id) const; // Haze faded out to show the surface map.
+    void showSurface(const std::string& id,bool surface);
     std::shared_ptr<const threepp::BVH> picker(const std::string& id) const;
     bool takeEviction(){return std::exchange(evicted_,false);}
     bool uploading() const{return uploads_.active();}

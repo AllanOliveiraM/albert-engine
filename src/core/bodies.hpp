@@ -16,6 +16,8 @@ struct NaturalBody {
     double shapeRadiusMeters=0; // Measured mesh extent from the original IAU origin.
     std::array<double,3> shapeDimensionsMeters{};
     std::string_view notice{}; // Source-specific UI note from the asset inventory.
+    std::array<float,3> hazeAlbedo{}; // Visible haze (linear RGB); zero when the surface is visible.
+    double hazeAltitudeMeters=0;      // Detached haze shell above the surface radius.
 };
 // Additional solid bodies. Existing Earth/Moon/Sun keep their specialized models.
 std::span<const NaturalBody> naturalBodies();
