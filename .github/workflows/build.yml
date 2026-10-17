@@ -100,8 +100,14 @@ jobs:
           restore-keys: ${{ steps.image.outputs.prefix }}
       - name: Build Windows with bootstrap wrapper
         if: runner.os == 'Windows'
-        shell: cmd
-        run: make.cmd render-build
+        shell: pwsh
+        run: |
+          & .\make.cmd render-build 2>&1 | Tee-Object -FilePath build-windows.log
+          exit $LASTEXITCODE
+      # Raw logs need a login; unique errors become annotations and a summary.
+      - name: Report Windows build errors
+        if: failure() && runner.os == 'Windows' && hashFiles('build-windows.log') != ''
+        run: python scripts/ci-errors.py build-windows.log
       # Dependencies build independently of the project sources: keep them even
       # when a later project fails, so the next attempt does not rebuild gRPC.
       - name: Save Windows dependency build
@@ -115,8 +121,11 @@ jobs:
         env:
           CCACHE_MAXSIZE: 1500M
         run: |
-          cmake --build --preset ${{ matrix.preset }}
+          cmake --build --preset ${{ matrix.preset }} 2>&1 | tee build-linux.log
           ccache --show-stats
+      - name: Report Linux build errors
+        if: failure() && runner.os == 'Linux' && hashFiles('build-linux.log') != ''
+        run: python3 scripts/ci-errors.py build-linux.log
       - name: Save Linux compiler cache
         if: ${{ !cancelled() && runner.os == 'Linux' }}
         uses: actions/cache/save@v4
