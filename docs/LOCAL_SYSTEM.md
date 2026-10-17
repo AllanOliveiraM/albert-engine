@@ -236,7 +236,7 @@ não baixa esses mapas; a leve traz o nível de 1024 px de cada lua no container
 essencial e baixa os níveis seguintes em `moons-2` e `moons-3`. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional (luas e pequenos corpos) ocupa **77.482.328 bytes**.
+todas as luas na RAM. O pacote adicional (luas e pequenos corpos) ocupa **77.586.518 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -263,10 +263,24 @@ baixa; Fornasier et al. 2015). A orientação segue o pck00011 (polo e período 
 2021, então a fase de rotação atual não é uma previsão. Coma e cauda ainda não são
 desenhadas.
 
+## Cometa 1P/Halley
+
+Halley usa o modelo de [Stooke](https://doi.org/10.26033/yt84-5y91) feito com limbos e
+terminadores das imagens da Giotto e das Vega, com apontamento de A. Abergel: raio a
+cada 5°, longitude leste (convenção de cometas), eixo z ao longo do eixo longo. São
+15,1 km no eixo longo e cerca de 7,5 km nos outros; o volume equivale a uma esfera de
+4,58 km de raio (o catálogo usa 5,5 km). O próprio autor considera o modelo
+extremamente incerto (erros absolutos de 0,5–1 km). Cor uniforme com o albedo de ~0,04
+medido pela câmera da Giotto (Keller et al. 1986). Em 1986 o núcleo girava em estado
+excitado (Belton et al. 1991: precessão de ~3,7 dias e giro de ~7,1 dias em torno do
+eixo longo), que não pode ser propagado até hoje; a orientação do Albert é
+**ilustrativa**: giro uniforme de 7,1 dias em torno do eixo longo, apontado para o polo
+da eclíptica. Coma e cauda ainda não são desenhadas.
+
 ## Formas artísticas dos pequenos corpos
 
-Vesta, Pallas e Halley usam malhas irregulares individuais. Fobos, Deimos, Febe,
-Hipérion, Proteu e a 67P usam o modelo medido acima quando a biblioteca contém as malhas.
+Vesta e Pallas usam malhas irregulares individuais. Fobos, Deimos, Febe, Hipérion,
+Proteu, a 67P e Halley usam o modelo medido acima quando a biblioteca contém as malhas.
 Numa biblioteca antiga sem as malhas, usam o elipsoide IAU (Hipérion, uma esfera)
 sob o mapa; sem nenhum asset do corpo, a forma rochosa ilustrativa. Crateras,
 silhuetas, variações de material e microrelevo são procedurais, com semente por

@@ -32,7 +32,7 @@ int main(){try{
     const PlanetFixture moons[]{
 #include "moon_frames_fixture.inc"
     };
-    require(surfaceBodies().size()==32&&naturalBodies().size()==7,"Surface catalogue changed online planet provider scope");
+    require(surfaceBodies().size()==33&&naturalBodies().size()==7,"Surface catalogue changed online planet provider scope");
     for(const auto& fixture:moons){const auto* definition=surfaceBody(fixture.body);require(definition&&!naturalBody(fixture.body)&&category(fixture.body)!=Category::Planet,"Textured local body was reclassified as a planet");
         require(surfaceRadius(fixture.body)==localOrbit(fixture.body)->radius,"Surface and orbital/collision radii disagree");
         const auto frame=bodyFrame(*definition,fixture.jd);const Vector columns[]{frame.prime,frame.east,frame.pole};
@@ -45,6 +45,7 @@ int main(){try{
     require(surfaceBody("proteus")->axesMeters==std::array<double,3>{218000,208000,201000}&&surfaceBody("proteus")->shapeRadiusMeters==232500&&!surfaceBody("proteus")->notice.empty(),"Proteus reference ellipsoid, measured extent or source notice changed");
     require(surfaceBody("nereid")->shapeRadiusMeters==0&&surfaceBody("nereid")->axesMeters==std::array<double,3>{}&&surfaceRadius("nereid")==170000&&!surfaceBody("nereid")->notice.empty(),"Nereid must stay a labelled sphere: no shape model exists");
     require(category("67p")==Category::Comet&&surfaceBody("67p")->shapeRadiusMeters==2613.4047701532313&&localOrbit("67p")->radius==1650&&!surfaceBody("67p")->notice.empty(),"67P measured shape, comet category or catalogue radius changed");
+    require(category("halley")==Category::Comet&&surfaceBody("halley")->shapeRadiusMeters==8909.01&&!surfaceBody("halley")->notice.empty(),"Halley measured extent or illustrative-rotation notice changed");
     require(surfaceBody("titan")->hazeAltitudeMeters>0&&surfaceBody("titan")->hazeAlbedo[0]>surfaceBody("titan")->hazeAlbedo[2]&&surfaceBody("mimas")->hazeAltitudeMeters==0,"Titan visible haze description missing");
     std::cout<<"Bodies OK: planets and mapped moons against CSPICE at four epochs, radii, ownership and partial coverage\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

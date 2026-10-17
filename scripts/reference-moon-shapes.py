@@ -23,19 +23,19 @@ def dsk_intersections(path,source,rays):
    yield np.asarray(result[1])
  finally:spice.dascls(handle)
 
-def stooke_grid(path):
+def stooke_grid(path,sign):
  rows=[[float(v) for v in line.split()] for line in path.read_text().split('\n') if line.strip()]
  r={(lon,lat):radius*1000 for lon,lat,radius in rows};lons=sorted({k[0] for k in r})[:-1];lats=sorted({k[1] for k in r})[1:-1]
- xyz=lambda lon,lat:[r[(lon,lat)]*np.cos(np.radians(lat))*np.cos(np.radians(-lon)),r[(lon,lat)]*np.cos(np.radians(lat))*np.sin(np.radians(-lon)),r[(lon,lat)]*np.sin(np.radians(lat))]
+ xyz=lambda lon,lat:[r[(lon,lat)]*np.cos(np.radians(lat))*np.cos(np.radians(sign*lon)),r[(lon,lat)]*np.cos(np.radians(lat))*np.sin(np.radians(sign*lon)),r[(lon,lat)]*np.sin(np.radians(lat))]
  south,north=np.array(xyz(0.,-90.)),np.array(xyz(0.,90.));plates=[]
  for i,lon in enumerate(lons):
   nxt=lons[(i+1)%len(lons)];plates.append([south,xyz(nxt,lats[0]),xyz(lon,lats[0])]);plates.append([north,xyz(lon,lats[-1]),xyz(nxt,lats[-1])])
   for low,high in zip(lats[:-1],lats[1:]):plates+=[[xyz(lon,low),xyz(nxt,low),xyz(nxt,high)],[xyz(lon,low),xyz(nxt,high),xyz(lon,high)]]
  return np.array(plates,dtype=float)/1000
 
-def table_intersections(path,rays,form):
+def table_intersections(path,rays,form,sign=-1):
  lines=path.read_text().split('\n')
- if form=='stooke-radius-grid':corners=stooke_grid(path)
+ if form=='stooke-radius-grid':corners=stooke_grid(path,sign)
  elif form=='thomas-plate':
   # "nv np", then "x y z" and 0-based "v1 v2 v3" rows.
   count,faces=map(int,lines[0].split());vertices=np.array([[float(v) for v in line.split()] for line in lines[1:1+count]])
@@ -61,7 +61,8 @@ for record in json.loads((ROOT/'assets/moon-sources.json').read_text())['bodies'
  distance={'phobos':40,'mimas':400,'phoebe':250,'hyperion':400,'proteus':500}.get(record['id'],25);rays=[]
  for _ in range(24):
   direction=rng.normal(size=3);direction/=np.linalg.norm(direction);rays.append((direction*distance,-direction))
- form=source.get('format','dsk');hits=dsk_intersections(path,source,rays) if form=='dsk' else table_intersections(path,rays,form)
+ form=source.get('format','dsk');sign=1 if source.get('longitude')=='east' else -1
+ hits=dsk_intersections(path,source,rays) if form=='dsk' else table_intersections(path,rays,form,sign)
  for (origin,ray),hit in zip(rays,hits):
   vectors=[origin*1000,ray,hit*1000]
   rows.append('{"'+record['id']+'",'+','.join('{'+','.join(format(float(v),'.17g') for v in vector)+'}' for vector in vectors)+'},')

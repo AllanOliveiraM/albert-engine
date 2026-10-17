@@ -14,7 +14,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
 | **Alta — 1** | ~~Completar as luas~~ — concluído em 17/10/2026 | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion/Proteu com formas medidas (Hipérion e Proteu sem mapa; Hipérion com orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
-| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P com forma medida (Rosetta); Halley/Vesta/Pallas ainda com malhas artísticas; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
+| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P (Rosetta) e Halley (Giotto/Vega) com formas medidas; Vesta/Pallas ainda com malhas artísticas; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
 | **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
 | **Alta — 5** | Validar GPU física, Windows nativo (inclui a versão leve e seus downloads) e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
@@ -83,6 +83,13 @@ Todas as 25 luas têm agora representação própria, com os limites de cada fon
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — Halley com a forma estimada pelas sondas de 1986.** Modelo de Stooke a partir
+das imagens da Giotto e das Vega (muito incerto, segundo o autor) no lugar da rocha
+artística, com o albedo de ~0,04 medido pela Giotto. A rotação excitada de 1986 não
+pode ser propagada: orientação ilustrativa, identificada no painel. Validação: 27
+testes Linux, 192 interseções independentes, frame contra CSPICE, OpenGL no Xvfb e no
+Wine e programa real focando Halley.
 
 **17/10 — 67P com a forma medida pela Rosetta.** Modelo da câmera OSIRIS (194 mil
 placas, ~23 m) no lugar da rocha artística bilobada, com a cor escura medida do núcleo

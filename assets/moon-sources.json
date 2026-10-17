@@ -711,6 +711,64 @@
         "credit": "ESA/Rosetta/MPS for OSIRIS Team, LAM-PSI stereophotoclinometry shape model (OSPCLPS, 195k plates), DSK by N. Bachman (NAIF/JPL), ESA SPICE Service; mirror of https://spiftp.esac.esa.int/data/SPICE/ROSETTA/kernels/dsk/",
         "limits": "Decimated version (194,668 plates, edges about 23 m) of the OSIRIS SPC model; volume-equivalent radius 1681 m against the 1650 m catalogue radius. 13 zero-thickness flaps of the decimation (a plate and its reverse, 26 plates) and the 13 vertices only they used are dropped; nothing else is changed. Original coordinates in metres, body-fixed Cheops-meridian frame and source origin; no rescaling or recentring. About 4% of plates face the origin (the neck between the lobes)."
       }
+    },
+    {
+      "id": "halley",
+      "name": "1P/Halley",
+      "horizons_id": 1000036,
+      "radius_m": 5500,
+      "kind": "uniform",
+      "map_grid": [
+        1024,
+        512
+      ],
+      "colour": {
+        "albedo_linear": [
+          0.04,
+          0.04,
+          0.04
+        ],
+        "reference": "Geometric albedo about 0.04 from the Giotto Halley Multicolour Camera (Keller et al. 1986, Nature 321, 320); rendered neutral, as no nucleus colour is applied."
+      },
+      "credit": "Albedo after Giotto HMC (Keller et al. 1986)",
+      "product": "https://doi.org/10.26033/yt84-5y91",
+      "limits": "No albedo map: one uniform colour over a very uncertain shape. No coma or tail is drawn here.",
+      "orientation": {
+        "illustrative": true,
+        "pole_ra_deg": 270,
+        "pole_dec_deg": 66.560708,
+        "rate_deg_per_day": 50.7042,
+        "w0_deg": 0,
+        "reference": "No IAU model. In 1986 the nucleus was in an excited rotation (Belton et al. 1991, Icarus 93, 183: spin precessing about the angular momentum in about 3.7 days, with a roll of about 7.1 days about the long axis); that state cannot be propagated to today. Illustrative: uniform 7.1-day roll about the model's long axis, which is pointed at the J2000 ecliptic pole; phase arbitrary."
+      },
+      "notice": "Forma de Stooke (Giotto/Vega, muito incerta) com cor uniforme. Rotacao ilustrativa: o estado excitado de 1986 nao pode ser propagado ate hoje.",
+      "shape_source": {
+        "format": "stooke-radius-grid",
+        "longitude": "east",
+        "filename": "1682q1halley.tab",
+        "url": "https://sbnarchive.psi.edu/pds4/non_mission/small_bodies.stooke.shape-models/data/1682q1halley.tab",
+        "bytes": 70226,
+        "sha256": "e9437ac850060a4c527d1045e028ac28f58bfe0386fc1da0bf50405b8128b824",
+        "body": 1000036,
+        "frame": "Stooke Halley frame: z along the long axis towards the 'big end'; east longitudes, 270 deg at the centre of the first high-resolution Vega 2 image (pointing by A. Abergel); not a spin frame",
+        "vertices": 2522,
+        "plates": 5040,
+        "bounds_m": [
+          [
+            -4104.504,
+            -4022.347,
+            -8875.109
+          ],
+          [
+            3428.506,
+            3562.592,
+            6269.579
+          ]
+        ],
+        "bounding_radius_m": 8909.01,
+        "credit": "Stooke, P. (2025). Stooke small bodies shape models V1.0, urn:nasa:pds:small_bodies.stooke.shape-models::1.0, NASA Planetary Data System, doi:10.26033/yt84-5y91; pointing by A. Abergel (IAS, Paris); Giotto and Vega images",
+        "limits": "Radius every 5 deg from limb and terminator fits to Giotto and Vega images; the author rates the model extremely uncertain (absolute errors probably 500-1000 m, point-to-point about 100 m). Volume-equivalent radius 4.58 km against the 5.5 km catalogue radius. Triangulated through the published points only; seam and pole repeats differ by 1 mm of rounding."
+      }
     }
   ]
 }

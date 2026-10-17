@@ -42,7 +42,8 @@ rotação é caótica, a orientação é ilustrativa. Proteu usa a forma de Stoo
 das imagens da Voyager 2, com cor neutra uniforme e sem mapa de albedo. Nereida, que
 nunca foi resolvida em imagem, aparece como esfera com o albedo medido e um aviso.
 O cometa 67P usa a forma medida pela câmera OSIRIS da Rosetta, com a cor escura do
-núcleo medida pela missão.
+núcleo medida pela missão; Halley usa a forma estimada com as imagens da Giotto e
+das Vega, muito incerta, com rotação ilustrativa.
 Titã aparece como em luz visível, coberta pela névoa alaranjada; a superfície em
 infravermelho (938 nm) da Cassini é uma opção identificada no painel.
 Os oito planetas e a Lua preservam suas efemérides Horizons

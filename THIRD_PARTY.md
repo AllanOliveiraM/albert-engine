@@ -56,7 +56,8 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   https://doi.org/10.26033/ewy3-jy61 (Hipérion); Stooke, P. (2025), Stooke small
   bodies shape models V1.0, NASA PDS, https://doi.org/10.26033/yt84-5y91 (Proteu);
   ESA/Rosetta/MPS for OSIRIS Team (LAM-PSI), DSK `ROS_CG_K195_OSPCLPS_N_V1.BDS` do
-  ESA SPICE Service (67P).
+  ESA SPICE Service (67P); o mesmo pacote de Stooke, com apontamento de A. Abergel
+  (Halley).
 - NASA/JPL-Caltech/Space Science Institute/Lunar and Planetary Institute, mosaico
   de Paul Schenk: mapa global de Mimas PIA18437 em cores realçadas,
   https://science.nasa.gov/photojournal/color-maps-of-mimas-2014.

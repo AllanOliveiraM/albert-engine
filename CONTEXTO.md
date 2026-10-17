@@ -8,8 +8,9 @@ mapa Cassini com lacunas preenchidas) e **Hipérion** (forma Thomas, cor uniform
 medida, orientação ilustrativa ancorada em 2005); repasse do Codex sem achados novos;
 **Proteu** (forma de Stooke, cinza neutro medido) e **Nereida** (esfera com albedo
 medido e aviso). **Etapa das luas concluída**, com repasse do Codex sem achados novos.
-Em andamento: pequenos corpos medidos (Alta 2) — **67P** entregue (forma OSIRIS/Rosetta,
-cor medida). Próximo: Halley → Pallas → Vesta; depois coma/caudas.
+Em andamento: pequenos corpos medidos (Alta 2) — **67P** (forma OSIRIS/Rosetta, cor
+medida) e **Halley** (Stooke, rotação ilustrativa) entregues. Próximo: Pallas → Vesta;
+depois coma/caudas.
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
@@ -215,7 +216,7 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
 - Somente Saturno tem anéis renderizados. Outros anéis continuam prioritários.
 - Formas artísticas próprias para Vesta, Pallas, Halley alongado e 67P bilobado;
   crateras/material procedural identificados como arte. Fobos, Deimos, Febe, Hipérion,
-  Proteu e a 67P voltam à rocha artística só se a biblioteca não tiver nenhum asset deles. Não são
+  Proteu, 67P e Halley voltam à rocha artística só se a biblioteca não tiver nenhum asset. Não são
   reconstruções medidas. Coma/caudas ainda não implementadas.
 - Ícones de janela Linux/Windows e registro de atalho por usuário (`make desktop`).
   O comando não instala o executável. GPU física/Windows nativo ainda exigem validação.
@@ -327,6 +328,15 @@ frame IAU nomeado). `moon-sources.json` passou a cobrir pequenos corpos (nome
 histórico): `bodies_test` aceita categoria ≠ Planet e o download prioriza "moons" para
 qualquer superfície local. No `visual_test`, o plano próximo da câmera passou a
 acompanhar o raio (o fixo de 6,4 km cortava a 67P).
+
+Halley: Stooke `1682q1halley.tab` (corpo 1000036), longitude **leste** (`longitude:
+east` no inventário; o leitor e a referência independente aceitam os dois sentidos),
+z = eixo longo (não é eixo de spin); emenda/polo repetidos diferem 1 mm (tolerância de
+1 cm). 15,1 × ~7,5 km, volume equivalente 4,58 km, raio máximo 8.909,01 m. Albedo
+~0,04 neutro (Giotto HMC, Keller 1986). Orientação ilustrativa: giro de 7,1 d (Belton
+1991) em torno do eixo longo apontado ao polo da eclíptica J2000; a precessão de 3,7 d
+não cabe no modelo uniforme e o estado de 1986 não se propaga. Fixture CSPICE via
+`tipbod` com PCK de texto.
 A mesma técnica pode validar os mosaicos Viking de Fobos/Deimos (ainda não feito).
 
 Orientações IAU `pck00011` e termos periódicos/quadráticos foram testados contra
@@ -374,7 +384,7 @@ GPU física, Windows real, viagens extensas e limites de RAM/VRAM.
   reproduzível com fontes fixadas por hash. SpicePy 8.3.0 somente na autoria,
   sem dependência SPICE no executável. `shape.bin` indexado little-endian:
   `ALBMSH1\0`, contagens uint32, xyz float32 em metros IAU, índices uint32.
-- `scripts/reference-moon-shapes.py`: 168 raios independentes (CSPICE/DSKX02 nos
+- `scripts/reference-moon-shapes.py`: 192 raios independentes (CSPICE/DSKX02 nos
   DSKs, float64 com parser próprio na tabela Gaskell); `tests/measured_shape_fixture.inc`.
 - `scripts/moon_shapes.py` exporta DSK (SpicePy) e Gaskell vértice-faceta (só NumPy).
   Inventário aceita `projection` (registro de mapas publicados) e `notice` (aviso
@@ -392,9 +402,9 @@ Esse empacotamento dificulta abertura casual; não é DRM.
 Originais e intermediários ficam em `asset-packs/`, ignorados. Não espalhar cópias
 de imagens pelo projeto; documentação/capas ficam em `docs/images/`.
 
-Pacote adicional das 24 luas e da 67P: **77.482.328 bytes**. Biblioteca reunida neste build:
-**4.902.183.379 bytes** (~4,90 GB decimal); essencial da versão leve: 71,3 MB (era 63,3; as malhas de Febe, Hipérion, Proteu e 67P vão no essencial). Não confundir disco com RAM/VRAM:
-recortes são limitados e descartáveis; as sete malhas/BVH medidas permanecem residentes.
+Pacote adicional das 24 luas, 67P e Halley: **77.586.518 bytes**. Biblioteca reunida neste build:
+**4.902.287.569 bytes** (~4,90 GB decimal); essencial da versão leve: 71,4 MB (era 63,3; as malhas medidas vão no essencial). Não confundir disco com RAM/VRAM:
+recortes são limitados e descartáveis; as oito malhas/BVH medidas permanecem residentes.
 Após mudar o inventário, regenerar pacote/hashes coerentes. Nunca versionar
 originais enormes nem saltar a verificação de integridade para acelerar.
 
@@ -498,9 +508,10 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
   Wine (`bodies_test`, `shape_test`, `visual_test` com e sem gráficos); app real no Xvfb,
   câmera fora da malha, pico RSS 1,21 GB (`build/comet67p-preview-*.png`).
 
-Próxima ação concreta: **Halley** (Stooke, `1682q1halley.tab` no pacote de Proteu;
-longitude **leste** para cometas na V2.0; sem modelo IAU de rotação: período/eixo
-publicados de Giotto/Vega a pesquisar), **Pallas** (sem sonda: elipsoide do pck00011 +
-cor medida) e **Vesta** (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
+- Halley: 27 CTests Linux (192 interseções; frame contra CSPICE); OpenGL no Xvfb; MinGW
+  + Wine; app real no Xvfb, câmera fora da malha (`build/halley-preview-*.png`).
+
+Próxima ação concreta: **Pallas** (sem sonda: elipsoide do pck00011 + cor medida) e
+**Vesta** (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
 `register-moon-map.py`). Depois coma/caudas com atividade coerente com a distância
 heliocêntrica (Halley perto do afélio em 2026 não deve ter coma).

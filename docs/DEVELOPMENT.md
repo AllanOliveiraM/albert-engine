@@ -626,7 +626,7 @@ separável para latitude planetocêntrica e longitude leste −180…180. O camp
 
 `scripts/moon_shapes.py` exporta DSK type 2, tabelas vértice-faceta de Gaskell,
 modelos de placas de Thomas e grades de raios de Stooke (PDS; triangulação só dos
-pontos publicados) para `shape.bin`: cabeçalho
+pontos publicados; `longitude: east` para cometas) para `shape.bin`: cabeçalho
 `ALBMSH1\0`, contagens uint32, posições float32 em metros IAU e índices uint32,
 tudo little-endian. Verifica hash, corpo, frame, contagens e limites. Nas tabelas
 de Gaskell, descarta apenas vértices duplicados do cubo ICQ que nenhuma placa usa.
@@ -643,7 +643,7 @@ aletas de espessura zero (placa e sua inversa) deixadas por decimação.
 o nome é histórico. Elas compartilham os containers `moons-<nível>` da versão leve. Não recentra nem redimensiona.
 Os recortes desses corpos têm `textureOnly`, sem malha esférica ou máscara extra.
 
-`measured_shapes` lê o pacote real e compara 168 interseções independentes (CSPICE
+`measured_shapes` lê o pacote real e compara 192 interseções independentes (CSPICE
 DSKX02 nos DSKs, inclusive a 67P; float64 sobre as tabelas originais de Gaskell em Mimas e Febe, de
 Thomas em Hipérion e sobre a grade de Stooke de Proteu, triangulada à parte),
 contagens, raio, normais, emendas e rejeição de entradas malformadas. Para regenerar
