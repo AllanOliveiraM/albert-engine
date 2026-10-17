@@ -29,6 +29,9 @@ with tempfile.TemporaryDirectory(prefix='albert-release-') as directory:
  try:release.package(source,source/'archives','bad')
  except ValueError:pass
  else:raise AssertionError('Archive can recursively include itself')
+ # Packaged on Windows (no Unix mode on disk), the Linux entrypoint stays executable.
+ executable.chmod(0o644);parts=release.package(source,output,'windows-host',65536);executable.chmod(0o755)
+ with zipfile.ZipFile(parts[0]) as archive:assert archive.getinfo('AlbertEngine').external_attr>>16&stat.S_IXUSR,'Entrypoint lost its executable bit'
  # Light folder: same program without the library, plus its download catalogue.
  import json,sys;sys.path.insert(0,str(ROOT/'tests'));from pack_fixture import fixture
  fixture(source/'assets/visuals.pak')

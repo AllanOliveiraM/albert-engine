@@ -41,6 +41,9 @@ def package(source,output,name,limit=1900*1024*1024):
     if source not in path.resolve().parents:raise ValueError('Distribution symlink escapes source')
     relative=path.relative_to(source).as_posix()
     info=zipfile.ZipInfo.from_file(path,relative,strict_timestamps=False)
+    # The Linux entrypoint must stay executable even when packaged on Windows,
+    # where the file system records no Unix mode.
+    if relative=='AlbertEngine':info.external_attr|=(0o100755<<16)
     # Images/pak are already compressed. Avoid another full compression pass.
     info.compress_type=zipfile.ZIP_STORED
     with path.open('rb') as incoming,archive.open(info,'w',force_zip64=info.file_size>=2*1024**3) as outgoing:
