@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "license": "NASA visualization resources; credit NASA VTAD; no endorsement implied. See https://www.nasa.gov/nasa-brand-center/images-and-media/",
+  "bodies": [
+    {
+      "id": "io",
+      "filename": "io.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/Io_1_3643.glb",
+      "sha256": "118a6bf7eda476ea6b454039f621778189141a82acb3ad0aaa762f1771c5a723",
+      "bytes": 17479700,
+      "grid": [
+        4096,
+        2048
+      ],
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "product": "https://science.nasa.gov/resource/io-3d-model/",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+    },
+    {
+      "id": "europa",
+      "filename": "europa.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/e/Europa_1_3138.glb",
+      "sha256": "fe88cbe326574a658c9d3b0885d1a38deea3ebfb354772eb3b95fe0f3f3d542c",
+      "bytes": 12287068,
+      "grid": [
+        4096,
+        2048
+      ],
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "product": "https://science.nasa.gov/resource/europa-3d-model/",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+    },
+    {
+      "id": "ganymede",
+      "filename": "ganymede.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/g/Ganymede_1_5268.glb",
+      "sha256": "367bc128197bf1d25ef5af5269f2d1902aababaae167c3c8d6529443b0100d6f",
+      "bytes": 4075564,
+      "grid": [
+        2048,
+        1024
+      ],
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "product": "https://science.nasa.gov/resource/ganymede-3d-model/",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+    },
+    {
+      "id": "callisto",
+      "filename": "callisto.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/c/Callisto_1_4821.glb",
+      "sha256": "0bdbd5600a4be4bef4bd85e53f6226f49e73a66c85310219402627e59457c303",
+      "bytes": 4452928,
+      "grid": [
+        2048,
+        1024
+      ],
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "product": "https://science.nasa.gov/resource/callisto-3d-model/",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+    }
+  ]
+}

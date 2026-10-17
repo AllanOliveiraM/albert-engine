@@ -905,7 +905,7 @@ int albert::runRenderer(int argc, char** argv) {
         albert::SceneObjects objects(*scene);
         albert::VectorLayers vectorLayers(*scene);
         objects.bind("earth",earth);objects.bind("moon",moon);objects.bind("sun",sun);
-        for(const auto& [id,node]:solids.nodes()){registry.include(*albert::core::naturalBody(id));objects.bind(id,node);}
+        for(const auto& [id,node]:solids.nodes()){if(const auto* body=albert::core::naturalBody(id))registry.include(*body);objects.bind(id,node);}
         albert::core::includeLocalSystem(registry);
         albert::DebrisFields debris(*scene);
         albert::core::Vector sceneOrigin;
@@ -1169,7 +1169,7 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::TextColored(ImVec4(.5f,.86f,.93f,1), "%s", focusName(focus));
                 if(focus.front()!='@' && albert::core::localOrbit(focus)) {
                     ImGui::TextDisabled("Orbita aproximada offline");
-                    ImGui::TextWrapped(albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
+                    ImGui::TextWrapped(solids.contains(focus)?"Mapa NASA/VTAD do objeto; resolucao e cobertura variam. Sem relevo medido.":albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
                 }
                 if(focus==targets::Moon&&eclipses.lunarActive())ImGui::TextWrapped("Eclipse lunar: luz atmosferica avermelhada aproximada.");
                 if(focus.front()!='@' && !registry.get(focus).builtin) {
@@ -1427,7 +1427,7 @@ int albert::runRenderer(int argc, char** argv) {
                 };
                 mark(targets::Earth,earthPosition, systemView(focus) ? "Terra / Lua" : "Terra", IM_COL32(145,208,229,230));
                 if (focus == targets::EarthMoon) mark(targets::Moon,moonPosition, "Lua", IM_COL32(215,220,230,230));
-                else {mark(targets::Sun,sunPosition, "Sol", IM_COL32(255,239,204,230));for(const auto& [id,node]:solids.nodes())mark(id,node->position,registry.get(id).name.c_str(),IM_COL32(211,201,184,230));}
+                else {mark(targets::Sun,sunPosition, "Sol", IM_COL32(255,239,204,230));for(const auto& [id,node]:solids.nodes())if(albert::core::naturalBody(id))mark(id,node->position,registry.get(id).name.c_str(),IM_COL32(211,201,184,230));}
             }
 
             {

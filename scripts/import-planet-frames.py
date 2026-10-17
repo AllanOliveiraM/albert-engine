@@ -35,6 +35,17 @@ def generate(path):
   records.append('{"'+body+'","'+name+'",'+str(target)+','+fmt(radii[0]*1000)+','+str(half)+','+str(step)+','+arr(ra)+','+arr(dec)+','+arr(pm)+','+(body+'Terms' if terms else '{}')+','+fmt(radii[2]*1000)+','+str(cloud).lower()+'}')
  out.append('const NaturalBody additionalBodies[]{'+',\n'.join(records)+'};')
  (ROOT/'src/core/planet_frames.inc').write_text('\n'.join(out)+'\n')
+ moon_out=out[:2];moon_records=[]
+ for body,name,target,radius in [('io','Io',501,1821500),('europa','Europa',502,1560800),('ganymede','Ganimedes',503,2631200),('callisto','Calisto',504,2410300)]:
+  key='BODY'+str(target);amps=[values(key+'_NUT_PREC_'+kind,[]) for kind in ['PM','RA','DEC']];angles=values('BODY5_NUT_PREC_ANGLES');terms=[]
+  for i in range(max(map(len,amps))):
+   w,a,d=[v[i] if i<len(v) else 0 for v in amps]
+   if any([w,a,d]):terms.append([angles[2*i],angles[2*i+1]/36525,w,0,a,d])
+  moon_out.append('constexpr RotationTerm '+body+'Terms[]{'+','.join('{'+','.join(map(fmt,t))+'}' for t in terms)+'};')
+  arr=lambda x:'{'+','.join(map(fmt,x))+'}'
+  moon_records.append('{"'+body+'","'+name+'",'+str(target)+','+str(radius)+',0,0,'+arr(values(key+'_POLE_RA'))+','+arr(values(key+'_POLE_DEC'))+','+arr(values(key+'_PM'))+','+body+'Terms}')
+ moon_out.append('const NaturalBody moonSurfaces[]{'+',\n'.join(moon_records)+'};')
+ (ROOT/'src/core/moon_frames.inc').write_text('\n'.join(moon_out)+'\n')
  names={401: 'Phobos', 402: 'Deimos', 501: 'Io', 502: 'Europa', 503: 'Ganymede', 504: 'Callisto', 505: 'Amalthea', 506: 'Himalia', 507: 'Elara', 508: 'Pasiphae', 509: 'Sinope', 510: 'Lysithea', 511: 'Carme', 512: 'Ananke', 513: 'Leda', 514: 'Thebe', 515: 'Adrastea', 516: 'Metis', 601: 'Mimas', 602: 'Enceladus', 603: 'Tethys', 604: 'Dione', 605: 'Rhea', 606: 'Titan', 607: 'Hyperion', 608: 'Iapetus', 609: 'Phoebe', 610: 'Janus', 611: 'Epimetheus', 612: 'Helene', 613: 'Telesto', 614: 'Calypso', 615: 'Atlas', 616: 'Prometheus', 617: 'Pandora', 618: 'Pan', 701: 'Ariel', 702: 'Umbriel', 703: 'Titania', 704: 'Oberon', 705: 'Miranda', 706: 'Cordelia', 707: 'Ophelia', 708: 'Bianca', 709: 'Cressida', 710: 'Desdemona', 711: 'Juliet', 712: 'Portia', 713: 'Rosalind', 714: 'Belinda', 715: 'Puck', 801: 'Triton', 802: 'Nereid', 803: 'Naiad', 804: 'Thalassa', 805: 'Despina', 806: 'Galatea', 807: 'Larissa', 808: 'Proteus', 901: 'Charon'}
  rows=[]
  for target,name in names.items():

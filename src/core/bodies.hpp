@@ -15,6 +15,9 @@ struct NaturalBody {
 // Additional solid bodies. Existing Earth/Moon/Sun keep their specialized models.
 std::span<const NaturalBody> naturalBodies();
 const NaturalBody* naturalBody(std::string_view id);
+// Surface/orientation catalogue is independent of online ephemeris providers.
+std::span<const NaturalBody> surfaceBodies();
+const NaturalBody* surfaceBody(std::string_view id);
 struct BodyFrame {Vector prime,east,pole;}; // Body-fixed basis -> geocentric ICRF.
 BodyFrame bodyFrame(const NaturalBody& body,double jdTDB);
 double surfaceRadius(std::string_view id);

@@ -27,8 +27,10 @@ câmera. A renderização, a navegação e as animações ficam dentro do Albert
 Hoje, a cena inclui **43 corpos**: o Sol, oito planetas, 25 luas, cinco planetas
 anões, Vesta, Pallas, Halley e 67P. A seleção é local, organizada por categorias,
 e aceita nomes aproximados. Luas adicionais, planetas anões e pequenos corpos
-usam órbitas aproximadas embarcadas e superfícies ilustrativas; os oito planetas
-e a Lua preservam suas efemérides Horizons e mapas próprios.
+usam órbitas aproximadas embarcadas. Io, Europa, Ganimedes e Calisto já têm mapas
+próprios NASA/VTAD, detalhes por zoom e orientação IAU; outras superfícies adicionais
+continuam ilustrativas. Os oito planetas e a Lua preservam suas efemérides Horizons
+e mapas próprios.
 Os cinturões de asteroides e Kuiper e a nuvem de Oort são populações visuais
 estatísticas, exibidas conforme a escala, sem representar trajetórias individuais.
 Objetos próprios podem ser criados pela API como esferas, caixas, cilindros ou
@@ -70,7 +72,7 @@ estão disponíveis pela API. Esta versão ainda não autentica NTP com NTS;
 [funcionamento e limites](docs/TIME.md).
 
 **As imagens estáticas acompanham o aplicativo.** Superfícies, luzes das cidades,
-relevo e referência solar estão em uma biblioteca de aproximadamente **4,82 GB**. Na distribuição,
+relevo e referência solar estão em uma biblioteca de aproximadamente **4,83 GB**. Na distribuição,
 ela fica em um único `assets/visuals.pak`. Aproximar a câmera carrega recortes
 mais detalhados dessa biblioteca; a resolução máxima depende dos dados de origem.
 

@@ -1,4 +1,5 @@
 #include "core/bodies.hpp"
+#include "core/local_system.hpp"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -28,5 +29,13 @@ int main(){try{
     require(naturalBodies().size()==7,"Missing a Solar System planet");
     for(const auto& fixture:planets){const auto* definition=naturalBody(fixture.body);require(definition&&definition->polarRadiusMeters>0&&definition->polarRadiusMeters<=definition->radiusMeters,"Invalid planetary dimensions");const auto frame=bodyFrame(*definition,fixture.jd);const Vector columns[]{frame.prime,frame.east,frame.pole};for(int col=0;col<3;++col){const double values[]{columns[col].x,columns[col].y,columns[col].z};for(int row=0;row<3;++row)require(std::abs(values[row]-fixture.m[row][col])<2e-9,"Planet orientation differs from CSPICE");}}
     require(std::abs(surfaceRadius("mercury")-2439400.)<.001,"DEM datum radius changed");
+    const PlanetFixture moons[]{
+#include "moon_frames_fixture.inc"
+    };
+    require(surfaceBodies().size()==11&&naturalBodies().size()==7,"Surface catalogue changed online planet provider scope");
+    for(const auto& fixture:moons){const auto* definition=surfaceBody(fixture.body);require(definition&&!naturalBody(fixture.body)&&category(fixture.body)==Category::Moon,"Textured moon was reclassified as a planet");
+        require(surfaceRadius(fixture.body)==localOrbit(fixture.body)->radius,"Surface and orbital/collision radii disagree");
+        const auto frame=bodyFrame(*definition,fixture.jd);const Vector columns[]{frame.prime,frame.east,frame.pole};
+        for(int col=0;col<3;++col){const double values[]{columns[col].x,columns[col].y,columns[col].z};for(int row=0;row<3;++row)require(std::abs(values[row]-fixture.m[row][col])<2e-9,"Galilean orientation differs from CSPICE");}}
     std::cout<<"Bodies OK: descriptors, built-in protection and IAU Mercury orientation/libration against CSPICE at four epochs\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

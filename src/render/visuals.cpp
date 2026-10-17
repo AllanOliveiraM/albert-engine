@@ -187,9 +187,9 @@ albert::DecodedAssets albert::loadVisualAssets(const std::filesystem::path& dire
         else result.images[i]=pack->image(layers[i],i==4 ? GeoRegion{0,0,1,1} : GeoRegion{},i==4 ? 2048 : i==5 ? 1024 : 4096,progress);
     }
     result.moonHeight=pack->image("moon-height",GeoRegion{},1024,progress);
-    for(const auto& body:core::naturalBodies()){
+    for(const auto& body:core::surfaceBodies()){
         const std::string id(body.id);
-        if(pack->contains(id+"-day"))result.surfaces.push_back({id,pack->image(id+"-day",{},2048,progress),pack->contains(id+"-height")?pack->image(id+"-height",{},512,progress):Image(std::vector<float>{0,0,0,1},1,1),pack->contains(id+"-ring")?std::optional<Image>(pack->image(id+"-ring",{0,0,1,1},4096,progress)):std::nullopt});
+        if(pack->contains(id+"-day"))result.surfaces.push_back({id,pack->image(id+"-day",{},core::naturalBody(id)?2048:1024,progress),pack->contains(id+"-height")?pack->image(id+"-height",{},512,progress):Image(std::vector<float>{0,0,0,1},1,1),pack->contains(id+"-ring")?std::optional<Image>(pack->image(id+"-ring",{0,0,1,1},4096,progress)):std::nullopt});
     }
     // A visual ocean mask inferred from the day map, not elevation or terrain.
     const auto& day = *result.images[0];

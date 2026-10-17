@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('setup', 'bootstrap', 'build', 'run', 'test', 'dist', 'clean', 'assets', 'assets-body',
+    [ValidateSet('setup', 'bootstrap', 'build', 'run', 'test', 'dist', 'clean', 'assets', 'assets-body', 'assets-moons',
                  'render-build', 'render-run', 'render-test', 'render-dist', 'render-clean')]
     [string]$Task = 'render-dist',
     [ValidateRange(1, 128)][int]$Jobs = 2,
@@ -28,7 +28,7 @@ if ($Task -eq 'render-clean') {
     if (Test-Path $build) { Remove-Item -Recurse -Force $build }
     exit 0
 }
-if ($Task -eq 'assets' -or $Task -eq 'assets-body') {
+if ($Task -eq 'assets' -or $Task -eq 'assets-body' -or $Task -eq 'assets-moons') {
     if ($Task -eq 'assets' -and (Test-Path (Join-Path $root 'assets/imagery/manifest.json'))) {
         Write-Host 'Biblioteca versionada: assets/imagery/ (reunida automaticamente no build)'
         exit 0
@@ -38,6 +38,8 @@ if ($Task -eq 'assets' -or $Task -eq 'assets-body') {
         Invoke-Checked -Program 'docker' -Arguments @('build', '-t', 'albert-assets-builder', '-f', 'scripts/Dockerfile.assets', 'scripts')
         if ($Task -eq 'assets-body') {
             Invoke-Checked -Program 'docker' -Arguments @('run', '--rm', '--init', '--entrypoint', 'python3', '-v', "${root}:/work", '-w', '/work', 'albert-assets-builder', 'scripts/prepare-body-assets.py', $Body)
+        } elseif ($Task -eq 'assets-moons') {
+            Invoke-Checked -Program 'docker' -Arguments @('run', '--rm', '--init', '--entrypoint', 'python3', '-v', "${root}:/work", '-w', '/work', 'albert-assets-builder', 'scripts/prepare-moon-assets.py')
         } else {
             Invoke-Checked -Program 'docker' -Arguments @('run', '--rm', '--init', '-v', "${root}:/work", '-w', '/work', 'albert-assets-builder')
         }

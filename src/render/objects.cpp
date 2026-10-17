@@ -1,5 +1,6 @@
 #include "objects.hpp"
 #include "core/model.hpp"
+#include "core/bodies.hpp"
 #include "animation.hpp"
 #include "rocks.hpp"
 #include <numbers>
@@ -16,7 +17,7 @@ std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Sce
         const auto& object=registry.get(id);
         if(!node->visible||!object.visible)continue;
         float distance=std::numeric_limits<float>::infinity();
-        if(object.appearance.shape==core::Shape::Builtin){
+        if(object.appearance.shape==core::Shape::Builtin||core::surfaceBody(id)){
             // Built-in globes are ellipsoids. Test in local space to retain
             // oblateness without walking every terrain triangle on hover.
             node->updateWorldMatrix(true,false);

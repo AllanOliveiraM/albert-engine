@@ -107,7 +107,7 @@ albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets)
         auto s=std::make_unique<Surface>();s->day=colorTexture(std::move(asset.day));s->height=heightTexture(std::move(asset.height),true);s->mask=colorTexture(Image(std::vector<unsigned char>(4,255),1,1));
         s->material=material(s->day.get(),s->height.get(),s->mask.get());
         s->mesh=Mesh::create(SphereGeometry::create(static_cast<float>(core::surfaceRadius(asset.body)/core::earthRadiusMeters),192,96),s->material);
-        const auto* definition=core::naturalBody(asset.body);
+        const auto* definition=core::surfaceBody(asset.body);
         if(definition->polarRadiusMeters>0)s->mesh->scale.y=static_cast<float>(definition->polarRadiusMeters/definition->radiusMeters);
         if(asset.ring){
             s->ringTexture=colorTexture(std::move(*asset.ring));const float r=static_cast<float>(definition->radiusMeters/core::earthRadiusMeters);
@@ -135,7 +135,7 @@ void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,
         s.material->uniforms.at("surfaceMask").setValue(s.region[4].get());s.material->uniforms.at("masked").setValue(1.f);
     }
     camera.updateMatrixWorld();
-    for(auto& [id,entry]:surfaces_){auto& s=*entry;const auto frame=core::bodyFrame(*core::naturalBody(id),jd);
+    for(auto& [id,entry]:surfaces_){auto& s=*entry;const auto frame=core::bodyFrame(*core::surfaceBody(id),jd);
         auto convert=[](core::Vector v){return Vector3(static_cast<float>(v.x),static_cast<float>(v.z),static_cast<float>(-v.y));};
         Matrix4 orientation;orientation.makeBasis(convert(frame.prime),convert(frame.pole),convert(frame.east*(-1.)));s.mesh->setRotationFromMatrix(orientation);
         Vector3 light=sun;light.sub(s.mesh->position);const double distance=light.length()*core::earthRadiusMeters;
@@ -148,7 +148,7 @@ void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,
         light.transformDirection(camera.matrixWorldInverse);
         const float intensity=static_cast<float>(2.4*std::pow(149597870700./distance,2)),angular=static_cast<float>(std::asin(std::min(1.,695700000./distance)));
         const auto aid=auxiliary.find(id);s.fill=animateValue(s.fill,aid!=auxiliary.end()&&aid->second.enabled?std::clamp(aid->second.intensity,0.f,1.5f):0.f,dt);
-        for(auto* m:{s.material.get(),s.patchMaterial.get()})if(m){m->uniforms.at("cloudSurface").setValue(core::naturalBody(id)->cloudSurface?1.f:0.f);m->uniforms.at("auxiliaryStrength").setValue(s.fill);m->uniforms.at("solarDirection").setValue(light);m->uniforms.at("intensity").setValue(intensity);m->uniforms.at("angularRadius").setValue(angular);}
+        for(auto* m:{s.material.get(),s.patchMaterial.get()})if(m){m->uniforms.at("cloudSurface").setValue(core::surfaceBody(id)->cloudSurface?1.f:0.f);m->uniforms.at("auxiliaryStrength").setValue(s.fill);m->uniforms.at("solarDirection").setValue(light);m->uniforms.at("intensity").setValue(intensity);m->uniforms.at("angularRadius").setValue(angular);}
         s.blend=animateValue(s.blend,1.f,dt);if(s.patchMaterial)s.patchMaterial->uniforms.at("detailBlend").setValue(s.blend);
         const bool nearby=camera.position.distanceTo(s.mesh->position)<static_cast<float>(core::surfaceRadius(id)/core::earthRadiusMeters)*2.4f;
         const auto now=std::chrono::steady_clock::now();

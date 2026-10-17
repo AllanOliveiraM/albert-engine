@@ -26,6 +26,9 @@
     },
     {
       "manifest": "solar/manifest.json"
+    },
+    {
+      "manifest": "moons/manifest.json"
     }
   ]
 }

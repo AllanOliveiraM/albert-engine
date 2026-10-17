@@ -3,6 +3,7 @@
 #include "paths.hpp"
 #include "visuals.hpp"
 #include "objects.hpp"
+#include "core/bodies.hpp"
 #include "rocks.hpp"
 #include "eclipses.hpp"
 #include "layers.hpp"
@@ -319,6 +320,24 @@ void graphics() {
     solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"earth",true,4.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
     require(std::abs(int(pixels[3*(96*192+96)])-lit)<4,"Solid detail eviction damaged the global surface");
     require(solids.takeEviction()&&!solids.takeEviction(),"Regional loader was not notified of eviction exactly once");
+    // Local moons share surface LOD/lighting while retaining their local registry
+    // ownership and category; their mesh radius must not be scaled twice.
+    for(const std::string id:{"io","europa","ganymede","callisto"}){
+        auto world=Scene::create();world->background=Color(0x000000);
+        std::vector<albert::SurfaceAssets> maps;maps.push_back({id,rgba(140),height(0)});
+        albert::SolidBodies moons(*world,std::move(maps));albert::core::Scene registry;
+        registry.include(*albert::core::localOrbit(id));albert::SceneObjects objects(*world);objects.bind(id,moons.nodes().at(id));
+        objects.sync(registry,0,{});const float radius=static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters);
+        auto camera=PerspectiveCamera::create(45,1,.001f,30000.f);camera->position.set(0,0,radius*4);camera->lookAt(Vector3());
+        moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);
+        require(renderer.readRGBPixels()[3*(96*192+96)]>20,"Local moon surface did not render");
+        Raycaster ray;ray.setFromCamera(Vector2(0,0),*camera);require(objects.pick(registry,ray)==id,"Textured local moon cannot be picked");
+        auto node=moons.nodes().at(id);node->geometry()->computeBoundingSphere();require(std::abs(node->geometry()->boundingSphere->radius-radius)<1e-5f,"Moon radius scaled twice");
+        albert::RegionalImages detail;detail.body=id;detail.day=rgba(230);detail.height=height(0);albert::prepareRegionalImages(detail);moons.stage(std::move(detail));
+        for(int i=0;moons.uploading()&&i<256;++i)moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,0.f);
+        require(!moons.uploading(),"Moon detail upload did not finish");moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);
+        moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(moons.takeEviction(),"Moon detail stayed resident after focus changed");
+    }
     albert::RegionalImages reload;reload.body="mercury";reload.day=rgba(230);reload.height=height(1000);albert::prepareRegionalImages(reload);solids.stage(std::move(reload));
     for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);
     solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,4.f);

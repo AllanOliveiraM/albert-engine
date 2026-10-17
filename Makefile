@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := render-build
-.PHONY: setup bootstrap build run test dist clean render-build render-run render-test render-dist render-clean assets assets-body desktop
+.PHONY: setup bootstrap build run test dist clean render-build render-run render-test render-dist render-clean assets assets-body assets-moons desktop
 
 JOBS ?= 2
 BODY ?= mercury
@@ -58,6 +58,13 @@ else
 endif
 
 # Regenerate one additional body's archive; existing image parts stay intact.
+assets-moons:
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1 -Task assets-moons
+else
+	bash scripts/prepare-assets.sh --moons
+endif
+
 assets-body:
 ifeq ($(OS),Windows_NT)
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1 -Task assets-body -Body "$(BODY)"

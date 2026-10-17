@@ -11,13 +11,16 @@ constexpr RotationTerm mercuryTerms[]{
     {164.3732571,12.277005,-.00011040},{339.1643429,16.369340,-.00002539},
     {153.9554286,20.461675,-.00000571}};
 #include "planet_frames.inc"
+#include "moon_frames.inc"
 const NaturalBody mercury[]{
     {"mercury","Mercurio",199,2439400.,44.,6.,{281.0103,-.0328},{61.4155,-.0049},{329.5988,6.1385108},mercuryTerms}
 };
 }
-std::span<const NaturalBody> naturalBodies(){static const auto bodies=[](){std::array<NaturalBody,7> value{};value[0]=mercury[0];std::copy(std::begin(additionalBodies),std::end(additionalBodies),value.begin()+1);return value;}();return bodies;}
+std::span<const NaturalBody> naturalBodies(){static const auto bodies=[](){std::array<NaturalBody,1+std::size(additionalBodies)> value{};value[0]=mercury[0];std::copy(std::begin(additionalBodies),std::end(additionalBodies),value.begin()+1);return value;}();return bodies;}
 const NaturalBody* naturalBody(std::string_view id){for(const auto& body:naturalBodies())if(body.id==id)return &body;return nullptr;}
-double surfaceRadius(std::string_view id){if(id=="earth")return earthRadiusMeters;if(id=="moon")return 1737400.;if(const auto* body=naturalBody(id))return body->radiusMeters;throw std::invalid_argument("Unknown solid surface");}
+std::span<const NaturalBody> surfaceBodies(){static const auto bodies=[](){std::array<NaturalBody,1+std::size(additionalBodies)+std::size(moonSurfaces)> value{};std::copy(naturalBodies().begin(),naturalBodies().end(),value.begin());std::copy(std::begin(moonSurfaces),std::end(moonSurfaces),value.begin()+naturalBodies().size());return value;}();return bodies;}
+const NaturalBody* surfaceBody(std::string_view id){for(const auto& body:surfaceBodies())if(body.id==id)return &body;return nullptr;}
+double surfaceRadius(std::string_view id){if(id=="earth")return earthRadiusMeters;if(id=="moon")return 1737400.;if(const auto* body=surfaceBody(id))return body->radiusMeters;throw std::invalid_argument("Unknown solid surface");}
 BodyFrame bodyFrame(const NaturalBody& body,double jd){
     if(!std::isfinite(jd))throw std::invalid_argument("Invalid orientation epoch");
     constexpr double radians=std::numbers::pi/180.;const double days=jd-2451545.,centuries=days/36525.;

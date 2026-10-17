@@ -39,7 +39,7 @@ Sample localState(const LocalOrbit& o,double jd){
 void Scene::include(const LocalOrbit& o){
     if(localOrbit(o.id)!=&o)throw std::invalid_argument("Unknown local orbital definition");
     Object body;body.id=o.id;body.name=o.name;
-    body.source="NASA/JPL Horizons: elementos embarcados; propagacao de dois corpos aproximada; superficie ilustrativa";
+    body.source="NASA/JPL Horizons: elementos embarcados; propagacao de dois corpos aproximada; superficie conforme assets locais";
     body.appearance={Shape::Sphere,{o.radius*2,o.radius*2,o.radius*2},o.category==Category::Comet?0x8f908eu:0xb6b2aau};
     body.samples.push_back({});create(std::move(body));objects_.at(std::string(o.id)).builtin=true;
 }
