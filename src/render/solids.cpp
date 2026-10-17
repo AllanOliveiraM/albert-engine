@@ -13,24 +13,25 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
     auto m=ShaderMaterial::create();
     m->vertexShader=R"(
         uniform sampler2D heightMap,baseHeightMap;
-        uniform float displacement,isPatch,baseRadius,detailBlend;
+        uniform float displacement,isPatch,baseRadius,detailBlend,shapeSurface;
         uniform vec4 bounds;
         varying vec2 vUv,vGlobalUv;
         varying vec3 vNormal,vPosition;
         void main(){
-            vUv=uv;vGlobalUv=bounds.xy+uv*bounds.zw;
+            vUv=uv;vGlobalUv=shapeSurface>0.5?uv:bounds.xy+uv*bounds.zw;
             vec3 radial=normalize(position);
             vec3 p=position+radial*texture2D(heightMap,uv).r*displacement;
             if(isPatch>0.5){float coarse=baseRadius+(texture2D(baseHeightMap,vGlobalUv).r+20.0)/6378137.0;p=radial*mix(coarse,length(position),detailBlend);}
             vec4 view=modelViewMatrix*vec4(p,1.0);
-            vNormal=normalize(normalMatrix*radial);vPosition=view.xyz;
+            vNormal=normalize(normalMatrix*(shapeSurface>0.5?normal:radial));vPosition=view.xyz;
             gl_Position=projectionMatrix*view;
         }
     )";
     m->fragmentShader=R"(
         uniform sampler2D dayMap,baseMap,heightMap,baseHeightMap,surfaceMask;
         uniform vec3 solarDirection;
-        uniform float intensity,angularRadius,masked,detailBlend,auxiliaryStrength,cloudSurface;
+        uniform float intensity,angularRadius,masked,detailBlend,auxiliaryStrength,cloudSurface,shapeSurface;
+        uniform vec4 bounds;
         varying vec2 vUv,vGlobalUv;
         varying vec3 vNormal,vPosition;
         const float PI=3.141592653589793;
@@ -38,8 +39,9 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
         float terrain(vec2 local,vec2 global){return mix(texture2D(baseHeightMap,global).r,texture2D(heightMap,local).r,detailBlend)/6378137.0;}
         void main(){
             if(masked>0.5&&texture2D(surfaceMask,vGlobalUv).g<0.5)discard;
-            vec4 sampleColor=texture2D(dayMap,vUv);
-            vec2 edge=min(vUv,1.0-vUv);
+            vec2 localUv=shapeSurface>0.5?vec2(fract(vUv.x-bounds.x),vUv.y-bounds.y)/bounds.zw:vUv;
+            vec4 sampleColor=texture2D(dayMap,localUv);
+            vec2 edge=min(localUv,1.0-localUv);
             float blend=detailBlend*smoothstep(0.0,0.025,min(edge.x,edge.y));
             vec3 albedo=linearColor(mix(texture2D(baseMap,vGlobalUv).rgb,sampleColor.rgb,blend));
             vec3 normal=normalize(vNormal),sigmaX=dFdx(vPosition),sigmaY=dFdy(vPosition);
@@ -68,6 +70,7 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
     m->uniforms.emplace("bounds",Uniform(Vector4(0,0,1,1)));m->uniforms.emplace("solarDirection",Uniform(Vector3(1,0,0)));
     m->uniforms.emplace("cloudSurface",Uniform(0.f));m->uniforms.emplace("intensity",Uniform(2.4f));m->uniforms.emplace("angularRadius",Uniform(.00465f));
     m->uniforms.emplace("auxiliaryStrength",Uniform(0.f));m->uniforms.emplace("masked",Uniform(0.f));m->uniforms.emplace("detailBlend",Uniform(0.f));m->uniforms.emplace("displacement",Uniform(1.f/6378137.f));
+    m->uniforms.emplace("shapeSurface",Uniform(0.f));
     return m;
 }
 std::shared_ptr<ShaderMaterial> rings(Texture* profile,float radius){
@@ -93,10 +96,12 @@ struct albert::SolidBodies::Surface {
     std::shared_ptr<ShaderMaterial> material,patchMaterial;
     std::shared_ptr<Texture> day,height,mask;
     std::array<std::shared_ptr<Texture>,5> region;
+    std::shared_ptr<BVH> picker;
     float blend=0,inactive=0,fill=0;
     std::chrono::steady_clock::time_point updated=std::chrono::steady_clock::now();
     void release(){
         material->uniforms.at("masked").setValue(0.f);material->uniforms.at("surfaceMask").setValue(mask.get());
+        if(picker){material->uniforms.at("dayMap").setValue(day.get());material->uniforms.at("detailBlend").setValue(0.f);material->uniforms.at("bounds").setValue(Vector4(0,0,1,1));}
         if(patch){mesh->remove(*patch);patch->geometry()->dispose();patchMaterial->dispose();patch.reset();patchMaterial.reset();}
         for(auto& t:region)if(t){t->dispose();t.reset();}
     }
@@ -104,11 +109,15 @@ struct albert::SolidBodies::Surface {
 };
 albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets){
     for(auto& asset:assets){
+        if(bool(asset.shape.geometry)!=bool(asset.shape.picker))throw std::invalid_argument("Incomplete measured shape");
         auto s=std::make_unique<Surface>();s->day=colorTexture(std::move(asset.day));s->height=heightTexture(std::move(asset.height),true);s->mask=colorTexture(Image(std::vector<unsigned char>(4,255),1,1));
         s->material=material(s->day.get(),s->height.get(),s->mask.get());
-        s->mesh=Mesh::create(SphereGeometry::create(static_cast<float>(core::surfaceRadius(asset.body)/core::earthRadiusMeters),192,96),s->material);
+        s->picker=std::move(asset.shape.picker);
+        s->mesh=Mesh::create(asset.shape.geometry?std::move(asset.shape.geometry):SphereGeometry::create(static_cast<float>(core::surfaceRadius(asset.body)/core::earthRadiusMeters),192,96),s->material);
+        if(s->picker){s->material->uniforms.at("shapeSurface").setValue(1.f);s->material->uniforms.at("displacement").setValue(0.f);}
         const auto* definition=core::surfaceBody(asset.body);
-        if(definition->axesMeters[0]>0){const auto& axes=definition->axesMeters;const double r=definition->radiusMeters;s->mesh->scale.set(static_cast<float>(axes[0]/r),static_cast<float>(axes[2]/r),static_cast<float>(axes[1]/r));}
+        if(s->picker){} // DSK positions already carry physical dimensions.
+        else if(definition->axesMeters[0]>0){const auto& axes=definition->axesMeters;const double r=definition->radiusMeters;s->mesh->scale.set(static_cast<float>(axes[0]/r),static_cast<float>(axes[2]/r),static_cast<float>(axes[1]/r));}
         else if(definition->polarRadiusMeters>0)s->mesh->scale.y=static_cast<float>(definition->polarRadiusMeters/definition->radiusMeters);
         if(asset.ring){
             s->ringTexture=colorTexture(std::move(*asset.ring));const float r=static_cast<float>(definition->radiusMeters/core::earthRadiusMeters);
@@ -119,10 +128,13 @@ albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets)
     }
 }
 albert::SolidBodies::~SolidBodies()=default;
+bool albert::SolidBodies::measuredShape(const std::string& id) const{return surfaces_.contains(id)&&bool(surfaces_.at(id)->picker);}
+std::shared_ptr<const BVH> albert::SolidBodies::picker(const std::string& id) const{return surfaces_.at(id)->picker;}
 void albert::SolidBodies::stage(RegionalImages images){
-    if(uploads_.active()||!surfaces_.contains(images.body)||!images.day||!images.height)return;
-    if(!images.geometry||!images.surfaceMask)throw std::invalid_argument("Solid terrain must be prepared on the worker");
-    images.gpu[0]=colorTexture(std::move(*images.day));images.gpu[3]=heightTexture(std::move(*images.height));images.gpu[4]=colorTexture(std::move(*images.surfaceMask));
+    if(uploads_.active()||!surfaces_.contains(images.body)||!images.day)return;
+    const bool shape=measuredShape(images.body);
+    if(!shape&&(!images.geometry||!images.surfaceMask||!images.height))throw std::invalid_argument("Solid terrain must be prepared on the worker");
+    images.gpu[0]=colorTexture(std::move(*images.day));if(!shape){images.gpu[3]=heightTexture(std::move(*images.height));images.gpu[4]=colorTexture(std::move(*images.surfaceMask));}
     for(const auto& t:images.gpu)if(t)uploads_.add(t);
     pending_=std::move(images);
 }
@@ -130,10 +142,13 @@ void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,
     uploads_.tick(renderer);
     if(pending_&&!uploads_.active()){
         auto images=std::move(*pending_);pending_.reset();auto& s=*surfaces_.at(images.body);s.release();s.inactive=0;s.region=std::move(images.gpu);
+        if(s.picker){const auto& r=images.region;s.material->uniforms.at("dayMap").setValue(s.region[0].get());s.material->uniforms.at("bounds").setValue(Vector4(static_cast<float>((r.west+180.)/360.),static_cast<float>((r.south+90.)/180.),static_cast<float>((r.east-r.west)/360.),static_cast<float>((r.north-r.south)/180.)));s.blend=0;}
+        else {
         s.patchMaterial=material(s.region[0].get(),s.region[3].get(),s.mask.get());s.patchMaterial->uniforms.at("baseMap").setValue(s.day.get());s.patchMaterial->uniforms.at("baseHeightMap").setValue(s.height.get());s.patchMaterial->uniforms.at("isPatch").setValue(1.f);s.patchMaterial->uniforms.at("baseRadius").setValue(static_cast<float>(core::surfaceRadius(images.body)/core::earthRadiusMeters));
         const auto& r=images.region;s.patchMaterial->uniforms.at("bounds").setValue(Vector4(static_cast<float>((r.west+180.)/360.),static_cast<float>((r.south+90.)/180.),static_cast<float>((r.east-r.west)/360.),static_cast<float>((r.north-r.south)/180.)));
         s.patchMaterial->uniforms.at("displacement").setValue(0.f);s.patch=Mesh::create(std::move(images.geometry),s.patchMaterial);s.mesh->add(s.patch);s.blend=0;
         s.material->uniforms.at("surfaceMask").setValue(s.region[4].get());s.material->uniforms.at("masked").setValue(1.f);
+        }
     }
     camera.updateMatrixWorld();
     for(auto& [id,entry]:surfaces_){auto& s=*entry;const auto frame=core::bodyFrame(*core::surfaceBody(id),jd);
@@ -150,10 +165,10 @@ void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,
         const float intensity=static_cast<float>(2.4*std::pow(149597870700./distance,2)),angular=static_cast<float>(std::asin(std::min(1.,695700000./distance)));
         const auto aid=auxiliary.find(id);s.fill=animateValue(s.fill,aid!=auxiliary.end()&&aid->second.enabled?std::clamp(aid->second.intensity,0.f,1.5f):0.f,dt);
         for(auto* m:{s.material.get(),s.patchMaterial.get()})if(m){m->uniforms.at("cloudSurface").setValue(core::surfaceBody(id)->cloudSurface?1.f:0.f);m->uniforms.at("auxiliaryStrength").setValue(s.fill);m->uniforms.at("solarDirection").setValue(light);m->uniforms.at("intensity").setValue(intensity);m->uniforms.at("angularRadius").setValue(angular);}
-        s.blend=animateValue(s.blend,1.f,dt);if(s.patchMaterial)s.patchMaterial->uniforms.at("detailBlend").setValue(s.blend);
+        s.blend=animateValue(s.blend,1.f,dt);if(s.patchMaterial)s.patchMaterial->uniforms.at("detailBlend").setValue(s.blend);else if(s.picker&&s.region[0])s.material->uniforms.at("detailBlend").setValue(s.blend);
         const bool nearby=camera.position.distanceTo(s.mesh->position)<static_cast<float>(core::surfaceRadius(id)/core::earthRadiusMeters)*2.4f;
         const auto now=std::chrono::steady_clock::now();
         const float residencySeconds=std::max(dt,std::chrono::duration<float>(now-s.updated).count());s.updated=now;
-        s.inactive=(focus==id&&details&&nearby)?0.f:s.inactive+residencySeconds;if(s.inactive>3.f&&s.patch){s.release();evicted_=true;}
+        s.inactive=(focus==id&&details&&nearby)?0.f:s.inactive+residencySeconds;if(s.inactive>3.f&&(s.patch||(s.picker&&s.region[0]))){s.release();evicted_=true;}
     }
 }

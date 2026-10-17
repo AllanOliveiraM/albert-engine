@@ -42,11 +42,13 @@ void Scene::include(const LocalOrbit& o){
     body.source="NASA/JPL Horizons: elementos embarcados; propagacao de dois corpos aproximada; superficie conforme assets locais";
     body.appearance={Shape::Sphere,{o.radius*2,o.radius*2,o.radius*2},o.category==Category::Comet?0x8f908eu:0xb6b2aau};
     const auto* surface=surfaceBody(o.id);const bool triaxial=surface&&surface->axesMeters[0]>0;
-    if(triaxial){const auto& axes=surface->axesMeters;body.appearance.sizeMeters={2*axes[0],2*axes[1],2*axes[2]};body.source+="; elipsoide IAU de referencia";}
+    if(surface&&surface->shapeRadiusMeters>0){const auto& size=surface->shapeDimensionsMeters;body.appearance.sizeMeters={size[0],size[1],size[2]};body.source+="; forma observada DSK em IAU";}
+    else if(triaxial){const auto& axes=surface->axesMeters;body.appearance.sizeMeters={2*axes[0],2*axes[1],2*axes[2]};body.source+="; elipsoide IAU de referencia";}
     body.samples.push_back({});create(std::move(body));auto& included=objects_.at(std::string(o.id));included.builtin=true;
     // Built-in radius remains the nominal datum used by surface LOD; API size
     // carries physical semiaxes and the camera clearance covers the whole body.
     if(triaxial){included.radiusMeters=o.radius;included.defaultDistanceMeters=o.radius*4;included.minDistanceMeters=*std::max_element(surface->axesMeters.begin(),surface->axesMeters.end())*1.05;}
+    if(surface&&surface->shapeRadiusMeters>0){included.appearance.shape=Shape::Builtin;included.radiusMeters=o.radius;included.defaultDistanceMeters=o.radius*4;included.minDistanceMeters=surface->shapeRadiusMeters*1.05;}
 }
 void includeLocalSystem(Scene& scene){for(const auto& o:definitions)scene.include(o);}
 void updateLocalSystem(Scene& scene,double utc,double jd){for(const auto& o:definitions){auto state=localState(o,jd);const auto parent=scene.evaluate(std::string(o.parent),utc).state;

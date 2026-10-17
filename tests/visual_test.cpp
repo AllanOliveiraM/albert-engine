@@ -3,6 +3,7 @@
 #include "paths.hpp"
 #include "visuals.hpp"
 #include "objects.hpp"
+#include "asset_pack.hpp"
 #include "core/bodies.hpp"
 #include "rocks.hpp"
 #include "eclipses.hpp"
@@ -340,6 +341,20 @@ void graphics() {
         for(int i=0;moons.uploading()&&i<256;++i)moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,0.f);
         require(!moons.uploading(),"Moon detail upload did not finish");moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);
         moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(moons.takeEviction(),"Moon detail stayed resident after focus changed");
+    }
+    for(const std::string id:{"phobos","deimos"}){
+        auto world=Scene::create();world->background=Color(0x000000);auto shape=albert::decodeShape(albert::visualAssetPack()->payload("v1/"+id+"/shape.bin"));auto geometry=shape.geometry;
+        std::vector<albert::SurfaceAssets> maps;maps.push_back({id,rgba(140),height(0),{},std::move(shape)});albert::SolidBodies measured(*world,std::move(maps));
+        albert::core::Scene registry;registry.include(*albert::core::localOrbit(id));albert::SceneObjects objects(*world);objects.bind(id,measured.nodes().at(id),measured.picker(id));objects.sync(registry,0,{});
+        auto camera=PerspectiveCamera::create(45,1,.00001f,30000.f);camera->position.set(0,0,float(albert::core::surfaceBody(id)->shapeRadiusMeters*4/albert::core::earthRadiusMeters));camera->lookAt(Vector3());
+        measured.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);const auto before=renderer.readRGBPixels();require(before[3*(96*192+96)]>10,"Observed shape failed to render");
+        Raycaster ray;ray.setFromCamera(Vector2(0,0),*camera);require(objects.pick(registry,ray)==id,"Measured BVH picking failed");
+        albert::RegionalImages detail;detail.body=id;detail.day=rgba(230);detail.textureOnly=true;albert::prepareRegionalImages(detail);require(!detail.geometry&&!detail.surfaceMask,"Measured imagery allocated a replacement sphere or mask");measured.stage(std::move(detail));
+        for(int i=0;measured.uploading()&&i<256;++i)measured.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,0.f);
+        require(!measured.uploading(),"Observed shape detail upload stalled");renderer.render(*world,*camera);const auto start=renderer.readRGBPixels();require(std::abs(int(start[3*(96*192+96)])-before[3*(96*192+96)])<4,"Measured detail appeared without fade");
+        measured.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);const auto after=renderer.readRGBPixels();long increase=0;for(size_t i=0;i<after.size();i+=3)increase+=int(after[i])-int(before[i]);require(increase>500,"Measured texture detail fade did not settle");
+        require(measured.nodes().at(id)->geometry()==geometry&&measured.nodes().at(id)->children.empty(),"Texture LOD replaced observed plate geometry");
+        measured.update(renderer,*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(measured.takeEviction(),"Measured texture detail was not evicted");renderer.render(*world,*camera);const auto released=renderer.readRGBPixels();require(std::abs(int(released[3*(96*192+96)])-before[3*(96*192+96)])<4,"Shape detail eviction damaged base imagery");
     }
     albert::RegionalImages reload;reload.body="mercury";reload.day=rgba(230);reload.height=height(1000);albert::prepareRegionalImages(reload);solids.stage(std::move(reload));
     for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);

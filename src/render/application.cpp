@@ -905,7 +905,7 @@ int albert::runRenderer(int argc, char** argv) {
         albert::SceneObjects objects(*scene);
         albert::VectorLayers vectorLayers(*scene);
         objects.bind("earth",earth);objects.bind("moon",moon);objects.bind("sun",sun);
-        for(const auto& [id,node]:solids.nodes()){if(const auto* body=albert::core::naturalBody(id))registry.include(*body);objects.bind(id,node);}
+        for(const auto& [id,node]:solids.nodes()){if(const auto* body=albert::core::naturalBody(id))registry.include(*body);objects.bind(id,node,solids.picker(id));}
         albert::core::includeLocalSystem(registry);
         albert::DebrisFields debris(*scene);
         albert::core::Vector sceneOrigin;
@@ -999,6 +999,7 @@ int albert::runRenderer(int argc, char** argv) {
         auto minimumFor = [&](const Focus& f) -> float {
             if(f.front()=='@')return .05f;
             float minimum=static_cast<float>(registry.get(f).minDistanceMeters/albert::core::earthRadiusMeters);
+            if(const auto* surface=albert::core::surfaceBody(f);surface&&surface->shapeRadiusMeters>0)minimum=std::max(minimum,static_cast<float>(surface->shapeRadiusMeters/albert::core::earthRadiusMeters)*1.05f);
             if(const auto* surface=albert::core::surfaceBody(f);surface&&surface->axesMeters[0]>0){const auto& axes=surface->axesMeters;minimum=std::max(minimum,static_cast<float>(*std::max_element(axes.begin(),axes.end())/albert::core::earthRadiusMeters)*1.04f);}
             if(albert::artisticRock(f)&&objects.nodes().contains(f)){
                 const auto& node=objects.nodes().at(f);
@@ -1171,7 +1172,7 @@ int albert::runRenderer(int argc, char** argv) {
                 if(focus.front()!='@' && albert::core::localOrbit(focus)) {
                     ImGui::TextDisabled("Orbita aproximada offline");
                     const auto* surface=albert::core::surfaceBody(focus);
-                    ImGui::TextWrapped(solids.contains(focus)?(surface&&surface->axesMeters[0]>0?"Mosaico Viking NASA/JPL/USGS; forma elipsoidal de referencia IAU. Sem relevo medido.":surface&&surface->partialMap?"Mapa parcial NASA. Areas uniformes ou borradas podem nao ter observacoes. Sem relevo medido.":"Mapa NASA do objeto; resolucao e cobertura variam. Sem relevo medido."):albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
+                    ImGui::TextWrapped(solids.measuredShape(focus)?"Forma observada DSK; mosaico Viking. Registro da imagem sobre o modelo ainda nao validado.":solids.contains(focus)?(surface&&surface->axesMeters[0]>0?"Mosaico Viking NASA/JPL/USGS; forma elipsoidal de referencia IAU. Sem relevo medido.":surface&&surface->partialMap?"Mapa parcial NASA. Areas uniformes ou borradas podem nao ter observacoes. Sem relevo medido.":"Mapa NASA do objeto; resolucao e cobertura variam. Sem relevo medido."):albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
                 }
                 if(focus==targets::Moon&&eclipses.lunarActive())ImGui::TextWrapped("Eclipse lunar: luz atmosferica avermelhada aproximada.");
                 if(focus.front()!='@' && !registry.get(focus).builtin) {

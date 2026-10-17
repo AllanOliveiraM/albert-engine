@@ -12,6 +12,7 @@ struct RegionalImages {
     std::string body="earth";
     int level=0;
     GeoRegion region;
+    bool textureOnly=false; // Measured base mesh stays intact when imagery changes.
     std::optional<threepp::Image> day,night,roughness,height,surfaceMask;
     std::shared_ptr<threepp::BufferGeometry> geometry;
     std::array<std::shared_ptr<threepp::Texture>,5> gpu;

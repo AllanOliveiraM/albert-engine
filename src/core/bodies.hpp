@@ -13,6 +13,8 @@ struct NaturalBody {
     double polarRadiusMeters=0;bool cloudSurface=false;
     bool partialMap=false; // Visual coverage only; never a terrain/ephemeris property.
     std::array<double,3> axesMeters{}; // Optional IAU x/y/z reference semiaxes.
+    double shapeRadiusMeters=0; // Measured mesh extent from the original IAU origin.
+    std::array<double,3> shapeDimensionsMeters{};
 };
 // Additional solid bodies. Existing Earth/Moon/Sun keep their specialized models.
 std::span<const NaturalBody> naturalBodies();

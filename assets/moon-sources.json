@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "license": "NASA visualization resources; credit NASA VTAD; no endorsement implied. See https://www.nasa.gov/nasa-brand-center/images-and-media/",
+  "license": "NASA/JPL/USGS imagery and DLR/ESA scientific shape data; original author credits and limits in each record; no endorsement implied.",
   "bodies": [
     {
       "id": "io",
@@ -299,7 +299,32 @@
       "partial_map": true,
       "credit": "NASA/JPL/Caltech/USGS Viking mosaic",
       "product": "https://space.jpl.nasa.gov/tmaps/mars.html",
-      "limits": "Static grayscale Viking mosaic; variable coverage and baked illumination, not calibrated reflectance. Triaxial reference ellipsoid from NAIF pck00011, not a detailed measured shape/DEM. Texture longitude registration against IAU landmarks is not independently validated."
+      "limits": "Static grayscale Viking mosaic with baked illumination, not calibrated albedo. Measured shape is a separate DSK source; texture landmark registration against that model is not independently validated.",
+      "shape_source": {
+        "filename": "phobos_2014_09_22.bds",
+        "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/dsk/satellites/phobos_2014_09_22.bds",
+        "bytes": 10460160,
+        "sha256": "8f8fe4ea2dc97355d37279ee8136a974015a0d1b5f1199f43678ba5ad03fd2b6",
+        "body": 401,
+        "frame": 10021,
+        "vertices": 137439,
+        "plates": 274874,
+        "bounds_m": [
+          [
+            -13642.0,
+            -11812.0,
+            -9345.0
+          ],
+          [
+            12497.0,
+            11553.0,
+            10159.0
+          ]
+        ],
+        "bounding_radius_m": 13923.082345515306,
+        "credit": "DLR: Willner, Shi, Oberst (2014); NAIF DSK conversion by Roatsch/Willner",
+        "limits": "Original plate coordinates in metres, IAU body-fixed frame and source origin. Float32 export; no shape rescaling/recentering. Viking texture registration against this shape is not independently validated. Source resolution/uncertainty and incomplete coverage remain."
+      }
     },
     {
       "id": "deimos",
@@ -319,7 +344,32 @@
       "partial_map": true,
       "credit": "NASA/JPL/Caltech/USGS Viking mosaic",
       "product": "https://space.jpl.nasa.gov/tmaps/mars.html",
-      "limits": "Static grayscale Viking mosaic; variable coverage and baked illumination, not calibrated reflectance. Triaxial reference ellipsoid from NAIF pck00011, not a detailed measured shape/DEM. Texture longitude registration against IAU landmarks is not independently validated."
+      "limits": "Static grayscale Viking mosaic with baked illumination, not calibrated albedo. Measured shape is a separate DSK source; texture landmark registration against that model is not independently validated.",
+      "shape_source": {
+        "filename": "DEIMOS_K005_THO_V02.BDS",
+        "url": "https://spiftp.esac.esa.int/data/SPICE/MARS-EXPRESS/kernels/dsk/DEIMOS_K005_THO_V02.BDS",
+        "bytes": 388096,
+        "sha256": "7580135c67da5a937d762d81531a9d0953d157544de95928375fcb103e377197",
+        "body": 402,
+        "frame": 10022,
+        "vertices": 2522,
+        "plates": 5040,
+        "bounds_m": [
+          [
+            -8346.206393348644,
+            -6595.1077597767835,
+            -5264.772103849778
+          ],
+          [
+            7542.666422996994,
+            6124.914889649885,
+            5792.359283786418
+          ]
+        ],
+        "bounding_radius_m": 8706.800000000001,
+        "credit": "Peter Thomas, Viking-based shape; ESA SPICE Service v0.2 (2023)",
+        "limits": "Original plate coordinates in metres, IAU body-fixed frame and source origin. Float32 export; no shape rescaling/recentering. Viking texture registration against this shape is not independently validated. Source resolution/uncertainty and incomplete coverage remain."
+      }
     }
   ]
 }

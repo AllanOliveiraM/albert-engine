@@ -89,19 +89,29 @@ a rotação retrógrada e todos os termos periódicos publicados no kernel.
 
 Fobos e Deimos têm mosaicos Viking próprios, em tons de cinza, de 1440×720,
 [NASA/JPL/Caltech/USGS](https://space.jpl.nasa.gov/tmaps/mars.html).
-A forma usa elipsoides de referência `pck00011`, com semieixos IAU x/y/z de
-13,0/11,4/9,1 km (Fobos) e 7,8/6,0/5,1 km (Deimos). São aproximações físicas
-triaxiais, sem crateras ou relevo medidos na geometria. A orientação inclui os
-termos periódicos e quadráticos publicados, validada contra CSPICE. Seleção,
-zoom mínimo e recortes regionais respeitam as três dimensões. O registro entre
-mosaico e marcos IAU ainda não foi validado; iluminação da imagem é herdada do
-mosaico, não albedo calibrado. Modelos detalhados observados continuam prioritários.
+A forma usa modelos medidos DSK type 2, mantendo origem, escala e referencial
+IAU das fontes. Fobos usa [DLR/NAIF 2014](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/dsk/satellites/phobos_2014_09_22.cmt),
+com 137.439 vértices e 274.874 triângulos; Deimos usa o modelo Thomas/Viking
+[ESA v0.2](https://spiftp.esac.esa.int/data/SPICE/MARS-EXPRESS/kernels/dsk/DEIMOS_K005_THO_V02.BDS),
+com 2.522 vértices e 5.040 triângulos. A versão 0.2 de Deimos corrige a rotação
+/ convenção de longitude do produto anterior. Hashes e limites estão no inventário.
+Não há deformação procedural ou normalização dessas formas. O raio nominal
+permanece como datum do catálogo/LOD; o limite da câmera cobre o raio máximo
+medido, aproximadamente 13,923 km e 8,707 km, com margem de 5%.
+
+A orientação inclui os termos periódicos e quadráticos publicados, validada
+contra CSPICE. Seleção usa BVH das placas reais, construído fora da thread gráfica.
+Recortes de alta resolução substituem somente a imagem, com transição suave,
+sem colocar uma esfera sobre o modelo. A forma medida não torna o mosaico Viking
+albedo calibrado: ele contém iluminação herdada, lacunas e o registro entre
+imagem e marcos IAU da malha ainda não foi validado. Os elipsoides de referência
+IAU permanecem como fallback para bibliotecas antigas sem as malhas.
 
 O build comum já reúne `assets/imagery/moons/` à biblioteca única. Não baixa mapas
 dessas luas em runtime. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **38.792.056 bytes**.
+todas as luas na RAM. O pacote adicional ocupa **43.832.843 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -111,15 +121,15 @@ versionados. O processo preserva os pacotes de Terra/Lua/Sol e planetas.
 
 Mimas ainda exige reprojetar seu atlas de dois hemisférios; o globo atmosférico
 de Titã requer um tratamento próprio. Hyperion e Phoebe continuam artísticos.
-Fobos/Deimos já têm mapas, elipsoides de referência e orientação IAU; faltam
-modelos detalhados de forma/relevo e órbitas mais precisas. Nereida e Proteus permanecem
+Fobos/Deimos já têm mapas, modelos medidos e orientação IAU; faltam validar o
+registro das imagens e melhorar as órbitas. Nereida e Proteus permanecem
 sem mapas próprios embarcados.
 
 ## Formas artísticas dos pequenos corpos
 
 Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Hyperion e
 Phoebe também recebem formas rochosas ilustrativas. Fobos/Deimos usam o modelo
-triaxial acima quando seus mapas estão disponíveis; a forma artística permanece
+medido acima quando a biblioteca contém as malhas; elipsoides IAU e a forma artística permanecem
 apenas como fallback para bibliotecas antigas sem esses assets. Crateras,
 silhuetas, variações de material e microrelevo são procedurais, com semente por
 objeto, sem emendas de textura. 67P tem uma silhueta com dois lobos. Não são

@@ -1,13 +1,29 @@
 #!/usr/bin/env python3
 """Reproduce the local moon surface pack from pinned NASA GLBs/images.
 
-Python 3 + Pillow (also available in scripts/Dockerfile.assets).
+Python 3 + Pillow; measured shapes also require NumPy/SpicePy.
+These authoring dependencies are declared in scripts/Dockerfile.assets.
 Originals/intermediates remain in ignored asset-packs/moons/.
 """
 import argparse,hashlib,importlib.util,io,json,pathlib,shutil,struct,urllib.request
 from solar_imagery import file_digest,image_tiles
 from PIL import Image
 ROOT=pathlib.Path(__file__).resolve().parents[1]
+def source_file(record,sources,offline):
+ path=sources/record['filename']
+ if not path.exists():
+  if offline:raise FileNotFoundError(path)
+  temporary=path.with_suffix('.part')
+  with urllib.request.urlopen(record['url'],timeout=90) as response,temporary.open('wb') as output:
+   remaining=record['bytes']
+   while block:=response.read(min(1024*1024,remaining+1)):
+    remaining-=len(block)
+    if remaining<0:raise ValueError('Oversized source')
+    output.write(block)
+  if temporary.stat().st_size!=record['bytes'] or file_digest(temporary)!=record['sha256']:raise ValueError('Downloaded source mismatch')
+  temporary.replace(path)
+ if path.stat().st_size!=record['bytes'] or file_digest(path)!=record['sha256']:raise ValueError('Source checksum/size mismatch: '+record['filename'])
+ return path
 
 def visual(raw,grid):
  if len(raw)<28 or struct.unpack_from('<4sII',raw)!=(b'glTF',2,len(raw)):
@@ -34,19 +50,7 @@ def prepare(offline=False):
  if public.exists():shutil.rmtree(public)
  public.mkdir();layers=[];files=[]
  for body in plan['bodies']:
-  path=sources/body['filename']
-  if not path.exists():
-   if offline:raise FileNotFoundError(path)
-   temporary=path.with_suffix('.part')
-   with urllib.request.urlopen(body['url'],timeout=90) as response,temporary.open('wb') as output:
-    remaining=body['bytes']
-    while block:=response.read(min(1024*1024,remaining+1)):
-     remaining-=len(block)
-     if remaining<0:raise ValueError('Oversized source: '+body['id'])
-     output.write(block)
-   if temporary.stat().st_size!=body['bytes'] or file_digest(temporary)!=body['sha256']:raise ValueError('Downloaded source mismatch')
-   temporary.replace(path)
-  if path.stat().st_size!=body['bytes'] or file_digest(path)!=body['sha256']:raise ValueError('Source checksum/size mismatch: '+body['id'])
+  path=source_file(body,sources,offline)
   if body.get('kind')=='image':
    with Image.open(path) as source:
     if list(source.size)!=body['grid'] or source.width!=2*source.height:raise ValueError('Unexpected source image grid')
@@ -55,6 +59,11 @@ def prepare(offline=False):
   record=image_tiles(public,body['id']+'-day',image);image.close()
   record['layer']['lighting']='Static '+body['credit']+' reference; not calibrated reflectance or elevation'
   layers.append(record['layer']);files.extend(record['files']);print(body['id'],body['grid'],flush=True)
+  if 'shape_source' in body:
+   from moon_shapes import export_shape
+   shape=body['shape_source'];source_path=source_file(shape,sources,offline);destination=public/f"v1/{body['id']}/shape.bin"
+   export_shape(source_path,shape,destination)
+   files.append(dict(path=destination.relative_to(public).as_posix(),bytes=destination.stat().st_size,sha256=file_digest(destination)))
  source=public/'v1/moons/SOURCES.json';source.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(plan_path,source)
  files.append(dict(path=source.relative_to(public).as_posix(),bytes=source.stat().st_size,sha256=file_digest(source)))
  (public/'manifest.json').write_text(json.dumps(dict(schema='albert-tiled-assets-v1',version='v1',static=True,layers=layers,files=files),indent=2)+'\n')

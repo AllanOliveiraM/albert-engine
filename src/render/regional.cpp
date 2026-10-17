@@ -42,6 +42,7 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
         RegionalImages result;result.region=region;result.body=body;result.level=level;
         try {
             const auto pack=visualAssetPack();
+            result.textureOnly=pack->hasPayload("v1/"+body+"/shape.bin");
             progress.stage("Lendo detalhes incluidos",0);
             result.day=pack->image(body+"-day",region,4096,progress);
             if(body=="earth") result.night=pack->image("earth-night",region,4096,progress);
@@ -74,7 +75,7 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
 }
 
 void albert::prepareRegionalImages(RegionalImages& images) {
-    if(!images.day || images.geometry) return;
+    if(!images.day || images.geometry || images.textureOnly) return;
     constexpr double pi=std::numbers::pi;
     const auto& region=images.region;
     constexpr unsigned maskWidth=2048,maskHeight=1024;

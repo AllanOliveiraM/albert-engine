@@ -9,7 +9,7 @@ threepp::Vector3 albert::renderPosition(core::Vector p,core::Vector origin){
     p=p-origin;return {static_cast<float>(p.x/core::earthRadiusMeters),static_cast<float>(p.z/core::earthRadiusMeters),static_cast<float>(-p.y/core::earthRadiusMeters)};
 }
 albert::SceneObjects::~SceneObjects(){for(auto& [id,model]:models_){(void)id;for(auto& g:model.geometry)g->dispose();for(auto& m:model.materials)m->dispose();}}
-void albert::SceneObjects::bind(const core::ObjectId& id,std::shared_ptr<Mesh> mesh){nodes_.emplace(id,std::move(mesh));}
+void albert::SceneObjects::bind(const core::ObjectId& id,std::shared_ptr<Mesh> mesh,std::shared_ptr<const BVH> picker){nodes_.emplace(id,std::move(mesh));if(picker)pickers_[id]=std::move(picker);}
 std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Scene& registry,Raycaster& ray) const {
     std::optional<core::ObjectId> picked;
     float nearest=ray.farPlane;
@@ -17,7 +17,10 @@ std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Sce
         const auto& object=registry.get(id);
         if(!node->visible||!object.visible)continue;
         float distance=std::numeric_limits<float>::infinity();
-        if(object.appearance.shape==core::Shape::Builtin||core::surfaceBody(id)){
+        if(const auto picker=pickers_.find(id);picker!=pickers_.end()){
+            node->updateWorldMatrix(true,false);Matrix4 inverse;inverse.copy(*node->matrixWorld).invert();const auto localRay=ray.ray.clone().applyMatrix4(inverse);
+            if(const auto hit=picker->second->raycast(localRay))distance=hit->point.clone().applyMatrix4(*node->matrixWorld).distanceTo(ray.ray.origin);
+        }else if(object.appearance.shape==core::Shape::Builtin||core::surfaceBody(id)){
             // Built-in globes are ellipsoids. Test in local space to retain
             // oblateness without walking every terrain triangle on hover.
             node->updateWorldMatrix(true,false);
@@ -37,7 +40,7 @@ std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Sce
 void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vector origin){
     for(auto it=nodes_.begin();it!=nodes_.end();) {
         if(!registry.objects().contains(it->first)||(!registry.get(it->first).builtin&&instances_[it->first]!=registry.get(it->first).instance)){
-            auto mesh=it->second;scene_.remove(*mesh);mesh->traverseType<Mesh>([](Mesh& part){part.material()->dispose();});displayedFill_.erase(it->first);instances_.erase(it->first);it=nodes_.erase(it);
+            auto mesh=it->second;scene_.remove(*mesh);mesh->traverseType<Mesh>([](Mesh& part){part.material()->dispose();});displayedFill_.erase(it->first);instances_.erase(it->first);pickers_.erase(it->first);it=nodes_.erase(it);
         }else ++it;
     }
     for(auto i=models_.begin();i!=models_.end();)if(!registry.models().contains(i->first)||registry.models().at(i->first)!=i->second.source){for(auto& g:i->second.geometry)g->dispose();for(auto& m:i->second.materials)m->dispose();i=models_.erase(i);}else ++i;

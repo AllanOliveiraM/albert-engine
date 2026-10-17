@@ -13,7 +13,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Modelos detalhados de Fobos/Deimos; completar formas, relevo e luas pendentes | Lua terrestre detalhada; 18 luas adicionais com mapas NASA e orientação IAU; demais luas ilustrativas; generalizar eclipses além de Terra/Lua |
+| **Alta — 1** | Completar Mimas, Titã, Hipérion, Febe, Proteu e Nereida | Lua terrestre detalhada; 18 luas adicionais com mapas/IAU; Fobos/Deimos com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
 | **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion/Febe já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
 | **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
@@ -45,19 +45,34 @@ o critério é a forma do corpo, não deformar todos os objetos indistintamente.
 Das 25 luas do catálogo, 19 têm mapas próprios, incluindo a Lua terrestre.
 Isso não significa geometria, relevo, cor ou cobertura completos.
 
-1. **Fobos e Deimos:** modelos detalhados de forma/relevo. Já têm mosaicos Viking,
-   orientação IAU e elipsoides de referência; a geometria detalhada é prioritária.
-2. **Mimas:** reprojetar o atlas próprio, depois melhorar a forma/relevo.
-3. **Titã:** aparência atmosférica própria; distinguir visão visível de mapas da superfície.
-4. **Hipérion e Febe:** modelos irregulares e imagens próprios, substituindo o procedural.
-5. **Proteu:** modelo e cobertura de imagens disponíveis, explicitando lacunas.
-6. **Nereida:** representação limitada aos dados disponíveis, sem inventar detalhes observados.
+Fobos e Deimos já têm modelos medidos DSK; registro dos mosaicos Viking sobre
+as malhas ainda requer conferência cartográfica. A próxima fila é:
+
+1. **Mimas:** reprojetar o atlas próprio, depois melhorar a forma/relevo.
+2. **Titã:** aparência atmosférica própria; distinguir visão visível de mapas da superfície.
+3. **Hipérion e Febe:** modelos irregulares e imagens próprios, substituindo o procedural.
+4. **Proteu:** modelo e cobertura de imagens disponíveis, explicitando lacunas.
+5. **Nereida:** representação limitada aos dados disponíveis, sem inventar detalhes observados.
 
 Os seis corpos ainda sem mapas/modelos próprios embarcados são Mimas, Titã,
 Hipérion, Febe, Proteu e Nereida. A forma artística e a esfera de referência
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**Modelos medidos de Fobos e Deimos.** Fobos usa DLR/NAIF 2014 (274.874
+triângulos) e Deimos, Thomas/ESA v0.2 (5.040 triângulos). Coordenadas originais
+IAU, convertidas de km para metros sem normalizar escala ou recentrar o corpo.
+Pacote binário indexado e BVH preparados no worker; seleção respeita a malha
+real. Detalhes regionais trocam somente texturas, com fade/upload incremental,
+sem sobrepor esfera ao modelo. Câmera considera o raio máximo medido.
+
+Validação: 23 testes Linux, 48 interseções comparadas com CSPICE/DSKX02,
+regressões OpenGL e build MinGW; gráficos e geometria Windows pelo Wine.
+Mosaicos Viking mantêm iluminação herdada e registro sobre a malha ainda não
+validado. Posições adicionais continuam aproximadas. Pacote das luas: 43,83 MB;
+biblioteca reunida: 4,87 GB. Sem novas distribuições.
+
 
 **16/10 — primeiro aprimoramento de Fobos e Deimos.** Mosaicos próprios Viking
 NASA/JPL/USGS de 1440×720, sem reutilizar imagens de outra lua. Formas elipsoidais

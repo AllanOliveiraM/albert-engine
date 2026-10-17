@@ -17,6 +17,8 @@ public:
                          unsigned maximum, DownloadProgress& progress) const;
     std::uint64_t bytes() const;
     bool contains(const std::string& layer) const;
+    bool hasPayload(const std::string& path) const;
+    std::string payload(const std::string& path) const; // Indexed, SHA-256 checked.
 private:
     struct Index;
     std::shared_ptr<const Index> index_;

@@ -149,6 +149,8 @@ albert::AssetPack::AssetPack(fs::path path) {
 }
 
 bool albert::AssetPack::contains(const std::string& layer) const{return index_->layers.contains(layer);}
+bool albert::AssetPack::hasPayload(const std::string& path) const{return index_->files.contains(path);}
+std::string albert::AssetPack::payload(const std::string& path) const{return index_->read(path);}
 
 std::uint64_t albert::AssetPack::bytes() const { return index_->size; }
 

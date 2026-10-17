@@ -29,8 +29,9 @@ anões, Vesta, Pallas, Halley e 67P. A seleção é local, organizada por catego
 e aceita nomes aproximados. Luas adicionais, planetas anões e pequenos corpos
 usam órbitas aproximadas embarcadas. Dezoito luas adicionais já têm mapas
 próprios NASA, detalhes por zoom e orientação IAU; outras superfícies adicionais
-continuam ilustrativas. Fobos e Deimos usam elipsoides de referência IAU; seus
-modelos detalhados ainda estão no roadmap. Os oito planetas e a Lua preservam suas efemérides Horizons
+continuam ilustrativas. Fobos e Deimos usam modelos de forma medidos de missões,
+com mapas Viking; o alinhamento das imagens sobre esses modelos ainda exige validação.
+Os oito planetas e a Lua preservam suas efemérides Horizons
 e mapas próprios.
 Os cinturões de asteroides e Kuiper e a nuvem de Oort são populações visuais
 estatísticas, exibidas conforme a escala, sem representar trajetórias individuais.

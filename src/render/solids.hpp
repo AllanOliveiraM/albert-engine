@@ -3,18 +3,21 @@
 #include "lighting.hpp"
 #include "regional.hpp"
 #include "uploads.hpp"
+#include "shapes.hpp"
 #include "threepp/threepp.hpp"
 #include "threepp/materials/ShaderMaterial.hpp"
 #include <map>
 #include <utility>
 namespace albert {
-struct SurfaceAssets {std::string body;threepp::Image day,height;std::optional<threepp::Image> ring;};
+struct SurfaceAssets {std::string body;threepp::Image day,height;std::optional<threepp::Image> ring;ShapeMesh shape;};
 class SolidBodies {
 public:
     SolidBodies(threepp::Scene& scene,std::vector<SurfaceAssets> assets);
     ~SolidBodies();
     bool contains(const std::string& id) const{return nodes_.contains(id);}
     const auto& nodes() const{return nodes_;}
+    bool measuredShape(const std::string& id) const;
+    std::shared_ptr<const threepp::BVH> picker(const std::string& id) const;
     bool takeEviction(){return std::exchange(evicted_,false);}
     bool uploading() const{return uploads_.active();}
     void stage(RegionalImages images);

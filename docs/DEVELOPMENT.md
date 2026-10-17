@@ -530,8 +530,9 @@ online. As 18 luas adicionais com mapas usam `moon_frames.inc` (IAU pck00011), m
 fixados em `assets/moon-sources.json` e `scripts/prepare-moon-assets.py`.
 O pacote `imagery/moons/` é unido automaticamente à biblioteca; não cria consultas
 Horizons extras nem objetos duplicados. LOD, uploads incrementais, fades, iluminação
-auxiliar e descarte de recortes são os mesmos de `SolidBodies`. Seleção usa a esfera
-local da malha, evitando percorrer triângulos a cada hover. Detalhes e limitações
+auxiliar e descarte de recortes são os mesmos de `SolidBodies`. Globos usam
+interseção elipsoidal; formas medidas usam BVH das placas, sem varrer todos os
+triângulos a cada hover. Detalhes e limitações
 em [LOCAL_SYSTEM.md](LOCAL_SYSTEM.md#mapas-das-luas).
 O fixture opcional `python3 tests/moon_assets_fixture.py` usa Pillow, sem rede;
 `natural_bodies` testa orientação contra CSPICE e `visual_test --graphics` exercita
@@ -543,9 +544,31 @@ a UI distingue lacunas/baixa definição de terreno medido. `axesMeters` contém
 os semieixos físicos IAU em x/y/z; no render, escala x/z/y aplicada igualmente
 à base e aos recortes. A API informa os três diâmetros físicos e mantém o raio
 nominal como datum do LOD. A câmera limita aproximação pelo maior semieixo; picking
-inverte a escala antes da interseção. Fobos/Deimos usam esses elipsoides e
-mosaicos Viking, sem declarar a malha como topografia medida. O gerador suporta
-imagens 2:1 além de GLB e argumentos periódicos de grau 2 no sistema de Marte.
+inverte a escala antes da interseção. Fobos/Deimos usam posições originais de
+modelos DSK medidos, sem aplicar novamente esses semieixos. `shapeRadiusMeters`
+limita a câmera; `shapeDimensionsMeters` informa as dimensões físicas da malha.
+O gerador suporta imagens 2:1 além de GLB e argumentos periódicos de grau 2 em Marte.
+
+`scripts/moon_shapes.py` exporta DSK type 2 para `shape.bin`: cabeçalho
+`ALBMSH1\0`, contagens uint32, posições float32 em metros IAU e índices uint32,
+tudo little-endian. Verifica hash, corpo, frame, contagens e limites. O Docker
+de autoria fixa SpicePy 8.3.0; o executável não depende de SPICE. `decodeShape`
+valida tamanho/índices/coordenadas, converte eixos para o render, preserva placas,
+gera normais/UVs sem emenda e constrói BVH no worker. Não recentra nem redimensiona.
+Os recortes desses corpos têm `textureOnly`, sem malha esférica ou máscara extra.
+
+`measured_shapes` lê o pacote real e compara 48 interseções contra CSPICE DSKX02,
+contagens, raio, normais, emendas e rejeição de entradas malformadas. Para regenerar
+o fixture, com as fontes originais já disponíveis:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" --entrypoint python3 \
+  -v "$PWD:/work" -w /work albert-assets-builder scripts/reference-moon-shapes.py
+```
+
+O teste OpenGL verifica seleção da malha, detalhe com fade, geometria preservada
+e descarte de texturas. Mosaicos Viking ainda não têm registro cartográfico
+validado sobre os modelos; os testes de geometria não certificam esse alinhamento.
 
 `providers/small_bodies` consulta SBDB API 1.3, valida respostas e resolve designações
 em SPK/diâmetro. `catalog::Manager::search` atende à UI assíncrona e a `SearchObjects`.

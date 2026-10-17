@@ -26,7 +26,8 @@ int main(){try{
     require(matchScore("zzzzzz","Terra","earth")==-1,"Unrelated names matched");
     Scene scene;for(const auto& body:naturalBodies())scene.include(body);includeLocalSystem(scene);
     const auto phobosSize=scene.get("phobos").appearance.sizeMeters;
-    require(phobosSize.x==26000&&phobosSize.y==22800&&phobosSize.z==18200&&scene.get("phobos").radiusMeters==localOrbit("phobos")->radius&&scene.get("phobos").minDistanceMeters>=13000*1.04,"Martian dimensions, nominal datum or camera clearance lost");
+    const auto* phobosSurface=surfaceBody("phobos");
+    require(phobosSize.x==phobosSurface->shapeDimensionsMeters[0]&&phobosSize.y==phobosSurface->shapeDimensionsMeters[1]&&phobosSize.z==phobosSurface->shapeDimensionsMeters[2]&&scene.get("phobos").appearance.shape==Shape::Builtin&&scene.get("phobos").radiusMeters==localOrbit("phobos")->radius&&scene.get("phobos").minDistanceMeters>=phobosSurface->shapeRadiusMeters*1.04,"Measured dimensions, nominal datum or camera clearance lost");
     scene.builtinState("saturn",{1,{1e12,2e11,3e10}});scene.builtinState("sun",{1,{1e11,0,0}});
     updateLocalSystem(scene,1,2461329.5);
     const auto* titan=localOrbit("titan");const auto relative=localState(*titan,titan->epoch).positionMeters;
