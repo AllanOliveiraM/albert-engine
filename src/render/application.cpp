@@ -23,6 +23,9 @@
 #include "paths.hpp"
 #include "borders.hpp"
 #include "objects.hpp"
+#include "rocks.hpp"
+#include "eclipses.hpp"
+#include "window_icon.hpp"
 #include "layers.hpp"
 #include "asset_pack.hpp"
 #include "solids.hpp"
@@ -787,6 +790,7 @@ int albert::runRenderer(int argc, char** argv) {
         Canvas canvas{window};
         canvas.exitOnKeyEscape(false);
         GLRenderer renderer{canvas};
+        albert::setWindowIcon(canvas,albert::assetDirectory()/"branding/albert.png");
         renderer.toneMapping = ToneMapping::ACESFilmic;
         renderer.toneMappingExposure = 1.05f;
         const float displayPixelRatio = std::min(2.f, renderer.getTargetPixelRatio());
@@ -889,6 +893,7 @@ int albert::runRenderer(int argc, char** argv) {
         albert::SolidBodies solids(*scene,std::move(solidAssets));
         auto earth = planets.earth;
         auto moon = planets.moon;
+        albert::EclipseVisuals eclipses(earth,moon,planets.sun);
         auto sun = planets.sun;
         albert::VisualSettings visualSettings;
         albert::core::Scene registry;
@@ -963,10 +968,13 @@ int albert::runRenderer(int argc, char** argv) {
             auto path=makeOrbit(samples);scene->add(path);localPaths.emplace(std::string(body.id),LocalPath{path,center,period});
         }
         float orbitVisibility=1.f,borderVisibility=0.f;
+        std::map<std::string,float> secondaryVisibility;
         std::string refreshError;
 
         Focus focus = targets::Earth;
         CameraTransition transition;
+        bool automaticOrbit=false;
+        float automaticOrbitAge=0.f;
 
         Vector3 sunPosition{0, 0, 0};
         Vector3 moonPosition{0, 0, 0};
@@ -988,7 +996,15 @@ int albert::runRenderer(int argc, char** argv) {
             return static_cast<float>(registry.get(f).defaultDistanceMeters/albert::core::earthRadiusMeters);
         };
         auto radiusFor = [&](const Focus& f) -> float {return f.front()=='@' ? 0.f : static_cast<float>(registry.get(f).radiusMeters/albert::core::earthRadiusMeters);};
-        auto minimumFor = [&](const Focus& f) -> float {return f.front()=='@' ? .05f : static_cast<float>(registry.get(f).minDistanceMeters/albert::core::earthRadiusMeters);};
+        auto minimumFor = [&](const Focus& f) -> float {
+            if(f.front()=='@')return .05f;
+            float minimum=static_cast<float>(registry.get(f).minDistanceMeters/albert::core::earthRadiusMeters);
+            if(albert::artisticRock(f)&&objects.nodes().contains(f)){
+                const auto& node=objects.nodes().at(f);
+                if(node->geometry()->boundingSphere){const auto& bounds=*node->geometry()->boundingSphere;minimum=std::max(minimum,(bounds.radius+bounds.center.length())*node->scale.x*1.04f);}
+            }
+            return minimum;
+        };
 
         auto setFocus = [&](Focus next, bool resetZoom = false) {
             registry.get(targetId(next));
@@ -996,6 +1012,7 @@ int albert::runRenderer(int argc, char** argv) {
 
             // Clear residual control inertia without moving the displayed camera.
             const Vector3 displayedPosition=camera->position,displayedTarget=controls.target;
+            automaticOrbit=false;automaticOrbitAge=0.f;controls.autoRotate=false;
             controls.dampingFactor = 1.f;controls.update();
             camera->position.copy(displayedPosition);controls.target.copy(displayedTarget);
             transition.active = true;
@@ -1040,6 +1057,16 @@ int albert::runRenderer(int argc, char** argv) {
 
         drawInterface = [&] {
             const auto display = ImGui::GetIO().DisplaySize;
+            const bool earthControls=focus==targets::Earth || focus==targets::EarthMoon;
+            std::array<std::pair<ImVec2,ImVec2>,5> protectedPanels;
+            size_t panelCount=0;
+            auto protectPanel=[&]{const auto p=ImGui::GetWindowPos(),s=ImGui::GetWindowSize();if(panelCount<protectedPanels.size())protectedPanels[panelCount++]={p,ImVec2(p.x+s.x,p.y+s.y)};};
+            auto covered=[&](ImVec2 lo,ImVec2 hi){for(size_t i=0;i<panelCount;++i){const auto& [a,b]=protectedPanels[i];if(lo.x<b.x&&hi.x>a.x&&lo.y<b.y&&hi.y>a.y)return true;}return false;};
+            // Consume wheel events inside ImGui's frame, before EndFrame clears them.
+            const auto& input=ImGui::GetIO();
+            if(!input.WantCaptureMouse&&(ImGui::IsMouseDragging(ImGuiMouseButton_Left)||ImGui::IsMouseDragging(ImGuiMouseButton_Right)||ImGui::IsMouseDragging(ImGuiMouseButton_Middle)||input.MouseWheel!=0.f||input.MouseWheelH!=0.f)){
+                automaticOrbit=false;controls.autoRotate=false;
+            }
             constexpr auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize;
             if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !uiPopupWasOpen) {
@@ -1051,6 +1078,7 @@ int albert::runRenderer(int argc, char** argv) {
             ImGui::SetNextWindowSize(ImVec2(barWidth, 58));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
             ImGui::Begin("Navegacao", nullptr, flags | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            protectPanel();
             const auto menuPosition = ImGui::GetCursorScreenPos();
             if (ImGui::Button("##Menu", ImVec2(38, 38))) menuOpen = !menuOpen;
             auto* draw = ImGui::GetWindowDrawList();
@@ -1078,6 +1106,7 @@ int albert::runRenderer(int argc, char** argv) {
             ImGui::SetNextWindowPos(ImVec2(std::clamp(pickerPosition.x,16.f,std::max(16.f,display.x-pickerWidth-16.f)),pickerPosition.y+46),ImGuiCond_Appearing);
             ImGui::SetNextWindowSizeConstraints(ImVec2(pickerWidth,0),ImVec2(pickerWidth,std::max(120.f,display.y-90.f)));
             if(ImGui::BeginPopup("Selecionar objeto")){
+                protectPanel();
                 ImGui::TextDisabled("EXPLORAR O SISTEMA SOLAR");
                 if(ImGui::IsWindowAppearing())ImGui::SetKeyboardFocusHere();
                 ImGui::SetNextItemWidth(-1);ImGui::InputTextWithHint("##Buscar objeto","Planeta, lua, asteroide ou cometa",focusSearch.data(),focusSearch.size());
@@ -1136,8 +1165,13 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * menuReveal);
                 ImGui::Begin("Menu lateral", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+                protectPanel();
                 ImGui::TextColored(ImVec4(.5f,.86f,.93f,1), "%s", focusName(focus));
-                if(focus.front()!='@' && albert::core::localOrbit(focus)) ImGui::TextDisabled("Orbita aproximada offline; superficie ilustrativa");
+                if(focus.front()!='@' && albert::core::localOrbit(focus)) {
+                    ImGui::TextDisabled("Orbita aproximada offline");
+                    ImGui::TextWrapped(albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
+                }
+                if(focus==targets::Moon&&eclipses.lunarActive())ImGui::TextWrapped("Eclipse lunar: luz atmosferica avermelhada aproximada.");
                 if(focus.front()!='@' && !registry.get(focus).builtin) {
                     const auto state=registry.evaluate(focus,(jdUTC()-2440587.5)*86400.);
                     ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : registry.get(focus).providerManaged ? "Posicoes reais; visual simplificado" : "Dados fornecidos pelo integrador");
@@ -1159,7 +1193,8 @@ int albert::runRenderer(int argc, char** argv) {
                 if (menuPage == 0) {
                     ImGui::TextWrapped("Personalize sua vista");
                     ImGui::Spacing();
-                    if (focus == targets::Earth || focus == targets::EarthMoon || systemView(focus)) {
+                    if (earthControls) {
+                        if(focus!=targets::Earth)ImGui::TextDisabled("TERRA");
                         ImGui::Checkbox("Atmosfera", &visualSettings.atmosphere);
                         ImGui::Checkbox("Nuvens em tempo real", &visualSettings.clouds);
                         ImGui::TextDisabled("Observacoes de satelite, com atraso.");
@@ -1212,6 +1247,7 @@ int albert::runRenderer(int argc, char** argv) {
                     ImGui::BeginDisabled(timing.synchronizing);
                     if(ImGui::Button("Conferir horario",ImVec2(-1,32)))timeService.resynchronize();
                     ImGui::EndDisabled();
+                    if(earthControls){
                     ImGui::Spacing();
                     ImGui::TextDisabled("NUVENS EM TEMPO REAL");
                     if (!visualSettings.clouds) ImGui::TextWrapped("Desativadas. Ative em Cena para buscar observacoes.");
@@ -1230,6 +1266,7 @@ int albert::runRenderer(int argc, char** argv) {
                         ImGui::BeginDisabled(cloudSync.active || cloudSync.detailActive());
                         if (ImGui::Button("Tentar novamente", ImVec2(-1, 36))) { visualSettings.clouds=true; cloudSync.refresh(); }
                         ImGui::EndDisabled();
+                    }
                     }
                     ImGui::Spacing();
                     if (ImGui::CollapsingHeader("Cache e detalhes visuais")) {
@@ -1254,7 +1291,7 @@ int albert::runRenderer(int argc, char** argv) {
                         if(!cache.error.empty()) ImGui::TextWrapped("%s",cache.error.c_str());
                     }
                     ImGui::Spacing();
-                    if (ImGui::CollapsingHeader("Manutencao dos arquivos")) {
+                    if (earthControls && ImGui::CollapsingHeader("Manutencao das nuvens")) {
                         ImGui::TextWrapped("Atualiza os downloads de nuvens sem apagar as texturas incluidas.");
                         ImGui::BeginDisabled(cloudSync.active || cloudSync.detailActive());
                         if (ImGui::Button("Limpar e baixar nuvens", ImVec2(-1, 36))) { visualSettings.clouds=true; cloudSync.refresh(true); }
@@ -1288,7 +1325,7 @@ int albert::runRenderer(int argc, char** argv) {
                     ImGui::TextWrapped("Explore corpos celestes em escala real, com posicoes astronomicas, imagens de observacao e estrelas catalogadas.");
                     std::string included;for(const auto& [id,object]:registry.objects())if(object.builtin){(void)id;if(!included.empty())included+=", ";included+=object.name;}
                     ImGui::TextWrapped("Conteudo incluido: %s.",included.c_str());
-                    ImGui::TextWrapped("Importe outros objetos em Dados ou conecte um integrador. Objetos sem imagens incluidas usam visuais simplificados.");
+                    ImGui::TextWrapped("Conecte um integrador pela API gRPC para adicionar outros objetos. Objetos sem imagens incluidas usam visuais simplificados.");
                     ImGui::Spacing();
                     if (ImGui::CollapsingHeader("Fontes e creditos")) {
                         ImGui::TextWrapped("Imagens: NASA Earth Observatory, SDO/HMI, LROC/ASU, LOLA, GEBCO e MESSENGER / JHUAPL / CIW / USGS. Fronteiras: Natural Earth. Estrelas: HYG / David Nash (CC BY-SA 4.0). Fonte: Inter (OFL).");
@@ -1313,6 +1350,7 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, 1.f);
                 ImGui::SetNextWindowBgAlpha(0.f);
                 ImGui::Begin("Restaurar enquadramento", nullptr, flags | ImGuiWindowFlags_NoScrollbar);
+                protectPanel();
                 ImGui::BeginDisabled(!resetZoomVisible);
                 if (ImGui::Button("Restaurar zoom", ImVec2(160,42))) setFocus(focus, true);
                 ImGui::EndDisabled();
@@ -1340,6 +1378,7 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::SetNextWindowBgAlpha(.65f);
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(18,14));
                 ImGui::Begin("Estado", nullptr, (flags & ~ImGuiWindowFlags_AlwaysAutoResize) | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                protectPanel();
                 const auto timing=timeService.status();
                 const auto time = albert::utcTime(static_cast<std::time_t>(timing.utcSeconds));
                 ImGui::TextDisabled("%02d:%02d:%02d UTC", time.tm_hour, time.tm_min, time.tm_sec);
@@ -1353,7 +1392,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
 
             // Hover and click use the same nearest visible object.
-            if(!ImGui::GetIO().WantCaptureMouse && !transition.active){
+            if(!ImGui::GetIO().WantCaptureMouse && !transition.active&&!covered(ImGui::GetMousePos(),ImGui::GetMousePos())){
                 const auto mouse=ImGui::GetMousePos();Raycaster ray;ray.setFromCamera(Vector2(mouse.x/display.x*2.f-1.f,1.f-mouse.y/display.y*2.f),*camera);
                 ray.nearPlane=camera->nearPlane;ray.farPlane=camera->farPlane;
                 if(const auto picked=objects.pick(registry,ray)){
@@ -1362,8 +1401,8 @@ int albert::runRenderer(int argc, char** argv) {
                 }
             }
             if (systemView(focus) || focus == targets::EarthMoon) {
-                if(showOrbits) {
-                    auto* legend=ImGui::GetForegroundDrawList();
+                if(showOrbits&&!covered(ImVec2(display.x*.5f-130.f,display.y-36.f),ImVec2(display.x*.5f+130.f,display.y-16.f))) {
+                    auto* legend=ImGui::GetBackgroundDrawList();
                     const float x=display.x*.5f-130.f, y=display.y-26.f;
                     legend->AddLine(ImVec2(x,y),ImVec2(x+24,y),IM_COL32(74,171,201,220),1.5f);
                     legend->AddText(ImVec2(x+32,y-8),IM_COL32(169,190,204,230),"Passado");
@@ -1377,10 +1416,12 @@ int albert::runRenderer(int argc, char** argv) {
                     if (position.z < -1.f || position.z > 1.f) return;
                     const ImVec2 screen((position.x*.5f+.5f)*display.x, (.5f-position.y*.5f)*display.y);
                     if (screen.x < 8 || screen.x > display.x-8 || screen.y < 100 || screen.y > display.y-8) return;
-                    auto* draw = ImGui::GetForegroundDrawList();
+                    const auto text=ImGui::CalcTextSize(label);
+                    if(covered(ImVec2(screen.x-6,screen.y-10),ImVec2(screen.x+12+text.x,screen.y+10)))return;
+                    auto* draw = ImGui::GetBackgroundDrawList();
                     draw->AddCircle(screen, 5.f, color, 16, 1.2f);
                     draw->AddText(ImVec2(screen.x+10,screen.y-8), color, label);
-                    const auto mouse=ImGui::GetMousePos();const auto text=ImGui::CalcTextSize(label);
+                    const auto mouse=ImGui::GetMousePos();
                     const bool hover=mouse.x>=screen.x-12&&mouse.x<=screen.x+12+text.x&&mouse.y>=screen.y-14&&mouse.y<=screen.y+14;
                     if(hover&&!ImGui::GetIO().WantCaptureMouse&&!transition.active){ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(id);}
                 };
@@ -1396,6 +1437,8 @@ int albert::runRenderer(int argc, char** argv) {
                 for(const auto& body:albert::core::localOrbits()){
                     const bool overview=systemView(focus);
                     if(body.id==focus||(!overview&&body.parent!=parent)||(overview&&body.category==albert::core::Category::Moon))continue;
+                    const float labelVisibility=overview ? secondaryVisibility[std::string(body.id)] : 1.f;
+                    if(labelVisibility<.02f)continue;
                     const auto& node=objects.nodes().at(std::string(body.id));if(!node->visible)continue;
                     Vector3 delta=node->position;delta.sub(camera->position);const float actualDistance=delta.length();
                     if(actualDistance<camera->nearPlane)continue;
@@ -1413,12 +1456,13 @@ int albert::runRenderer(int argc, char** argv) {
                     // Large nearby spheres need no label unless hovered.
                     const float apparent=static_cast<float>(body.radius/albert::core::earthRadiusMeters)/actualDistance*display.y;
                     const auto mouse=ImGui::GetMousePos();const auto text=ImGui::CalcTextSize(body.name.data());
+                    if(covered(ImVec2(point.x-6,point.y-10),ImVec2(point.x+12+text.x,point.y+10)))continue;
                     const bool hover=mouse.x>point.x-12&&mouse.x<point.x+text.x+14&&std::abs(mouse.y-point.y)<14;
                     if(apparent>25&&!hover)continue;
-                    auto* draw=ImGui::GetForegroundDrawList();draw->AddCircle(point,4,IM_COL32(185,203,211,190),12,1.f);
+                    auto* draw=ImGui::GetBackgroundDrawList();draw->AddCircle(point,4,IM_COL32(185,203,211,int(190*labelVisibility)),12,1.f);
                     const bool overlap=std::any_of(placed.begin(),placed.end(),[&](const auto& p){return std::abs(p.point.y-point.y)<18&&std::abs(p.point.x-point.x)<100;});
-                    if(!overlap||hover){draw->AddText(ImVec2(point.x+9,point.y-8),IM_COL32(185,203,211,220),body.name.data());placed.push_back({point});}
-                    if(hover&&!ImGui::GetIO().WantCaptureMouse&&!transition.active){ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(std::string(body.id));}
+                    if(!overlap||hover){draw->AddText(ImVec2(point.x+9,point.y-8),IM_COL32(185,203,211,int(220*labelVisibility)),body.name.data());placed.push_back({point});}
+                    if(hover&&labelVisibility>.5f&&!ImGui::GetIO().WantCaptureMouse&&!transition.active){ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(std::string(body.id));}
                 }
             }
 
@@ -1627,6 +1671,7 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
                             throw std::invalid_argument("Invalid orbit parameters");
+                        automaticOrbit=false;automaticOrbitAge=0.f;controls.autoRotate=false;
                         controls.dampingFactor=1;controls.update();transition.active=false;
                         Vector3 offset=camera->position;offset.sub(controls.target);Spherical orbit;orbit.setFromVector3(offset);
                         orbit.theta+=static_cast<float>(value.azimuthRadians);orbit.phi=std::clamp(orbit.phi+static_cast<float>(value.elevationRadians),.001f,static_cast<float>(PI)-.001f);
@@ -1717,7 +1762,9 @@ int albert::runRenderer(int argc, char** argv) {
             Vector3 target = targetFor(focus);
 
             if (transition.active) {
-                transition.elapsed += elapsed;
+                // A slow upload/shader frame must not skip a chunk of the flight.
+                // Astronomical time continues independently of this presentation clock.
+                transition.elapsed += std::min(elapsed,.1f);
 
                 const float progress=std::clamp(transition.elapsed/transition.duration,0.f,1.f);
                 const float destinationDistance=distanceFor(transition.destination);
@@ -1738,7 +1785,7 @@ int albert::runRenderer(int argc, char** argv) {
                     Vector3 departure=transition.startTarget;departure.add(transition.startOffset.clone().normalize().multiplyScalar(retreatDistance));
                     Vector3 arrival=target;arrival.add(transition.arrivalDirection.clone().multiplyScalar(arrivalDistance));
                     const float retreat=albert::flightEase(progress/.34f);
-                    const float transit=albert::flightEase((progress-.12f)/(context ? .88f : .62f));
+                    const float transit=albert::flightTravel(albert::flightEase((progress-.12f)/(context ? .88f : .62f)),departure.distanceTo(arrival),startDistance,arrivalDistance);
                     const float approach=context ? 0.f : albert::flightEase((progress-.48f)/.52f);
                     camera->position.copy(lerpVector(lerpVector(startEye,departure,retreat),arrival,transit));
                     camera->position.add(transition.arrivalDirection.clone().multiplyScalar(
@@ -1756,6 +1803,7 @@ int albert::runRenderer(int argc, char** argv) {
 
                 if (transition.elapsed >= transition.duration) {
                     transition.active = false;
+                    automaticOrbit=focus.front()!='@';automaticOrbitAge=0.f;
                     zoomTarget = zoomDisplayed = distanceFor(focus);
                     controls.minDistance = minimumFor(focus);
                 }
@@ -1778,6 +1826,10 @@ int albert::runRenderer(int argc, char** argv) {
             const float relativeAltitude=interactionRadius>0 ? std::max(0.f,camera->position.distanceTo(controls.target)-interactionRadius)/interactionRadius : 1.f;
             controls.rotateSpeed=.75f*std::clamp(relativeAltitude,.025f,1.f);
             controls.zoomSpeed=std::clamp(relativeAltitude,.18f,1.f);
+            automaticOrbitAge=automaticOrbit ? automaticOrbitAge+dt : 0.f;
+            controls.autoRotate=automaticOrbit&&controls.enabled;
+            // OrbitControls uses frame-based increments: compensate for actual dt.
+            controls.autoRotateSpeed=.12f*dt*60.f*albert::flightEase(automaticOrbitAge);
             controls.dampingFactor = 1.f - std::exp(-8.f * dt);
             controls.update();
             if (transition.active) {
@@ -1808,13 +1860,36 @@ int albert::runRenderer(int argc, char** argv) {
             camera->nearPlane = std::clamp(std::min(distance * .02f, clearance * .25f), 1e-9f, 100.f);
             camera->updateProjectionMatrix();
             const auto display=ImGui::GetIO().DisplaySize;
-            auto orbitView=[&](const std::shared_ptr<Mesh>& path, const Vector3& body, float daysPerUnit) {
+            camera->updateMatrixWorld();
+            if(systemView(focus)){
+                std::vector<ImVec2> occupied;
+                auto screenPoint=[&](const Vector3& position)->std::optional<ImVec2>{
+                    Vector3 projected=position;projected.project(*camera);
+                    if(projected.z< -1||projected.z>1||std::abs(projected.x)>1.1f||std::abs(projected.y)>1.1f)return std::nullopt;
+                    return ImVec2((projected.x*.5f+.5f)*display.x,(.5f-projected.y*.5f)*display.y);
+                };
+                for(const auto& [id,node]:objects.nodes())if(node->visible&&(id=="earth"||id=="sun"||albert::core::naturalBody(id)))if(auto point=screenPoint(node->position))occupied.push_back(*point);
+                std::vector<const albert::core::LocalOrbit*> candidates;
+                for(const auto& body:albert::core::localOrbits())if(body.category!=albert::core::Category::Moon)candidates.push_back(&body);
+                std::sort(candidates.begin(),candidates.end(),[](const auto* a,const auto* b){if(a->category!=b->category)return a->category<b->category;return a->radius>b->radius;});
+                for(const auto* body:candidates){
+                    const auto& node=objects.nodes().at(std::string(body->id));const auto point=screenPoint(node->position);
+                    float& visibility=secondaryVisibility[std::string(body->id)];
+                    const float gap=visibility>.5f ? 21.f : 29.f;
+                    const bool crowded=point&&std::any_of(occupied.begin(),occupied.end(),[&](const auto& other){return std::abs(point->x-other.x)<gap*1.6f&&std::abs(point->y-other.y)<gap;});
+                    const bool visible=point&&!crowded&&camera->position.distanceTo(node->position)<distanceFor(focus)*5.f;
+                    visibility=albert::animateValue(visibility,visible?1.f:0.f,dt);
+                    if(visible)occupied.push_back(*point);
+                }
+            }
+            auto orbitView=[&](const std::shared_ptr<Mesh>& path, const Vector3& body, float daysPerUnit,float visibility=1.f) {
                 auto* material=path->material()->as<ShaderMaterial>();
                 material->uniforms.at("referenceVisibility").setValue(1.f);
-                const float zoom=std::clamp(distanceFor(focus)/std::max(.00001f,camera->position.distanceTo(controls.target)),1.f,8.f);
-                const float magnification=std::pow(zoom,.3f);
+                const float bodyDistance=std::max(.00001f,camera->position.distanceTo(body));
+                const float reference=distanceFor(focus)*(focus.front()=='@' ? 1.f : 6.f);
+                const float magnification=std::clamp(std::pow(reference/bodyDistance,.22f),.65f,2.25f);
                 material->uniforms.at("strokeWidth").setValue(3.2f*magnification);
-                material->uniforms.at("visibility").setValue(orbitVisibility);
+                material->uniforms.at("visibility").setValue(orbitVisibility*visibility);
                 material->uniforms.at("viewport").setValue(Vector2(display.x,display.y));
                 material->uniforms.at("nearClip").setValue(camera->nearPlane);
                 material->uniforms.at("dashDays").setValue(std::max(.0001f,
@@ -1834,16 +1909,17 @@ int albert::runRenderer(int argc, char** argv) {
             }
             for(const auto& body:albert::core::localOrbits()){
                 auto& orbit=localPaths.at(std::string(body.id));
+                const float secondary=systemView(focus)&&body.category!=albert::core::Category::Moon ? secondaryVisibility[std::string(body.id)] : 1.f;
                 const auto* focused=albert::core::localOrbit(focus);
                 const bool family=body.parent==focus||(focused&&focused->category==albert::core::Category::Moon&&body.parent==focused->parent);
-                orbit.path->visible=orbitVisibility>0&&(body.id==focus||family||((systemView(focus)||focus==targets::Sun)&&body.category!=albert::core::Category::Moon));
+                orbit.path->visible=orbitVisibility*secondary>.001f&&(body.id==focus||family||((systemView(focus)||focus==targets::Sun)&&body.category!=albert::core::Category::Moon));
                 if(!orbit.path->visible)continue;
                 const auto parent=registry.evaluate(std::string(body.parent),frameTime.utcSeconds).state.positionMeters;
                 orbit.path->origin={-parent.x/1000.,-parent.y/1000.,-parent.z/1000.};
                 orbit.path->material()->as<ShaderMaterial>()->uniforms.at("present").setValue(static_cast<float>(std::remainder(tdb-orbit.epoch,orbit.period)));
                 orbit.path->rebase(camera->position,{sceneOrigin.x/1000.,sceneOrigin.y/1000.,sceneOrigin.z/1000.});
                 const auto state=albert::core::localState(body,tdb);const double speed=std::hypot(state.velocityMetersPerSecond.x,state.velocityMetersPerSecond.y,state.velocityMetersPerSecond.z);
-                orbitView(orbit.path,objects.nodes().at(std::string(body.id))->position,static_cast<float>(albert::core::earthRadiusMeters/(speed*86400.)));
+                orbitView(orbit.path,objects.nodes().at(std::string(body.id))->position,static_cast<float>(albert::core::earthRadiusMeters/(speed*86400.)),secondary);
             }
             // Photographic exposure adapts to the irradiance at the focused planet;
             // physical solar illumination and geometry remain unchanged.
@@ -1935,6 +2011,7 @@ int albert::runRenderer(int argc, char** argv) {
                     camera->position.distanceTo(controls.target)*r,transition.active});
                 snapshot.clock=frameTime;commands.publish(std::move(snapshot));
             }
+            eclipses.update(visualSettings.shadows);
             renderer.render(*scene, *camera);
             ui.render();
 #ifdef ALBERT_HAS_RPC

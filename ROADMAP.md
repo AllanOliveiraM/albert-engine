@@ -6,7 +6,70 @@ formam o backlog para entregas incrementais conforme as prioridades acordadas.
 Este documento reúne os pedidos, a proposta de arquitetura
 e os critérios para orientar as próximas implementações.
 
+### Prioridades atuais — o que ainda falta
+
+Esta fila prevalece sobre a ordem histórica do backlog abaixo. Um primeiro
+corte entregue não significa suporte completo a todos os requisitos da feature.
+
+| Prioridade | Próxima entrega | Limite do que existe hoje |
+| --- | --- | --- |
+| **Alta — 1** | Luas com identidade real: mapas, cores, formas, relevo e orientação por sistema | Lua terrestre detalhada; demais luas ainda ilustrativas; generalizar também eclipses além de Terra/Lua |
+| **Alta — 2** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
+| **Alta — 3** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
+| **Alta — 4** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
+| **Média — 1** | Efemérides/orientações locais mais precisas para luas e pequenos corpos, avaliando SPICE | Catálogo adicional usa propagação aproximada de dois corpos |
+| **Média — 2** | NTS e tratamento completo de leap seconds/smear | NTP com múltiplas fontes já existe, sem autenticação criptográfica |
+| **Média — 3** | Texturas GLB/glTF, animação de peças e controles avançados de câmera pela API | GLB estático/PBR sólido e streaming de posição/atitude já existem |
+| **Média — 4** | Rótulos, polígonos/GeoJSON e camadas raster/clima selecionadas | Camadas atuais: pontos e polilinhas; nuvens GIBS continuam opcionais |
+| **Média — 5** | Data de simulação, gravação/reprodução e cenários de eventos/eclipses | Eclipses acompanham a geometria em tempo real; não há seletor de datas históricas |
+| **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
+
 ### Andamento
+
+**16/10 — lapidação de navegação, interface e fenômenos.** Menu contextual;
+anotações abaixo dos painéis; órbitas acompanham a distância real até o corpo
+desde a aproximação. Rótulos e órbitas secundários usam espaçamento em tela,
+histerese e fade nas vistas gerais; catálogo e seleção direta continuam disponíveis.
+Viagem com progresso adaptado às distâncias de saída/chegada, fases sobrepostas
+e tempo gráfico limitado por quadro para não saltar após uploads. Órbita lenta
+de apresentação após chegar a um corpo, cancelada por arraste, zoom ou comando
+de órbita externo; vistas gerais permanecem estáticas.
+
+Vesta, Pallas, Halley, 67P, Phobos, Deimos, Hyperion e Phoebe recebem formas
+irregulares, crateras e material rochoso procedural por objeto. Representações
+artísticas explícitas, centradas e com volume nominal preservado, sem novos
+downloads nem imagens fictícias apresentadas como observações. Detalhes em
+[LOCAL_SYSTEM.md](docs/LOCAL_SYSTEM.md).
+
+Eclipses Terra/Lua usam sobreposição angular de um disco solar finito, com
+umbra/penumbra/antumbra. A luz vermelha do eclipse lunar é uma aproximação
+visual atmosférica documentada; detalhes regionais compartilham a mesma
+oclusão. Fontes, limitações e validação em [ECLIPSES.md](docs/ECLIPSES.md).
+Ícones nativos em 32/64/128 px; atalho Linux por usuário com `make desktop`
+associa o ícone ao WM_CLASS, sem instalar o executável. Distribuições não foram geradas.
+
+Validação desta rodada: 22 testes Linux, regressões OpenGL (incluindo eclipses
+solar/lunar e rochas), build MinGW, gráficos e executável Windows pelo Wine.
+Conferência integrada verificou órbita automática e parada com a roda física
+do mouse, enquadramento da visão geral, menus contextuais, rótulos, pequenos
+corpos e propriedades nativas do ícone. Na conferência final em 600×480 com
+llvmpipe, pico de RSS próximo de 1,0 GiB; não é um teto de RAM nem uma medição
+de VRAM/desempenho em GPU física.
+
+**Prioridade alta — identidade visual das luas.** Substituir as superficies
+genericas das luas adicionais por formas, cores, relevo e materiais semelhantes
+aos corpos reais. Priorizar imagens e modelos de missões com proveniência e
+licenças registradas; usar LOD e carregamento sob demanda no pacote local.
+Quando não houver cobertura, identificar explicitamente a representação
+artística e evitar inventar precisão. Começar por Io, Europa, Ganimedes,
+Calisto, Titã, Encélado, Tritão, Caronte, Phobos e Deimos. Validar silhuetas,
+orientação, transição de resolução e orçamento de RAM/VRAM. A Lua terrestre
+já tem imagens e relevo próprios; as demais ainda exigem esse trabalho.
+
+**Lacuna visual — outros sistemas de anéis.** Hoje somente Saturno tem anéis
+renderizados. Incluir Júpiter, Urano e Netuno com raios e orientação de fontes
+astronômicas, perfis sutis próprios e distinção entre luz visível e imagens
+infravermelhas. Não reutilizar dimensões/opacidade de Saturno nos outros corpos.
 
 **16/10 — navegação e conteúdo local (novo corte).** Retirada a busca/importação
 online da interface; serviços continuam na API. Cena padrão com 43 corpos,

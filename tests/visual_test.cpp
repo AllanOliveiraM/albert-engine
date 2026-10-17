@@ -3,6 +3,8 @@
 #include "paths.hpp"
 #include "visuals.hpp"
 #include "objects.hpp"
+#include "rocks.hpp"
+#include "eclipses.hpp"
 #include "layers.hpp"
 #include "core/layers.hpp"
 #include "core/model.hpp"
@@ -23,6 +25,34 @@ void controls() {
     require(albert::flightEase(.01f)<.00002f && albert::flightEase(.99f)>.99998f,"Flight ramp is abrupt");
     float previous=0;for(int i=0;i<=1000;++i){const float t=i/1000.f, value=albert::flightEase(t);require(value>=previous-1e-6f && std::abs(value+albert::flightEase(1-t)-1)<2e-6f,"Flight curve reverses or is asymmetric");previous=value;}
     require(albert::flightDuration(10,1e6f)<=4.8f && albert::flightDuration(0,0)>2.f,"Flight duration unbounded or too short");
+    for(const auto scales:{Vector3(1e8f,1.f,4.f),Vector3(1e10f,.00001f,1e5f),Vector3(1.f,4.f,1.f)}){
+        float last=0;
+        for(int i=0;i<=1000;++i){const float t=albert::flightTravel(i/1000.f,scales.x,scales.y,scales.z);require(std::isfinite(t)&&t>=last&&t>=0&&t<=1,"Adaptive camera travel reversed or lost precision");last=t;}
+        require(last==1,"Adaptive travel missed its destination");
+    }
+    require(albert::flightTravel(.1f,1e8f,1.f,4.f)*1e8f<50.f,"Distant travel instantly abandoned the initial subject");
+    require((1.f-albert::flightTravel(.9f,1e6f,4.f,1.f))*1e6f<50.f,"Distant travel rushed the destination");
+    {
+        using V=albert::core::Vector;
+        auto visible=[](double x,double radius=1.){return albert::solarVisibility({},V{0,0,10000},100.,V{x,0,100},radius);};
+        require(visible(0)<1e-12&&visible(3)==1.,"Total/no eclipse disk geometry failed");
+        require(std::abs(visible(0,.5)-.75)<.0001,"Annular eclipse lost the visible solar ring");
+        require(std::abs(visible(1)-.609)<.002,"Partial eclipse disk overlap is incorrect");
+        require(albert::solarVisibility({},V{0,0,10000},100.,V{0,0,20000},400.)==1.,"Body behind the Sun caused an eclipse");
+        double previous=0;for(int i=0;i<=300;++i){const double value=visible(i*.01);require(value+1e-12>=previous,"Penumbra is discontinuous or reverses");previous=value;}
+        require(albert::solarVisibility(V{0,0,384400000},V{0,0,-149597870700},695700000.,{},6378137.)==0.,"Lunar totality did not block direct sunlight");
+        require(albert::solarVisibility({},V{0,0,149597870700},695700000.,V{0,0,350000000},1737400.)==0.,"Solar umbra did not reach Earth");
+    }
+    require(albert::artisticRock("67p")&&albert::artisticRock("halley")&&albert::artisticRock("vesta")&&!albert::artisticRock("moon")&&!albert::artisticRock("titan"),"Artistic rocks replaced a photographic or spherical moon");
+    for(const auto id:{"67p","halley","vesta","pallas"}){
+        const auto rock=albert::makeArtisticRock(*albert::core::localOrbit(id));const auto& p=rock->geometry()->getAttribute<float>("position")->array();
+        double volume=0;float shortest=1e6f,longest=0;
+        for(size_t i=0;i<p.size();i+=3){const float r=std::hypot(p[i],p[i+1],p[i+2]);require(std::isfinite(r)&&r>.1f,"Artistic mesh has invalid or collapsed vertices");shortest=std::min(shortest,r);longest=std::max(longest,r);}
+        for(size_t i=0;i<p.size();i+=9){Vector3 a(p[i],p[i+1],p[i+2]),b(p[i+3],p[i+4],p[i+5]),c(p[i+6],p[i+7],p[i+8]);volume+=a.dot(b.cross(c))/6.;}
+        require(longest/shortest>1.15f,"Rock retained a spherical silhouette");
+        require(std::abs(std::abs(volume)-3.141592653589793/6.)<.0001,"Artistic surface changed the declared equivalent volume");
+        require(p.size()/3<=65000,"Rock geometry exceeded its memory budget");
+    }
     {
         albert::core::Scene registry;auto world=Scene::create();albert::SceneObjects objects(*world);
         auto earth=Mesh::create(SphereGeometry::create(1.f,16,8));earth->scale.y=.5f;
@@ -293,7 +323,32 @@ void graphics() {
     for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);
     solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,4.f);
     require(solids.takeEviction(),"Zooming out on the same planet retained high-resolution terrain");
-    std::cout<<"Graphics OK: incremental upload, terrain occlusion, subpixel paths, borders, cloud fade and precise generic objects\n";
+    {
+        auto world=Scene::create();world->background=Color(0x000000);world->add(AmbientLight::create(Color(0xffffff),.2f));
+        auto light=DirectionalLight::create(Color(0xffffff),3.f);light->position.set(0,0,-100);world->add(light);
+        albert::PlanetVisuals bodies(*world,assets());bodies.earth->position.set(0,0,0);bodies.moon->position.set(0,0,60);bodies.sun->position.set(0,0,-23455);
+        light->setTarget(*bodies.moon);
+        auto view=PerspectiveCamera::create(60,1,.001f,100000);view->position.set(0,0,58.9f);view->lookAt(bodies.moon->position);
+        albert::VisualSettings settings;settings.atmosphere=settings.clouds=settings.nightLights=false;
+        bodies.update(Vector3(0,0,-1),view->position,settings,1.f);
+        albert::EclipseVisuals eclipses(bodies.earth,bodies.moon,bodies.sun);eclipses.update(true);renderer.render(*world,*view);auto total=renderer.readRGBPixels();
+        const size_t center=3*(96*192+96);
+        require(eclipses.lunarActive()&&total[center]>total[center+1]*2&&total[center]>5,"Lunar eclipse did not render filtered red light");
+        eclipses.update(false);renderer.render(*world,*view);auto ordinary=renderer.readRGBPixels();
+        require(!eclipses.lunarActive()&&ordinary[center+1]>total[center+1]*2,"Disabling shadows did not restore direct lunar light");
+        bodies.earth->position.x=5;eclipses.update(true);renderer.render(*world,*view);
+        require(!eclipses.lunarActive(),"A missed alignment retained the lunar eclipse");
+        bodies.earth->position.set(0,0,0);bodies.moon->position.set(0,0,55);bodies.sun->position.set(0,0,23455);
+        light->position.set(0,0,100);light->setTarget(*bodies.earth);view->position.set(0,0,3);view->lookAt(Vector3());
+        bodies.update(Vector3(0,0,1),view->position,settings,1.f);eclipses.update(true);renderer.render(*world,*view);auto solar=renderer.readRGBPixels();
+        eclipses.update(false);renderer.render(*world,*view);auto sunlit=renderer.readRGBPixels();
+        require(solar[center]<sunlit[center]/3,"Solar eclipse did not darken the terrestrial umbra");
+        world->remove(*bodies.earth);world->remove(*bodies.moon);world->remove(*bodies.sun);
+        auto rock=albert::makeArtisticRock(*albert::core::localOrbit("67p"));rock->scale.setScalar(1);world->add(rock);light->setTarget(*rock);view->position.set(0,0,-2.5f);view->lookAt(Vector3());
+        renderer.render(*world,*view);pixels=renderer.readRGBPixels();
+        require(std::count_if(pixels.begin(),pixels.end(),[](auto value){return value>20;})>300,"Rock PBR surface shader did not render");
+    }
+    std::cout<<"Graphics OK: incremental upload, terrain occlusion, paths, clouds, objects, artistic rocks and lunar eclipse\n";
 }
 }
 int main(int argc,char**) {

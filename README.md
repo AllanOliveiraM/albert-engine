@@ -49,6 +49,9 @@ Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 | Céu | Estrelas baseadas em catálogo astronômico, com posições e brilhos relativos |
 | Nuvens | Observações de satélite opcionais, atualizadas automaticamente quando ativadas |
 | Navegação | Foco por objeto, órbita manual, zoom e transições animadas |
+| Apresentação | Órbita lenta ao chegar a um objeto; arraste ou use o zoom para parar |
+| Pequenos corpos | Formas rochosas individuais; representações artísticas identificadas, sem novas imagens baixadas |
+| Eclipses Terra/Lua | Umbra, penumbra e eclipses anulares; luz avermelhada lunar aproximada. [Limites](docs/ECLIPSES.md) |
 | Camadas | Pontos e linhas programáveis, inclusive sobre o relevo terrestre, com controle no menu |
 | Catálogo local | Categorias, busca aproximada e foco em corpos já incluídos; objetos adicionais entram pela API |
 | Controle externo | API gRPC local para consultar a cena, importar GLB estático, criar/remover objetos e transmitir posição, velocidade e orientação |
@@ -135,6 +138,10 @@ levar vários minutos. As próximas reaproveitam o que já foi compilado.
 bash scripts/setup-linux.sh
 make run
 ```
+
+Para o ícone aparecer corretamente na barra e no menu de aplicativos do Linux,
+execute `make desktop` depois de compilar e reabra o Albert. Esse comando cria
+o atalho no seu usuário, mantendo o programa na pasta original.
 
 **Windows 10/11 — PowerShell:**
 

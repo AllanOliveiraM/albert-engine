@@ -33,9 +33,10 @@ São elipses de dois corpos, propagadas localmente. Luas são relativas a seus
 planetas; os demais são heliocêntricos. Perturbações, precessão e forças não
 gravitacionais não são integradas. Não são efemérides precisas em tempo real;
 o erro cresce com a distância temporal à época de referência. A interface
-identifica a aproximação ao focar esses corpos. Superfícies são esferas
-ilustrativas, sem reutilizar fotografias de outros objetos, com raios médios
-aproximados. Formatos irregulares e texturas próprias permanecem no roadmap.
+identifica a aproximação ao focar esses corpos. Superfícies são ilustrativas:
+há esferas de referência e formas rochosas artísticas descritas abaixo, sem
+reutilizar fotografias de outros objetos. Modelos e mapas observados próprios
+permanecem no roadmap; os raios nominais são aproximados.
 
 O gerador usa a [API oficial Horizons](https://ssd-api.jpl.nasa.gov/doc/horizons.html)
 apenas durante a preparação. Não faz parte do build comum nem consulta a rede
@@ -52,6 +53,29 @@ O teste compara posição e velocidade de cada órbita na época com uma consult
 independente de vetores Horizons, além de verificar fechamento, limites radiais,
 referencial do planeta principal e busca aproximada. Essa comparação valida a
 conversão dos elementos; não mede o erro de propagação fora da época inicial.
+
+## Formas artísticas dos pequenos corpos
+
+Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Phobos, Deimos,
+Hyperion e Phoebe também recebem formas rochosas ilustrativas. Crateras,
+silhuetas, variações de material e microrelevo são procedurais, com semente por
+objeto, sem emendas de textura. 67P tem uma silhueta com dois lobos. Não são
+reconstruções fotogramétricas nem modelos de missão; a interface deixa essa
+distinção explícita. A orientação dessas formas também não é uma atitude medida.
+
+A geração conserva o volume equivalente ao raio nominal do catálogo e centra
+a malha no centro de volume. A câmera respeita a extensão visual da malha para
+não entrar nas pontas dos corpos alongados. Cada superfície tem 20.480 triângulos
+e cerca de 1,9 MiB de atributos; não há texturas adicionais residentes nem
+download. O microrelevo reduz frequências que ficariam menores que um pixel.
+Substituir essas formas por modelos observados, onde disponíveis, continua no
+roadmap com alta prioridade junto à fidelidade das luas.
+
+Nas vistas de conjunto, rótulos e órbitas de corpos secundários desaparecem
+suavemente quando se aglomeram na tela ou ficam muito distantes. Histerese
+evita alternância perto do limiar. Ao aproximar, eles reaparecem quando há
+espaço; a seleção pelo catálogo continua disponível. Sol e planetas mantêm
+suas marcações.
 
 ## Cinturões e nuvem de Oort
 

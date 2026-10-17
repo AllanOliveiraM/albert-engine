@@ -70,6 +70,12 @@ a câmera volta à Terra. Ocultar um objeto preserva seu estado e o acompanhamen
 Imagens externas e trajetórias de objetos externos desenhadas serão acrescentadas
 nos próximos cortes. O primeiro suporte a modelos está descrito abaixo.
 
+Ao terminar um `Focus` em um corpo, a câmera inicia uma órbita lenta de
+apresentação. Arraste/zoom local ou um comando `Orbit` interrompem esse movimento;
+`Orbit` com ângulos zero e `distance_scale=1` mantém o enquadramento e o deixa
+parado. Vistas de conjunto não giram automaticamente. Um novo `Focus` ou uma
+restauração de zoom inicia a apresentação novamente ao concluir a aproximação.
+
 ## Catálogo interno e importação automática
 
 A interface pesquisa apenas os corpos incluídos. Importações adicionais são feitas

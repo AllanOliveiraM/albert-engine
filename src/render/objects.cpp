@@ -1,6 +1,7 @@
 #include "objects.hpp"
 #include "core/model.hpp"
 #include "animation.hpp"
+#include "rocks.hpp"
 #include <numbers>
 using namespace threepp;
 threepp::Vector3 albert::renderPosition(core::Vector p,core::Vector origin){
@@ -43,7 +44,10 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
         if(!nodes_.contains(id)){
             if(o.appearance.shape==core::Shape::Builtin)continue;
             instances_[id]=o.instance;
-            if(o.appearance.shape==core::Shape::Model){
+            if(artisticRock(id)){
+                auto mesh=makeArtisticRock(*core::localOrbit(id));
+                mesh->scale.setScalar(float(o.radiusMeters*2/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);
+            }else if(o.appearance.shape==core::Shape::Model){
                 auto& asset=models_[o.appearance.modelId];
                 if(!asset.source){asset.source=registry.models().at(o.appearance.modelId);
                     for(const auto& part:asset.source->parts){auto geometry=BufferGeometry::create();geometry->setAttribute("position",FloatBufferAttribute::create(part.positions,3));geometry->setIndex(part.indices);

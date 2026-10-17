@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := render-build
-.PHONY: setup bootstrap build run test dist clean render-build render-run render-test render-dist render-clean assets assets-body
+.PHONY: setup bootstrap build run test dist clean render-build render-run render-test render-dist render-clean assets assets-body desktop
 
 JOBS ?= 2
 BODY ?= mercury
@@ -44,6 +44,9 @@ render-dist: assets render-test
 
 render-clean:
 	cmake -E rm -rf "build/$(PLATFORM)"
+
+desktop:
+	python3 scripts/register-desktop.py
 endif
 
 # Optional high-resolution library for hosting; requires Docker.

@@ -18,6 +18,12 @@ make run
 ```
 
 Se os pré-requisitos já estiverem instalados, basta executar `make render-build`.
+No Ubuntu/Linux, use `make desktop` uma vez após compilar para associar o ícone
+ao aplicativo e criar o atalho no menu do seu usuário. Isso registra somente
+metadados e o ícone em `~/.local/share`, sem instalar ou mover o executável.
+Reabra o programa; se já estava fixado na barra, remova o favorito antigo e
+fixe novamente. Repita o comando se mover a pasta do projeto ou do executável
+(`python3 scripts/register-desktop.py --executable /caminho/AlbertEngine`).
 `make run` compila apenas o alvo `render`; `make build` e `make test` também
 preparam os testes e o cliente de exemplo. Os wrappers Linux/Windows serializam
 configuração e compilação por pasta para evitar dois builds simultâneos.

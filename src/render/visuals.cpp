@@ -1,4 +1,5 @@
 #include "visuals.hpp"
+#include "eclipses.hpp"
 #include "platform.hpp"
 #include "asset_pack.hpp"
 #include "animation.hpp"
@@ -278,8 +279,8 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
 
     cloudMaterial_ = ShaderMaterial::create();
     cloudMaterial_->vertexShader = surfaceVertex;
-    cloudMaterial_->fragmentShader = std::string(cloudSampling) + R"(
-        uniform vec3 solarDirection, moonPosition;
+    cloudMaterial_->fragmentShader = std::string(cloudSampling) + eclipseShader() + R"(
+        uniform vec3 solarDirection, moonPosition, eclipseSunPosition;
         uniform float eclipseEnabled, visibility;
         varying vec2 vUv;
         varying vec3 vWorldNormal, vWorldPosition;
@@ -287,17 +288,15 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
             float density = cloudDensity(vUv);
             vec3 normal = normalize(vWorldNormal);
             float light = max(0.0,dot(normal,solarDirection));
-            vec3 toMoon = moonPosition-vWorldPosition;
-            float along = dot(toMoon,solarDirection);
-            float perpendicular = length(toMoon-solarDirection*along);
-            float eclipse = eclipseEnabled * step(0.0,along) * (1.0-smoothstep(0.26,0.29,perpendicular));
-            gl_FragColor = vec4(vec3(1.0,0.98,0.95)*(0.003+2.4*light*(1.0-eclipse)),density*0.88*visibility);
+            float transmission=mix(1.,visibleSun(vWorldPosition,eclipseSunPosition,695700./6378.137,moonPosition,1737.4/6378.137),eclipseEnabled);
+            gl_FragColor = vec4(vec3(1.0,0.98,0.95)*(0.003+2.4*light*transmission),density*0.88*visibility);
             #include <tonemapping_fragment>
             #include <encodings_fragment>
         }
     )";
     cloudMaterial_->uniforms.emplace("solarDirection",Uniform(Vector3(1,0,0)));
     cloudMaterial_->uniforms.emplace("moonPosition",Uniform(Vector3(0,0,60)));
+    cloudMaterial_->uniforms.emplace("eclipseSunPosition",Uniform(Vector3(0,0,23455)));
     cloudMaterial_->uniforms.emplace("eclipseEnabled",Uniform(1.f));
     cloudMaterial_->uniforms.emplace("visibility",Uniform(0.f));
     cloudMaterial_->transparent = true;
@@ -661,6 +660,7 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     nightMaterial_->uniforms.at("solarDirection").setValue(solarDirection);
     cloudMaterial_->uniforms.at("solarDirection").setValue(solarDirection);
     cloudMaterial_->uniforms.at("moonPosition").setValue(moon->position);
+    cloudMaterial_->uniforms.at("eclipseSunPosition").setValue(sun->position);
     cloudMaterial_->uniforms.at("eclipseEnabled").setValue(settings.shadows ? 1.f : 0.f);
     nightMaterial_->uniforms.at("cloudOpacity").setValue(displayedClouds_);
     earth->updateMatrixWorld();
