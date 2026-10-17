@@ -27,9 +27,9 @@ int main(int argc,char** argv){try{
     const Fixture fixtures[]{
 #include "measured_shape_fixture.inc"
     };
-    for(const std::string id:{"phobos","deimos","mimas","phoebe"}){
+    for(const std::string id:{"phobos","deimos","mimas","phoebe","hyperion"}){
         const auto raw=pack.payload("v1/"+id+"/shape.bin");auto model=albert::decodeShape(raw);const auto* definition=albert::core::surfaceBody(id);
-        require(model.picker->triangleCount()==size_t(id=="phobos"?274874:id=="deimos"?5040:id=="mimas"?786432:196608),"Measured plates were lost or fabricated");
+        require(model.picker->triangleCount()==size_t(id=="phobos"?274874:id=="deimos"?5040:id=="mimas"?786432:id=="phoebe"?196608:29268),"Measured plates were lost or fabricated");
         const auto* positions=model.geometry->getAttribute<float>("position"),*normals=model.geometry->getAttribute<float>("normal"),*uv=model.geometry->getAttribute<float>("uv");
         const auto* indices=model.geometry->getIndex();double maximum=0;
         for(int i=0;i<positions->count();++i){maximum=std::max(maximum,std::hypot(double(positions->getX(i)),double(positions->getY(i)),double(positions->getZ(i)))*albert::core::earthRadiusMeters);require(std::abs(std::hypot(normals->getX(i),normals->getY(i),normals->getZ(i))-1)<.001,"Measured mesh has invalid normals");}
@@ -40,5 +40,5 @@ int main(int argc,char** argv){try{
         auto rejects=[&](std::string bytes){bool rejected=false;try{albert::decodeShape(bytes);}catch(const std::exception&){rejected=true;}require(rejected,"Invalid measured geometry accepted");};
         rejects(raw.substr(0,raw.size()-1));auto bad=raw;bad[0]='X';rejects(bad);bad=raw;for(int j=8;j<12;++j)bad[j]=char(255);rejects(bad);bad=raw;bad[16]=0;bad[17]=0;bad[18]=char(192);bad[19]=char(127);rejects(bad);
     }
-    std::cout<<"Measured shapes: original physical bounds, normals, UV seam and 96 independent intersections (CSPICE DSKX02 and float64 Gaskell) OK\n";return 0;
+    std::cout<<"Measured shapes: original physical bounds, normals, UV seam and 120 independent intersections (CSPICE DSKX02 and float64 Gaskell/Thomas) OK\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

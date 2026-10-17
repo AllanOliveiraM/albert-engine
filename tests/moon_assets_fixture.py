@@ -38,4 +38,6 @@ mask=module.no_data(Image.fromarray(inside),spec['no_data'])
 assert mask[:9].all() and mask[9,10] and not mask[9,11] and not mask[20,30] and mask[29:].all() and not mask[10:29].any(),'Unobserved pixels misclassified'
 filled=np.asarray(module.published(Image.fromarray(framed),spec))[...,0]
 assert filled[20,30]==5 and (filled[~mask][filled[~mask]!=5]==120).all() and filled[mask].min()>=100 and filled[mask].max()<=120,'Gap fill invented detail or changed observations'
-print('Moon assets: material texture selection, source grid, GLB chunks, unsupported UV transforms, map registration, cropping and gap filling OK')
+# Uniform maps store linear albedo as sRGB, decoded again by the shader.
+assert np.abs(module.srgb(np.array([0.,.0031308,.21404114,1.]))-[0,.04044994,.5,1]).max()<1e-6,'sRGB encoding changed'
+print('Moon assets: material texture selection, source grid, GLB chunks, unsupported UV transforms, map registration, cropping, gap filling and uniform colour OK')

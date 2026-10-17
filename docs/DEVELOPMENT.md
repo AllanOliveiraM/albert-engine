@@ -191,7 +191,7 @@ O CI comum de branches/PRs não gera distribuições.
 Cada sistema recebe duas versões. A **completa** contém o executável na raiz,
 os assets e bibliotecas/licenças necessários, sem código, logs, cache ou README,
 e funciona offline. A **leve** (`-light`) é a mesma pasta sem `assets/visuals.pak`
-e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~67 MB) numa
+e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~68 MB) numa
 tela de carregamento e completa as demais resoluções em segundo plano (ver
 [ASSETS.md](ASSETS.md#download-por-níveis)). `scripts/light-dist.py` deriva a
 pasta leve da completa. Os containers baixados ficam numa release própria
@@ -612,14 +612,20 @@ Albert: borda oeste da imagem, deslocamento de longitude e latitude planetográf
 áreas sem observação (`no_data`: valor de preenchimento, ruído escuro ligado a ele
 até `dark_max`, limite sul observado e borda `fringe_px`). Essas áreas recebem a
 média local das observações vizinhas (~2°), dissolvida no cinza mediano; sombras
-isoladas continuam intactas, e `register-moon-map.py` correlaciona a mesma imagem. O campo `haze` (Titã) descreve albedo linear e altitude da
+isoladas continuam intactas, e `register-moon-map.py` correlaciona a mesma imagem.
+`kind: "uniform"` gera um mapa de cor única (`colour.albedo_linear`, gravado em sRGB)
+para uma forma medida sem mapa registrado (Hipérion). `orientation` substitui o
+pck00011 quando não há modelo IAU: polo e taxa fixos e fase W0 ancorada numa
+observação; `scripts/anchor-orientation.py <corpo>` reproduz W0 e confere a direção
+do Sol. A fixture de Hipérion em `moon_frames_fixture.inc` vem do CSPICE com essas
+constantes carregadas num PCK de texto. O campo `haze` (Titã) descreve albedo linear e altitude da
 névoa visível: `SolidBodies` mistura a névoa ao mapa por um fator animado e acrescenta
 uma casca aditiva integrada por raio; `showSurface()` alterna para o mapa da superfície. O gerador reamostra esses mapas com interpolação cúbica
 separável para latitude planetocêntrica e longitude leste −180…180. O campo
 `notice` do inventário vira o aviso exibido pela interface para aquela fonte.
 
-`scripts/moon_shapes.py` exporta DSK type 2 e tabelas vértice-faceta de Gaskell
-(PDS) para `shape.bin`: cabeçalho
+`scripts/moon_shapes.py` exporta DSK type 2, tabelas vértice-faceta de Gaskell e
+modelos de placas de Thomas (PDS) para `shape.bin`: cabeçalho
 `ALBMSH1\0`, contagens uint32, posições float32 em metros IAU e índices uint32,
 tudo little-endian. Verifica hash, corpo, frame, contagens e limites. Nas tabelas
 de Gaskell, descarta apenas vértices duplicados do cubo ICQ que nenhuma placa usa.
@@ -631,8 +637,9 @@ do eixo que o resto da placa (polos ICQ de Gaskell a 3–133 m do eixo) é trata
 polo: recebe a longitude da placa e fica fora do cálculo da emenda. Não recentra nem redimensiona.
 Os recortes desses corpos têm `textureOnly`, sem malha esférica ou máscara extra.
 
-`measured_shapes` lê o pacote real e compara 96 interseções independentes (CSPICE
-DSKX02 nos DSKs; float64 sobre as tabelas originais de Gaskell em Mimas e Febe),
+`measured_shapes` lê o pacote real e compara 120 interseções independentes (CSPICE
+DSKX02 nos DSKs; float64 sobre as tabelas originais de Gaskell em Mimas e Febe e de
+Thomas em Hipérion),
 contagens, raio, normais, emendas e rejeição de entradas malformadas. Para regenerar
 o fixture, com as fontes originais já disponíveis:
 

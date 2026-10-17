@@ -13,8 +13,8 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Completar Hipérion, Proteu e Nereida | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
-| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
+| **Alta — 1** | Completar Proteu e Nereida | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion com formas medidas (Hipérion sem mapa, orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
+| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
 | **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
 | **Alta — 5** | Validar GPU física, Windows nativo (inclui a versão leve e seus downloads) e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
@@ -75,15 +75,26 @@ as malhas ainda requer conferência cartográfica. A próxima fila é:
 
 1. ~~**Mimas**~~ — entregue em 17/10/2026: forma medida e mosaico registrado.
 2. ~~**Titã**~~ — entregue em 17/10/2026: névoa visível e superfície em 938 nm opcional.
-3. **Hipérion** (Febe entregue em 17/10/2026): modelo irregular e imagem próprios, substituindo o procedural.
+3. ~~**Hipérion e Febe**~~ — entregues em 17/10/2026: formas medidas no lugar do procedural.
 4. **Proteu:** modelo e cobertura de imagens disponíveis, explicitando lacunas.
 5. **Nereida:** representação limitada aos dados disponíveis, sem inventar detalhes observados.
 
-Os três corpos ainda sem mapas/modelos próprios embarcados são Hipérion, Proteu e
-Nereida. A forma artística e a esfera de referência
+Os dois corpos ainda sem modelos próprios embarcados são Proteu e Nereida. A forma artística e a esfera de referência
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — Hipérion com forma medida e orientação ilustrativa.** Modelo de placas de
+Thomas (PDS, Cassini ISS): 29.268 triângulos em metros, sem renormalizar, no lugar da
+rocha procedural. Sem mapa de superfície: cor uniforme medida na composição Cassini em
+cor natural (PIA08240), com albedo ~0,3. O modelo 3D da NASA/VTAD foi avaliado e
+descartado, porque nem a malha nem a textura dele correspondem ao relevo medido. A
+rotação é caótica e não tem modelo IAU: polo e taxa da solução Cassini de setembro de
+2005, com a fase ancorada no ponto subsolar observado naquele sobrevoo, identificados
+como ilustrativos no painel. Sem os assets, os corpos medidos voltam à rocha artística
+em vez de sumir. Validação: 27 testes Linux, 120 interseções independentes, frame contra
+CSPICE, OpenGL no Xvfb e no Wine e programa real focando Hipérion. Pacote das luas:
+73,85 MB; biblioteca reunida: 4,90 GB. Sem novas distribuições.
 
 **17/10 — Febe com forma medida e mapa Cassini.** Modelo de Gaskell (PDS, 208 imagens
 Cassini ISS), Q=128: 98.306 vértices e 196.608 triângulos em metros, sem renormalizar

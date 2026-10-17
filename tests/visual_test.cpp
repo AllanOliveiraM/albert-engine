@@ -46,6 +46,11 @@ void controls() {
         require(albert::solarVisibility({},V{0,0,149597870700},695700000.,V{0,0,350000000},1737400.)==0.,"Solar umbra did not reach Earth");
     }
     require(albert::artisticRock("67p")&&albert::artisticRock("halley")&&albert::artisticRock("vesta")&&!albert::artisticRock("moon")&&!albert::artisticRock("titan"),"Artistic rocks replaced a photographic or spherical moon");
+    {   // Measured small bodies are built-in solids; without their library assets they fall back to rocks.
+        albert::core::Scene registry;auto world=Scene::create();albert::SceneObjects objects(*world);auto solid=Mesh::create(SphereGeometry::create(.5f,8,4));
+        registry.include(*albert::core::localOrbit("hyperion"));registry.include(*albert::core::localOrbit("phoebe"));objects.bind("phoebe",solid);objects.sync(registry,0,{});
+        require(registry.get("hyperion").appearance.shape==albert::core::Shape::Builtin&&objects.nodes().contains("hyperion")&&objects.nodes().at("hyperion")!=solid&&objects.nodes().at("phoebe")==solid,"Measured body without assets vanished or replaced its bound solid");
+    }
     for(const auto id:{"67p","halley","vesta","pallas"}){
         const auto rock=albert::makeArtisticRock(*albert::core::localOrbit(id));const auto& p=rock->geometry()->getAttribute<float>("position")->array();
         double volume=0;float shortest=1e6f,longest=0;
@@ -350,7 +355,7 @@ void graphics() {
         require(!moons.uploading(),"Moon detail upload did not finish");moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);
         moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(moons.takeEviction(),"Moon detail stayed resident after focus changed");
     }
-    for(const std::string id:{"phobos","deimos","mimas","phoebe"}){
+    for(const std::string id:{"phobos","deimos","mimas","phoebe","hyperion"}){
         auto world=Scene::create();world->background=Color(0x000000);auto shape=albert::decodeShape(albert::visualAssetPack()->payload("v1/"+id+"/shape.bin"));auto geometry=shape.geometry;
         std::vector<albert::SurfaceAssets> maps;maps.push_back({id,rgba(140),height(0),{},std::move(shape)});albert::SolidBodies measured(*world,std::move(maps));
         albert::core::Scene registry;registry.include(*albert::core::localOrbit(id));albert::SceneObjects objects(*world);objects.bind(id,measured.nodes().at(id),measured.picker(id));objects.sync(registry,0,{});

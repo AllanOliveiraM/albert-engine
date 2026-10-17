@@ -36,7 +36,9 @@ com mapas Viking; o alinhamento das imagens sobre esses modelos ainda exige vali
 Mimas usa a forma medida de Gaskell e o mosaico Cassini em cores realçadas,
 reprojetado e alinhado à forma, com conferência por crateras catalogadas pela IAU.
 Febe usa a forma medida de Gaskell e o mapa Cassini de 2005; as áreas nunca
-observadas aparecem em cinza neutro, identificadas no painel.
+observadas aparecem em cinza neutro, identificadas no painel. Hipérion usa a forma
+medida de Thomas com a cor média medida pela Cassini, sem mapa de albedo; como sua
+rotação é caótica, a orientação é ilustrativa.
 Titã aparece como em luz visível, coberta pela névoa alaranjada; a superfície em
 infravermelho (938 nm) da Cassini é uma opção identificada no painel.
 Os oito planetas e a Lua preservam suas efemérides Horizons
@@ -84,7 +86,7 @@ estão disponíveis pela API. Esta versão ainda não autentica NTP com NTS;
 **As imagens estáticas ficam no computador, completas ou baixadas aos poucos.**
 Superfícies, luzes das cidades, relevo e referência solar formam uma biblioteca de
 aproximadamente **4,89 GB**. A versão completa a traz em um único `assets/visuals.pak`
-e funciona offline. A versão leve baixa ao abrir só o essencial (~67 MB, todos os
+e funciona offline. A versão leve baixa ao abrir só o essencial (~68 MB, todos os
 corpos em resolução global) e completa as demais resoluções em segundo plano, com
 o corpo em foco à frente; o canto inferior esquerdo mostra o andamento. Aproximar
 a câmera carrega recortes mais detalhados; a resolução máxima depende dos dados de

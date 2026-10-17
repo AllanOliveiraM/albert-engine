@@ -99,6 +99,9 @@ def registered(image,projection):
  channels=[cubic(cubic(np.asarray(band,dtype=np.float32),rows,0,False),cols,1,True) for band in image.split()]
  return Image.merge(image.mode,[Image.fromarray(np.clip(np.rint(c),0,255).astype(np.uint8)) for c in channels])
 
+def srgb(linear):
+ return np.where(linear<=.0031308,12.92*linear,1.055*np.power(linear,1/2.4)-.055)
+
 def prepare(offline=False):
  plan_path=ROOT/'assets/moon-sources.json';plan=json.loads(plan_path.read_text())
  root=ROOT/'asset-packs/moons';sources=root/'sources';public=root/'public'
@@ -107,16 +110,20 @@ def prepare(offline=False):
  if public.exists():shutil.rmtree(public)
  public.mkdir();layers=[];files=[]
  for body in plan['bodies']:
-  path=source_file(body,sources,offline)
-  if body.get('kind')=='image':
+  if body.get('kind')=='uniform':
+   # No observed map registered to the measured shape: one measured colour, no invented detail.
+   colour=tuple(int(v) for v in np.rint(255*srgb(np.array(body['colour']['albedo_linear']))))
+   image=Image.new('RGB',tuple(body['map_grid']),colour)
+  elif body.get('kind')=='image':
+   path=source_file(body,sources,offline)
    with Image.open(path) as source:
     if list(source.size)!=body['grid']:raise ValueError('Unexpected source image grid')
     image=published(source,body.get('projection',{}))
    if 'projection' in body:image=registered(image,body['projection'])
-  else:image=visual(path.read_bytes(),body['grid'])
+  else:image=visual(source_file(body,sources,offline).read_bytes(),body['grid'])
   record=image_tiles(public,body['id']+'-day',image);image.close()
   record['layer']['lighting']='Static '+body['credit']+' reference; not calibrated reflectance or elevation'
-  layers.append(record['layer']);files.extend(record['files']);print(body['id'],body['grid'],flush=True)
+  layers.append(record['layer']);files.extend(record['files']);print(body['id'],body.get('grid',body.get('map_grid')),flush=True)
   if 'shape_source' in body:
    from moon_shapes import export_shape
    shape=body['shape_source'];source_path=source_file(shape,sources,offline);destination=public/f"v1/{body['id']}/shape.bin"

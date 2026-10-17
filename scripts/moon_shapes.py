@@ -42,5 +42,20 @@ def export_gaskell(path,record,destination):
  if (len(vertices),len(plates))!=(record['vertices'],record['plates']) or len(vertices)>500000 or len(plates)>1000000:raise ValueError('Unexpected Gaskell counts')
  check_bounds(vertices,record);write_shape(destination,vertices,plates)
 
+def thomas_tables(path):
+ # PDS plate model (Thomas): "nv np", nv rows "x y z" in km, np rows "v1 v2 v3" (0-based).
+ with open(path) as source:
+  nv,nf=map(int,source.readline().split());vertices=np.loadtxt(source,max_rows=nv)
+  plates=np.loadtxt(source,max_rows=nf,dtype=np.int64)
+  if source.read().strip():raise ValueError('Trailing data in plate model')
+ if vertices.shape!=(nv,3) or plates.shape!=(nf,3):raise ValueError('Malformed plate model')
+ return vertices*1000,plates
+
+def export_thomas(path,record,destination):
+ vertices,plates=thomas_tables(path)
+ if plates.min()<0 or plates.max()>=len(vertices) or not np.isfinite(vertices).all():raise ValueError('Invalid plate model geometry')
+ if (len(vertices),len(plates))!=(record['vertices'],record['plates']) or len(vertices)>500000 or len(plates)>1000000:raise ValueError('Unexpected plate model counts')
+ check_bounds(vertices,record);write_shape(destination,vertices,plates)
+
 def export_shape(path,record,destination):
- {'dsk':export_dsk,'gaskell-vertex-facet':export_gaskell}[record.get('format','dsk')](path,record,destination)
+ {'dsk':export_dsk,'gaskell-vertex-facet':export_gaskell,'thomas-plate':export_thomas}[record.get('format','dsk')](path,record,destination)

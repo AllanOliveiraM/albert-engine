@@ -2,8 +2,8 @@
 """Regenerate independent ray intersections from the pinned raw shape models.
 
 Authoring only: NumPy + SpicePy 8.3.0, available in Dockerfile.assets.
-DSKs use CSPICE DSKX02; Gaskell vertex-facet tables use a separate float64
-parser and Moller-Trumbore. No network, renderer decoder or shape.bin is used.
+DSKs use CSPICE DSKX02; Gaskell vertex-facet and Thomas plate tables use a
+separate float64 parser and Moller-Trumbore. No network, renderer decoder or shape.bin is used.
 """
 import hashlib,json,pathlib
 import numpy as np
@@ -22,10 +22,15 @@ def dsk_intersections(path,source,rays):
    yield np.asarray(result[1])
  finally:spice.dascls(handle)
 
-def gaskell_intersections(path,rays):
- lines=path.read_text().split('\n');count=int(lines[0])
- vertices=np.array([[float(v) for v in line.split()[1:4]] for line in lines[1:1+count]])
- plates=np.array([[int(v)-1 for v in line.split()[1:4]] for line in lines[2+count:2+count+int(lines[1+count])]])
+def table_intersections(path,rays,thomas):
+ lines=path.read_text().split('\n')
+ if thomas:
+  # "nv np", then "x y z" and 0-based "v1 v2 v3" rows.
+  count,faces=map(int,lines[0].split());vertices=np.array([[float(v) for v in line.split()] for line in lines[1:1+count]])
+  plates=np.array([[int(v) for v in line.split()] for line in lines[1+count:1+count+faces]])
+ else:
+  count=int(lines[0]);vertices=np.array([[float(v) for v in line.split()[1:4]] for line in lines[1:1+count]])
+  plates=np.array([[int(v)-1 for v in line.split()[1:4]] for line in lines[2+count:2+count+int(lines[1+count])]])
  a=vertices[plates[:,0]];e1=vertices[plates[:,1]]-a;e2=vertices[plates[:,2]]-a
  for origin,ray in rays:
   p=np.cross(ray,e2);det=(e1*p).sum(1);valid=np.abs(det)>1e-12;inv=np.where(valid,1/np.where(valid,det,1),0)
@@ -34,16 +39,16 @@ def gaskell_intersections(path,rays):
   if not hit.any():raise ValueError('Reference ray missed the source model')
   yield origin+ray*t[hit].min()
 
-rows=['// Independent ray intersections in the original body frame, metres: CSPICE DSKX02 for DSKs, float64 Moller-Trumbore for Gaskell tables.']
+rows=['// Independent ray intersections in the original body frame, metres: CSPICE DSKX02 for DSKs, float64 Moller-Trumbore for Gaskell and Thomas tables.']
 for record in json.loads((ROOT/'assets/moon-sources.json').read_text())['bodies']:
  if 'shape_source' not in record:continue
  source=record['shape_source'];path=ROOT/'asset-packs/moons/sources'/source['filename']
  if path.stat().st_size!=source['bytes'] or hashlib.sha256(path.read_bytes()).hexdigest()!=source['sha256']:raise ValueError('Original shape hash/size mismatch')
  rng=np.random.default_rng(source['body'])
- distance={'phobos':40,'mimas':400,'phoebe':250}.get(record['id'],25);rays=[]
+ distance={'phobos':40,'mimas':400,'phoebe':250,'hyperion':400}.get(record['id'],25);rays=[]
  for _ in range(24):
   direction=rng.normal(size=3);direction/=np.linalg.norm(direction);rays.append((direction*distance,-direction))
- hits=gaskell_intersections(path,rays) if source.get('format')=='gaskell-vertex-facet' else dsk_intersections(path,source,rays)
+ form=source.get('format','dsk');hits=dsk_intersections(path,source,rays) if form=='dsk' else table_intersections(path,rays,form=='thomas-plate')
  for (origin,ray),hit in zip(rays,hits):
   vectors=[origin*1000,ray,hit*1000]
   rows.append('{"'+record['id']+'",'+','.join('{'+','.join(format(float(v),'.17g') for v in vector)+'}' for vector in vectors)+'},')

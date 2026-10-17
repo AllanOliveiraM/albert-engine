@@ -3,13 +3,14 @@
 **Estado em 17/10/2026 (manhã), continuação por Claude Opus 5.5.** Entregues nesta
 sessão: correções do Windows no CI, cache de LFS/compilação no CI, **Mimas**
 completo, o **download dos assets por níveis** (versão leve), correções da revisão
-do Codex, **Titã** (névoa visível + superfície em 938 nm) e **Febe** (forma Gaskell +
-mapa Cassini com lacunas preenchidas). Próximo: Hipérion → Proteu → Nereida; depois
-cometas. Revisão do Codex prevista ao concluir Hipérion (cobre Febe e Hipérion).
+do Codex, **Titã** (névoa visível + superfície em 938 nm), **Febe** (forma Gaskell +
+mapa Cassini com lacunas preenchidas) e **Hipérion** (forma Thomas, cor uniforme
+medida, orientação ilustrativa ancorada em 2005). Próximo: revisão do Codex sobre
+Febe + Hipérion → Proteu → Nereida; depois cometas.
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
-e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem três corpos pendentes (Hipérion, Proteu, Nereida).**
+e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem dois corpos pendentes (Proteu, Nereida).**
 Atualizar este arquivo ao concluir essa etapa, conforme pedido do Allan, e a cada
 entrega relevante.
 
@@ -100,7 +101,7 @@ extensão do VS Code; nesse caso pedir ao Allan para liberá-la, não abrir sess
 Decisão do Allan: versão leve baixa tudo, por **níveis de resolução**, com tela de
 loading só para o essencial e o resto em segundo plano, indicador minimalista no
 canto, retentativa e continuação; zoom limitado ao que chegou, nunca imagem
-inventada. `scripts/split-asset-pack.py` gera `essential.pak` (67 MB com Febe) + 18
+inventada. `scripts/split-asset-pack.py` gera `essential.pak` (68 MB com Febe e Hipérion) + 18
 containers `<corpo>-<nível>.pak`/`moons-<nível>.pak` e `catalog.json`;
 `AssetPack` indexa vários arquivos e limita cada camada ao maior nível completo;
 `AssetDownloads` (`src/render/asset_downloads.*`) baixa da release `assets-<id>`
@@ -194,15 +195,17 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
 - Eclipses Terra/Lua: disco solar finito, umbra/penumbra/antumbra e avermelhamento
   atmosférico aproximado documentado. Outros sistemas de eclipses ainda pendentes.
 - Somente Saturno tem anéis renderizados. Outros anéis continuam prioritários.
-- Formas artísticas próprias para Vesta, Pallas, Halley alongado, 67P bilobado e
-  Hipérion; crateras/material procedural identificados como arte. Não são
+- Formas artísticas próprias para Vesta, Pallas, Halley alongado e 67P bilobado;
+  crateras/material procedural identificados como arte. Fobos, Deimos, Febe e Hipérion
+  voltam à rocha artística só se a biblioteca não tiver nenhum asset deles. Não são
   reconstruções medidas. Coma/caudas ainda não implementadas.
 - Ícones de janela Linux/Windows e registro de atalho por usuário (`make desktop`).
   O comando não instala o executável. GPU física/Windows nativo ainda exigem validação.
 
 ## Luas — qualidade real e lacunas
 
-22 das 25 luas têm imagens próprias, incluindo a Lua terrestre. As 21 adicionais:
+22 das 25 luas têm imagens próprias, incluindo a Lua terrestre; Hipérion tem forma
+medida sem mapa. As 21 adicionais com mapa:
 
 | Grupo | Corpos / fonte atual |
 | --- | --- |
@@ -256,6 +259,25 @@ de dois erros-padrão (melhor: k 1,00, +2°, 0,118), então a grade publicada fo
 exato" para esse teste pareado; Mimas continua aprovado (0,514, 83/84). O ajuste de
 bordas de crateras do Gazetteer não serve em Febe (MAD ~5°: crateras de 30–100 km num
 corpo de 213 km); o script agora imprime a dispersão.
+
+Hipérion: placas de Thomas (`hyperion_30k_plt.tab`, PDS doi:10.26033/ewy3-jy61),
+14.636 vértices/29.268 placas, índices a partir de zero, km; raio máximo 184.616,033 m,
+volume equivalente a 136,25 km; eixo longo em +Z; todas as placas voltadas para fora da
+origem. `kind: "uniform"`: cor única (0,352; 0,293; 0,220) lineares = cromaticidade do
+disco em PIA08240 (cor natural) com luminância 0,3 (estimativas 0,2–0,44). **O modelo
+VTAD (`hyperion.glb`) foi descartado:** ajuste por Gauss-Newton em resíduos radiais (24
+partidas, escala 0,896) só reproduz a forma geral (mediana 4,4 km, RMS 8,2 km;
+espelhado não melhora) e nem relevo nem textura VTAD correlacionam com o relevo de
+Thomas (0,02–0,05; autoteste 0,999). Código da avaliação não versionado (descrito aqui).
+Orientação ilustrativa (`orientation` no inventário; `scripts/anchor-orientation.py`):
+polo 299,8°/58,7° e 72°/dia (solução 2005/268 17:20–269/02:18 de Bauer & Thomas 2007,
+que dá 11,29° de latitude subsolar contra 11,11° do modelo) e W0 = 200,4161° ancorado
+no ponto subsolar de N1506385183 (longitudes do sobrevoo reproduzidas em 0,01°).
+Direção do Sol pelos elementos de Standish, conferida pelas outras soluções publicadas
+(−13,98/26,27/−43,66 contra −14,1/27,0/−43,7). Fixture CSPICE com essas constantes num
+PCK de texto (época 2440000 trocada por 2005-09-26: 72°/dia × 11.545 d = voltas inteiras).
+Em fase baixa Hipérion parece liso: falta o contraste de albedo; projetar imagens Cassini
+sobre a forma exigiria kernels SPICE de apontamento (trabalho futuro).
 A mesma técnica pode validar os mosaicos Viking de Fobos/Deimos (ainda não feito).
 
 Orientações IAU `pck00011` e termos periódicos/quadráticos foram testados contra
@@ -270,8 +292,7 @@ aproximada de dois corpos. Planetas e Lua preservam os provedores existentes.
    principal H = 60 km e camada alta a 400 km com Henyey-Greenstein g = 0,65); opção
    "Superfície em infravermelho (938 nm)" com PIA22770, registro conferido em 12
    feições. `NaturalBody::hazeAlbedo/hazeAltitudeMeters`, `SolidBodies::showSurface`.
-3. **Hipérion** (Febe entregue): forma Thomas plate e textura VTAD reprojetada após
-   alinhar as malhas; orientação ilustrativa (rotação caótica), identificada como tal.
+3. ~~Hipérion e Febe~~ — entregues em 17/10/2026 (ver acima).
 4. **Proteu:** fontes disponíveis e cobertura limitada explicitadas.
 5. **Nereida:** poucos dados; visual artisticamente plausível e identificado
    quando necessário, sem prometer fotorealismo observado indisponível.
@@ -305,7 +326,7 @@ GPU física, Windows real, viagens extensas e limites de RAM/VRAM.
   reproduzível com fontes fixadas por hash. SpicePy 8.3.0 somente na autoria,
   sem dependência SPICE no executável. `shape.bin` indexado little-endian:
   `ALBMSH1\0`, contagens uint32, xyz float32 em metros IAU, índices uint32.
-- `scripts/reference-moon-shapes.py`: 96 raios independentes (CSPICE/DSKX02 nos
+- `scripts/reference-moon-shapes.py`: 120 raios independentes (CSPICE/DSKX02 nos
   DSKs, float64 com parser próprio na tabela Gaskell); `tests/measured_shape_fixture.inc`.
 - `scripts/moon_shapes.py` exporta DSK (SpicePy) e Gaskell vértice-faceta (só NumPy).
   Inventário aceita `projection` (registro de mapas publicados) e `notice` (aviso
@@ -323,10 +344,10 @@ Esse empacotamento dificulta abertura casual; não é DRM.
 Originais e intermediários ficam em `asset-packs/`, ignorados. Não espalhar cópias
 de imagens pelo projeto; documentação/capas ficam em `docs/images/`.
 
-Pacote adicional das 21 luas: **73.307.457 bytes**. Biblioteca reunida neste build:
-**4.898.008.508 bytes** (~4,90 GB decimal); essencial da versão leve: 67,1 MB (era 63,3; a malha de Febe vai no essencial). Ao regenerar com Febe, as 659 entradas anteriores
-saíram idênticas; só `SOURCES.json` mudou e entraram 27 entradas de Febe. Não confundir disco com RAM/VRAM:
-recortes são limitados e descartáveis; as quatro malhas/BVH medidas permanecem residentes.
+Pacote adicional das 22 luas: **73.849.447 bytes**. Biblioteca reunida neste build:
+**4.898.550.498 bytes** (~4,90 GB decimal); essencial da versão leve: 67,7 MB (era 63,3; as malhas de Febe e Hipérion vão no essencial). Ao regenerar com Hipérion, as 686 entradas anteriores
+saíram idênticas; só `SOURCES.json` mudou e entraram 4 entradas de Hipérion. Não confundir disco com RAM/VRAM:
+recortes são limitados e descartáveis; as cinco malhas/BVH medidas permanecem residentes.
 Após mudar o inventário, regenerar pacote/hashes coerentes. Nunca versionar
 originais enormes nem saltar a verificação de integridade para acelerar.
 
@@ -410,6 +431,11 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
   malha, pico RSS 1,24 GB (`build/phoebe-preview-*.png`). A regressão do polo falha no
   `shapes.cpp` anterior.
 
-Próxima ação concreta: **Hipérion** (parser Thomas plate, alinhamento VTAD→Thomas,
-orientação ilustrativa), depois a revisão do Codex sobre Febe + Hipérion, mantendo
-inventário, pacote, testes e documentação sincronizados.
+- Hipérion: 27 CTests Linux (120 interseções, IAU_HYPERION ilustrativo contra CSPICE,
+  fallback para rocha sem assets, que falha no `objects.cpp` anterior); OpenGL no Xvfb;
+  MinGW + Wine (`shape_test`, `bodies_test`, `visual_test` com e sem gráficos); app real
+  no Xvfb com foco/zoom/detalhe, câmera fora da malha, pico RSS 1,24 GB
+  (`build/hyperion-preview-*.png`).
+
+Próxima ação concreta: revisão do Codex sobre Febe + Hipérion; depois **Proteu**,
+mantendo inventário, pacote, testes e documentação sincronizados.

@@ -162,6 +162,31 @@ restringem o registro. A malha usa o mesmo meridiano e a mesma rotação do pck0
 o polo difere 0,08° em declinação. `scripts/register-moon-map.py phoebe --search`
 reproduz a análise.
 
+Hipérion usa o modelo de placas de [Thomas](https://doi.org/10.26033/ewy3-jy61)
+(PDS, imagens Cassini ISS): 14.636 vértices, 29.268 triângulos, arestas de 3,4–6,0 km,
+raio máximo de 184,616 km e volume equivalente a uma esfera de 136,25 km. A incerteza
+é inferior a 1 km no lado melhor imageado e chega a 6 km no oposto; crateras pequenas
+não estão representadas de forma confiável. **Não há mapa de superfície**: a malha
+recebe uma cor uniforme, medida no disco iluminado da composição Cassini em cor
+natural [PIA08240](https://photojournal.jpl.nasa.gov/catalog/PIA08240) e escalada para
+albedo geométrico de ~0,3 (as estimativas publicadas vão de 0,2 a 0,44). O relevo e as
+sombras vêm só da forma medida; o contraste real de albedo (material escuro no fundo
+das crateras) não aparece. O modelo 3D da NASA/VTAD foi avaliado e descartado: depois
+do melhor ajuste de escala, rotação e translação sobre as placas de Thomas, a malha
+dele só reproduz a forma geral (resíduo radial mediano de 4,4 km, RMS de 8,2 km), e
+nem o relevo nem a textura dele se correlacionam com o relevo medido (0,02–0,05 em 84
+regiões, contra 0,999 no autoteste); suas crateras cairiam fora das reais.
+
+A rotação de Hipérion é caótica, e o pck00011 não traz modelo de orientação. A
+orientação do Albert é **ilustrativa**: mantém fixa a solução instantânea medida pela
+Cassini no sobrevoo de 25–26/09/2005 (polo em AR 299,8°, Dec 58,7°, 72°/dia; J. Bauer
+e P. Thomas, 2007), que define o eixo +Z do próprio modelo de Thomas, e ancora a fase
+no ponto subsolar da imagem N1506385183, listado no documento PDS do modelo. Ela
+reproduz a latitude subsolar observada com diferença de 0,2° e as longitudes ao longo
+daquele sobrevoo com 0,01°; em outras datas, a orientação real difere arbitrariamente.
+`python3 scripts/anchor-orientation.py hyperion` reproduz a fase e confere a direção
+do Sol pelas outras soluções publicadas.
+
 Titã aparece por padrão como em **luz visível**: uma névoa opaca alaranjada, sem
 superfície visível. A cor vem da cromaticidade do disco iluminado na composição em
 cor natural Cassini [PIA06230](https://pds-rings.seti.org/press_releases/pages/PIA06xxx/PIA06230.html)
@@ -187,7 +212,7 @@ não baixa esses mapas; a leve traz o nível de 1024 px de cada lua no container
 essencial e baixa os níveis seguintes em `moons-2` e `moons-3`. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **73.307.457 bytes**.
+todas as luas na RAM. O pacote adicional ocupa **73.849.447 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -195,17 +220,17 @@ Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 ficam fora do Git em `asset-packs/moons/`; o pacote otimizado e os hashes são
 versionados. O processo preserva os pacotes de Terra/Lua/Sol e planetas.
 
-Hyperion continua artístico. Fobos/Deimos já têm mapas, modelos medidos e orientação IAU;
+Fobos/Deimos já têm mapas, modelos medidos e orientação IAU;
 faltam validar o registro das imagens Viking, como já feito para Mimas, e melhorar
 as órbitas. Nereida e Proteus permanecem
 sem mapas próprios embarcados.
 
 ## Formas artísticas dos pequenos corpos
 
-Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Hyperion também
-recebe uma forma rochosa ilustrativa. Fobos, Deimos e Febe usam o modelo
-medido acima quando a biblioteca contém as malhas; elipsoides IAU e a forma artística permanecem
-apenas como fallback para bibliotecas antigas sem esses assets. Crateras,
+Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Fobos, Deimos,
+Febe e Hipérion usam o modelo medido acima quando a biblioteca contém as malhas.
+Numa biblioteca antiga sem as malhas, usam o elipsoide IAU (Hipérion, uma esfera)
+sob o mapa; sem nenhum asset do corpo, a forma rochosa ilustrativa. Crateras,
 silhuetas, variações de material e microrelevo são procedurais, com semente por
 objeto, sem emendas de textura. 67P tem uma silhueta com dois lobos. Não são
 reconstruções fotogramétricas nem modelos de missão; a interface deixa essa

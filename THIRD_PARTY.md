@@ -51,7 +51,9 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   P. Thomas / ESA SPICE v0.2 (Deimos); Gaskell, R.W. (2020), Gaskell Mimas Shape
   Model V1.0, NASA PDS, https://doi.org/10.26033/22n9-v553 (Mimas); Gaskell, R.W.
   (2013), Gaskell Phoebe Shape Model V1.0, NASA PDS,
-  urn:nasa:pds:gaskell.phoebe.shape-model::1.0 (Febe).
+  urn:nasa:pds:gaskell.phoebe.shape-model::1.0 (Febe); Thomas, P., Joseph, J. e
+  Ansty, T. (2018), Saturn Small Moon Shape Models V1.0, NASA PDS,
+  https://doi.org/10.26033/ewy3-jy61 (Hipérion).
 - NASA/JPL-Caltech/Space Science Institute/Lunar and Planetary Institute, mosaico
   de Paul Schenk: mapa global de Mimas PIA18437 em cores realçadas,
   https://science.nasa.gov/photojournal/color-maps-of-mimas-2014.
@@ -60,6 +62,10 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   medida em NASA/JPL/Space Science Institute PIA06230.
 - NASA/JPL/Space Science Institute (Cassini ISS): mapa de Febe PIA07775 (2005),
   https://photojournal.jpl.nasa.gov/catalog/PIA07775.
+- NASA/JPL/Space Science Institute (Cassini ISS): cor de Hipérion medida na composição
+  em cor natural PIA08240, https://photojournal.jpl.nasa.gov/catalog/PIA08240; polo e
+  taxa de rotação da solução instantânea de 2005 em J. Bauer e P. Thomas,
+  "Hyperion: the sponge moon" (JPL/Cornell, 2007).
 
 Dados dinâmicos:
 

@@ -223,6 +223,70 @@
       "notice": "Luz visivel: nevoa alaranjada com cor de imagem Cassini em cor natural; a superficie so aparece em infravermelho. Opcao abaixo: superficie em 938 nm."
     },
     {
+      "id": "hyperion",
+      "name": "Hiperion",
+      "horizons_id": 607,
+      "radius_m": 138600,
+      "kind": "uniform",
+      "map_grid": [
+        1024,
+        512
+      ],
+      "colour": {
+        "albedo_linear": [
+          0.3522,
+          0.2926,
+          0.2201
+        ],
+        "reference": "Chromaticity of the lit disc in the Cassini ISS natural colour composite PIA08240 (red/green/blue filters, 28 June 2006; sRGB decoded, pixels above 10% of the peak luminance: linear RGB (0.441, 0.367, 0.276)), scaled to a visible geometric albedo of about 0.3 (published estimates range from about 0.2 to 0.44). Source https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia08/pia08240/PIA08240.tif, 190648 bytes, SHA-256 c2867245e4102b3096dd9ad9b23aef4ceaacf3677358974b75361bafc71139b4."
+      },
+      "credit": "Colour measured in NASA/JPL/Space Science Institute PIA08240 (Cassini ISS natural colour)",
+      "product": "https://photojournal.jpl.nasa.gov/catalog/PIA08240",
+      "limits": "No surface map: one uniform colour over the measured shape, so the real albedo contrast (dark material in crater floors) is not shown; the relief and its shading come from the plate model alone. The NASA VTAD 3D model (Hyperion_1_1000.glb) was evaluated and rejected on 2026-10-17: after the best scale/rotation/translation fit onto these plates (24 principal-axis starts, Gauss-Newton on radial residuals) its mesh matches only the overall shape (radial residual median 4.4 km, RMS 8.2 km, scale 0.896, a mirrored fit is no better), and neither its relief nor its texture correlates with the measured relief (mean 0.02-0.05 over 84 regions at 3-9 deg scales, against 0.999 in a self-test), so its craters would not fall on real ones.",
+      "orientation": {
+        "illustrative": true,
+        "pole_ra_deg": 299.8,
+        "pole_dec_deg": 58.7,
+        "rate_deg_per_day": 72,
+        "w0_deg": 200.4161,
+        "anchor": {
+          "image": "N1506385183_1",
+          "utc": "2005-09-26T00:19:43",
+          "tdb_minus_utc_s": 64.184,
+          "subsolar_lat_deg": 11.11,
+          "subsolar_west_lon_deg": 250.02
+        },
+        "reference": "Hyperion rotates chaotically and pck00011 has no orientation model. Illustrative: the instantaneous spin solution for 2005 day 268 17:20 - day 269 02:18 UTC (pole RA 299.8 deg, Dec 58.7 deg, 72 deg/day; J. Bauer and P. Thomas, 'Hyperion: the sponge moon', JPL/Cornell, 28 Aug 2007, table of Cassini ISS control-point spin solutions) is held fixed, and the phase is anchored on the sub-solar point of image N1506385183 in the shape model's own frame (Table 1 of the PDS document; UTC from the spacecraft clock count, within about a minute). It reproduces the observed sub-solar latitude within 0.2 deg and longitudes over that flyby within 0.01 deg; at other dates the real orientation differs arbitrarily. scripts/anchor-orientation.py reproduces W0."
+      },
+      "notice": "Forma medida (Thomas/Cassini) com cor uniforme medida em imagem Cassini de cor natural; sem mapa de albedo. Rotacao caotica: orientacao ilustrativa, ancorada no sobrevoo de 2005.",
+      "shape_source": {
+        "format": "thomas-plate",
+        "filename": "hyperion_30k_plt.tab",
+        "url": "https://sbnarchive.psi.edu/pds4/cassini/saturn_satellite_shape_models_V1_0/data/hyperion_30k_plt.tab",
+        "bytes": 2195250,
+        "sha256": "cf90156a297d3078375583a99c2367bfe265bc5175710772e173544a25c37002",
+        "body": 607,
+        "frame": "Thomas Hyperion body-fixed frame: +Z the spin axis observed on 2005 day 268, +X the prime meridian (crater Bahloo at 196 deg W); no IAU model",
+        "vertices": 14636,
+        "plates": 29268,
+        "bounds_m": [
+          [
+            -122446.449,
+            -137747.215,
+            -172734.89
+          ],
+          [
+            130031.237,
+            129365.59,
+            168528.763
+          ]
+        ],
+        "bounding_radius_m": 184616.03339554372,
+        "credit": "Thomas, P., Joseph, J., and Ansty, T. (2018). Saturn Small Moon Shape Models V1.0, urn:nasa:pds:saturn_satellite_shape_models::1.0, NASA Planetary Data System, doi:10.26033/ewy3-jy61; Cassini ISS images",
+        "limits": "Plate model with 29,268 plates (edges about 3.4-6.0 km); origin at the model centre of figure within about 200 m. Positions on the best-imaged side (roughly 140-300 deg W near the equator) are uncertain by under 1 km, on the opposite side by up to 6 km; small craters are not reliably represented. Original coordinates converted from km to metres without rescaling or recentring."
+      }
+    },
+    {
       "id": "iapetus",
       "filename": "iapetus.glb",
       "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/Iapetus_1_1471.glb",
