@@ -624,5 +624,14 @@ Horizons levou 1–9 s por tabela independentemente do tamanho; por isso tabelas
 0,1 m de consulta independente, primeiras posições 0,6 s após o salto, reprodução
 contínua a 1 h/s, 1 dia/s e 1 semana/s para trás, limite de 2100, volta ao vivo.
 
-Próxima ação concreta: revisão do Codex sobre a data simulada; depois **coma/caudas**
-(notas acima), validando em datas de periélio, e a validação em Windows nativo (Alta 5).
+Revisão do Codex sobre a data simulada (17/10, `924cfad..e6cb123`): dois P2, ambos
+confirmados e corrigidos. (1) `queryHorizons` passava `forceRefresh=!bootstrap`,
+ignorando memória e disco ao revisitar datas: agora usa os caches, e a memória do
+provedor guarda 96 tabelas (duas datas completas); regressão no `providers_test`, e
+no programa real a revisita a 1969 caiu de 34 s para 1,8 s. (2) O movimento próprio
+das estrelas só era aplicado na abertura: agora vai no shader (`motion` + `years`,
+`setStarEpoch` a cada quadro); regressão no `astronomy_test` com Toliman em 1900
+(6,2′ desde J2000). O achado anterior dos anéis foi dado como corrigido.
+
+Próxima ação concreta: **coma/caudas** (notas acima), validando em datas de periélio,
+e a validação em Windows nativo (Alta 5).

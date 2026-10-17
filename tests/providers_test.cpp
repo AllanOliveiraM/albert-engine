@@ -106,6 +106,9 @@ int main(int argc,char** argv){try{
     require(provider.query(request).fromCache&&calls==1,"Repeated query ignored bounded cache");
     mono=301;require(!provider.query(request).fromCache&&calls==2,"Expired provider cache reused");
     std::jthread one([&]{auto q=request;q.target=299;provider.query(q);});std::jthread two([&]{auto q=request;q.target=599;provider.query(q);});one.join();two.join();require(maximum==1,"Horizons requests ran concurrently");
+    // Positions and paths of two simulated dates (18 tables each) stay cached together.
+    {const int before=calls;for(int target=1;target<=40;++target){auto q=request;q.target=1000+target;provider.query(q);}
+     auto revisit=request;revisit.target=1001;require(provider.query(revisit).fromCache&&calls==before+40,"Revisited date left the memory cache");}
     albert::DownloadProgress cancelled;cancelled.cancelled=true;rejects([&]{provider.query(request,&cancelled);});
     Horizons incomplete([](const std::string&,albert::DownloadProgress*){return "$$SOE\n2451545.01,date,1,2,3,4,5,6,\n2451545.02,date,1,2,3,4,5,6,\n$$EOE";},[]{return 946728000.;},[]{return 0.;});
     rejects([&]{incomplete.query(request);});

@@ -111,6 +111,10 @@ instante coberto; após uma nova data não há diferença conhecida. Quando uma
 tabela chega, a diferença entra em 0,6 s. O painel e a API (`approximate_positions`)
 indicam esse estado; acima de 6 h/s ele é permanente até pausar ou desacelerar.
 
+As tabelas ficam em cache (memória do provedor com 96 tabelas e disco), então
+voltar a uma data já visitada não repete consultas. As estrelas recebem o movimento
+próprio do catálogo para a data, no shader.
+
 Os trajetos orbitais ficam centrados no instante e são buscados de novo após 60
 dias simulados, no máximo a cada 30 s e só até 6 h/s. Fora das amostras, o destaque
 de passado e futuro é dobrado por revoluções inteiras (até três); além disso fica

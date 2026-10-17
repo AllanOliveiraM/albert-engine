@@ -1,8 +1,13 @@
 #include "visuals.hpp"
 
+#include <array>
 #include <cmath>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 int main(int argc, char** argv) {
     try {
@@ -42,6 +47,24 @@ int main(int argc, char** argv) {
         if (std::abs(ra - 6.75248f) > .001f || std::abs(dec + 16.7161f) > .01f) {
             throw std::runtime_error("Direcao de Sirius incorreta");
         }
+        // Proper motion follows the simulated date: Toliman (Alpha Centauri B, ~3.7 arcsec
+        // a year) moves about 6.2 arcmin by 1900,
+        // from its catalogue row, against the attributes and epoch the shader uses.
+        std::ifstream csv(argv[1]);std::string line;std::getline(csv,line);size_t index=0;std::vector<double> row;
+        for(;std::getline(csv,line);++index)if(line.find(",Toliman,")!=std::string::npos){std::istringstream fields(line);std::string field;while(std::getline(fields,field,','))row.push_back(field.empty()?0:std::atof(field.c_str()));break;}
+        if(row.size()!=10)throw std::runtime_error("Toliman ausente do catalogo");
+        const double jd1900=2415020.5,years=(jd1900-2451545.)/365.25;
+        albert::setStarEpoch(*stars,jd1900);
+        const auto motion=stars->geometry()->getAttribute<float>("motion");
+        const float shaderYears=stars->material()->as<threepp::ShaderMaterial>()->uniforms.at("years").value<float>();
+        if(std::abs(shaderYears-years)>1e-4)throw std::runtime_error("Epoca estelar nao aplicada");
+        auto direction1900=[&](double x,double y,double z){const double r=std::sqrt(x*x+y*y+z*z);return std::array<double,3>{x/r,y/r,z/r};};
+        const auto expected=direction1900(row[4]+row[7]*years,row[6]+row[9]*years,-(row[5]+row[8]*years));
+        const auto drawn=direction1900(position->getX(index)+motion->getX(index)*shaderYears,position->getY(index)+motion->getY(index)*shaderYears,position->getZ(index)+motion->getZ(index)*shaderYears);
+        const auto j2000=direction1900(position->getX(index),position->getY(index),position->getZ(index));
+        const double error=std::acos(std::min(1.,expected[0]*drawn[0]+expected[1]*drawn[1]+expected[2]*drawn[2]))*180/3.14159265358979*60;
+        const double moved=std::acos(std::min(1.,j2000[0]*drawn[0]+j2000[1]*drawn[1]+j2000[2]*drawn[2]))*180/3.14159265358979*60;
+        if(error>.01||moved<5.9||moved>6.4)throw std::runtime_error("Movimento proprio estelar incorreto");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

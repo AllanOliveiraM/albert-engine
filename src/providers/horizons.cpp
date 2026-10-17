@@ -104,7 +104,7 @@ Table Horizons::query(Query request,DownloadProgress* progress){
     if(points.front().jdTDB>start+1e-7||points.back().jdTDB<end-1e-7)throw std::runtime_error("Horizons table does not cover requested interval");
     Table result{std::move(points),impl_->utcNow(),false,"NASA/JPL Horizons"};
     saveResponse(impl_->directory,group,{response,result.fetchedUtc},4*1024*1024);
-    {std::lock_guard cacheLock(impl_->mutex);if(impl_->cache.size()>=32){auto oldest=std::min_element(impl_->cache.begin(),impl_->cache.end(),[](const auto& a,const auto& b){return a.second.lastUse<b.second.lastUse;});impl_->cache.erase(oldest);}const double now=impl_->monotonicNow();impl_->cache[key]={result,now,now,ttl};}
+    {std::lock_guard cacheLock(impl_->mutex);if(impl_->cache.size()>=96){auto oldest=std::min_element(impl_->cache.begin(),impl_->cache.end(),[](const auto& a,const auto& b){return a.second.lastUse<b.second.lastUse;});impl_->cache.erase(oldest);}const double now=impl_->monotonicNow();impl_->cache[key]={result,now,now,ttl};}
     return result;
 }
 Horizons& horizons(){static Horizons value({}, {}, {},dataDirectory()/"ephemerides");return value;}

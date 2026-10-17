@@ -726,13 +726,16 @@ void albert::PlanetVisuals::updateBorderMaterial(ShaderMaterial& material,const 
     material.uniforms.at("surfaceOffset").setValue(distance>2.1f ? .0008f : std::max(.00005f,(distance-1.f)*.00025f));
 }
 
+void albert::setStarEpoch(Points& stars, double jdTDB) {
+    stars.material()->as<ShaderMaterial>()->uniforms.at("years").setValue(static_cast<float>((jdTDB - 2451545.) / 365.25));
+}
+
 std::shared_ptr<Points> albert::makeStarField(const std::filesystem::path& catalogue, double jdTDB) {
     std::ifstream file(catalogue);
     if (!file) throw std::runtime_error("Catalogo estelar local indisponivel");
     std::string line;
     std::getline(file, line); // Header; generated CSV never quotes numeric fields.
-    const double years = (jdTDB - 2451545.) / 365.25;
-    std::vector<float> positions, colors, sizes;
+    std::vector<float> positions, motions, colors, sizes;
     while (std::getline(file, line)) {
         std::istringstream row(line);
         std::vector<std::string> fields;
@@ -741,12 +744,16 @@ std::shared_ptr<Points> albert::makeStarField(const std::filesystem::path& catal
         if (fields.size() != 10) throw std::runtime_error("Catalogo estelar invalido");
         const float magnitude = std::stof(fields[2]);
         const float bv = fields[3].empty() ? 0.65f : std::clamp(std::stof(fields[3]), -0.4f, 2.f);
-        const double x = std::stod(fields[4]) + std::stod(fields[7]) * years;
-        const double y = std::stod(fields[5]) + std::stod(fields[8]) * years;
-        const double z = std::stod(fields[6]) + std::stod(fields[9]) * years;
+        // J2000 position and space motion per Julian year (same units). Both are
+        // scaled so the position lies on the sky sphere: the direction of
+        // position + motion*years is unchanged by the common scale.
+        const double x = std::stod(fields[4]), y = std::stod(fields[5]), z = std::stod(fields[6]);
+        const double vx = std::stod(fields[7]), vy = std::stod(fields[8]), vz = std::stod(fields[9]);
         const double radius = std::sqrt(x*x + y*y + z*z);
-        if (!std::isfinite(radius) || radius <= 0) throw std::runtime_error("Posicao estelar invalida");
-        positions.insert(positions.end(), {static_cast<float>(80000*x/radius), static_cast<float>(80000*z/radius), static_cast<float>(-80000*y/radius)});
+        if (!std::isfinite(radius) || radius <= 0 || !std::isfinite(vx + vy + vz)) throw std::runtime_error("Posicao estelar invalida");
+        const double scale = 80000 / radius;
+        positions.insert(positions.end(), {static_cast<float>(scale*x), static_cast<float>(scale*z), static_cast<float>(-scale*y)});
+        motions.insert(motions.end(), {static_cast<float>(scale*vx), static_cast<float>(scale*vz), static_cast<float>(-scale*vy)});
         // Photometric flux is 10^(-0.4m). Compress its dynamic range for a
         // display; angular point sizes are an artistic visibility aid.
         const float flux = std::pow(10.f, -0.4f * (magnitude + 1.46f));
@@ -759,6 +766,7 @@ std::shared_ptr<Points> albert::makeStarField(const std::filesystem::path& catal
     if (positions.empty()) throw std::runtime_error("Catalogo estelar vazio");
     auto geometry = BufferGeometry::create();
     geometry->setAttribute("position", FloatBufferAttribute::create(std::move(positions), 3));
+    geometry->setAttribute("motion", FloatBufferAttribute::create(std::move(motions), 3));
     geometry->setAttribute("color", FloatBufferAttribute::create(std::move(colors), 3));
     geometry->setAttribute("pointSize", FloatBufferAttribute::create(std::move(sizes), 1));
     auto material = ShaderMaterial::create();
@@ -766,13 +774,16 @@ std::shared_ptr<Points> albert::makeStarField(const std::filesystem::path& catal
     material->transparent = true;
     material->depthWrite = false;
     material->toneMapped = false;
+    material->uniforms.emplace("years", Uniform(0.f));
     material->vertexShader = R"(
         attribute float pointSize;
+        attribute vec3 motion;
+        uniform float years;
         varying vec3 vColor;
         void main() {
             vColor = color;
             gl_PointSize = pointSize;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(normalize(position + motion * years) * 80000.0, 1.0);
         }
     )";
     material->fragmentShader = R"(
@@ -787,6 +798,7 @@ std::shared_ptr<Points> albert::makeStarField(const std::filesystem::path& catal
     )";
     auto points = Points::create(geometry, material);
     points->frustumCulled = false;
+    setStarEpoch(*points, jdTDB);
     return points;
 }
 

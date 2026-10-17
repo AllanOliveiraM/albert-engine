@@ -101,7 +101,10 @@ private:
     std::uint64_t detailGeneration_=0;int sunDetailLevel_=-1,uploadingSunLevel_=-1;bool sunStale_=false;
 };
 
+// Directions at J2000 plus linear space motion, applied in the vertex shader for
+// the epoch set here (and initially by makeStarField).
 std::shared_ptr<threepp::Points> makeStarField(const std::filesystem::path& catalogue, double jdTDB);
+void setStarEpoch(threepp::Points& stars, double jdTDB);
 
 // IAU_MOON trigonometric approximation from NASA/NAIF pck00011, NOT the
 // high-precision binary lunar PCK. Input is Julian date TDB, output ICRF scene.

@@ -242,7 +242,8 @@ using albert::httpGet;
 
 // Interval in Unix UTC seconds of simulated time.
 std::vector<State> queryHorizons(int body,const std::string& center,double start,double end,const std::string& step,albert::DownloadProgress* progress=nullptr,bool bootstrap=false,bool* cached=nullptr){
-    const auto table=albert::providers::horizons().query({body,center,start,end,step,bootstrap,!bootstrap},progress);
+    // Cached tables count: revisiting a date reuses them, also offline.
+    const auto table=albert::providers::horizons().query({body,center,start,end,step,bootstrap},progress);
     if(cached)*cached|=table.fromCache;
     std::vector<State> result;result.reserve(table.points.size());
     for(const auto& point:table.points)result.push_back({point.jdTDB,{point.positionMeters.x/1000.,point.positionMeters.y/1000.,point.positionMeters.z/1000.},{point.velocityMetersPerSecond.x/1000.,point.velocityMetersPerSecond.y/1000.,point.velocityMetersPerSecond.z/1000.}});
@@ -2206,6 +2207,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
 
             stars->position.copy(camera->position);
+            albert::setStarEpoch(*stars, tdb); // Proper motion for the simulated date.
             const float distance = camera->position.distanceTo(controls.target);
             controls.maxDistance=std::max(65000.f,distanceFor(targets::Overview)*2.f);
             controls.maxDistance=std::max(controls.maxDistance,static_cast<float>(150000.*149597870700./albert::core::earthRadiusMeters));
