@@ -14,7 +14,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
 | **Alta — 1** | ~~Completar as luas~~ — concluído em 17/10/2026 | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion/Proteu com formas medidas (Hipérion e Proteu sem mapa; Hipérion com orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
-| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P (Rosetta), Halley (Giotto/Vega), Vesta e Ceres (Dawn: mosaico + relevo) medidos; Pallas ainda artística; coma/caudas desbloqueadas pela data simulada; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
+| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P (Rosetta), Halley (Giotto/Vega), Vesta e Ceres (Dawn: mosaico + relevo) medidos; Pallas ainda artística; coma e cauda de poeira entregues (17/10/2026); faltam cauda de íons, tabelas do Horizons para os cometas em datas antigas, materiais, formas e detalhe por zoom |
 | **Alta — 3** | ~~Anéis de Júpiter, Urano e Netuno~~ — entregue em 17/10/2026 | Perfis das tabelas do PDS, espalhamento simples com sombra do planeta, realce opcional; faltam arcos de Adams, excentricidades e cor das partículas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
 | **Alta — 5** | Validar GPU física, Windows nativo (inclui a versão leve e seus downloads) e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
@@ -83,6 +83,17 @@ Todas as 25 luas têm agora representação própria, com os limites de cada fon
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — coma e cauda de poeira da 67P e do Halley.** Atividade pelo Afρ medido (67P:
+Knight et al. 2017; Halley: Schleicher et al. 1998), função de fase Halley-Marcus,
+coma pela coluna 1/b dentro do envelope parabólico da pressão de radiação e cauda de
+Finson-Probstein (grãos de β 0,003–0,9 por até 120 dias em órbitas de dois corpos com
+gravidade reduzida, propagação em variáveis universais) como lâmina de seção de choque.
+Brilho físico por padrão; "Realçar coma e cauda de poeira" usa escala asinh. A cauda
+da 67P em 23/09/2015 sai a ~290° de ângulo de posição contra ~285° observados.
+Validação: 29 testes Linux (novo `comet_activity`), regressão OpenGL de coma por dentro
+e por fora e cauda antissolar (Xvfb e Wine), programa real em 2021-11-02 (67P) e
+1986-03-13 (Halley). Faltam cauda de íons e tabelas do Horizons para os cometas.
 
 **17/10 — data simulada.** O horário no canto superior direito abre pausa, retrocesso,
 velocidades de 1× a uma semana por segundo, ida a qualquer instante de 1900 a 2100 e

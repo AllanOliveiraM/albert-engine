@@ -299,8 +299,8 @@ nada mais muda. Sem mapa de albedo: cor uniforme do núcleo medida pela OSIRIS
 (albedo geométrico de 6,5% a 649 nm e inclinação espectral de 11%/100 nm em fase
 baixa; Fornasier et al. 2015). A orientação segue o pck00011 (polo e período de
 12,404 h da época Rosetta); o período encurtou nas passagens pelo periélio de 2015 e
-2021, então a fase de rotação atual não é uma previsão. Coma e cauda ainda não são
-desenhadas.
+2021, então a fase de rotação atual não é uma previsão. Coma e cauda de poeira:
+ver [Coma e cauda de poeira](#coma-e-cauda-de-poeira).
 
 ## Cometa 1P/Halley
 
@@ -314,7 +314,57 @@ medido pela câmera da Giotto (Keller et al. 1986). Em 1986 o núcleo girava em 
 excitado (Belton et al. 1991: precessão de ~3,7 dias e giro de ~7,1 dias em torno do
 eixo longo), que não pode ser propagado até hoje; a orientação do Albert é
 **ilustrativa**: giro uniforme de 7,1 dias em torno do eixo longo, apontado para o polo
-da eclíptica. Coma e cauda ainda não são desenhadas.
+da eclíptica. Coma e cauda de poeira: ver abaixo.
+
+## Coma e cauda de poeira
+
+A 67P e Halley soltam poeira conforme a **atividade medida**, Afρ (A'Hearn et al. 1984):
+A(0°)fρ corrigido a fase 0° pela função Halley-Marcus, em abertura de 10⁴ km.
+
+| Cometa | Afρ de referência | Dependência | Início | Fontes |
+| --- | --- | --- | --- | --- |
+| 67P | 1500 cm a 1,25 UA | r^-2,7 antes do periélio, r^-4,2 depois | 4,3 UA | Knight et al. 2017 (tabela 2: 1366–1649 cm em ago. 2015; ~140 cm a 2,99 UA em nov. 2014, abertura convertida); Snodgrass et al. 2013 |
+| Halley | 8×10⁴ cm a 0,9 UA | r^-3 | 6 UA (OH medido até 5,1 UA) | Schleicher et al. 1998, comparado por Schleicher e Farnham 2024; liberação de poeira ∝ r^-3,0±0,7 |
+
+O pico do Halley foi atribuído a 0,9 UA porque o periélio de 1986 ocorreu atrás do
+Sol; a escolha pode errar por um fator de alguns. As velocidades dos grãos (20 m/s
+na 67P, 300 m/s no Halley, para β = 0,1 a 1 UA, ∝ √(β/r)) são ordens de grandeza
+representativas, não medidas diretas.
+
+**Coma.** Num escoamento estacionário a coluna de seção de choque ponderada pelo
+albedo dá I/F = Afρ·Φ(θ)/(8b) a uma distância projetada b do núcleo, com a função de
+fase de poeira Halley-Marcus (Schleicher 2010, tabela da Lowell Observatory) e cor
+levemente avermelhada (~10%/1000 Å). Só conta a parte do raio à frente da câmera, então
+de dentro da coma olhar para longe do núcleo é escuro. A pressão de radiação devolve os
+grãos num ápice X = v²/(2βg) do lado do Sol (modelo de fonte): a coma ocupa um
+paraboloide com o núcleo no foco, aberto para o lado oposto ao Sol, com borda suave
+porque tamanhos e velocidades espalham X por ordens de grandeza. A coluna decai em 10X,
+onde os grãos mais velhos passam à cauda.
+
+**Cauda de poeira.** Modelo de Finson-Probstein: grãos com razão β de 0,003 a 0,9,
+soltos de 600 s a 120 dias atrás com a velocidade do núcleo, seguem órbitas de dois
+corpos sob (1−β) da gravidade solar (propagação em variáveis universais, qualquer
+cônica). A grade forma uma lâmina no plano da órbita; cada célula recebe a seção de
+choque solta naquele intervalo, 2·v·Afρ·w(β) com w ∝ √β (distribuição de tamanhos
+s^-3,5), dividida pela área da célula (no mínimo a área de espalhamento pela velocidade
+de ejeção). O brilho é I/F = σΦ(θ)/4 pelo cosseno entre a visada e a lâmina, limitado
+pela espessura. A direção foi conferida com a cauda da 67P observada em 23/09/2015:
+ângulo de posição ~290° no modelo (com o estado do Horizons naquela data) contra ~285°
+observados por Knight et al. 2017.
+
+**Brilho.** O padrão é físico, com a mesma iluminação e exposição dos sólidos: quase
+invisível, como numa exposição curta. **Realçar coma e cauda de poeira**, no painel do
+cometa, passa a uma escala asinh como em astrofotografia, levando a coma a 1/5 do ápice
+na atividade de referência a I/F 0,15 e chegando ao preto cinco ordens abaixo; assim a
+cauda, milhares de vezes mais tênue por área, aparece junto. A escala não é linear, e
+de dentro de uma coma grande (Halley, a centenas de milhares de km) o fundo fica claro.
+
+Limites: a cauda de íons não é desenhada; jatos, rotação, fragmentação, explosões e o
+rastro de grãos grandes ao longo da órbita também não. As órbitas dos dois cometas são
+de dois corpos com elementos de outubro de 2026: perto do presente e do periélio da 67P
+em 2021 estão certas, mas em 2015 a 67P fica uns três meses adiantada (1,83 UA no
+modelo contra 1,34 UA reais em 23/09/2015). Para validar datas antigas, os cometas
+precisam de tabelas do Horizons.
 
 ## Formas artísticas dos pequenos corpos
 

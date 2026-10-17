@@ -40,6 +40,9 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - Inter, © 2020 The Inter Project Authors: fonte da interface,
   https://github.com/rsms/inter, SIL OFL 1.1; licença em `assets/fonts/OFL.txt`
   nos fontes e `licenses/Inter/OFL.txt` na distribuição.
+- Lowell Observatory / D. Schleicher (2010): função de fase de poeira composta
+  Halley-Marcus, tabela em `src/core/comets.cpp`,
+  https://asteroid.lowell.edu/comet/dustphase.html (Schleicher et al. 1998; Marcus 2007).
 - NASA GIBS: paleta pública de fração de nuvens MODIS, convertida para JSON,
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml.
 - Planetas e luas (créditos e limites por corpo em `assets/planetary-sources.json`,

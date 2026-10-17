@@ -30,6 +30,7 @@
 #include "asset_pack.hpp"
 #include "asset_downloads.hpp"
 #include "solids.hpp"
+#include "comets.hpp"
 #include "core/bridge.hpp"
 #include "core/time.hpp"
 #include "core/simulation.hpp"
@@ -1022,6 +1023,7 @@ int albert::runRenderer(int argc, char** argv) {
         auto solidAssets=std::move(loadedAssets->surfaces);
         albert::PlanetVisuals planets(*scene, std::move(*loadedAssets));
         albert::SolidBodies solids(*scene,std::move(solidAssets));
+        albert::CometVisuals comets(*scene);
         auto earth = planets.earth;
         auto moon = planets.moon;
         albert::EclipseVisuals eclipses(earth,moon,planets.sun);
@@ -1323,6 +1325,15 @@ int albert::runRenderer(int argc, char** argv) {
                 if(solids.faintRings(focus)){
                     bool enhanced=solids.ringsEnhanced(focus);if(ImGui::Checkbox("Realcar aneis tenues",&enhanced))solids.enhanceRings(focus,enhanced);
                     ImGui::PushTextWrapPos(0);ImGui::TextDisabled(enhanced?"Brilho esticado, como em longa exposicao; proporcoes mantidas.":"Aneis escuros ou de poeira: quase invisiveis em luz visivel.");ImGui::PopTextWrapPos();
+                }
+                if(comets.known(focus)){
+                    bool enhanced=comets.enhanced(focus);if(ImGui::Checkbox("Realcar coma e cauda de poeira",&enhanced))comets.enhance(focus,enhanced);
+                    ImGui::PushTextWrapPos(0);
+                    if(comets.afrho(focus)>0)ImGui::TextDisabled("Atividade medida (Afrho): %.0f cm a %.2f UA do Sol. %s",comets.afrho(focus)*100,comets.distanceAu(focus),
+                        enhanced?"Brilho em escala asinh, como em astrofotografia: coma e cauda juntas.":"Em brilho fisico, quase invisivel como numa exposicao curta.");
+                    else ImGui::TextDisabled("Sem coma: a %.1f UA do Sol, alem do inicio da atividade. Escolha uma data perto do perielio.",comets.distanceAu(focus));
+                    ImGui::TextDisabled("Cauda de ions nao desenhada.");
+                    ImGui::PopTextWrapPos();
                 }
                 if(focus.front()!='@' && !registry.get(focus).builtin) {
                     const auto state=registry.evaluate(focus,simulatedUtc);
@@ -2284,6 +2295,8 @@ int albert::runRenderer(int argc, char** argv) {
             const float photographicExposure=focus==targets::Moon?2.1f:solids.contains(focus)?std::clamp(1.05f*std::pow(sunPosition.distanceTo(solids.nodes().at(focus)->position)*6378137.f/149597870700.f,2.f),.25f,1200.f):1.05f;
             renderer.toneMappingExposure=std::exp(std::lerp(std::log(renderer.toneMappingExposure),std::log(photographicExposure),-std::expm1(-dt/.65f)));
             solids.update(renderer,*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary);
+            {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
+             comets.update(*camera,sunPosition,nuclei,tdb,dt);}
             objects.updateLighting(*camera,sunPosition,visualSettings.auxiliary,dt);
 
             if (appliedQuality != visualSettings.quality) {

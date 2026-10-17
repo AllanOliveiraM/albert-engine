@@ -12,7 +12,8 @@ Em andamento: pequenos corpos medidos (Alta 2) — **67P** (forma OSIRIS/Rosetta
 medida), **Halley** (Stooke, rotação ilustrativa) e **Vesta** (mosaico + DTM da Dawn)
 **Ceres** (idem), **Plutão** e **Caronte** (mosaico + DEM da New Horizons/USGS) entregues; Pallas
 segue artística (dimensões não verificadas). **Data simulada** (ROADMAP Média 5)
-entregue à tarde: ver "Data simulada" abaixo. Coma/caudas desbloqueadas (próximas).
+entregue à tarde: ver "Data simulada" abaixo. **Coma e cauda de poeira** da 67P e do
+Halley entregues em seguida (ver "Coma e cauda de poeira" abaixo).
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
@@ -240,7 +241,7 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
 - Formas artísticas próprias para Vesta, Pallas, Halley alongado e 67P bilobado;
   crateras/material procedural identificados como arte. Fobos, Deimos, Febe, Hipérion,
   Proteu, 67P e Halley voltam à rocha artística só se a biblioteca não tiver nenhum asset. Não são
-  reconstruções medidas. Coma/caudas ainda não implementadas.
+  reconstruções medidas. Coma e cauda de poeira: `core/comets` + `render/comets`.
 - Ícones de janela Linux/Windows e registro de atalho por usuário (`make desktop`).
   O comando não instala o executável. GPU física/Windows nativo ainda exigem validação.
 
@@ -556,17 +557,22 @@ Vesta é `kind: external` (só frames/aviso). Pacote `assets/imagery/vesta`: 105
 PDS SBN recusa o User-Agent do Python: `fetch-ranges.py` agora se identifica. Fixture
 CSPICE via `tipbod`. App real: forma, mosaico e detalhe regional OK, pico RSS 1,46 GB.
 
-Coma/caudas: estavam adiadas por falta de data simulada, que agora existe. Em
-17/10/2026 a 67P está a 4,45 UA (atividade começa a ~4,3 UA, Snodgrass et al. 2013;
-periélio em 9/4/2028) e Halley a 35 UA (periélio em 2061); validar em datas próximas
-dos periélios (67P 2015-08-13 ou 2021-11-02; Halley 1986-02-09). As órbitas dos
-cometas são de dois corpos com elementos de 2026: em 1986 Halley sai deslocada
-(forças não gravitacionais e perturbações); avaliar tabelas do Horizons para os
-cometas antes de validar a coma em datas antigas. Notas
-para o modelo: atividade ∝ (q/r)² com limiar de início, iluminação física ∝ 1/r² (lei
-de magnitude total n = 4), coma pela coluna analítica de n ∝ 1/r² na esfera (como a
-casca de Titã), cauda de íons antissolar com aberração pelo vento solar (~400 km/s) e
-cauda de poeira curvada para trás da velocidade; brilho absoluto realçado e declarado.
+Coma e cauda de poeira (entregues em 17/10/2026; detalhes em `docs/LOCAL_SYSTEM.md`).
+`core/comets`: atividade Afρ medida por cometa (67P: 1500 cm a 1,25 UA, r^-2,7/r^-4,2,
+início 4,3 UA; Halley: 8e4 cm a 0,9 UA, r^-3, início 6 UA), tabela Halley-Marcus,
+propagação kepleriana universal e grade de Finson-Probstein (`StateAt`, então aceita
+tabelas no futuro). `render/comets`: coma numa casca de 80 ápices (coluna Afρ/8b à
+frente da câmera, envelope parabólico suave, decaimento em 10X) e cauda como lâmina
+20×40 recalculada a cada minuto simulado (máx. 10 Hz). Brilho físico; realce em asinh
+(I/F de referência → 0,15, preto ~5e-5 abaixo). Lições: `gl_FrontFacing` em casca
+`Side::Double` falhou na threepp com a câmera dentro (troquei por `Side::Back/Front`
+conforme a posição); o realce linear escondia a cauda (10^4 mais tênue que a coma);
+`readRGBPixels` vem de baixo para cima. Validação: AP da cauda da 67P em 23/09/2015
+~290° contra ~285° (Knight et al. 2017), usando o estado do Horizons porque os elementos
+de 2026 adiantam a 67P de 2015 em ~3 meses (Halley em 1986 fica a ~1 dia do periélio
+real). Pendentes: cauda de íons (CO+, antissolar com aberração ~400 km/s; brilho exige
+fonte medida), tabelas do Horizons para cometas em datas antigas (opção `DES=67P;CAP<ano`),
+jatos e rastro de grãos grandes.
 
 Ceres (entregue): DLR HAMO `CE_HAMO_G_00N_180E_EQU_CLR.IMG` (21093×10546, 58,59
 px/grau, SHA e8f5fee4…, 8,9% sem dado, sobretudo polos) → 21600×10800 com `fill_gaps`
@@ -634,5 +640,5 @@ das estrelas só era aplicado na abertura: agora vai no shader (`motion` + `year
 `setStarEpoch` a cada quadro); regressão no `astronomy_test` com Toliman em 1900
 (6,2′ desde J2000). O achado anterior dos anéis foi dado como corrigido.
 
-Próxima ação concreta: **coma/caudas** (notas acima), validando em datas de periélio,
-e a validação em Windows nativo (Alta 5).
+Próxima ação concreta: tabelas do Horizons para os cometas (posições certas em datas
+antigas), depois cauda de íons; validação em Windows nativo (Alta 5) depende do Allan.

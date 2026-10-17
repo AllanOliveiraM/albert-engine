@@ -7,6 +7,7 @@
 #include "core/bodies.hpp"
 #include "rocks.hpp"
 #include "ring_systems.hpp"
+#include "comets.hpp"
 #include "eclipses.hpp"
 #include "layers.hpp"
 #include "core/layers.hpp"
@@ -460,7 +461,32 @@ void graphics() {
         renderer.render(*world,*view);pixels=renderer.readRGBPixels();
         require(std::count_if(pixels.begin(),pixels.end(),[](auto value){return value>20;})>300,"Rock PBR surface shader did not render");
     }
-    std::cout<<"Graphics OK: incremental upload, terrain occlusion, paths, clouds, objects, artistic rocks and lunar eclipse\n";
+    {   // 67P at its 2021 perihelion, the Sun along +x: coma seen from inside and from
+        // outside its shell, physical and stretched, and the dust tail antisunward.
+        auto world=Scene::create();world->background=Color(0x000000);albert::CometVisuals comets(*world);
+        const double jd=2459520.5;const auto state=albert::core::heliocentricState(*albert::core::localOrbit("67p"))(jd);
+        auto graphical=[](albert::core::Vector v){return Vector3(static_cast<float>(v.x),static_cast<float>(v.z),static_cast<float>(-v.y)).normalize();};
+        const Vector3 sun=graphical(state.position*-1.).multiplyScalar(23455.f); // Real direction of the Sun from 67P.
+        const Vector3 pole=graphical({state.position.y*state.velocity.z-state.position.z*state.velocity.y,state.position.z*state.velocity.x-state.position.x*state.velocity.z,state.position.x*state.velocity.y-state.position.y*state.velocity.x});
+        const std::map<std::string,Vector3> nuclei{{"67p",Vector3()}};
+        auto view=PerspectiveCamera::create(60,1,1e-6f,1e5f);
+        auto shot=[&](Vector3 eye,Vector3 at,float seconds){view->position.copy(eye);view->lookAt(at);view->updateMatrixWorld();
+            comets.update(*view,sun,nuclei,jd,seconds);renderer.render(*world,*view);return renderer.readRGBPixels();};
+        auto luminance=[](const auto& p,int x,int y){const auto i=3*(y*192+x);return p[i]+p[i+1]+p[i+2];};
+        const Vector3 inside(0,0,.002f),outside(0,0,1.f);
+        auto physical=shot(inside,Vector3(),.1f);
+        require(comets.afrho("67p")>10&&luminance(physical,96+40,96)<9,"Physical coma not faint near the nucleus");
+        comets.enhance("67p",true);for(int i=0;i<50;++i)shot(inside,Vector3(),1.f);
+        auto near=shot(inside,Vector3(),.1f);require(luminance(near,96+40,96)>60,"Stretched coma missing from inside its shell");
+        auto far=shot(outside,Vector3(),.1f);require(luminance(far,96+3,96)>60&&luminance(far,96+3,96)>luminance(far,96+60,96),"Stretched coma missing or not centred from outside");
+        // Seen along the orbit normal; pixels split by the projected antisolar direction.
+        auto tail=shot(Vector3(pole).multiplyScalar(3000.f),Vector3(),.1f);Vector3 away=Vector3(sun).multiplyScalar(-.01f);away.project(*view);
+        const float ax=away.x,ay=away.y;int anti=0,sunward=0;
+        for(int y=0;y<192;++y)for(int x=0;x<192;++x){const float dx=(x-95.5f)/96.f,dy=(y-95.5f)/96.f; // Rows from the bottom (glReadPixels).if(dx*dx+dy*dy<.01f)continue;
+            (dx*ax+dy*ay>0?anti:sunward)+=luminance(tail,x,y);}
+        require(anti>4*sunward+300,"Dust tail not antisunward");
+    }
+    std::cout<<"Graphics OK: incremental upload, terrain occlusion, paths, clouds, objects, artistic rocks, lunar eclipse and comet dust\n";
 }
 }
 // Revolution period of a sampled path and the folded highlight time.
