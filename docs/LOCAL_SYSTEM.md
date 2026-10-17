@@ -187,6 +187,20 @@ daquele sobrevoo com 0,01°; em outras datas, a orientação real difere arbitra
 `python3 scripts/anchor-orientation.py hyperion` reproduz a fase e confere a direção
 do Sol pelas outras soluções publicadas.
 
+Proteu usa o modelo de [Stooke](https://doi.org/10.26033/yt84-5y91) (PDS), feito a
+partir de limbos e terminadores das imagens da Voyager 2 e retocado em grandes crateras
+e cristas: um raio a cada 5° de latitude e longitude (cerca de 17 km no equador). O
+Albert triangula só os pontos publicados (quadriláteros em dois triângulos, leques nos
+polos): 2.522 vértices, 5.040 triângulos, raio máximo de 232,5 km. O volume equivale a
+uma esfera de 201,0 km, menor que os 210 ± 7 km estimados por Karkoschka (2003); o
+autor observa que esses modelos podem exagerar a profundidade das depressões. A
+origem da grade não coincide com o centro de figura e foi mantida. **Não há mapa de
+superfície**: a Voyager 2 imageou só parte de Proteu, e não há mosaico global nem modelo
+3D da NASA. A malha recebe cinza neutro uniforme (cor plana entre 0,4 e 0,6 µm, Thomas e
+Veverka, 1991) com albedo geométrico de 0,096, o valor mais citado; estimativas da época
+da Voyager, sem o efeito de oposição, davam cerca de 0,06. A orientação segue o
+pck00011, com os termos periódicos de Netuno, validada contra CSPICE.
+
 Titã aparece por padrão como em **luz visível**: uma névoa opaca alaranjada, sem
 superfície visível. A cor vem da cromaticidade do disco iluminado na composição em
 cor natural Cassini [PIA06230](https://pds-rings.seti.org/press_releases/pages/PIA06xxx/PIA06230.html)
@@ -212,7 +226,7 @@ não baixa esses mapas; a leve traz o nível de 1024 px de cada lua no container
 essencial e baixa os níveis seguintes em `moons-2` e `moons-3`. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **73.849.447 bytes**.
+todas as luas na RAM. O pacote adicional ocupa **73.953.490 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -222,13 +236,12 @@ versionados. O processo preserva os pacotes de Terra/Lua/Sol e planetas.
 
 Fobos/Deimos já têm mapas, modelos medidos e orientação IAU;
 faltam validar o registro das imagens Viking, como já feito para Mimas, e melhorar
-as órbitas. Nereida e Proteus permanecem
-sem mapas próprios embarcados.
+as órbitas. Nereida permanece sem forma ou mapa próprios embarcados.
 
 ## Formas artísticas dos pequenos corpos
 
 Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Fobos, Deimos,
-Febe e Hipérion usam o modelo medido acima quando a biblioteca contém as malhas.
+Febe, Hipérion e Proteu usam o modelo medido acima quando a biblioteca contém as malhas.
 Numa biblioteca antiga sem as malhas, usam o elipsoide IAU (Hipérion, uma esfera)
 sob o mapa; sem nenhum asset do corpo, a forma rochosa ilustrativa. Crateras,
 silhuetas, variações de material e microrelevo são procedurais, com semente por

@@ -32,7 +32,7 @@ int main(){try{
     const PlanetFixture moons[]{
 #include "moon_frames_fixture.inc"
     };
-    require(surfaceBodies().size()==29&&naturalBodies().size()==7,"Surface catalogue changed online planet provider scope");
+    require(surfaceBodies().size()==30&&naturalBodies().size()==7,"Surface catalogue changed online planet provider scope");
     for(const auto& fixture:moons){const auto* definition=surfaceBody(fixture.body);require(definition&&!naturalBody(fixture.body)&&category(fixture.body)==Category::Moon,"Textured moon was reclassified as a planet");
         require(surfaceRadius(fixture.body)==localOrbit(fixture.body)->radius,"Surface and orbital/collision radii disagree");
         const auto frame=bodyFrame(*definition,fixture.jd);const Vector columns[]{frame.prime,frame.east,frame.pole};
@@ -42,6 +42,7 @@ int main(){try{
     require(surfaceBody("mimas")->axesMeters==std::array<double,3>{207800,196700,190600}&&surfaceBody("mimas")->shapeRadiusMeters>surfaceBody("mimas")->axesMeters[0]&&!surfaceBody("mimas")->notice.empty(),"Mimas reference ellipsoid, measured extent or source notice missing");
     require(surfaceBody("phoebe")->axesMeters==std::array<double,3>{109400,108500,101800}&&surfaceBody("phoebe")->shapeRadiusMeters>surfaceBody("phoebe")->axesMeters[0]&&surfaceBody("phoebe")->partialMap&&!surfaceBody("phoebe")->notice.empty(),"Phoebe reference ellipsoid, measured extent, partial coverage or source notice missing");
     require(surfaceBody("hyperion")->axesMeters==std::array<double,3>{}&&std::abs(surfaceBody("hyperion")->shapeRadiusMeters-184616.03339554372)<1e-6&&!surfaceBody("hyperion")->partialMap&&!surfaceBody("hyperion")->notice.empty(),"Hyperion measured extent, absent IAU ellipsoid or illustrative-orientation notice changed");
+    require(surfaceBody("proteus")->axesMeters==std::array<double,3>{218000,208000,201000}&&surfaceBody("proteus")->shapeRadiusMeters==232500&&!surfaceBody("proteus")->notice.empty(),"Proteus reference ellipsoid, measured extent or source notice changed");
     require(surfaceBody("titan")->hazeAltitudeMeters>0&&surfaceBody("titan")->hazeAlbedo[0]>surfaceBody("titan")->hazeAlbedo[2]&&surfaceBody("mimas")->hazeAltitudeMeters==0,"Titan visible haze description missing");
     std::cout<<"Bodies OK: planets and mapped moons against CSPICE at four epochs, radii, ownership and partial coverage\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

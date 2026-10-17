@@ -13,7 +13,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Completar Proteu e Nereida | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion com formas medidas (Hipérion sem mapa, orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
+| **Alta — 1** | Completar Nereida | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion/Proteu com formas medidas (Hipérion e Proteu sem mapa; Hipérion com orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
 | **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
 | **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
@@ -76,13 +76,21 @@ as malhas ainda requer conferência cartográfica. A próxima fila é:
 1. ~~**Mimas**~~ — entregue em 17/10/2026: forma medida e mosaico registrado.
 2. ~~**Titã**~~ — entregue em 17/10/2026: névoa visível e superfície em 938 nm opcional.
 3. ~~**Hipérion e Febe**~~ — entregues em 17/10/2026: formas medidas no lugar do procedural.
-4. **Proteu:** modelo e cobertura de imagens disponíveis, explicitando lacunas.
+4. ~~**Proteu**~~ — entregue em 17/10/2026: forma de Stooke e cor neutra medida.
 5. **Nereida:** representação limitada aos dados disponíveis, sem inventar detalhes observados.
 
-Os dois corpos ainda sem modelos próprios embarcados são Proteu e Nereida. A forma artística e a esfera de referência
+O único corpo ainda sem representação própria embarcada é Nereida. A forma artística e a esfera de referência
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — Proteu com forma medida.** Modelo de Stooke (PDS), feito com limbos e
+terminadores das imagens da Voyager 2: raio a cada 5°, triangulado só nos pontos
+publicados, no lugar da esfera de referência. Sem mapa (a Voyager viu parte do corpo e
+não há mosaico global): cinza neutro uniforme com o albedo medido. Orientação IAU com
+os termos periódicos de Netuno, conferida contra CSPICE. Validação: 27 testes Linux,
+144 interseções independentes, OpenGL no Xvfb e no Wine e programa real focando Proteu.
+Pacote das luas: 73,95 MB. Sem novas distribuições.
 
 **17/10 — Hipérion com forma medida e orientação ilustrativa.** Modelo de placas de
 Thomas (PDS, Cassini ISS): 29.268 triângulos em metros, sem renormalizar, no lugar da

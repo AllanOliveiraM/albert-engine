@@ -5,12 +5,12 @@ sessão: correções do Windows no CI, cache de LFS/compilação no CI, **Mimas*
 completo, o **download dos assets por níveis** (versão leve), correções da revisão
 do Codex, **Titã** (névoa visível + superfície em 938 nm), **Febe** (forma Gaskell +
 mapa Cassini com lacunas preenchidas) e **Hipérion** (forma Thomas, cor uniforme
-medida, orientação ilustrativa ancorada em 2005). Próximo: revisão do Codex sobre
-Febe + Hipérion → Proteu → Nereida; depois cometas.
+medida, orientação ilustrativa ancorada em 2005); repasse do Codex sem achados novos;
+**Proteu** (forma de Stooke, cinza neutro medido). Próximo: Nereida; depois cometas.
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
-e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem dois corpos pendentes (Proteu, Nereida).**
+e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem um corpo pendente (Nereida).**
 Atualizar este arquivo ao concluir essa etapa, conforme pedido do Allan, e a cada
 entrega relevante.
 
@@ -95,6 +95,14 @@ latest, antes de verificar. Regressão em `tests/release_fixture.py`. O Codex ro
 `bodies_test`, `shape_test`, CPU do `visual_test` e actionlint; não CTest completo.
 A sessão do Codex fica bloqueada ("active writer") se a conversa estiver aberta na
 extensão do VS Code; nesse caso pedir ao Allan para liberá-la, não abrir sessão nova.
+
+Repasse de 17/10/2026 após Febe e Hipérion (`0bcd4fa..1f97e52`, árvore limpa): **nenhum
+defeito novo confirmado**; a proteção contra release em rascunho foi reavaliada como
+corrigida (o Codex reproduziu a rejeição de rascunho, estado ausente e anexos
+incompletos). O Codex rodou `bodies_test`, `shape_test` (120 interseções), CPU do
+`visual_test`, `anchor-orientation.py hyperion` (latitude subsolar a 0,18°), hashes de
+`cmake/Assets.cmake` e actionlint; não recompilou nem validou OpenGL, Windows nativo ou
+o CI do novo HEAD. CI de `028f24f` (Febe) verde em Linux e Windows.
 
 ### Download por níveis (entregue em 17/10/2026)
 
@@ -196,16 +204,16 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
   atmosférico aproximado documentado. Outros sistemas de eclipses ainda pendentes.
 - Somente Saturno tem anéis renderizados. Outros anéis continuam prioritários.
 - Formas artísticas próprias para Vesta, Pallas, Halley alongado e 67P bilobado;
-  crateras/material procedural identificados como arte. Fobos, Deimos, Febe e Hipérion
-  voltam à rocha artística só se a biblioteca não tiver nenhum asset deles. Não são
+  crateras/material procedural identificados como arte. Fobos, Deimos, Febe, Hipérion
+  e Proteu voltam à rocha artística só se a biblioteca não tiver nenhum asset deles. Não são
   reconstruções medidas. Coma/caudas ainda não implementadas.
 - Ícones de janela Linux/Windows e registro de atalho por usuário (`make desktop`).
   O comando não instala o executável. GPU física/Windows nativo ainda exigem validação.
 
 ## Luas — qualidade real e lacunas
 
-22 das 25 luas têm imagens próprias, incluindo a Lua terrestre; Hipérion tem forma
-medida sem mapa. As 21 adicionais com mapa:
+22 das 25 luas têm imagens próprias, incluindo a Lua terrestre; Hipérion e Proteu têm
+forma medida sem mapa. As 21 adicionais com mapa:
 
 | Grupo | Corpos / fonte atual |
 | --- | --- |
@@ -278,6 +286,16 @@ Direção do Sol pelos elementos de Standish, conferida pelas outras soluções 
 PCK de texto (época 2440000 trocada por 2005-09-26: 72°/dia × 11.545 d = voltas inteiras).
 Em fase baixa Hipérion parece liso: falta o contraste de albedo; projetar imagens Cassini
 sobre a forma exigiria kernels SPICE de apontamento (trabalho futuro).
+
+Proteu: grade de Stooke (`n8proteus.tab`, PDS4 `small_bodies.stooke.shape-models`,
+doi:10.26033/yt84-5y91): raio a cada 5°, km, longitude **oeste**, 0° voltado para
+Netuno (como IAU_PROTEUS), origem fora do centro de figura (mantida). Formato
+`stooke-radius-grid`: triangulação só dos pontos publicados (anéis de quadriláteros +
+leques polares), 2.522 vértices/5.040 placas, malha fechada, estrelada, raio máximo
+232,5 km, volume equivalente 201,0 km (Karkoschka 2003: 210 ± 7). `reference-moon-shapes`
+triangula a grade de forma independente. Sem mapa (Voyager viu parte; nenhum mosaico
+ou modelo 3D NASA): `kind: uniform` cinza neutro 0,096 (cor plana 0,4–0,6 µm, Thomas e
+Veverka 1991; Voyager sem oposição ~0,06). Orientação pck00011 com termos de Netuno.
 A mesma técnica pode validar os mosaicos Viking de Fobos/Deimos (ainda não feito).
 
 Orientações IAU `pck00011` e termos periódicos/quadráticos foram testados contra
@@ -293,7 +311,7 @@ aproximada de dois corpos. Planetas e Lua preservam os provedores existentes.
    "Superfície em infravermelho (938 nm)" com PIA22770, registro conferido em 12
    feições. `NaturalBody::hazeAlbedo/hazeAltitudeMeters`, `SolidBodies::showSurface`.
 3. ~~Hipérion e Febe~~ — entregues em 17/10/2026 (ver acima).
-4. **Proteu:** fontes disponíveis e cobertura limitada explicitadas.
+4. ~~Proteu~~ — entregue em 17/10/2026 (forma de Stooke, cor neutra uniforme).
 5. **Nereida:** poucos dados; visual artisticamente plausível e identificado
    quando necessário, sem prometer fotorealismo observado indisponível.
 6. Consolidar a etapa: registro cartográfico/limites, testes/visual/RAM e atualizar
@@ -326,7 +344,7 @@ GPU física, Windows real, viagens extensas e limites de RAM/VRAM.
   reproduzível com fontes fixadas por hash. SpicePy 8.3.0 somente na autoria,
   sem dependência SPICE no executável. `shape.bin` indexado little-endian:
   `ALBMSH1\0`, contagens uint32, xyz float32 em metros IAU, índices uint32.
-- `scripts/reference-moon-shapes.py`: 120 raios independentes (CSPICE/DSKX02 nos
+- `scripts/reference-moon-shapes.py`: 144 raios independentes (CSPICE/DSKX02 nos
   DSKs, float64 com parser próprio na tabela Gaskell); `tests/measured_shape_fixture.inc`.
 - `scripts/moon_shapes.py` exporta DSK (SpicePy) e Gaskell vértice-faceta (só NumPy).
   Inventário aceita `projection` (registro de mapas publicados) e `notice` (aviso
@@ -344,10 +362,10 @@ Esse empacotamento dificulta abertura casual; não é DRM.
 Originais e intermediários ficam em `asset-packs/`, ignorados. Não espalhar cópias
 de imagens pelo projeto; documentação/capas ficam em `docs/images/`.
 
-Pacote adicional das 22 luas: **73.849.447 bytes**. Biblioteca reunida neste build:
-**4.898.550.498 bytes** (~4,90 GB decimal); essencial da versão leve: 67,7 MB (era 63,3; as malhas de Febe e Hipérion vão no essencial). Ao regenerar com Hipérion, as 686 entradas anteriores
-saíram idênticas; só `SOURCES.json` mudou e entraram 4 entradas de Hipérion. Não confundir disco com RAM/VRAM:
-recortes são limitados e descartáveis; as cinco malhas/BVH medidas permanecem residentes.
+Pacote adicional das 23 luas: **73.953.490 bytes**. Biblioteca reunida neste build:
+**4.898.654.541 bytes** (~4,90 GB decimal); essencial da versão leve: 67,8 MB (era 63,3; as malhas de Febe, Hipérion e Proteu vão no essencial). Ao regenerar com Proteu, as 690 entradas anteriores
+saíram idênticas; só `SOURCES.json` mudou e entraram 4 entradas de Proteu. Não confundir disco com RAM/VRAM:
+recortes são limitados e descartáveis; as seis malhas/BVH medidas permanecem residentes.
 Após mudar o inventário, regenerar pacote/hashes coerentes. Nunca versionar
 originais enormes nem saltar a verificação de integridade para acelerar.
 
@@ -437,5 +455,12 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
   no Xvfb com foco/zoom/detalhe, câmera fora da malha, pico RSS 1,24 GB
   (`build/hyperion-preview-*.png`).
 
-Próxima ação concreta: revisão do Codex sobre Febe + Hipérion; depois **Proteu**,
-mantendo inventário, pacote, testes e documentação sincronizados.
+- Proteu: 27 CTests Linux (144 interseções; IAU_PROTEUS contra CSPICE em quatro
+  épocas); OpenGL no Xvfb; MinGW + Wine (`shape_test`, `bodies_test`, `visual_test`
+  com e sem gráficos); app real no Xvfb, câmera fora da malha, pico RSS 1,25 GB
+  (`build/proteus-preview-*.png`).
+
+Próxima ação concreta: **Nereida** — sem forma medida (Voyager a 4,7 milhões de km);
+K2 (Kiss et al. 2016, MNRAS, doi:10.1093/mnras/stw081): período 11,594 ± 0,017 h,
+amplitude 0,033 mag, alongamento no máximo ~1,3:1. Representar como esfera com cor
+medida e aviso, sem inventar relevo. Conferir o CI de `1f97e52` e do commit de Proteu.

@@ -624,8 +624,9 @@ uma casca aditiva integrada por raio; `showSurface()` alterna para o mapa da sup
 separável para latitude planetocêntrica e longitude leste −180…180. O campo
 `notice` do inventário vira o aviso exibido pela interface para aquela fonte.
 
-`scripts/moon_shapes.py` exporta DSK type 2, tabelas vértice-faceta de Gaskell e
-modelos de placas de Thomas (PDS) para `shape.bin`: cabeçalho
+`scripts/moon_shapes.py` exporta DSK type 2, tabelas vértice-faceta de Gaskell,
+modelos de placas de Thomas e grades de raios de Stooke (PDS; triangulação só dos
+pontos publicados) para `shape.bin`: cabeçalho
 `ALBMSH1\0`, contagens uint32, posições float32 em metros IAU e índices uint32,
 tudo little-endian. Verifica hash, corpo, frame, contagens e limites. Nas tabelas
 de Gaskell, descarta apenas vértices duplicados do cubo ICQ que nenhuma placa usa.
@@ -637,9 +638,9 @@ do eixo que o resto da placa (polos ICQ de Gaskell a 3–133 m do eixo) é trata
 polo: recebe a longitude da placa e fica fora do cálculo da emenda. Não recentra nem redimensiona.
 Os recortes desses corpos têm `textureOnly`, sem malha esférica ou máscara extra.
 
-`measured_shapes` lê o pacote real e compara 120 interseções independentes (CSPICE
-DSKX02 nos DSKs; float64 sobre as tabelas originais de Gaskell em Mimas e Febe e de
-Thomas em Hipérion),
+`measured_shapes` lê o pacote real e compara 144 interseções independentes (CSPICE
+DSKX02 nos DSKs; float64 sobre as tabelas originais de Gaskell em Mimas e Febe, de
+Thomas em Hipérion e sobre a grade de Stooke de Proteu, triangulada à parte),
 contagens, raio, normais, emendas e rejeição de entradas malformadas. Para regenerar
 o fixture, com as fontes originais já disponíveis:
 

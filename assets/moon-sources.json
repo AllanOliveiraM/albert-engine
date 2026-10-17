@@ -475,6 +475,56 @@
       "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
     },
     {
+      "id": "proteus",
+      "name": "Proteu",
+      "horizons_id": 808,
+      "radius_m": 209000,
+      "kind": "uniform",
+      "shape": "iau-triaxial",
+      "map_grid": [
+        1024,
+        512
+      ],
+      "colour": {
+        "albedo_linear": [
+          0.096,
+          0.096,
+          0.096
+        ],
+        "reference": "Neutral: Voyager 2 colour measurements of Proteus between 0.4 and 0.6 micrometres are flat (Thomas and Veverka, 1991). Visible geometric albedo 0.096, the commonly quoted value; Voyager-era estimates without the opposition effect were about 0.06."
+      },
+      "credit": "Neutral colour after Voyager 2 photometry (Thomas and Veverka, 1991)",
+      "product": "https://doi.org/10.26033/yt84-5y91",
+      "limits": "No surface map: one uniform neutral colour over the shape model, so albedo variations and the craters Voyager 2 resolved (about 1.3 km/pixel at best) are not shown beyond the model's own 5 deg relief. Voyager imaged only part of Proteus; no public global mosaic from NASA, and no NASA 3D model, is available.",
+      "notice": "Forma de Stooke (grade de raios a cada 5 graus, imagens Voyager 2) com cor neutra uniforme: sem mapa de albedo. Detalhe limitado a ~17 km.",
+      "shape_source": {
+        "format": "stooke-radius-grid",
+        "filename": "n8proteus.tab",
+        "url": "https://sbnarchive.psi.edu/pds4/non_mission/small_bodies.stooke.shape-models/data/n8proteus.tab",
+        "bytes": 70226,
+        "sha256": "d079c8eac52d84224d5cb413526ff9415ab33afd48965e7e025544832ddd1868",
+        "body": 808,
+        "frame": "Stooke Proteus body-fixed frame: planetocentric, west longitude, 0 deg facing Neptune (as IAU_PROTEUS); grid origin not at the centre of figure",
+        "vertices": 2522,
+        "plates": 5040,
+        "bounds_m": [
+          [
+            -222794.67,
+            -204359.679,
+            -205491.655
+          ],
+          [
+            214502.266,
+            194054.444,
+            205535.289
+          ]
+        ],
+        "bounding_radius_m": 232500.0,
+        "credit": "Stooke, P. (2025). Stooke small bodies shape models V1.0, urn:nasa:pds:small_bodies.stooke.shape-models::1.0, NASA Planetary Data System, doi:10.26033/yt84-5y91; Stooke (1994), Earth, Moon and Planets 65, 31-54; Voyager 2 images",
+        "limits": "Radius every 5 deg of latitude and longitude (about 17 km at the equator) from Voyager 2 limbs and terminators, locally modified for large craters and ridges; the author notes that such models may exaggerate the depth of depressions. Volume-equivalent radius 201.0 km, against 210 +/- 7 km from Karkoschka (2003). Triangulated through the published points only (quads split into two triangles, fans at the poles); radii converted from km to metres without rescaling or recentring."
+      }
+    },
+    {
       "id": "charon",
       "filename": "charon.glb",
       "url": "https://science.nasa.gov/wp-content/uploads/2023/09/Charon_1_2.glb",

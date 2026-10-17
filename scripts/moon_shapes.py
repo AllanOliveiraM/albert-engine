@@ -57,5 +57,37 @@ def export_thomas(path,record,destination):
  if (len(vertices),len(plates))!=(record['vertices'],record['plates']) or len(vertices)>500000 or len(plates)>1000000:raise ValueError('Unexpected plate model counts')
  check_bounds(vertices,record);write_shape(destination,vertices,plates)
 
+def stooke_tables(path):
+ # PDS radius grid (Stooke): "west_lon lat radius_km" every 5 deg, poles and 0/360 repeated.
+ # Triangulated through the published points only: rings of quads, fans at the poles.
+ grid=np.loadtxt(path)
+ if grid.ndim!=2 or grid.shape[1]!=3:raise ValueError('Malformed radius grid')
+ lons,lats=np.unique(grid[:,0]),np.unique(grid[:,1]);step=lons[1]-lons[0]
+ if len(grid)!=len(lons)*len(lats) or lons[0]!=0 or lons[-1]!=360 or lats[0]!=-90 or lats[-1]!=90 or not np.allclose(np.diff(lons),step) or not np.allclose(np.diff(lats),step):raise ValueError('Unexpected radius grid layout')
+ radius={(lon,lat):r for lon,lat,r in grid}
+ for lat in lats:
+  if radius[(0.,lat)]!=radius[(360.,lat)]:raise ValueError('Radius grid seam mismatch')
+ for lat in (-90.,90.):
+  if len({radius[(lon,lat)] for lon in lons})!=1:raise ValueError('Radius grid pole mismatch')
+ def point(lon,lat):
+  r=radius[(lon,lat)]*1000;east,phi=np.radians(-lon),np.radians(lat)
+  return [r*np.cos(phi)*np.cos(east),r*np.cos(phi)*np.sin(east),r*np.sin(phi)]
+ ring=lons[:-1];inner=lats[1:-1];n=len(ring)
+ vertices=[point(0.,-90.)]+[point(lon,lat) for lat in inner for lon in ring]+[point(0.,90.)]
+ index=lambda j,i:1+j*n+i%n;top=len(vertices)-1;plates=[]
+ for i in range(n):plates.append([0,index(0,i+1),index(0,i)])
+ for j in range(len(inner)-1):
+  for i in range(n):plates+=[[index(j,i),index(j,i+1),index(j+1,i+1)],[index(j,i),index(j+1,i+1),index(j+1,i)]]
+ for i in range(n):plates.append([top,index(len(inner)-1,i),index(len(inner)-1,i+1)])
+ vertices,plates=np.array(vertices),np.array(plates,dtype=np.int64)
+ a,b,c=(vertices[plates[:,k]] for k in range(3))
+ if np.einsum('ij,ij->i',a,np.cross(b,c)).sum()<0:plates=plates[:,::-1].copy()
+ return vertices,plates
+
+def export_stooke(path,record,destination):
+ vertices,plates=stooke_tables(path)
+ if (len(vertices),len(plates))!=(record['vertices'],record['plates']):raise ValueError('Unexpected radius grid counts')
+ check_bounds(vertices,record);write_shape(destination,vertices,plates)
+
 def export_shape(path,record,destination):
- {'dsk':export_dsk,'gaskell-vertex-facet':export_gaskell,'thomas-plate':export_thomas}[record.get('format','dsk')](path,record,destination)
+ {'dsk':export_dsk,'gaskell-vertex-facet':export_gaskell,'thomas-plate':export_thomas,'stooke-radius-grid':export_stooke}[record.get('format','dsk')](path,record,destination)

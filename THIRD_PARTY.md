@@ -53,7 +53,8 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   (2013), Gaskell Phoebe Shape Model V1.0, NASA PDS,
   urn:nasa:pds:gaskell.phoebe.shape-model::1.0 (Febe); Thomas, P., Joseph, J. e
   Ansty, T. (2018), Saturn Small Moon Shape Models V1.0, NASA PDS,
-  https://doi.org/10.26033/ewy3-jy61 (Hipérion).
+  https://doi.org/10.26033/ewy3-jy61 (Hipérion); Stooke, P. (2025), Stooke small
+  bodies shape models V1.0, NASA PDS, https://doi.org/10.26033/yt84-5y91 (Proteu).
 - NASA/JPL-Caltech/Space Science Institute/Lunar and Planetary Institute, mosaico
   de Paul Schenk: mapa global de Mimas PIA18437 em cores realçadas,
   https://science.nasa.gov/photojournal/color-maps-of-mimas-2014.

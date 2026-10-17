@@ -3,7 +3,7 @@
 A biblioteca completa está versionada em **`assets/imagery/`** usando Git LFS.
 São sete partes de até 1 GiB, reunidas automaticamente em `visuals.pak` durante
 o build, com verificação SHA-256 de cada parte e do resultado completo.
-O arquivo final tem **4.898.550.498 bytes (4,90 GB / 4,56 GiB)**: biblioteca
+O arquivo final tem **4.898.654.541 bytes (4,90 GB / 4,56 GiB)**: biblioteca
 original de 2,86 GB, Mercúrio de 1,69 GB, Sol de 276 MB e luas de 74 MB, com
 índice de coleção.
 As partes preservam exatamente os mesmos bytes; não reduzem a qualidade.
