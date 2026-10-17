@@ -662,6 +662,55 @@
         "credit": "Peter Thomas, Viking-based shape; ESA SPICE Service v0.2 (2023)",
         "limits": "Original plate coordinates in metres, IAU body-fixed frame and source origin. Float32 export; no shape rescaling/recentering. Viking texture registration against this shape is not independently validated. Source resolution/uncertainty and incomplete coverage remain."
       }
+    },
+    {
+      "id": "67p",
+      "name": "67P/Churyumov-Gerasimenko",
+      "horizons_id": 1000012,
+      "radius_m": 1650,
+      "kind": "uniform",
+      "map_grid": [
+        1024,
+        512
+      ],
+      "colour": {
+        "albedo_linear": [
+          0.0625,
+          0.0586,
+          0.0531
+        ],
+        "reference": "Geometric albedo 6.5 +/- 0.2% at 649 nm and disk-averaged spectral slope 11%/(100 nm) at low phase (OSIRIS, Fornasier et al. 2015, A&A 583, A30, doi:10.1051/0004-6361/201525901); channels at about 610, 550 and 465 nm from that slope. Local albedo varies by up to 16% (Hapi) and the slope reddens with phase; not shown."
+      },
+      "credit": "Colour after OSIRIS photometry (Fornasier et al. 2015)",
+      "product": "https://doi.org/10.1051/0004-6361/201525901",
+      "limits": "No albedo map: one uniform colour over the measured shape; the relief comes from the plate model alone. Orientation follows pck00011 (Rosetta-era pole and 12.404 h period); the spin period shortened at the 2015 and 2021 perihelia, so the rotation phase today is not a prediction. No coma or tail is drawn here.",
+      "notice": "Forma medida (Rosetta/OSIRIS) com cor uniforme medida; sem mapa de albedo. Fase de rotacao atual nao prevista: o periodo mudou nas passagens de 2015 e 2021.",
+      "shape_source": {
+        "format": "dsk",
+        "filename": "ROS_CG_K195_OSPCLPS_N_V1.BDS",
+        "url": "https://naif.jpl.nasa.gov/pub/naif/ROSETTA/kernels/dsk/ROS_CG_K195_OSPCLPS_N_V1.BDS",
+        "bytes": 17435648,
+        "sha256": "c5948b82e6fb7d814500020d20e367123ff268b25e9a9183ed4fb26eb76b9157",
+        "body": 1000012,
+        "frame": -1000012000,
+        "vertices": 97323,
+        "plates": 194642,
+        "bounds_m": [
+          [
+            -2428.735,
+            -1735.967,
+            -1528.418
+          ],
+          [
+            2541.381,
+            1945.757,
+            1588.998
+          ]
+        ],
+        "bounding_radius_m": 2613.4047701532313,
+        "credit": "ESA/Rosetta/MPS for OSIRIS Team, LAM-PSI stereophotoclinometry shape model (OSPCLPS, 195k plates), DSK by N. Bachman (NAIF/JPL), ESA SPICE Service; mirror of https://spiftp.esac.esa.int/data/SPICE/ROSETTA/kernels/dsk/",
+        "limits": "Decimated version (194,668 plates, edges about 23 m) of the OSIRIS SPC model; volume-equivalent radius 1681 m against the 1650 m catalogue radius. 13 zero-thickness flaps of the decimation (a plate and its reverse, 26 plates) and the 13 vertices only they used are dropped; nothing else is changed. Original coordinates in metres, body-fixed Cheops-meridian frame and source origin; no rescaling or recentring. About 4% of plates face the origin (the neck between the lobes)."
+      }
     }
   ]
 }

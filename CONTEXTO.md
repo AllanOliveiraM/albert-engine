@@ -7,8 +7,9 @@ do Codex, **Titã** (névoa visível + superfície em 938 nm), **Febe** (forma G
 mapa Cassini com lacunas preenchidas) e **Hipérion** (forma Thomas, cor uniforme
 medida, orientação ilustrativa ancorada em 2005); repasse do Codex sem achados novos;
 **Proteu** (forma de Stooke, cinza neutro medido) e **Nereida** (esfera com albedo
-medido e aviso). **Etapa das luas concluída.** Próximo: revisão do Codex sobre Proteu e
-Nereida; depois cometas (prioridade Alta 2).
+medido e aviso). **Etapa das luas concluída**, com repasse do Codex sem achados novos.
+Em andamento: pequenos corpos medidos (Alta 2) — **67P** entregue (forma OSIRIS/Rosetta,
+cor medida). Próximo: Halley → Pallas → Vesta; depois coma/caudas.
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
@@ -105,6 +106,13 @@ incompletos). O Codex rodou `bodies_test`, `shape_test` (120 interseções), CPU
 `visual_test`, `anchor-orientation.py hyperion` (latitude subsolar a 0,18°), hashes de
 `cmake/Assets.cmake` e actionlint; não recompilou nem validou OpenGL, Windows nativo ou
 o CI do novo HEAD. CI de `028f24f` (Febe) verde em Linux e Windows.
+
+Repasse ao fim da etapa das luas (`1f97e52..f317697`, árvore limpa): **nenhum defeito
+novo confirmado**; pendências anteriores continuam corrigidas. O Codex rodou
+`bodies_test`, `shape_test` (144 interseções), CPU do `visual_test`, conferiu SHA,
+escala, limites, fechamento e orientação dos 5.040 triângulos de Proteu, o pacote das
+luas, `Assets.cmake`, actionlint e `git diff --check`; sem OpenGL, Windows, downloads
+reais ou RAM/VRAM.
 
 ### Download por níveis (entregue em 17/10/2026)
 
@@ -206,8 +214,8 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
   atmosférico aproximado documentado. Outros sistemas de eclipses ainda pendentes.
 - Somente Saturno tem anéis renderizados. Outros anéis continuam prioritários.
 - Formas artísticas próprias para Vesta, Pallas, Halley alongado e 67P bilobado;
-  crateras/material procedural identificados como arte. Fobos, Deimos, Febe, Hipérion
-  e Proteu voltam à rocha artística só se a biblioteca não tiver nenhum asset deles. Não são
+  crateras/material procedural identificados como arte. Fobos, Deimos, Febe, Hipérion,
+  Proteu e a 67P voltam à rocha artística só se a biblioteca não tiver nenhum asset deles. Não são
   reconstruções medidas. Coma/caudas ainda não implementadas.
 - Ícones de janela Linux/Windows e registro de atalho por usuário (`make desktop`).
   O comando não instala o executável. GPU física/Windows nativo ainda exigem validação.
@@ -305,6 +313,20 @@ de catálogo (170 km; Kiss et al. 2016, doi:10.1093/mnras/stw081: D 335–345 km
 `kind: uniform` cinza 0,25, sem `shape_source`. `orientation` ilustrativa sem âncora:
 período K2 11,594 h (745,213°/dia), polo de Netuno, W0 0; sem efeito visível. Fixture
 CSPICE com essas constantes num PCK de texto.
+
+67P: DSK `ROS_CG_K195_OSPCLPS_N_V1.BDS` (OSIRIS SPC LAM-PSI, corpo 1000012, frame
+−1000012000; ESA lenta, baixado do espelho NAIF, primeiro MiB conferido com a ESA).
+13 aletas de espessura zero (placa + inversa, vértice exclusivo) removidas por
+`moon_shapes.without_flaps` (falha se a duplicata não for invertida; no-op em Fobos e
+Deimos): 97.323 vértices/194.642 placas, raio máximo 2.613,405 m. Duas placas são
+atravessadas pelo eixo polar sem vértice próximo (polo sul e "pescoço"): `decodeShape`
+dá a elas uma única longitude (regressão sintética falha no código anterior). Cor
+(0,0625; 0,0586; 0,0531) de Fornasier et al. 2015 (6,5% a 649 nm, 11%/100 nm).
+Orientação pck00011 BODY1000012 (época Rosetta); fixture via `tipbod` transposto (sem
+frame IAU nomeado). `moon-sources.json` passou a cobrir pequenos corpos (nome
+histórico): `bodies_test` aceita categoria ≠ Planet e o download prioriza "moons" para
+qualquer superfície local. No `visual_test`, o plano próximo da câmera passou a
+acompanhar o raio (o fixo de 6,4 km cortava a 67P).
 A mesma técnica pode validar os mosaicos Viking de Fobos/Deimos (ainda não feito).
 
 Orientações IAU `pck00011` e termos periódicos/quadráticos foram testados contra
@@ -352,7 +374,7 @@ GPU física, Windows real, viagens extensas e limites de RAM/VRAM.
   reproduzível com fontes fixadas por hash. SpicePy 8.3.0 somente na autoria,
   sem dependência SPICE no executável. `shape.bin` indexado little-endian:
   `ALBMSH1\0`, contagens uint32, xyz float32 em metros IAU, índices uint32.
-- `scripts/reference-moon-shapes.py`: 144 raios independentes (CSPICE/DSKX02 nos
+- `scripts/reference-moon-shapes.py`: 168 raios independentes (CSPICE/DSKX02 nos
   DSKs, float64 com parser próprio na tabela Gaskell); `tests/measured_shape_fixture.inc`.
 - `scripts/moon_shapes.py` exporta DSK (SpicePy) e Gaskell vértice-faceta (só NumPy).
   Inventário aceita `projection` (registro de mapas publicados) e `notice` (aviso
@@ -370,10 +392,9 @@ Esse empacotamento dificulta abertura casual; não é DRM.
 Originais e intermediários ficam em `asset-packs/`, ignorados. Não espalhar cópias
 de imagens pelo projeto; documentação/capas ficam em `docs/images/`.
 
-Pacote adicional das 24 luas: **73.965.556 bytes**. Biblioteca reunida neste build:
-**4.898.666.607 bytes** (~4,90 GB decimal); essencial da versão leve: 67,8 MB (era 63,3; as malhas de Febe, Hipérion e Proteu vão no essencial). Ao regenerar com Nereida, as 694 entradas anteriores
-saíram idênticas; só `SOURCES.json` mudou e entraram 3 entradas de Nereida. Não confundir disco com RAM/VRAM:
-recortes são limitados e descartáveis; as seis malhas/BVH medidas permanecem residentes.
+Pacote adicional das 24 luas e da 67P: **77.482.328 bytes**. Biblioteca reunida neste build:
+**4.902.183.379 bytes** (~4,90 GB decimal); essencial da versão leve: 71,3 MB (era 63,3; as malhas de Febe, Hipérion, Proteu e 67P vão no essencial). Não confundir disco com RAM/VRAM:
+recortes são limitados e descartáveis; as sete malhas/BVH medidas permanecem residentes.
 Após mudar o inventário, regenerar pacote/hashes coerentes. Nunca versionar
 originais enormes nem saltar a verificação de integridade para acelerar.
 
@@ -473,6 +494,13 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
   `visual_test --graphics`); app real no Xvfb, pico RSS 1,27 GB
   (`build/nereid-preview-*.png`).
 
-Próxima ação concreta: revisão do Codex sobre Proteu e Nereida (fim da etapa das luas),
-conferir o CI dos últimos commits e então **cometas** (prioridade Alta 2: coma e caudas
-de Halley/67P, materiais e detalhe por zoom).
+- 67P: 27 CTests Linux (168 interseções; frame contra CSPICE); OpenGL no Xvfb; MinGW +
+  Wine (`bodies_test`, `shape_test`, `visual_test` com e sem gráficos); app real no Xvfb,
+  câmera fora da malha, pico RSS 1,21 GB (`build/comet67p-preview-*.png`).
+
+Próxima ação concreta: **Halley** (Stooke, `1682q1halley.tab` no pacote de Proteu;
+longitude **leste** para cometas na V2.0; sem modelo IAU de rotação: período/eixo
+publicados de Giotto/Vega a pesquisar), **Pallas** (sem sonda: elipsoide do pck00011 +
+cor medida) e **Vesta** (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
+`register-moon-map.py`). Depois coma/caudas com atividade coerente com a distância
+heliocêntrica (Halley perto do afélio em 2026 não deve ter coma).

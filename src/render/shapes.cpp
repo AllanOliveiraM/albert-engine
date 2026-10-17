@@ -33,6 +33,19 @@ albert::ShapeMesh albert::decodeShape(std::string_view bytes){
         float axis[3],lo=1,hi=0;bool pole[3];
         for(int j=0;j<3;++j){const auto k=indices[i+j];axis[j]=std::hypot(positions[3*k],positions[3*k+2]);}
         for(int j=0;j<3;++j){pole[j]=axis[j]<.25f*std::min(axis[(j+1)%3],axis[(j+2)%3]);if(!pole[j]){lo=std::min(lo,uv[2*indices[i+j]]);hi=std::max(hi,uv[2*indices[i+j]]);}}
+        if(!pole[0]&&!pole[1]&&!pole[2]){
+            // A plate pierced by the polar axis away from its corners (non-convex bodies cross the
+            // axis more than twice) spans every longitude; along the axis latitude is +-90 deg, so
+            // the whole plate takes one longitude.
+            float cross[3];for(int j=0;j<3;++j){const auto a=indices[i+j],b=indices[i+(j+1)%3];cross[j]=positions[3*a]*positions[3*b+2]-positions[3*a+2]*positions[3*b];}
+            if((cross[0]>0&&cross[1]>0&&cross[2]>0)||(cross[0]<0&&cross[1]<0&&cross[2]<0)){
+                const float u=uv[2*indices[i]];
+                for(int j=0;j<3;++j){const unsigned original=indices[i+j];const auto next=static_cast<unsigned>(positions.size()/3);
+                    for(int k=0;k<3;++k){const float p=positions[3*original+k],n=normals[3*original+k];positions.push_back(p);normals.push_back(n);}
+                    const float v=uv[2*original+1];uv.push_back(u);uv.push_back(v);indices[i+j]=next;}
+                continue;
+            }
+        }
         for(int j=0;j<3;++j){const unsigned original=indices[i+j];const bool shift=!pole[j]&&hi-lo>.5f&&uv[2*original]<.5f;
             if(!shift&&!pole[j])continue;
             if(shift&&shifted.contains(original)){indices[i+j]=shifted.at(original);continue;}

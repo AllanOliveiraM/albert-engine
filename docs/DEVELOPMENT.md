@@ -191,7 +191,7 @@ O CI comum de branches/PRs não gera distribuições.
 Cada sistema recebe duas versões. A **completa** contém o executável na raiz,
 os assets e bibliotecas/licenças necessários, sem código, logs, cache ou README,
 e funciona offline. A **leve** (`-light`) é a mesma pasta sem `assets/visuals.pak`
-e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~68 MB) numa
+e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~71 MB) numa
 tela de carregamento e completa as demais resoluções em segundo plano (ver
 [ASSETS.md](ASSETS.md#download-por-níveis)). `scripts/light-dist.py` deriva a
 pasta leve da completa. Os containers baixados ficam numa release própria
@@ -635,11 +635,16 @@ depende de SPICE. `decodeShape`
 valida tamanho/índices/coordenadas, converte eixos para o render, preserva placas,
 gera normais/UVs sem emenda e constrói BVH no worker. Um vértice muito mais próximo
 do eixo que o resto da placa (polos ICQ de Gaskell a 3–133 m do eixo) é tratado como
-polo: recebe a longitude da placa e fica fora do cálculo da emenda. Não recentra nem redimensiona.
+polo: recebe a longitude da placa e fica fora do cálculo da emenda. Uma placa
+atravessada pelo eixo polar longe dos vértices (corpos não convexos, como a 67P,
+cruzam o eixo mais de duas vezes) recebe uma única longitude. O exportador DSK remove
+aletas de espessura zero (placa e sua inversa) deixadas por decimação.
+`assets/moon-sources.json` cobre todas as superfícies locais (luas e pequenos corpos);
+o nome é histórico. Elas compartilham os containers `moons-<nível>` da versão leve. Não recentra nem redimensiona.
 Os recortes desses corpos têm `textureOnly`, sem malha esférica ou máscara extra.
 
-`measured_shapes` lê o pacote real e compara 144 interseções independentes (CSPICE
-DSKX02 nos DSKs; float64 sobre as tabelas originais de Gaskell em Mimas e Febe, de
+`measured_shapes` lê o pacote real e compara 168 interseções independentes (CSPICE
+DSKX02 nos DSKs, inclusive a 67P; float64 sobre as tabelas originais de Gaskell em Mimas e Febe, de
 Thomas em Hipérion e sobre a grade de Stooke de Proteu, triangulada à parte),
 contagens, raio, normais, emendas e rejeição de entradas malformadas. Para regenerar
 o fixture, com as fontes originais já disponíveis:

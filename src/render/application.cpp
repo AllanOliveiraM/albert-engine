@@ -1037,7 +1037,8 @@ int albert::runRenderer(int argc, char** argv) {
         auto setFocus = [&](Focus next, bool resetZoom = false) {
             registry.get(targetId(next));
             if (focus == next && !transition.active && !resetZoom) return;
-            if(assetDownloads){const auto id=targetId(next);assetDownloads->prioritize(id!=targets::Moon&&albert::core::category(id)==albert::core::Category::Moon?std::string("moons"):id);}
+            // Local surfaces (moons and small bodies) share the "moons" download containers.
+            if(assetDownloads){const auto id=targetId(next);assetDownloads->prioritize(id!=targets::Moon&&albert::core::surfaceBody(id)&&!albert::core::naturalBody(id)?std::string("moons"):id);}
 
             // Clear residual control inertia without moving the displayed camera.
             const Vector3 displayedPosition=camera->position,displayedTarget=controls.target;

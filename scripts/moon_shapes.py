@@ -12,6 +12,17 @@ def check_bounds(vertices,record):
  bounds=np.stack((vertices.min(0),vertices.max(0)))
  if not np.allclose(bounds,record['bounds_m'],rtol=0,atol=.001) or abs(np.linalg.norm(vertices,axis=1).max()-record['bounding_radius_m'])>.001:raise ValueError('Shape bounds mismatch')
 
+def without_flaps(vertices,plates):
+ # Decimated models can carry zero-thickness flaps: a plate and its reverse, whose
+ # normals cancel. Drop both, then any vertex no plate uses; nothing else changes.
+ key=np.sort(plates,1);_,inverse,count=np.unique(key,axis=0,return_inverse=True,return_counts=True);inverse=inverse.reshape(-1);keep=count[inverse]==1
+ if keep.all():return vertices,plates
+ for group in np.unique(inverse[~keep]):
+  pair=plates[inverse==group];a,b,c=(vertices[pair[:,k]] for k in range(3));normals=np.cross(b-a,c-a)
+  if len(pair)!=2 or normals[0]@normals[1]>=0:raise ValueError('Duplicated plates are not a zero-thickness flap')
+ used,remap=np.unique(plates[keep],return_inverse=True)
+ return vertices[used],remap.reshape(-1,3)
+
 def export_dsk(path,record,destination):
  import spiceypy as spice
  handle=spice.dasopr(str(path))
@@ -19,9 +30,11 @@ def export_dsk(path,record,destination):
   segment=spice.dlabfs(handle);description=spice.dskgd(handle,segment)
   if description.dtype!=2 or description.center!=record['body'] or description.frmcde!=record['frame']:raise ValueError('DSK body/frame/type mismatch')
   nv,nf=spice.dskz02(handle,segment)
-  if (nv,nf)!=(record['vertices'],record['plates']) or nv>500000 or nf>1000000:raise ValueError('Unexpected DSK counts')
+  if nv>500000 or nf>1000000:raise ValueError('Unexpected DSK counts')
   vertices=spice.dskv02(handle,segment,1,nv)*1000;plates=spice.dskp02(handle,segment,1,nf)-1
   if not np.isfinite(vertices).all() or plates.min()<0 or plates.max()>=nv:raise ValueError('Invalid DSK geometry')
+  vertices,plates=without_flaps(vertices,plates)
+  if (len(vertices),len(plates))!=(record['vertices'],record['plates']):raise ValueError('Unexpected DSK counts')
   check_bounds(vertices,record);write_shape(destination,vertices,plates)
  finally:spice.dascls(handle)
 

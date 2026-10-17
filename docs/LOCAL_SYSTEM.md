@@ -236,7 +236,7 @@ não baixa esses mapas; a leve traz o nível de 1024 px de cada lua no container
 essencial e baixa os níveis seguintes em `moons-2` e `moons-3`. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **73.965.556 bytes**.
+todas as luas na RAM. O pacote adicional (luas e pequenos corpos) ocupa **77.482.328 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -248,14 +248,29 @@ Fobos/Deimos já têm mapas, modelos medidos e orientação IAU;
 faltam validar o registro das imagens Viking, como já feito para Mimas, e melhorar
 as órbitas.
 
+## Cometa 67P/Churyumov-Gerasimenko
+
+A 67P usa o modelo de forma da câmera OSIRIS da Rosetta (estereofotoclinometria
+LAM-PSI), na versão de 194.668 placas distribuída como DSK pelo serviço SPICE da
+ESA (`ROS_CG_K195_OSPCLPS_N_V1.BDS`, espelho NAIF): arestas de ~23 m, raio máximo de
+2.613 m e volume equivalente a uma esfera de 1.681 m (o catálogo usa 1.650 m).
+A decimação deixou 13 "aletas" de espessura zero (um triângulo e o mesmo invertido,
+presos por uma aresta); elas e os 13 vértices que só elas usavam são descartados, e
+nada mais muda. Sem mapa de albedo: cor uniforme do núcleo medida pela OSIRIS
+(albedo geométrico de 6,5% a 649 nm e inclinação espectral de 11%/100 nm em fase
+baixa; Fornasier et al. 2015). A orientação segue o pck00011 (polo e período de
+12,404 h da época Rosetta); o período encurtou nas passagens pelo periélio de 2015 e
+2021, então a fase de rotação atual não é uma previsão. Coma e cauda ainda não são
+desenhadas.
+
 ## Formas artísticas dos pequenos corpos
 
-Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Fobos, Deimos,
-Febe, Hipérion e Proteu usam o modelo medido acima quando a biblioteca contém as malhas.
+Vesta, Pallas e Halley usam malhas irregulares individuais. Fobos, Deimos, Febe,
+Hipérion, Proteu e a 67P usam o modelo medido acima quando a biblioteca contém as malhas.
 Numa biblioteca antiga sem as malhas, usam o elipsoide IAU (Hipérion, uma esfera)
 sob o mapa; sem nenhum asset do corpo, a forma rochosa ilustrativa. Crateras,
 silhuetas, variações de material e microrelevo são procedurais, com semente por
-objeto, sem emendas de textura. 67P tem uma silhueta com dois lobos. Não são
+objeto, sem emendas de textura. Não são
 reconstruções fotogramétricas nem modelos de missão; a interface deixa essa
 distinção explícita. A orientação dessas formas também não é uma atitude medida.
 

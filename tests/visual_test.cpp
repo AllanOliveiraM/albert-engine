@@ -335,7 +335,8 @@ void graphics() {
         albert::SolidBodies moons(*world,std::move(maps));albert::core::Scene registry;
         registry.include(*albert::core::localOrbit(id));albert::SceneObjects objects(*world);objects.bind(id,moons.nodes().at(id));
         objects.sync(registry,0,{});const float radius=static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters);
-        auto camera=PerspectiveCamera::create(45,1,.001f,30000.f);camera->position.set(0,0,radius*4);camera->lookAt(Vector3());
+        // Near plane scaled to the body: 67P's catalogue radius is only 1.65 km.
+        auto camera=PerspectiveCamera::create(45,1,radius*.1f,30000.f);camera->position.set(0,0,radius*4);camera->lookAt(Vector3());
         moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);
         require(renderer.readRGBPixels()[3*(96*192+96)]>20,"Local moon surface did not render");
         if(moons.hazy(id)){
@@ -355,7 +356,7 @@ void graphics() {
         require(!moons.uploading(),"Moon detail upload did not finish");moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);
         moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(moons.takeEviction(),"Moon detail stayed resident after focus changed");
     }
-    for(const std::string id:{"phobos","deimos","mimas","phoebe","hyperion","proteus"}){
+    for(const std::string id:{"phobos","deimos","mimas","phoebe","hyperion","proteus","67p"}){
         auto world=Scene::create();world->background=Color(0x000000);auto shape=albert::decodeShape(albert::visualAssetPack()->payload("v1/"+id+"/shape.bin"));auto geometry=shape.geometry;
         std::vector<albert::SurfaceAssets> maps;maps.push_back({id,rgba(140),height(0),{},std::move(shape)});albert::SolidBodies measured(*world,std::move(maps));
         albert::core::Scene registry;registry.include(*albert::core::localOrbit(id));albert::SceneObjects objects(*world);objects.bind(id,measured.nodes().at(id),measured.picker(id));objects.sync(registry,0,{});

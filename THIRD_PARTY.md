@@ -54,7 +54,9 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   urn:nasa:pds:gaskell.phoebe.shape-model::1.0 (Febe); Thomas, P., Joseph, J. e
   Ansty, T. (2018), Saturn Small Moon Shape Models V1.0, NASA PDS,
   https://doi.org/10.26033/ewy3-jy61 (Hipérion); Stooke, P. (2025), Stooke small
-  bodies shape models V1.0, NASA PDS, https://doi.org/10.26033/yt84-5y91 (Proteu).
+  bodies shape models V1.0, NASA PDS, https://doi.org/10.26033/yt84-5y91 (Proteu);
+  ESA/Rosetta/MPS for OSIRIS Team (LAM-PSI), DSK `ROS_CG_K195_OSPCLPS_N_V1.BDS` do
+  ESA SPICE Service (67P).
 - NASA/JPL-Caltech/Space Science Institute/Lunar and Planetary Institute, mosaico
   de Paul Schenk: mapa global de Mimas PIA18437 em cores realçadas,
   https://science.nasa.gov/photojournal/color-maps-of-mimas-2014.
@@ -67,6 +69,8 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   em cor natural PIA08240, https://photojournal.jpl.nasa.gov/catalog/PIA08240; polo e
   taxa de rotação da solução instantânea de 2005 em J. Bauer e P. Thomas,
   "Hyperion: the sponge moon" (JPL/Cornell, 2007).
+- 67P: cor do núcleo de Fornasier et al. (2015), A&A 583, A30,
+  https://doi.org/10.1051/0004-6361/201525901.
 - Nereida: albedo, cor e período de rotação de Kiss et al. (2016), MNRAS,
   https://doi.org/10.1093/mnras/stw081 (Kepler/K2, Herschel e Spitzer).
 
