@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <stdexcept>
 namespace albert::core {
 namespace {
@@ -13,8 +14,8 @@ namespace {
 // Schleicher & Farnham 2024), taken at 0.9 AU; dust release ∝ r^-3.0±0.7 (Planet.
 // Space Sci. 1997); OH measured out to 5.1 AU. Grain speed: hundreds of m/s.
 constexpr std::array<CometActivity,2> comets{{
-    {"67p",15.,1.25,2.7,4.2,4.3,3.6,20.},
-    {"halley",800.,.9,3.,3.,6.,5.1,300.}}};
+    {"67p","67P",15.,1.25,2.7,4.2,4.3,3.6,20.},
+    {"halley","1P",800.,.9,3.,3.,6.,5.1,300.}}};
 // Halley-Marcus composite, 0°-normalised, 0-180° in 1° steps (Lowell Observatory,
 // dustphaseHM_table.txt, SHA-256 84b92184...).
 constexpr std::array<double,181> phase{
@@ -85,6 +86,21 @@ StateVector propagate(const StateVector& start,double mu,double dt){
 StateAt heliocentricState(const LocalOrbit& orbit){
     if(orbit.parent!="sun")throw std::invalid_argument("Not a heliocentric orbit");
     return [&orbit](double jd){const auto s=localState(orbit,jd);return StateVector{s.positionMeters,s.velocityMetersPerSecond};};
+}
+StateAt osculating(const StateVector& state,double jd){return [state,jd](double t){return propagate(state,solarGM,(t-jd)*86400.);};}
+std::vector<std::pair<double,StateVector>> revolution(const StateVector& state,double jd,unsigned samples){
+    const double r=norm(state.position),v=norm(state.velocity),a=1/(2/r-v*v/solarGM);
+    if(!(a>0)||samples<3)return {};
+    // Eccentricity vector and the current eccentric anomaly give the time since perihelion.
+    const double rv=dot(state.position,state.velocity);
+    const Vector ev=state.position*(v*v/solarGM-1/r)-state.velocity*(rv/solarGM);const double e=norm(ev);
+    const double n=std::sqrt(solarGM/(a*a*a)),now=std::atan2(rv/std::sqrt(solarGM*a),1-r/a),mean=now-e*std::sin(now);
+    std::vector<std::pair<double,StateVector>> path;path.reserve(samples+1);
+    for(unsigned k=0;k<=samples;++k){
+        const double eccentric=now-std::numbers::pi+2*std::numbers::pi*k/samples,seconds=(eccentric-e*std::sin(eccentric)-mean)/n;
+        path.push_back({jd+seconds/86400.,propagate(state,solarGM,seconds)});
+    }
+    return path;
 }
 DustGrid dustGrid(const StateAt& state,const CometActivity& comet,double jd,std::span<const double> betas,std::span<const double> ages){
     if(!state||betas.size()<2||ages.empty())throw std::invalid_argument("Empty dust grid");

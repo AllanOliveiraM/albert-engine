@@ -9,7 +9,7 @@ namespace albert::core {
 // A(0°)fρ (A'Hearn et al. 1984): phase-corrected to 0° with the Halley-Marcus
 // function, in a 10^4 km aperture, in metres.
 struct CometActivity {
-    std::string_view id;
+    std::string_view id,designation;     // Scene id and Horizons periodic designation
     double afrhoMetres,referenceAu;      // Afρ at referenceAu
     double inboundSlope,outboundSlope;   // Afρ ∝ r^-slope before and after perihelion
     double onsetAu,fullAu;               // zero beyond onset, the power law inside full
@@ -37,4 +37,9 @@ struct DustGrid {std::vector<double> betas,ages;std::vector<Vector> offsets;std:
 using StateAt=std::function<StateVector(double jdTDB)>;
 DustGrid dustGrid(const StateAt& comet,const CometActivity&,double jdTDB,std::span<const double> betas,std::span<const double> ages);
 StateAt heliocentricState(const LocalOrbit&); // Two-body elements around the Sun.
+// Osculating two-body motion through a heliocentric state at jdTDB.
+StateAt osculating(const StateVector& heliocentric,double jdTDB);
+// One revolution of the osculating ellipse through the state, evenly spaced in
+// eccentric anomaly (dense near perihelion), as TDB dates and states; empty if open.
+std::vector<std::pair<double,StateVector>> revolution(const StateVector& heliocentric,double jdTDB,unsigned samples);
 }

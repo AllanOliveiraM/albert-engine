@@ -35,6 +35,7 @@
 #include "core/time.hpp"
 #include "core/simulation.hpp"
 #include "core/approximate_ephemeris.hpp"
+#include "core/comets.hpp"
 #include "core/astro_time.hpp"
 #include "core/local_system.hpp"
 #include "debris.hpp"
@@ -126,6 +127,7 @@ struct Ephemerides {
     std::vector<State> sun;
     std::vector<State> moon;
     std::map<std::string,std::vector<State>> bodies;
+    std::map<std::string,std::vector<State>> comets; // Geocentric, by scene id.
 };
 
 struct Orbits {
@@ -158,7 +160,7 @@ void waitForEssential(albert::AssetDownloads& assets,albert::DownloadProgress& p
     }
 }
 
-int loadSteps(){static const int steps=11+2*static_cast<int>(availableBodies().size());return steps;}
+int loadSteps(){static const int steps=11+2*static_cast<int>(availableBodies().size())+static_cast<int>(albert::core::cometActivities().size());return steps;}
 
 using Focus=albert::core::ObjectId;
 namespace targets {
@@ -241,14 +243,24 @@ Matrix4 earthOrientation(double utc) {
 
 using albert::httpGet;
 
-// Interval in Unix UTC seconds of simulated time.
-std::vector<State> queryHorizons(int body,const std::string& center,double start,double end,const std::string& step,albert::DownloadProgress* progress=nullptr,bool bootstrap=false,bool* cached=nullptr){
-    // Cached tables count: revisiting a date reuses them, also offline.
-    const auto table=albert::providers::horizons().query({body,center,start,end,step,bootstrap},progress);
+// Interval in Unix UTC seconds of simulated time. Cached tables count: revisiting a
+// date reuses them, also offline.
+std::vector<State> states(const albert::providers::Table& table,bool* cached){
     if(cached)*cached|=table.fromCache;
     std::vector<State> result;result.reserve(table.points.size());
     for(const auto& point:table.points)result.push_back({point.jdTDB,{point.positionMeters.x/1000.,point.positionMeters.y/1000.,point.positionMeters.z/1000.},{point.velocityMetersPerSecond.x/1000.,point.velocityMetersPerSecond.y/1000.,point.velocityMetersPerSecond.z/1000.}});
     return result;
+}
+
+std::vector<State> queryHorizons(int body,const std::string& center,double start,double end,const std::string& step,albert::DownloadProgress* progress=nullptr,bool bootstrap=false,bool* cached=nullptr){
+    return states(albert::providers::horizons().query({body,center,start,end,step,bootstrap},progress),cached);
+}
+
+// Periodic comet by designation, from the solution of its apparition for the dates.
+std::vector<State> queryComet(const std::string& designation,const albert::providers::Window& window,albert::DownloadProgress* progress,bool bootstrap,bool* cached){
+    albert::providers::Query query;query.center="500@399";query.startUtc=window.startUtc;query.endUtc=window.endUtc;query.step=window.step;
+    query.bootstrapCache=bootstrap;query.comet=designation;
+    return states(albert::providers::horizons().query(query,progress),cached);
 }
 
 // Positions of the Sun, the Moon and the planets: at least one simulated day, and
@@ -267,6 +279,8 @@ constexpr PlaybackPlan QUICK_PLAYBACK{60., 60}; // First table for a date withou
 albert::providers::Playback ephemerisPlayback(std::string_view id, PlaybackPlan plan) {
     constexpr double DAY = 86400.;
     if (id == "moon") return {DAY, plan.seconds, plan.rows, 3600., DAY};
+    // Comets near perihelion move fastest: daily rows keep Halley within ~2 km.
+    if (albert::core::cometActivity(id)) return {DAY, plan.seconds, plan.rows, DAY, DAY};
     double coarsest = 5 * DAY;
     if (const auto* body = albert::core::naturalBody(id)) coarsest = std::min(coarsest, 2 * body->orbitHalfDays * DAY / 45);
     coarsest = std::max(DAY, coarsest);
@@ -295,6 +309,14 @@ Ephemerides loadEphemerides(double utc, double rate, PlaybackPlan plan, albert::
         if(progress)progress->stage("Efemerides: "+std::string(body->name),4+offset+bodyIndex++);
         e.bodies[std::string(body->id)]=query(std::string(body->id), body->horizonsId);
     }
+    for(const auto& comet:albert::core::cometActivities()){
+        if(progress)progress->stage("Efemerides: cometa "+std::string(comet.designation),4+offset+bodyIndex++);
+        if (superseded && superseded()) throw Superseded();
+        const std::string id(comet.id);
+        const auto window = albert::providers::playbackWindow(utc, rate, ephemerisPlayback(id, plan));
+        e.windows[id] = window;
+        e.comets[id] = queryComet(std::string(comet.designation), window, progress, bootstrap, &e.cached);
+    }
     return e;
 }
 
@@ -317,6 +339,7 @@ bool covers(const Ephemerides& e, double tdb) {
     auto inside=[&](const std::vector<State>& v){return v.size()>=2&&tdb>=v.front().jd&&tdb<=v.back().jd;};
     if(!inside(e.sun)||!inside(e.moon))return false;
     for(const auto& [id,samples]:e.bodies){(void)id;if(!inside(samples))return false;}
+    for(const auto& [id,samples]:e.comets){(void)id;if(!inside(samples))return false;}
     return true;
 }
 
@@ -382,6 +405,16 @@ Vec3 interpolate(const std::vector<State>& states, double jd) {
          + a.velocity * (duration * (t3 - 2*t2 + t))
          + b.position * (-2*t3 + 3*t2)
          + b.velocity * (duration * (t3 - t2));
+}
+
+// Derivative of the same Hermite cubic (km/s), for tables covering jd.
+Vec3 interpolateVelocity(const std::vector<State>& states, double jd) {
+    const auto upper = std::upper_bound(states.begin(), states.end(), jd, [](double t, const State& s) { return t < s.jd; });
+    const size_t index = std::clamp<size_t>(std::distance(states.begin(), upper), 1, states.size() - 1);
+    const auto& a = states[index - 1];const auto& b = states[index];
+    const double duration = (b.jd - a.jd) * 86400.0, t = (jd - a.jd) * 86400.0 / duration, t2 = t*t;
+    return (a.position * (6*t2 - 6*t) + b.position * (6*t - 6*t2)) * (1 / duration)
+         + a.velocity * (3*t2 - 4*t + 1) + b.velocity * (3*t2 - 2*t);
 }
 
 // ----------------------------------------
@@ -508,7 +541,7 @@ public:
             result.timeGeneration=albert::time::clock().status().generation;
             result.simulationGeneration=moment.generation;
             result.ephemerides = loadEphemerides(moment.utcSeconds, moment.rate, FULL_PLAYBACK, &progress, 5, bootstrap);
-            result.orbits = loadOrbits(moment.utcSeconds, &progress, 5+static_cast<int>(availableBodies().size()), bootstrap);
+            result.orbits = loadOrbits(moment.utcSeconds, &progress, 5+static_cast<int>(availableBodies().size()+albert::core::cometActivities().size()), bootstrap);
             progress.stage("Pronto", loadSteps());
             return result;
         });
@@ -1857,6 +1890,11 @@ int albert::runRenderer(int argc, char** argv) {
         // Tabulated minus analytic position per body (km), eased when a table arrives.
         struct Correction {Vec3 target, shown, from;float age=1e9f;bool tabulated=false;};
         std::map<std::string,Correction> corrections;
+        std::map<std::string,albert::core::Sample> tabulatedComets; // Geocentric, for the local system.
+        std::map<std::string,albert::core::StateVector> cometStates; // Heliocentric, for coma, tail and path.
+        struct CometPath {double jd=std::numeric_limits<double>::quiet_NaN();std::uint64_t generation=0;std::chrono::steady_clock::time_point time{};bool tabulated=false;};
+        std::map<std::string,CometPath> cometPaths;
+        auto covered=[](const std::vector<State>& table,double tdb){return table.size()>=2&&tdb>=table.front().jd&&tdb<=table.back().jd;};
         canvas.animate([&] {
             const auto frameTime=timeService.status();
             auto moment=simulation.read();
@@ -2042,10 +2080,11 @@ int albert::runRenderer(int argc, char** argv) {
                 // shifted by their last difference from the tables (none at a new date), so
                 // positions never stop while tables load; the difference eases in on arrival.
                 constexpr float CORRECTION_EASE = .6f;
-                auto place=[&](const std::string& id,const std::vector<State>& table)->Vec3{
+                // Comets fall back to their two-body elements instead of an ERFA model.
+                auto place=[&](const std::string& id,const std::vector<State>& table,std::optional<Vec3> fallback={})->Vec3{
                     const auto model=albert::core::approximateGeocentric(id,tdb);
-                    if(!model)return interpolate(table,tdb);
-                    const Vec3 analytic{model->x/1000.,model->y/1000.,model->z/1000.};
+                    if(!model&&!fallback)return interpolate(table,tdb);
+                    const Vec3 analytic=fallback?*fallback:Vec3{model->x/1000.,model->y/1000.,model->z/1000.};
                     const bool fresh=!corrections.contains(id);auto& c=corrections[id];
                     const bool tabulated=table.size()>=2&&tdb>=table.front().jd&&tdb<=table.back().jd;
                     if(tabulated){
@@ -2065,6 +2104,23 @@ int albert::runRenderer(int argc, char** argv) {
                 registry.builtinState("moon",{timestamp,{moonState.x*1000.,moonState.y*1000.,moonState.z*1000.}});
                 registry.builtinState("sun",{timestamp,{sunState.x*1000.,sunState.y*1000.,sunState.z*1000.}});
                 for(const auto& [id,samples]:ephemerides.bodies){const auto value=place(id,samples);registry.builtinState(id,{timestamp,{value.x*1000.,value.y*1000.,value.z*1000.}});}
+                // Comets: Horizons tables for the apparition of the date, else the elements.
+                tabulatedComets.clear();cometStates.clear();
+                const bool sunMoves=covered(ephemerides.sun,tdb);
+                for(const auto& [id,samples]:ephemerides.comets){
+                    const auto* orbit=albert::core::localOrbit(id);if(!orbit)continue;
+                    const auto local=albert::core::localState(*orbit,tdb);
+                    const Vec3 elements=Vec3{local.positionMeters.x/1000.,local.positionMeters.y/1000.,local.positionMeters.z/1000.}+sunState;
+                    const Vec3 value=place(id,samples,elements);
+                    // Velocities from the tables where they cover the instant, else the elements
+                    // (heliocentric) plus the Sun's tabulated geocentric motion when known.
+                    const Vec3 sunVelocity=sunMoves?interpolateVelocity(ephemerides.sun,tdb):Vec3{};
+                    const Vec3 orbital{local.velocityMetersPerSecond.x/1000.,local.velocityMetersPerSecond.y/1000.,local.velocityMetersPerSecond.z/1000.};
+                    const Vec3 geocentric=covered(samples,tdb)?interpolateVelocity(samples,tdb):orbital+sunVelocity;
+                    const Vec3 helio=value-sunState,helioVelocity=sunMoves?geocentric-sunVelocity:orbital;
+                    cometStates[id]={{helio.x*1000.,helio.y*1000.,helio.z*1000.},{helioVelocity.x*1000.,helioVelocity.y*1000.,helioVelocity.z*1000.}};
+                    tabulatedComets[id]=albert::core::Sample{timestamp,{value.x*1000.,value.y*1000.,value.z*1000.},{geocentric.x*1000.,geocentric.y*1000.,geocentric.z*1000.},std::nullopt,sunMoves||covered(samples,tdb)};
+                }
                 // Orbitas heliocentricas convertidas
                 // para a origem geocentrica da cena.
                 earthOrbit->origin=earthHelio;
@@ -2084,7 +2140,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
 
             // Provider failure holds built-ins; independent objects and camera still advance.
-            albert::core::updateLocalSystem(registry,simulatedUtc,tdb);
+            albert::core::updateLocalSystem(registry,simulatedUtc,tdb,tabulatedComets);
             const auto nextOriginId=transition.active?Focus("@flight"):targetId(focus);
             // During flight the floating origin follows the eye, preserving the
             // departure body's detail instead of rebasing immediately to a planet AU away.
@@ -2276,6 +2332,20 @@ int albert::runRenderer(int argc, char** argv) {
                 const double speed=std::hypot(velocity.x,velocity.y,velocity.z);
                 orbitView(path,solids.nodes().at(id)->position,static_cast<float>(EARTH_RADIUS/(std::max(speed,.001)*86400.)));
             }
+            // Comet paths follow the osculating orbit of their current state (tables of the
+            // apparition, or anchored elements): redrawn after 20 simulated days, a new date
+            // or a change of source (once its ease ends), at most every two seconds.
+            for(const auto& [id,state]:cometStates){
+                auto& built=cometPaths[id];const auto& source=corrections.at(id);
+                const bool current=std::abs(tdb-built.jd)<20.&&built.generation==simulationGeneration&&built.tabulated==source.tabulated;
+                if(current||source.age<.6f||steadyNow-built.time<std::chrono::seconds(2))continue;
+                const auto revolution=albert::core::revolution(state,tdb,256);if(revolution.empty())continue;
+                std::vector<State> samples;samples.reserve(revolution.size());
+                for(const auto& [jd,s]:revolution)samples.push_back({jd,{s.position.x/1000.,s.position.y/1000.,s.position.z/1000.},{s.velocity.x/1000.,s.velocity.y/1000.,s.velocity.z/1000.}});
+                auto& local=localPaths.at(id);auto next=makeOrbit(samples);scene->remove(*local.path);scene->add(next);
+                local={next,(samples.front().jd+samples.back().jd)*.5,samples.back().jd-samples.front().jd};
+                built={tdb,simulationGeneration,steadyNow,source.tabulated};
+            }
             for(const auto& body:albert::core::localOrbits()){
                 auto& orbit=localPaths.at(std::string(body.id));
                 const float secondary=systemView(focus)&&body.category!=albert::core::Category::Moon ? secondaryVisibility[std::string(body.id)] : 1.f;
@@ -2296,7 +2366,7 @@ int albert::runRenderer(int argc, char** argv) {
             renderer.toneMappingExposure=std::exp(std::lerp(std::log(renderer.toneMappingExposure),std::log(photographicExposure),-std::expm1(-dt/.65f)));
             solids.update(renderer,*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary);
             {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
-             comets.update(*camera,sunPosition,nuclei,tdb,dt);}
+             comets.update(*camera,sunPosition,nuclei,cometStates,tdb,dt);}
             objects.updateLighting(*camera,sunPosition,visualSettings.auxiliary,dt);
 
             if (appliedQuality != visualSettings.quality) {

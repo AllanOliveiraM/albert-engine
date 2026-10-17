@@ -98,6 +98,11 @@ int main(int argc,char** argv){try{
     Query request{499,"500@399",946728000,946728600,"5 min"};const auto url=horizonsURL(request);
     require(url.find("REF_PLANE=FRAME")!=std::string::npos&&url.find("TIME_TYPE=TDB")!=std::string::npos&&url.find("OUT_UNITS=KM-S")!=std::string::npos,"Reference frame/time/units are implicit");
     auto asteroidRequest=request;asteroidRequest.target=20099942;require(horizonsURL(asteroidRequest).find("DES%3D%2020099942%3B")!=std::string::npos,"SBDB SPK was treated as a Horizons record number");
+    {auto comet=request;comet.target=0;comet.comet="67P";comet.startUtc=1442966400;comet.endUtc=1442970000; // 2015-09-23
+     require(horizonsURL(comet).find("COMMAND=%27DES%3D67P%3BCAP%3C2016%3BNOFRAG%27")!=std::string::npos,"Comet apparition command");
+     comet.comet="1P";comet.startUtc=511056000;comet.endUtc=511059600;require(horizonsURL(comet).find("CAP%3C1987")!=std::string::npos,"Halley 1986 apparition");
+     for(const char* bad:{"P","067P","67P;COMMAND=10","1234567P","67"}){auto wrong=comet;wrong.comet=bad;rejects([&]{horizonsURL(wrong);});}
+     auto both=comet;both.target=499;rejects([&]{horizonsURL(both);});}
     auto bad=request;bad.center="500@evil";rejects([&]{horizonsURL(bad);});bad=request;bad.step="1 min&COMMAND=10";rejects([&]{horizonsURL(bad);});bad=request;bad.endUtc=std::numeric_limits<double>::quiet_NaN();rejects([&]{horizonsURL(bad);});
     for(double utc:{946728000.,1483228801.,1791886400.,2200000000.})require(std::abs(albert::astro::tdbToUtc(albert::astro::utcToTdb(utc))-utc)<.0001,"UTC/TAI/TT/TDB round trip lost precision");
     std::atomic_int calls=0,active=0,maximum=0;std::atomic<double> mono=0;

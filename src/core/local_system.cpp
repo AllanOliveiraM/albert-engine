@@ -51,7 +51,9 @@ void Scene::include(const LocalOrbit& o){
     if(surface&&surface->shapeRadiusMeters>0){included.appearance.shape=Shape::Builtin;included.radiusMeters=o.radius;included.defaultDistanceMeters=o.radius*4;included.minDistanceMeters=surface->shapeRadiusMeters*1.05;}
 }
 void includeLocalSystem(Scene& scene){for(const auto& o:definitions)scene.include(o);}
-void updateLocalSystem(Scene& scene,double utc,double jd){for(const auto& o:definitions){auto state=localState(o,jd);const auto parent=scene.evaluate(std::string(o.parent),utc).state;
+void updateLocalSystem(Scene& scene,double utc,double jd,const std::map<std::string,Sample>& tabulated){for(const auto& o:definitions){
+    if(const auto known=tabulated.find(std::string(o.id));known!=tabulated.end()){auto state=known->second;state.utcSeconds=utc;scene.builtinState(std::string(o.id),state);continue;}
+    auto state=localState(o,jd);const auto parent=scene.evaluate(std::string(o.parent),utc).state;
     state.utcSeconds=utc;state.positionMeters=state.positionMeters+parent.positionMeters;state.velocityMetersPerSecond=state.velocityMetersPerSecond+parent.velocityMetersPerSecond;
     scene.builtinState(std::string(o.id),state);}}
 Category category(std::string_view id){if(id=="sun")return Category::Star;if(id=="moon")return Category::Moon;if(id=="earth"||naturalBody(id))return Category::Planet;if(const auto* o=localOrbit(id))return o->category;return Category::External;}

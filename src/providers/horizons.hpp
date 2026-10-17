@@ -6,7 +6,10 @@
 #include <memory>
 namespace albert::providers {
 struct Point {double jdTDB;core::Vector positionMeters,velocityMetersPerSecond;};
-struct Query {int target=0;std::string center="500@399";double startUtc=0,endUtc=0;std::string step="5 min";bool bootstrapCache=false,forceRefresh=false;};
+// comet: a periodic comet designation ("67P", "1P") instead of target, resolved to the
+// orbit solution of the last apparition before the year after the interval
+// (DES=67P;CAP<year;NOFRAG), so historical dates use their own apparition.
+struct Query {int target=0;std::string center="500@399";double startUtc=0,endUtc=0;std::string step="5 min";bool bootstrapCache=false,forceRefresh=false;std::string comet;};
 struct Table {std::vector<Point> points;double fetchedUtc=0;bool fromCache=false;std::string source="NASA/JPL Horizons";};
 // Table interval for a simulated instant moving at `rate` simulated seconds per
 // second: `playbackSeconds` of real time (at least `minimumSeconds`) ahead in the

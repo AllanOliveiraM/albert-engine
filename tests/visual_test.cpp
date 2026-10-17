@@ -470,8 +470,9 @@ void graphics() {
         const Vector3 pole=graphical({state.position.y*state.velocity.z-state.position.z*state.velocity.y,state.position.z*state.velocity.x-state.position.x*state.velocity.z,state.position.x*state.velocity.y-state.position.y*state.velocity.x});
         const std::map<std::string,Vector3> nuclei{{"67p",Vector3()}};
         auto view=PerspectiveCamera::create(60,1,1e-6f,1e5f);
+        const std::map<std::string,albert::core::StateVector> states{{"67p",state}};
         auto shot=[&](Vector3 eye,Vector3 at,float seconds){view->position.copy(eye);view->lookAt(at);view->updateMatrixWorld();
-            comets.update(*view,sun,nuclei,jd,seconds);renderer.render(*world,*view);return renderer.readRGBPixels();};
+            comets.update(*view,sun,nuclei,states,jd,seconds);renderer.render(*world,*view);return renderer.readRGBPixels();};
         auto luminance=[](const auto& p,int x,int y){const auto i=3*(y*192+x);return p[i]+p[i+1]+p[i+2];};
         const Vector3 inside(0,0,.002f),outside(0,0,1.f);
         auto physical=shot(inside,Vector3(),.1f);

@@ -359,12 +359,19 @@ na atividade de referência a I/F 0,15 e chegando ao preto cinco ordens abaixo; 
 cauda, milhares de vezes mais tênue por área, aparece junto. A escala não é linear, e
 de dentro de uma coma grande (Halley, a centenas de milhares de km) o fundo fica claro.
 
+**Posições.** Os dois cometas vêm de tabelas do Horizons para a data, junto das
+efemérides dos planetas, com a solução orbital da aparição daquela época
+(`DES=67P;CAP<ano;NOFRAG`, `DES=1P;…`: por exemplo JPL#K284/1 para a 67P em 2015 e
+JPL#75 para o Halley em 1986), em passos de um dia. Os elementos de dois corpos de
+outubro de 2026 só entram enquanto a tabela não chega ou acima de 6 h/s, ajustados à
+última diferença medida, como os planetas; sozinhos eles adiantariam a 67P de 2015 em
+uns três meses (1,83 UA contra 1,34 UA reais em 23/09/2015). A atividade, os grãos da
+cauda (órbita osculante do estado atual) e o trajeto desenhado (uma revolução da
+órbita osculante, redesenhada a cada 20 dias simulados, nova data ou troca de fonte)
+seguem esse estado.
+
 Limites: a cauda de íons não é desenhada; jatos, rotação, fragmentação, explosões e o
-rastro de grãos grandes ao longo da órbita também não. As órbitas dos dois cometas são
-de dois corpos com elementos de outubro de 2026: perto do presente e do periélio da 67P
-em 2021 estão certas, mas em 2015 a 67P fica uns três meses adiantada (1,83 UA no
-modelo contra 1,34 UA reais em 23/09/2015). Para validar datas antigas, os cometas
-precisam de tabelas do Horizons.
+rastro de grãos grandes ao longo da órbita também não.
 
 ## Formas artísticas dos pequenos corpos
 

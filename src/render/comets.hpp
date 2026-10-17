@@ -24,9 +24,11 @@ public:
     bool known(const std::string& id) const{return comets_.contains(id);}
     bool enhanced(const std::string& id) const;
     void enhance(const std::string& id,bool enhanced);
-    // Nuclei and the Sun in render space (Earth radii, floating origin).
+    // Nuclei and the Sun in render space (Earth radii, floating origin); heliocentric
+    // states of the nuclei, from tables or elements, drive activity and the grains.
     void update(const threepp::PerspectiveCamera& camera,const threepp::Vector3& sun,
-                const std::map<std::string,threepp::Vector3>& nuclei,double jdTDB,float seconds);
+                const std::map<std::string,threepp::Vector3>& nuclei,
+                const std::map<std::string,core::StateVector>& heliocentric,double jdTDB,float seconds);
 private:
     struct Comet;
     threepp::Scene& scene_;

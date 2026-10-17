@@ -20,9 +20,24 @@ double stepSeconds(const std::string& step){
     std::istringstream stream(step);unsigned n=0;std::string unit,extra;if(!(stream>>n>>unit)||n==0||n>100000||stream>>extra)throw std::invalid_argument("Invalid Horizons step");
     const double factor=unit=="min"?60.:unit=="h"?3600.:unit=="d"?86400.:0.;if(!factor)throw std::invalid_argument("Unsupported Horizons step unit");return n*factor;
 }
+bool periodicComet(const std::string& d){
+    if(d.size()<2||d.size()>5||d.back()!='P'||d.front()=='0')return false;
+    return std::all_of(d.begin(),d.end()-1,[](char c){return c>='0'&&c<='9';});
+}
+// Apparition bound: the year after the interval ends (proleptic Gregorian, from days).
+int apparitionYear(double utc){
+    long long days=static_cast<long long>(std::floor(utc/86400.))+719468;const long long era=(days>=0?days:days-146096)/146097;
+    const auto doe=static_cast<unsigned>(days-era*146097),yoe=(doe-doe/1460+doe/36524-doe/146096)/365,doy=doe-(365*yoe+yoe/4-yoe/100),mp=(5*doy+2)/153;
+    return static_cast<int>(static_cast<long long>(yoe)+era*400+(mp>=10))+1;
+}
+std::string command(const Query& q){
+    if(!q.comet.empty())return "DES="+q.comet+";CAP<"+std::to_string(apparitionYear(q.endUtc))+";NOFRAG";
+    return q.target>=1000000?"DES= "+std::to_string(q.target)+";":std::to_string(q.target);
+}
 Query normalize(Query q){
     const double step=stepSeconds(q.step);
-    if(q.target==0||std::abs(static_cast<long long>(q.target))>2000000000LL||(q.center!="500@399"&&q.center!="500@10")||!std::isfinite(q.startUtc)||!std::isfinite(q.endUtc)||q.startUtc< -1e10||q.endUtc<=q.startUtc||q.endUtc-q.startUtc>100000.*86400.||q.endUtc>1e11)throw std::invalid_argument("Invalid Horizons query");
+    if(!q.comet.empty()&&(!periodicComet(q.comet)||q.target!=0))throw std::invalid_argument("Invalid comet designation");
+    if((q.target==0&&q.comet.empty())||std::abs(static_cast<long long>(q.target))>2000000000LL||(q.center!="500@399"&&q.center!="500@10")||!std::isfinite(q.startUtc)||!std::isfinite(q.endUtc)||q.startUtc< -1e10||q.endUtc<=q.startUtc||q.endUtc-q.startUtc>100000.*86400.||q.endUtc>1e11)throw std::invalid_argument("Invalid Horizons query");
     q.startUtc=std::floor(q.startUtc/step)*step;q.endUtc=std::ceil(q.endUtc/step)*step;
     if((q.endUtc-q.startUtc)/step>8190)throw std::length_error("Horizons query exceeds sample limit");return q;
 }
@@ -68,7 +83,7 @@ std::vector<Point> parseVectors(const std::string& text){
 std::string horizonsURL(const Query& request){
     const auto q=normalize(request);
     auto epoch=[](double utc){std::ostringstream out;out<<"'JD"<<std::fixed<<std::setprecision(9)<<astro::utcToTdb(utc)<<"'";return out.str();};
-    const std::pair<std::string,std::string> args[]={{"format","text"},{"COMMAND","'"+(q.target>=1000000?"DES= "+std::to_string(q.target)+";":std::to_string(q.target))+"'"},{"OBJ_DATA","NO"},{"MAKE_EPHEM","YES"},{"EPHEM_TYPE","VECTORS"},{"CENTER","'"+q.center+"'"},{"REF_PLANE","FRAME"},{"REF_SYSTEM","ICRF"},{"OUT_UNITS","KM-S"},{"VEC_TABLE","2"},{"VEC_LABELS","NO"},{"VEC_CORR","NONE"},{"CSV_FORMAT","YES"},{"TIME_TYPE","TDB"},{"START_TIME",epoch(q.startUtc)},{"STOP_TIME",epoch(q.endUtc+stepSeconds(q.step))},{"STEP_SIZE","'"+q.step+"'"}};
+    const std::pair<std::string,std::string> args[]={{"format","text"},{"COMMAND","'"+command(q)+"'"},{"OBJ_DATA","NO"},{"MAKE_EPHEM","YES"},{"EPHEM_TYPE","VECTORS"},{"CENTER","'"+q.center+"'"},{"REF_PLANE","FRAME"},{"REF_SYSTEM","ICRF"},{"OUT_UNITS","KM-S"},{"VEC_TABLE","2"},{"VEC_LABELS","NO"},{"VEC_CORR","NONE"},{"CSV_FORMAT","YES"},{"TIME_TYPE","TDB"},{"START_TIME",epoch(q.startUtc)},{"STOP_TIME",epoch(q.endUtc+stepSeconds(q.step))},{"STEP_SIZE","'"+q.step+"'"}};
     std::string url="https://ssd.jpl.nasa.gov/api/horizons.api?";for(const auto& [key,value]:args){if(url.back()!='?')url+='&';url+=key+'='+encode(value);}return url;
 }
 struct Horizons::Impl {
@@ -91,7 +106,7 @@ Table Horizons::query(Query request,DownloadProgress* progress){
     std::unique_lock lock(jplRequestGate(),std::defer_lock);
     while(!lock.try_lock_for(std::chrono::milliseconds(100)))if(progress)progress->checkCancelled();
     if(progress)progress->checkCancelled();if(!request.forceRefresh)if(auto value=cached())return *value;
-    const auto group=std::to_string(request.target)+"/"+request.center+"/"+request.step+"/ICRF-KM-S-TDB-NONE-v1";
+    const auto group=(request.comet.empty()?std::to_string(request.target):command(request))+"/"+request.center+"/"+request.step+"/ICRF-KM-S-TDB-NONE-v1";
     if(auto saved=request.forceRefresh?std::optional<StoredResponse>{}:loadResponse(impl_->directory,group,4*1024*1024))try{
         const double age=impl_->utcNow()-saved->fetchedUtc;auto points=parseVectors(saved->payload);
         const bool full=points.front().jdTDB<=astro::utcToTdb(request.startUtc)+1e-7&&points.back().jdTDB>=astro::utcToTdb(request.endUtc)-1e-7;

@@ -570,9 +570,16 @@ conforme a posição); o realce linear escondia a cauda (10^4 mais tênue que a 
 `readRGBPixels` vem de baixo para cima. Validação: AP da cauda da 67P em 23/09/2015
 ~290° contra ~285° (Knight et al. 2017), usando o estado do Horizons porque os elementos
 de 2026 adiantam a 67P de 2015 em ~3 meses (Halley em 1986 fica a ~1 dia do periélio
-real). Pendentes: cauda de íons (CO+, antissolar com aberração ~400 km/s; brilho exige
-fonte medida), tabelas do Horizons para cometas em datas antigas (opção `DES=67P;CAP<ano`),
-jatos e rastro de grãos grandes.
+real). Em seguida, **cometas pelo Horizons**: `providers::Query::comet` (designação
+periódica validada, `DES=67P;CAP<ano+1;NOFRAG`, cache por comando), tabelas diárias no
+conjunto de efemérides (`Ephemerides::comets`, etapas do carregamento +2), posição pela
+tabela com os elementos de 2026 como modelo ancorado (mesmo `place`/correções dos
+planetas), `updateLocalSystem` aceita estados tabelados, coma/cauda pelo estado
+osculante (`core::osculating`) e trajeto por `core::revolution` (redesenhado após 20
+dias, nova data ou troca de fonte depois da transição; antes ficava com o estado de
+dois corpos do instante do salto). Programa real: 67P a 1,340 UA em 23/09/2015 (antes
+1,83), Halley a 0,888 UA em 13/03/1986. Pendentes: cauda de íons (CO+, antissolar com
+aberração ~400 km/s; brilho exige fonte medida), jatos e rastro de grãos grandes.
 
 Ceres (entregue): DLR HAMO `CE_HAMO_G_00N_180E_EQU_CLR.IMG` (21093×10546, 58,59
 px/grau, SHA e8f5fee4…, 8,9% sem dado, sobretudo polos) → 21600×10800 com `fill_gaps`
@@ -640,5 +647,6 @@ das estrelas só era aplicado na abertura: agora vai no shader (`motion` + `year
 `setStarEpoch` a cada quadro); regressão no `astronomy_test` com Toliman em 1900
 (6,2′ desde J2000). O achado anterior dos anéis foi dado como corrigido.
 
-Próxima ação concreta: tabelas do Horizons para os cometas (posições certas em datas
-antigas), depois cauda de íons; validação em Windows nativo (Alta 5) depende do Allan.
+Próxima ação concreta: revisão do Codex sobre coma/cauda e cometas pelo Horizons;
+depois cauda de íons (se houver fonte medida para o brilho) ou cenários de eventos
+(Média 5); validação em Windows nativo (Alta 5) depende do Allan.

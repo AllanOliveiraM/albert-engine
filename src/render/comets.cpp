@@ -103,7 +103,7 @@ double apexMetres(const albert::core::CometActivity& c,double r){
 }
 
 struct albert::CometVisuals::Comet {
-    const core::CometActivity* activity;const core::LocalOrbit* orbit;core::StateAt state;
+    const core::CometActivity* activity;const core::LocalOrbit* orbit;
     std::shared_ptr<Mesh> coma,tail;std::shared_ptr<ShaderMaterial> comaShader,tailShader;
     double afrho=0,distance=0,computedJd=std::numeric_limits<double>::quiet_NaN();
     std::chrono::steady_clock::time_point computed{};
@@ -114,7 +114,7 @@ struct albert::CometVisuals::Comet {
 albert::CometVisuals::CometVisuals(Scene& scene):scene_(scene),phase_(phaseTexture()){
     for(const auto& activity:core::cometActivities()){
         const auto* orbit=core::localOrbit(activity.id);if(!orbit||orbit->parent!="sun")continue;
-        auto c=std::make_unique<Comet>();c->activity=&activity;c->orbit=orbit;c->state=core::heliocentricState(*orbit);
+        auto c=std::make_unique<Comet>();c->activity=&activity;c->orbit=orbit;
         c->comaShader=comaMaterial(phase_.get());c->coma=Mesh::create(SphereGeometry::create(1.f,64,32),c->comaShader);
         c->tailShader=tailMaterial(phase_.get());
         auto geometry=BufferGeometry::create();std::vector<unsigned> index;
@@ -139,10 +139,12 @@ double albert::CometVisuals::distanceAu(const std::string& id) const{return come
 bool albert::CometVisuals::enhanced(const std::string& id) const{return comets_.contains(id)&&comets_.at(id)->stretchTarget>0;}
 void albert::CometVisuals::enhance(const std::string& id,bool enhanced){if(comets_.contains(id))comets_.at(id)->stretchTarget=enhanced?1.f:0.f;}
 
-void albert::CometVisuals::update(const PerspectiveCamera& camera,const Vector3& sun,const std::map<std::string,Vector3>& nuclei,double jd,float seconds){
+void albert::CometVisuals::update(const PerspectiveCamera& camera,const Vector3& sun,const std::map<std::string,Vector3>& nuclei,
+                                  const std::map<std::string,core::StateVector>& heliocentric,double jd,float seconds){
     for(auto& [id,entry]:comets_){
-        auto& c=*entry;const auto nucleus=nuclei.find(id);
-        const auto now=c.state(jd);const double r=length(now.position)/AU;
+        auto& c=*entry;const auto nucleus=nuclei.find(id);const auto known=heliocentric.find(id);
+        if(known==heliocentric.end()){c.coma->visible=c.tail->visible=false;continue;}
+        const auto& now=known->second;const double r=length(now.position)/AU;
         const bool inbound=now.position.x*now.velocity.x+now.position.y*now.velocity.y+now.position.z*now.velocity.z<0;
         c.afrho=core::afrho(*c.activity,r,inbound);c.distance=r;
         c.stretch=animateValue(c.stretch,c.stretchTarget,seconds); // Blended in log radiance by the shaders.
@@ -169,7 +171,8 @@ void albert::CometVisuals::update(const PerspectiveCamera& camera,const Vector3&
             std::vector<double> betas(BETAS),ages(AGES);
             for(std::size_t i=0;i<BETAS;++i)betas[i]=.003*std::pow(.9/.003,static_cast<double>(i)/(BETAS-1));
             for(std::size_t j=0;j<AGES;++j)ages[j]=young*std::pow(120*86400./young,static_cast<double>(j)/(AGES-1));
-            const auto grid=core::dustGrid(c.state,*c.activity,jd,betas,ages);
+            // Osculating orbit through the current state: perturbations over 120 days are small.
+            const auto grid=core::dustGrid(core::osculating(now,jd),*c.activity,jd,betas,ages);
             auto geometry=c.tail->geometry();
             auto* positions=geometry->getAttribute<float>("position");auto* normals=geometry->getAttribute<float>("normal");
             auto* density=geometry->getAttribute<float>("density");auto* thickness=geometry->getAttribute<float>("thickness");

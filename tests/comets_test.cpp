@@ -36,6 +36,18 @@ int main(){try{
         const auto then=localState(orbit,jd-730),now=localState(orbit,jd);
         const auto moved=propagate({then.positionMeters,then.velocityMetersPerSecond},solarGM,730*86400.);
         require(norm(moved.position-now.positionMeters)<1e3,"Propagation disagrees with the comet elements");}
+    // Osculating path through a state: closes on itself after one revolution, passes
+    // through the state and reaches the elements' perihelion (Halley, 1986).
+    {const auto& orbit=*localOrbit("halley");const double jd=2446470.5;const auto s=heliocentricState(orbit)(jd);
+     const auto path=revolution(s,jd,256);require(path.size()==257,"Revolution samples");
+     require(norm(path.front().second.position-path.back().second.position)<1e3,"Revolution does not close");
+     double best=1e99;std::size_t closest=0;for(std::size_t k=0;k<path.size();++k){const double d=norm(path[k].second.position-s.position);if(d<best){best=d;closest=k;}}
+     require(best<1e6&&std::abs(path[closest].first-jd)<1.,"Path misses the state");
+     double nearest=1e99,when=0;for(const auto& [t,p]:path)if(norm(p.position)<nearest){nearest=norm(p.position);when=t;}
+     // The 2026 elements put the 1986 perihelion within a day of 1986-02-09.5, at q = a(1-e)
+     // (to the sampling: 256 steps in eccentric anomaly).
+     require(std::abs(nearest/(orbit.a*(1-orbit.e))-1)<3e-3&&std::abs(when-2446470.96)<3.5,"Halley 1986 perihelion");
+     const auto through=osculating(s,jd);require(norm(through(jd).position-s.position)<1e-3,"Osculating state");}
     // Finson-Probstein grid: no dust far from the Sun; near 67P's 2015 perihelion the
     // grains trail antisunward, small grains (high beta) farther.
     const std::vector<double> betas{.01,.1,.5},ages{86400.,10*86400.};

@@ -12,7 +12,8 @@ const LocalOrbit* localOrbit(std::string_view id);
 // Relative to the listed parent, in ICRF/SI. Two-body approximation only.
 Sample localState(const LocalOrbit&,double jdTDB);
 void includeLocalSystem(Scene&);
-void updateLocalSystem(Scene&,double utcSeconds,double jdTDB);
+// Two-body states around each parent; `tabulated` geocentric states (by id) replace them.
+void updateLocalSystem(Scene&,double utcSeconds,double jdTDB,const std::map<std::string,Sample>& tabulated={});
 Category category(std::string_view id);
 const char* categoryName(Category);
 std::string normalizedName(std::string_view);
