@@ -28,6 +28,7 @@
 #include "window_icon.hpp"
 #include "layers.hpp"
 #include "asset_pack.hpp"
+#include "asset_downloads.hpp"
 #include "solids.hpp"
 #include "core/bridge.hpp"
 #include "core/time.hpp"
@@ -128,9 +129,25 @@ struct Orbits {
 };
 
 std::vector<const albert::core::NaturalBody*> availableBodies(){
-    std::vector<const albert::core::NaturalBody*> result;const auto pack=albert::visualAssetPack();
-    for(const auto& body:albert::core::naturalBodies()){const std::string id(body.id);if(pack->contains(id+"-day"))result.push_back(&body);}
+    std::vector<const albert::core::NaturalBody*> result;std::shared_ptr<const albert::AssetPack> pack;
+    // While the essential container downloads there is no library yet; every
+    // bundled planet arrives with it, so count them all.
+    try{pack=albert::visualAssetPack();}catch(const std::exception&){}
+    for(const auto& body:albert::core::naturalBodies()){const std::string id(body.id);if(!pack||pack->contains(id+"-day"))result.push_back(&body);}
     return result;
+}
+
+// The loading card shows the essential container like any other stage.
+void waitForEssential(albert::AssetDownloads& assets,albert::DownloadProgress& progress){
+    std::string shown;
+    while(true){
+        const auto status=assets.status();if(status.essentialReady)return;
+        const auto& item=status.items.front();
+        const auto stage=status.error.empty()?std::string("Baixando dados visuais essenciais"):"Dados essenciais: nova tentativa em "+std::to_string(status.retrySeconds)+" s ("+status.error.substr(0,60)+")";
+        if(stage!=shown){progress.stage(stage,0);shown=stage;}
+        progress.transfer(static_cast<std::int64_t>(item.received),static_cast<std::int64_t>(item.bytes));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));progress.checkCancelled();
+    }
 }
 
 int loadSteps(){static const int steps=11+2*static_cast<int>(availableBodies().size());return steps;}
@@ -415,7 +432,7 @@ struct LoadedData {
 // Scene replacements are applied on the render thread only after full success.
 class DataLoader {
 public:
-    explicit DataLoader(fs::path countries): countries_(std::move(countries)) {}
+    explicit DataLoader(fs::path countries,albert::AssetDownloads* assets=nullptr): countries_(std::move(countries)),assets_(assets) {}
 
     ~DataLoader() {
         progress.cancelled = true;
@@ -433,6 +450,7 @@ public:
         pending_ = std::async(std::launch::async, [this, reloadAssets, bootstrap] {
             LoadedData result;
             if (reloadAssets) {
+                if (assets_) waitForEssential(*assets_, progress);
                 result.assets = albert::loadVisualAssets(countries_.parent_path(), progress);
                 progress.stage("Preparando cartografia local", 6);
                 result.borders = loadBorders(countries_);
@@ -484,6 +502,7 @@ public:
 
 private:
     fs::path countries_;
+    albert::AssetDownloads* assets_ = nullptr;
     bool reloadAssets_ = true;
     bool bootstrap_ = false;
     int failures_ = 0;
@@ -798,7 +817,14 @@ int albert::runRenderer(int argc, char** argv) {
         renderer.shadowMap().enabled = true;
         renderer.shadowMap().type = ShadowMap::PFC;
         renderer.shadowMap().autoUpdate = false;
-        DataLoader downloads(countries);
+        // Light distributions carry only the catalogue: download what is missing,
+        // essential first. Complete libraries never start this service.
+        std::unique_ptr<albert::AssetDownloads> assetDownloads;
+        if(const auto catalog=albert::assetDirectory()/"catalog.json";fs::is_regular_file(catalog)){
+            bool complete=false;try{complete=albert::visualAssetsComplete();}catch(const std::exception&){}
+            if(!complete){assetDownloads=std::make_unique<albert::AssetDownloads>(albert::readAssetCatalog(catalog),albert::AssetDownloads::Options{});assetDownloads->start();}
+        }
+        DataLoader downloads(countries,assetDownloads.get());
         std::function<void()> drawInterface;
         std::ifstream fontFile(albert::assetDirectory() / "fonts" / "Inter.ttf", std::ios::binary);
         std::vector<char> fontBytes(std::istreambuf_iterator<char>(fontFile), {});
@@ -835,7 +861,7 @@ int albert::runRenderer(int argc, char** argv) {
             else ImGui::TextDisabled("Horario conferido na internet");
             drawDownloadStatus(downloads);
             ImGui::Spacing();
-            ImGui::TextWrapped("Imagens incluidas no programa. Buscando as posicoes reais dos corpos disponiveis.");
+            ImGui::TextWrapped("%s",assetDownloads?"Dados visuais essenciais baixados ao abrir; as demais resolucoes continuam em segundo plano. Buscando as posicoes reais dos corpos.":"Imagens incluidas no programa. Buscando as posicoes reais dos corpos disponiveis.");
             if (ImGui::Button("Sair", ImVec2(-1, 32))) canvas.close();
             ImGui::End();
             ImGui::PopStyleVar();
@@ -1011,6 +1037,7 @@ int albert::runRenderer(int argc, char** argv) {
         auto setFocus = [&](Focus next, bool resetZoom = false) {
             registry.get(targetId(next));
             if (focus == next && !transition.active && !resetZoom) return;
+            if(assetDownloads){const auto id=targetId(next);assetDownloads->prioritize(id!=targets::Moon&&albert::core::category(id)==albert::core::Category::Moon?std::string("moons"):id);}
 
             // Clear residual control inertia without moving the displayed camera.
             const Vector3 displayedPosition=camera->position,displayedTarget=controls.target;
@@ -1056,6 +1083,8 @@ int albert::runRenderer(int argc, char** argv) {
         camera->lookAt(controls.target);
         int appliedQuality = -1;
         Focus lastRegionalFocus=focus;bool lastDetailQuality=visualSettings.quality;
+        std::uint64_t assetGeneration=albert::visualAssetGeneration();std::string levelBody;int levelSeen=-1;
+        float assetIndicatorAlpha=0.f,assetCompleteAge=0.f;
 
         drawInterface = [&] {
             const auto display = ImGui::GetIO().DisplaySize;
@@ -1374,6 +1403,39 @@ int albert::runRenderer(int argc, char** argv) {
                         ImGui::GetColorU32(ImVec4(.55f,.78f,.84f,detailLoaderAlpha*(i+1)/8.f)),1.2f);
                 }
                 draw->AddText(ImVec2(spot.x+12,spot.y-8),ImGui::GetColorU32(ImVec4(.65f,.76f,.8f,detailLoaderAlpha)),"Detalhes");
+            }
+            if(assetDownloads) {
+                // Background detail download: a quiet ring and two lines in the corner,
+                // a retry button only after a failure, fading out once complete.
+                const auto status=assetDownloads->status();const float dt=ImGui::GetIO().DeltaTime;
+                assetCompleteAge=status.complete?assetCompleteAge+dt:0.f;
+                assetIndicatorAlpha=albert::animateValue(assetIndicatorAlpha,assetCompleteAge<2.5f?1.f:0.f,dt);
+                if(assetIndicatorAlpha>.01f) {
+                    const double fraction=status.totalBytes?static_cast<double>(status.doneBytes)/static_cast<double>(status.totalBytes):1.;
+                    auto bytes=[](std::uint64_t b){char text[32];std::snprintf(text,sizeof text,b>=1000000000ull?"%.1f GB":"%.0f MB",b>=1000000000ull?b/1e9:b/1e6);return std::string(text);};
+                    auto groupName=[&](const std::string& group)->std::string{if(group=="moons")return "Luas";try{return registry.get(group).name;}catch(const std::exception&){return group;}};
+                    std::string title=status.complete?"Detalhes completos":!status.error.empty()?"Download pausado":"Baixando detalhes",detail;
+                    if(status.complete)detail="Todas as resolucoes disponiveis";
+                    else if(!status.error.empty())detail="Nova tentativa em "+std::to_string(status.retrySeconds)+" s";
+                    else for(const auto& item:status.items)if(item.active){detail=groupName(item.group)+" nivel "+std::to_string(item.level)+" - "+bytes(status.doneBytes)+" de "+bytes(status.totalBytes);break;}
+                    ImGui::SetNextWindowPos(ImVec2(margin,display.y-margin),ImGuiCond_Always,ImVec2(0,1));
+                    ImGui::SetNextWindowBgAlpha(.55f);
+                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha,ImGui::GetStyle().Alpha*assetIndicatorAlpha);
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(12,9));
+                    ImGui::Begin("Dados visuais",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoFocusOnAppearing|ImGuiWindowFlags_NoNav|ImGuiWindowFlags_NoMove);
+                    protectPanel();
+                    auto* draw=ImGui::GetWindowDrawList();const auto origin=ImGui::GetCursorScreenPos();const ImVec2 centre(origin.x+11,origin.y+15);
+                    const ImVec4 accent=status.error.empty()?ImVec4(.55f,.86f,.93f,assetIndicatorAlpha):ImVec4(.95f,.72f,.42f,assetIndicatorAlpha);
+                    draw->AddCircle(centre,8.f,ImGui::GetColorU32(ImVec4(.6f,.7f,.75f,.25f*assetIndicatorAlpha)),32,2.f);
+                    draw->PathArcTo(centre,8.f,-static_cast<float>(PI)*.5f,-static_cast<float>(PI)*.5f+static_cast<float>(2*PI*fraction),32);
+                    draw->PathStroke(ImGui::GetColorU32(accent),ImDrawFlags_None,2.f);
+                    ImGui::Dummy(ImVec2(22,30));ImGui::SameLine(0,8);ImGui::BeginGroup();
+                    ImGui::Text("%s  %d%%",title.c_str(),static_cast<int>(fraction*100));
+                    ImGui::TextDisabled("%s",detail.c_str());
+                    if(!status.error.empty()&&ImGui::SmallButton("Tentar agora"))assetDownloads->retry();
+                    ImGui::EndGroup();
+                    ImGui::End();ImGui::PopStyleVar(2);
+                }
             }
             if (display.x > 900) {
                 ImGui::SetNextWindowPos(ImVec2(display.x-margin,margin),ImGuiCond_Always,ImVec2(1,0));
@@ -1966,6 +2028,12 @@ int albert::runRenderer(int argc, char** argv) {
             const bool released=planetReleased||solidReleased;
             if(released)regional.retry();
             memory.update(released);
+            // A finer level of the focused body arrived: reload its regional detail once.
+            if(const auto generation=albert::visualAssetGeneration();generation!=assetGeneration){
+                assetGeneration=generation;const std::string body=targetId(focus);const int level=albert::visualAssetPack()->availableLevel(body+"-day");
+                if(body==levelBody&&level>levelSeen)regional.retry();
+                levelBody=body;levelSeen=level;
+            }
             if((focus!=lastRegionalFocus&&(solids.contains(focus)||solids.contains(lastRegionalFocus)))||(lastDetailQuality!=static_cast<bool>(visualSettings.quality)&&solids.contains(focus)))regional.retry();
             lastRegionalFocus=focus;lastDetailQuality=visualSettings.quality;
             if(visualSettings.quality && focus==targets::Earth && earthCamera.length()<2.2f) {

@@ -528,7 +528,7 @@ void albert::PlanetVisuals::updateUploads(GLRenderer& renderer) {
         auto images=std::move(*uploadingRegion_);uploadingRegion_.reset();setRegionalImages(std::move(images));
     }
     if(!uploads_.active() && uploadingSun_) {
-        if(imageWanted_[1]) {imageDetail_[1]=std::move(uploadingSun_);imageFailed_[1]=false;sunMaterial_->uniforms.at("sunMap").setValue(imageDetail_[1].get());}
+        if(imageWanted_[1]) {if(imageDetail_[1])imageDetail_[1]->dispose();imageDetail_[1]=std::move(uploadingSun_);imageFailed_[1]=false;sunDetailLevel_=uploadingSunLevel_;sunStale_=false;sunMaterial_->uniforms.at("sunMap").setValue(imageDetail_[1].get());}
         else {uploadingSun_->dispose();uploadingSun_.reset();}
     }
 }
@@ -614,12 +614,16 @@ bool albert::PlanetVisuals::releaseDistantDetails(const std::string& focus,const
 void albert::PlanetVisuals::updateImageDetail(const Vector3& camera, bool enabled) {
     if(!detailError.empty() && std::chrono::steady_clock::now()>=imageRetry_) retryDetails();
     imageWanted_ = {false,enabled && camera.distanceTo(sun->position)<1200.f,false};
+    if(const auto generation=visualAssetGeneration();generation!=detailGeneration_){
+        detailGeneration_=generation;
+        if(imageDetail_[1]&&visualAssetPack()->availableLevel("sun")>sunDetailLevel_){sunStale_=true;imageFailed_[1]=false;}
+    }
     if(pendingImage_.valid() && pendingImage_.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
         auto result=pendingImage_.get();
         detailError=result.error;
         if(!detailError.empty()) imageRetry_=std::chrono::steady_clock::now()+std::chrono::minutes(2);
         if(result.image && imageWanted_[result.index]) {
-            uploadingSun_=texture(std::move(*result.image),ColorSpace::sRGB);
+            uploadingSun_=texture(std::move(*result.image),ColorSpace::sRGB);uploadingSunLevel_=result.level;
             uploads_.add(uploadingSun_);
         }
     }
@@ -631,14 +635,15 @@ void albert::PlanetVisuals::updateImageDetail(const Vector3& camera, bool enable
     sunMaterial_->uniforms.at("sunMap").setValue((imageDetail_[1] ? imageDetail_[1] : textures_[4]).get());
     nightMaterial_->uniforms.at("nightMap").setValue((imageDetail_[2] ? imageDetail_[2] : textures_[1]).get());
     if(pendingImage_.valid() || uploadingSun_) return;
-    for(int i=0;i<3;++i) if(imageWanted_[i] && !imageDetail_[i] && !imageFailed_[i]) {
+    for(int i=0;i<3;++i) if(imageWanted_[i] && (!imageDetail_[i]||(i==1&&sunStale_)) && !imageFailed_[i]) {
         imageFailed_[i]=true;
         detailProgress.cancelled=false;
         pendingImage_=std::async(std::launch::async,[this,i] {
             DetailedImage result{i,std::nullopt,{}};
             try {
                 detailProgress.stage("Lendo detalhes do Sol",0);
-                result.image=visualAssetPack()->image("sun",GeoRegion{0,0,1,1},4096,detailProgress);
+                const auto pack=visualAssetPack();result.level=pack->availableLevel("sun");
+                result.image=pack->image("sun",GeoRegion{0,0,1,1},4096,detailProgress);
             } catch(const std::exception& e) { result.error=e.what(); }
             return result;
         });

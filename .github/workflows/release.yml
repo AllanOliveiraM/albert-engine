@@ -28,6 +28,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Release the LFS object store
+        shell: bash
+        run: rm -rf .git/lfs/objects
       - name: Check asset checkout and release packager
         run: |
           python tests/asset_checkout_fixture.py
@@ -38,6 +41,18 @@ jobs:
       - name: Build and test portable Linux (Debian 12)
         if: runner.os == 'Linux'
         run: bash scripts/build-portable.sh linux
+      - name: Light folder and asset containers (Linux)
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 scripts/light-dist.py dist/linux dist/linux-light
+          assets=$(python3 -c "import json;print(json.load(open('dist/linux-light/assets/catalog.json'))['release'])")
+          # Containers do not depend on the system: build them once, and only
+          # while that asset release does not exist yet.
+          if gh release view "$assets" >/dev/null 2>&1; then echo "Asset release $assets already published"
+          else python3 scripts/split-asset-pack.py dist/linux/assets/visuals.pak release-assets; fi
       - name: Build and test portable Windows (MSVC x64)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -50,6 +65,8 @@ jobs:
           Set-Location $workspace
           & .\make.cmd render-dist -Jobs 2
           if ($LASTEXITCODE -ne 0) { throw 'Windows release build or tests failed' }
+          & python scripts/light-dist.py dist/windows dist/windows-light
+          if ($LASTEXITCODE -ne 0) { throw 'Windows light folder failed' }
           "RELEASE_WORKSPACE=$workspace" >> $env:GITHUB_ENV
       - name: Archive portable distribution
         shell: bash
@@ -66,6 +83,8 @@ jobs:
           if [[ "$RUNNER_OS" == Windows ]]; then cd "$(cygpath -u "$RELEASE_WORKSPACE")"; fi
           python scripts/package-release.py "dist/$PLATFORM" release \
             --name "AlbertEngine-$version-$PLATFORM-x64"
+          python scripts/package-release.py "dist/$PLATFORM-light" release \
+            --name "AlbertEngine-$version-$PLATFORM-x64-light"
           if [[ "$RUNNER_OS" == Windows ]]; then
             echo "RELEASE_OUTPUT=$(cygpath -w "$(pwd)/release")" >> "$GITHUB_ENV"
           else
@@ -76,6 +95,15 @@ jobs:
         with:
           name: portable-${{ matrix.platform }}-x64
           path: ${{ env.RELEASE_OUTPUT }}/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+      - name: Upload asset containers
+        if: runner.os == 'Linux' && hashFiles('release-assets/catalog.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-containers
+          path: release-assets/*
           compression-level: 0
           if-no-files-found: error
           retention-days: 3
@@ -94,6 +122,12 @@ jobs:
           pattern: portable-*-x64
           path: release
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        # Absent when the asset release of this library already exists.
+        continue-on-error: true
+        with:
+          name: asset-containers
+          path: release-assets
       - name: Publish both platforms after all tests pass
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,8 +136,19 @@ jobs:
         shell: bash
         run: |
           for sums in release/*.sha256; do (cd release && sha256sum --check "$(basename "$sums")"); done
+          # Asset release first: a light download never points at missing containers.
+          if [[ -f release-assets/catalog.json ]]; then
+            assets=$(python3 -c "import json;print(json.load(open('release-assets/catalog.json'))['release'])")
+            if ! gh release view "$assets" >/dev/null 2>&1; then
+              gh release create "$assets" release-assets/* --latest=false \
+                --title "Albert Engine - dados visuais ${assets#assets-}" \
+                --notes "Containers de imagens baixados automaticamente pelas versões leves. Não é preciso baixá-los manualmente."
+            fi
+          fi
           cat > release-notes.md <<'NOTES'
           Versões portáteis para Linux x64 (glibc 2.36+) e Windows x64.
+          Versão leve (`-light`): pacote pequeno; ao abrir, baixa os dados visuais essenciais
+          (~63 MB) e completa o restante em segundo plano. Versão completa: tudo incluído, offline.
           Baixe todos os volumes `.zip.001`, `.zip.002`, etc. do seu sistema na mesma pasta.
           Abra `.zip.001` com 7-Zip e extraia. Abra AlbertEngine / AlbertEngine.exe na pasta extraída.
           Se houver apenas um `.zip`, extraia normalmente. O pacote já inclui todos os assets.

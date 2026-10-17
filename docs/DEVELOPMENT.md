@@ -188,8 +188,15 @@ sufixo, como `v0.2.1-rc1`, geram pré-releases. Reexecutar uma tag existente
 substitui seus anexos; releases imutáveis continuam protegidas pelo GitHub.
 O CI comum de branches/PRs não gera distribuições.
 
-Cada pacote contém o executável na raiz, os assets e bibliotecas/licenças
-necessários, sem código, logs, cache ou README. Os arquivos `.sha256` ficam
+Cada sistema recebe duas versões. A **completa** contém o executável na raiz,
+os assets e bibliotecas/licenças necessários, sem código, logs, cache ou README,
+e funciona offline. A **leve** (`-light`) é a mesma pasta sem `assets/visuals.pak`
+e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~63 MB) numa
+tela de carregamento e completa as demais resoluções em segundo plano (ver
+[ASSETS.md](ASSETS.md#download-por-níveis)). `scripts/light-dist.py` deriva a
+pasta leve da completa. Os containers baixados ficam numa release própria
+`assets-<id>`, criada pelo workflow antes da release da versão e só quando ainda
+não existe; anexos de release não consomem a cota de banda LFS da conta. Os arquivos `.sha256` ficam
 ao lado dos downloads, fora da pasta do programa. O ZIP preserva a permissão
 de execução Linux e inclui arquivos grandes com ZIP64.
 
@@ -209,7 +216,7 @@ byte a byte, inclusive no Windows com `core.autocrlf=true`. Não afrouxar os
 hashes de `cmake/Assets.cmake` para contornar conversões de LF/CRLF.
 `tests/asset_checkout_fixture.py` simula esse checkout e confirma rejeição de
 corrupção; `tests/release_fixture.py` verifica reconstrução dos volumes, CRC,
-conteúdo, modos e hashes. Os dois são executados antes do build de releases.
+conteúdo, modos, hashes e a pasta leve. Os dois são executados antes do build de releases.
 
 ## Dependências declaradas
 

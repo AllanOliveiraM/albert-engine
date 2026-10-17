@@ -29,7 +29,8 @@ def package(source,output,name,limit=1900*1024*1024):
  if not source.is_dir() or output==source or source in output.parents:raise ValueError('Output must be outside the distribution folder')
  if not 1<=limit<2*1024**3:raise ValueError('Volume size must be below 2 GiB')
  if not any((source/n).is_file() for n in ('AlbertEngine','AlbertEngine.exe')):raise ValueError('Distribution executable missing at root')
- if not (source/'assets/visuals.pak').is_file():raise ValueError('Distribution imagery missing')
+ # Complete folders carry the library; light ones carry its download catalogue.
+ if not ((source/'assets/visuals.pak').is_file() or (source/'assets/catalog.json').is_file()):raise ValueError('Distribution imagery missing')
  output.mkdir(parents=True,exist_ok=True)
  if list(output.glob(name+'.zip*')) or (output/(name+'.sha256')).exists():raise FileExistsError('Release output already exists')
  volumes=Volumes(output,name,limit)

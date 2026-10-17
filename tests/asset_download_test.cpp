@@ -3,6 +3,7 @@
 #include "sha256.hpp"
 #include <algorithm>
 #include <iostream>
+#include <cstdlib>
 #include <map>
 #include <stdexcept>
 using namespace std::chrono_literals;
@@ -41,16 +42,23 @@ int main(int argc,char** argv){try{
         const auto a=library->image(layer,{},32,progress),b=original.image(layer,{},32,progress);
         require(a.width()==b.width()&&(a.isFloat()?a.data<float>()==b.data<float>():a.data()==b.data()),"Downloaded library differs from the original");
     }
-    const auto packs=albert::assetContainerDirectories().front();
+    // Fresh asset folder for the remaining checks: on Windows an installed
+    // container stays open, so deleting it would only mark it pending.
+    const auto second=albert::assetDirectory().parent_path()/"second";
+#ifdef _WIN32
+    _wputenv_s(L"ALBERT_ASSET_DIR",second.c_str());
+#else
+    setenv("ALBERT_ASSET_DIR",second.c_str(),1);
+#endif
+    const auto packs=albert::assetContainerDirectories().front();require(packs==second/"packs","Asset folder switch failed");
     // Disk reserve: refuse to start a container that would leave too little space.
-    fs::remove(packs/"moons-2.pak");
     {auto low=options;low.reserveBytes=std::uint64_t(1)<<62;albert::AssetDownloads downloads(catalog,low);downloads.start();
      require(waitFor([&]{return downloads.status().error.find("Espaco")!=std::string::npos;},10s),"Disk reserve was not enforced");}
+    require(!fs::exists(packs/"essential.pak.part"),"Download started despite the disk reserve");
     // Shutdown cancels a running transfer promptly and keeps it resumable.
-    fs::remove(packs/"earth-1.pak");
     std::chrono::steady_clock::time_point stopped;
     {albert::AssetDownloads downloads(catalog,options);downloads.start();
-     require(waitFor([&]{const auto s=downloads.status();return std::any_of(s.items.begin(),s.items.end(),[](const auto& i){return i.file=="earth-1.pak"&&i.active&&i.received>0;});},10s),"Cancellation target never started");
+     require(waitFor([&]{const auto s=downloads.status();return std::any_of(s.items.begin(),s.items.end(),[](const auto& i){return i.file=="earth-1.pak"&&i.active&&i.received>0;});},20s),"Cancellation target never started");
      stopped=std::chrono::steady_clock::now();}
     require(std::chrono::steady_clock::now()-stopped<3s,"Cancellation did not stop the transfer promptly");
     require(fs::exists(packs/"earth-1.pak.part")&&!fs::exists(packs/"earth-1.pak"),"Cancelled transfer was not kept resumable");

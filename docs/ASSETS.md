@@ -130,6 +130,44 @@ permite processar somente essas camadas; o manifesto final só é publicado quan
 todas as seis estiverem prontas. A pasta padrão é `asset-packs`; `--output` deve
 apontar para um caminho dentro da montagem `/work` quando usado via Docker.
 
+## Download por níveis
+
+A versão leve não traz `visuals.pak`. `scripts/split-asset-pack.py` divide a
+biblioteca reunida em containers `albert-pack-v1` comuns, sem recodificar nada:
+
+- `essential.pak` (~63 MB): todos os blocos com que o programa abre (o nível
+  global de cada camada pedido na inicialização, malhas medidas e registros de
+  fontes). Todo o Sistema Solar fica navegável com ele.
+- `<corpo>-<nível>.pak`: as resoluções seguintes de Terra, Lua, Sol, Mercúrio e
+  Marte; `moons-<nível>.pak` reúne as luas. Cada um fica abaixo de 2 GiB.
+- `catalog.json`: tamanho, SHA-256 e prioridade de cada container; o id do
+  catálogo nomeia a release `assets-<id>` de onde são baixados.
+
+A ordem segue o tamanho acumulado de cada corpo: Sol, Terra e Lua primeiro, nível
+a nível, depois luas, Marte e Mercúrio intercalados. O corpo em foco passa à
+frente, inclusive interrompendo a transferência em andamento (ela retoma depois
+do ponto em que parou). Cada container é baixado para `.part` com HTTP Range,
+conferido por tamanho e SHA-256, renomeado atomicamente e só então incorporado;
+falhas repetem com espera crescente e o canto inferior esquerdo mostra o andamento
+e o botão de nova tentativa. Antes de cada container é reservado espaço em disco.
+
+O leitor junta os containers num único índice e usa, para cada camada, o maior
+nível com todos os blocos presentes: sem um nível, aparece a melhor resolução já
+baixada, nunca uma imagem inventada. A chegada de um nível mais fino do corpo em
+foco recarrega o detalhe regional uma vez. Os arquivos vão para `assets/packs`
+ao lado do executável, ou para `data/packs` quando `assets` não é gravável.
+A versão completa e o build de desenvolvimento continuam lendo `visuals.pak`.
+
+```sh
+python3 scripts/split-asset-pack.py build/linux/imagery/visuals.pak saida --catalog-only
+python3 scripts/split-asset-pack.py build/linux/imagery/visuals.pak saida
+python3 scripts/light-dist.py dist/linux dist/linux-light
+```
+
+Para testar localmente, sirva os containers em `<base>/<release>/<arquivo>` e
+defina `ALBERT_ASSET_BASE_URL=<base>` e `ALBERT_ASSET_DIR` com uma pasta de assets
+contendo `catalog.json` e sem `visuals.pak`.
+
 ## Pacotes por corpo
 
 O build também aceita arquivos adicionais em `assets/imagery/<corpo>/`, cada um

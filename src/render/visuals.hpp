@@ -92,11 +92,13 @@ private:
     float displayedAtmosphere_=1.f, displayedClouds_=0.f, displayedNight_=1.f;
     std::optional<GeoRegion> earthDetailBounds_;
     std::array<std::shared_ptr<threepp::Texture>,3> imageDetail_;
-    struct DetailedImage { int index; std::optional<threepp::Image> image; std::string error; };
+    struct DetailedImage { int index; std::optional<threepp::Image> image; std::string error; int level=-1; };
     std::future<DetailedImage> pendingImage_;
     std::array<float,2> detailIdle_{};
     std::array<bool,3> imageWanted_{}, imageFailed_{};
     std::chrono::steady_clock::time_point imageRetry_{};
+    // Downloaded detail levels arrive over time; refresh the Sun when a finer one lands.
+    std::uint64_t detailGeneration_=0;int sunDetailLevel_=-1,uploadingSunLevel_=-1;bool sunStale_=false;
 };
 
 std::shared_ptr<threepp::Points> makeStarField(const std::filesystem::path& catalogue, double jdTDB);

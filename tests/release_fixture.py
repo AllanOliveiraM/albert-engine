@@ -29,4 +29,16 @@ with tempfile.TemporaryDirectory(prefix='albert-release-') as directory:
  try:release.package(source,source/'archives','bad')
  except ValueError:pass
  else:raise AssertionError('Archive can recursively include itself')
-print('Release OK: single/split ZIP, root entrypoint, exact files, CRC, modes and SHA-256')
+ # Light folder: same program without the library, plus its download catalogue.
+ import json,sys;sys.path.insert(0,str(ROOT/'tests'));from pack_fixture import fixture
+ fixture(source/'assets/visuals.pak')
+ spec=importlib.util.spec_from_file_location('light',ROOT/'scripts/light-dist.py');light=importlib.util.module_from_spec(spec);spec.loader.exec_module(light)
+ catalog=light.light(source,root/'light')
+ assert not (root/'light/assets/visuals.pak').exists() and json.loads((root/'light/assets/catalog.json').read_text())==catalog and catalog['containers'][0]['essential']
+ assert (root/'light/AlbertEngine').stat().st_mode&stat.S_IXUSR and (root/'light/licenses/notice.txt').read_bytes()==b'license\n'
+ parts=release.package(root/'light',output,'light',65536)
+ with zipfile.ZipFile(parts[0]) as archive:assert set(archive.namelist())=={'AlbertEngine','assets/catalog.json','licenses/notice.txt'}
+ try:light.light(source,root/'light')
+ except ValueError:pass
+ else:raise AssertionError('Light folder silently overwritten')
+print('Release OK: single/split ZIP, root entrypoint, exact files, CRC, modes, SHA-256 and light folder')

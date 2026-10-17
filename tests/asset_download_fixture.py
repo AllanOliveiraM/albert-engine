@@ -53,12 +53,14 @@ with tempfile.TemporaryDirectory(prefix='albert-download-') as directory:
  finally:server.shutdown();server.server_close()
  requests=lambda name:[(r,s) for n,r,s in log if n==name]
  moon=requests('moon-1.pak');assert len(moon)>=3 and moon[0]==(None,200) and moon[1][0] and moon[1][1]==206,moon
- assert all(int(r.split('=')[1][:-1])>0 for r,_ in moon[1:]),'Resumed transfers must not restart from zero'
+ # First phase: truncated, resumed (slow), preempted and resumed again.
+ assert all(int(r.split('=')[1][:-1])>0 for r,_ in moon[1:3]),'Resumed transfers must not restart from zero'
  assert int(moon[2][0].split('=')[1][:-1])>int(moon[1][0].split('=')[1][:-1]),'Preempted transfer did not resume where it stopped'
  earth=requests('earth-1.pak');assert earth[0]==(None,200) and earth[1][0] and earth[1][1]==200,earth
  assert requests('mercury-1.pak')[:2]==[(None,200),(None,200)],'Corrupt download was not discarded and fetched again'
  assert requests('essential.pak')[:2]==[(None,503),(None,200)]
  assert requests('moons-2.pak')[0][1]==302
+ assert not list((assets/'packs').glob('*.part')),'Completed downloads left partial files'
  # Only the transfer cancelled on purpose remains, resumable.
- assert [p.name for p in (assets/'packs').glob('*.part')]==['earth-1.pak.part']
+ assert [p.name for p in (root/'second/packs').glob('*.part')]==['earth-1.pak.part']
 print('Downloads: resume, ignored range, SHA-256 rejection, redirect, 503 retry and focus preemption OK')
