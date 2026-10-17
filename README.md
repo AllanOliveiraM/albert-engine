@@ -27,9 +27,10 @@ câmera. A renderização, a navegação e as animações ficam dentro do Albert
 Hoje, a cena inclui **43 corpos**: o Sol, oito planetas, 25 luas, cinco planetas
 anões, Vesta, Pallas, Halley e 67P. A seleção é local, organizada por categorias,
 e aceita nomes aproximados. Luas adicionais, planetas anões e pequenos corpos
-usam órbitas aproximadas embarcadas. Dezesseis luas adicionais já têm mapas
-próprios NASA/VTAD, detalhes por zoom e orientação IAU; outras superfícies adicionais
-continuam ilustrativas. Os oito planetas e a Lua preservam suas efemérides Horizons
+usam órbitas aproximadas embarcadas. Dezoito luas adicionais já têm mapas
+próprios NASA, detalhes por zoom e orientação IAU; outras superfícies adicionais
+continuam ilustrativas. Fobos e Deimos usam elipsoides de referência IAU; seus
+modelos detalhados ainda estão no roadmap. Os oito planetas e a Lua preservam suas efemérides Horizons
 e mapas próprios.
 Os cinturões de asteroides e Kuiper e a nuvem de Oort são populações visuais
 estatísticas, exibidas conforme a escala, sem representar trajetórias individuais.

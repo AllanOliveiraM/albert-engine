@@ -334,6 +334,8 @@ void graphics() {
         require(renderer.readRGBPixels()[3*(96*192+96)]>20,"Local moon surface did not render");
         Raycaster ray;ray.setFromCamera(Vector2(0,0),*camera);require(objects.pick(registry,ray)==id,"Textured local moon cannot be picked");
         auto node=moons.nodes().at(id);node->geometry()->computeBoundingSphere();require(std::abs(node->geometry()->boundingSphere->radius-radius)<1e-5f,"Moon radius scaled twice");
+        if(definition.axesMeters[0]>0){const auto& axes=definition.axesMeters;const double r=definition.radiusMeters;
+            require(std::abs(node->scale.x-axes[0]/r)<1e-6&&std::abs(node->scale.y-axes[2]/r)<1e-6&&std::abs(node->scale.z-axes[1]/r)<1e-6,"IAU axes mapped incorrectly into render coordinates");}
         albert::RegionalImages detail;detail.body=id;detail.day=rgba(230);detail.height=height(0);albert::prepareRegionalImages(detail);moons.stage(std::move(detail));
         for(int i=0;moons.uploading()&&i<256;++i)moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,0.f);
         require(!moons.uploading(),"Moon detail upload did not finish");moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);

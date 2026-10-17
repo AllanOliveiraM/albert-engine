@@ -526,8 +526,8 @@ fixtures de CSPICE são independentes. Não há DEM artificial derivado de image
 
 `surfaceBodies()/surfaceBody()` descrevem superfícies e orientações separadamente
 de `naturalBodies()`, que permanece sendo o conjunto de planetas dos provedores
-online. As 16 luas adicionais com mapas usam `moon_frames.inc` (IAU pck00011), mapas NASA
-VTAD fixados em `assets/moon-sources.json` e `scripts/prepare-moon-assets.py`.
+online. As 18 luas adicionais com mapas usam `moon_frames.inc` (IAU pck00011), mapas NASA
+fixados em `assets/moon-sources.json` e `scripts/prepare-moon-assets.py`.
 O pacote `imagery/moons/` é unido automaticamente à biblioteca; não cria consultas
 Horizons extras nem objetos duplicados. LOD, uploads incrementais, fades, iluminação
 auxiliar e descarte de recortes são os mesmos de `SolidBodies`. Seleção usa a esfera
@@ -539,7 +539,13 @@ renderização, clique, escala, upload e descarte para cada lua com mapas.
 O gerador de orientação lê IDs/raios do mesmo inventário de fontes e seleciona
 os argumentos periódicos do sistema planetário correspondente. `partialMap`
 registra apenas a cobertura visual, sem alterar raios, posição ou orientação;
-a UI distingue lacunas/baixa definição de terreno medido.
+a UI distingue lacunas/baixa definição de terreno medido. `axesMeters` contém
+os semieixos físicos IAU em x/y/z; no render, escala x/z/y aplicada igualmente
+à base e aos recortes. A API informa os três diâmetros físicos e mantém o raio
+nominal como datum do LOD. A câmera limita aproximação pelo maior semieixo; picking
+inverte a escala antes da interseção. Fobos/Deimos usam esses elipsoides e
+mosaicos Viking, sem declarar a malha como topografia medida. O gerador suporta
+imagens 2:1 além de GLB e argumentos periódicos de grau 2 no sistema de Marte.
 
 `providers/small_bodies` consulta SBDB API 1.3, valida respostas e resolve designações
 em SPK/diâmetro. `catalog::Manager::search` atende à UI assíncrona e a `SearchObjects`.

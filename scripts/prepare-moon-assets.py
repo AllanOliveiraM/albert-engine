@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproduce the local moon surface pack from pinned NASA GLBs.
+"""Reproduce the local moon surface pack from pinned NASA GLBs/images.
 
 Python 3 + Pillow (also available in scripts/Dockerfile.assets).
 Originals/intermediates remain in ignored asset-packs/moons/.
@@ -47,16 +47,20 @@ def prepare(offline=False):
    if temporary.stat().st_size!=body['bytes'] or file_digest(temporary)!=body['sha256']:raise ValueError('Downloaded source mismatch')
    temporary.replace(path)
   if path.stat().st_size!=body['bytes'] or file_digest(path)!=body['sha256']:raise ValueError('Source checksum/size mismatch: '+body['id'])
-  image=visual(path.read_bytes(),body['grid'])
+  if body.get('kind')=='image':
+   with Image.open(path) as source:
+    if list(source.size)!=body['grid'] or source.width!=2*source.height:raise ValueError('Unexpected source image grid')
+    image=source.convert('RGB')
+  else:image=visual(path.read_bytes(),body['grid'])
   record=image_tiles(public,body['id']+'-day',image);image.close()
-  record['layer']['lighting']='Static NASA VTAD visual reference; not calibrated reflectance or elevation'
+  record['layer']['lighting']='Static '+body['credit']+' reference; not calibrated reflectance or elevation'
   layers.append(record['layer']);files.extend(record['files']);print(body['id'],body['grid'],flush=True)
  source=public/'v1/moons/SOURCES.json';source.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(plan_path,source)
  files.append(dict(path=source.relative_to(public).as_posix(),bytes=source.stat().st_size,sha256=file_digest(source)))
  (public/'manifest.json').write_text(json.dumps(dict(schema='albert-tiled-assets-v1',version='v1',static=True,layers=layers,files=files),indent=2)+'\n')
  spec=importlib.util.spec_from_file_location('pack',ROOT/'scripts/pack-assets.py');pack=importlib.util.module_from_spec(spec);spec.loader.exec_module(pack);pack.create_pack(root,'moons')
  metadata=ROOT/'assets/manifest.json';record=json.loads(metadata.read_text())
- record['files']=[v for v in record['files'] if v['path']!='moon-sources.json']+[dict(path='moon-sources.json',bytes=plan_path.stat().st_size,sha256=file_digest(plan_path),source='NASA VTAD visual resources',license='Credits and limits in source inventory')]
+ record['files']=[v for v in record['files'] if v['path']!='moon-sources.json']+[dict(path='moon-sources.json',bytes=plan_path.stat().st_size,sha256=file_digest(plan_path),source='NASA/JPL/USGS visual resources',license='Credits and limits in source inventory')]
  metadata.write_text(json.dumps(record,ensure_ascii=False,indent=2)+'\n')
 
 if __name__=='__main__':

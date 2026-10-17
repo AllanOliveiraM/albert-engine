@@ -13,7 +13,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Fobos/Deimos primeiro; depois completar mapas, formas e relevo das luas pendentes | Lua terrestre detalhada; 16 luas adicionais com mapas NASA/VTAD e orientação IAU; demais luas ilustrativas; generalizar eclipses além de Terra/Lua |
+| **Alta — 1** | Modelos detalhados de Fobos/Deimos; completar formas, relevo e luas pendentes | Lua terrestre detalhada; 18 luas adicionais com mapas NASA e orientação IAU; demais luas ilustrativas; generalizar eclipses além de Terra/Lua |
 | **Alta — 2** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 3** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
 | **Alta — 4** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
@@ -25,6 +25,15 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
 
 ### Andamento
+
+**16/10 — primeiro aprimoramento de Fobos e Deimos.** Mosaicos próprios Viking
+NASA/JPL/USGS de 1440×720, sem reutilizar imagens de outra lua. Formas elipsoidais
+triaxiais com semieixos IAU pck00011, orientação física com termos periódicos e
+argumentos quadráticos de Marte. Limite de câmera considera o maior semieixo,
+e seleção/detalhes regionais respeitam a escala não uniforme. Substitui as
+formas aleatórias quando os mapas estão presentes. Não é um modelo de relevo
+observado: detalhes de forma, cor real/calibração e registro textura/geometria
+continuam pendentes. São 18 luas adicionais com mapas; pacote conjunto 38,79 MB.
 
 **16/10 — luas dos sistemas externos.** Ariel, Umbriel, Titânia, Oberon, Miranda,
 Tritão e Caronte recebem mapas próprios NASA/VTAD e orientação IAU, incluindo

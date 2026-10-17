@@ -280,6 +280,46 @@
       "partial_map": true,
       "credit": "NASA Visualization Technology Applications and Development (VTAD)",
       "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
+    },
+    {
+      "id": "phobos",
+      "name": "Fobos",
+      "horizons_id": 401,
+      "radius_m": 11166.6666667,
+      "kind": "image",
+      "shape": "iau-triaxial",
+      "filename": "phobos-viking.tif",
+      "url": "https://space.jpl.nasa.gov/tmaps/pix/mar1kuu2.tif",
+      "bytes": 887628,
+      "sha256": "860a161436bc7b0a5e1e026715b38b426ab98a1e52709c4ccb5e5e9982353686",
+      "grid": [
+        1440,
+        720
+      ],
+      "partial_map": true,
+      "credit": "NASA/JPL/Caltech/USGS Viking mosaic",
+      "product": "https://space.jpl.nasa.gov/tmaps/mars.html",
+      "limits": "Static grayscale Viking mosaic; variable coverage and baked illumination, not calibrated reflectance. Triaxial reference ellipsoid from NAIF pck00011, not a detailed measured shape/DEM. Texture longitude registration against IAU landmarks is not independently validated."
+    },
+    {
+      "id": "deimos",
+      "name": "Deimos",
+      "horizons_id": 402,
+      "radius_m": 6300,
+      "kind": "image",
+      "shape": "iau-triaxial",
+      "filename": "deimos-viking.tif",
+      "url": "https://space.jpl.nasa.gov/tmaps/pix/mar2kuu2.tif",
+      "bytes": 743096,
+      "sha256": "b95417bf476fd94d91f622d994c7ef072bafe8b0daf76cf41324722959c1cf1f",
+      "grid": [
+        1440,
+        720
+      ],
+      "partial_map": true,
+      "credit": "NASA/JPL/Caltech/USGS Viking mosaic",
+      "product": "https://space.jpl.nasa.gov/tmaps/mars.html",
+      "limits": "Static grayscale Viking mosaic; variable coverage and baked illumination, not calibrated reflectance. Triaxial reference ellipsoid from NAIF pck00011, not a detailed measured shape/DEM. Texture longitude registration against IAU landmarks is not independently validated."
     }
   ]
 }

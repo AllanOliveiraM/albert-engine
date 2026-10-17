@@ -33,8 +33,8 @@ São elipses de dois corpos, propagadas localmente. Luas são relativas a seus
 planetas; os demais são heliocêntricos. Perturbações, precessão e forças não
 gravitacionais não são integradas. Não são efemérides precisas em tempo real;
 o erro cresce com a distância temporal à época de referência. A interface
-identifica a aproximação ao focar esses corpos. Dezesseis luas adicionais
-têm mapas próprios NASA/VTAD, orientação IAU e detalhes regionais por zoom.
+identifica a aproximação ao focar esses corpos. Dezoito luas adicionais
+têm mapas próprios NASA, orientação IAU e detalhes regionais por zoom.
 Os demais usam esferas de referência ou formas rochosas artísticas descritas
 abaixo, sem reutilizar fotografias de outros objetos. Mais mapas/modelos observados
 permanecem no roadmap; os raios nominais são aproximados.
@@ -87,11 +87,21 @@ de pixels não garante essa resolução em toda a superfície. Não há DEM nem
 atividade atmosférica/geológica em tempo real. A orientação de Tritão preserva
 a rotação retrógrada e todos os termos periódicos publicados no kernel.
 
+Fobos e Deimos têm mosaicos Viking próprios, em tons de cinza, de 1440×720,
+[NASA/JPL/Caltech/USGS](https://space.jpl.nasa.gov/tmaps/mars.html).
+A forma usa elipsoides de referência `pck00011`, com semieixos IAU x/y/z de
+13,0/11,4/9,1 km (Fobos) e 7,8/6,0/5,1 km (Deimos). São aproximações físicas
+triaxiais, sem crateras ou relevo medidos na geometria. A orientação inclui os
+termos periódicos e quadráticos publicados, validada contra CSPICE. Seleção,
+zoom mínimo e recortes regionais respeitam as três dimensões. O registro entre
+mosaico e marcos IAU ainda não foi validado; iluminação da imagem é herdada do
+mosaico, não albedo calibrado. Modelos detalhados observados continuam prioritários.
+
 O build comum já reúne `assets/imagery/moons/` à biblioteca única. Não baixa mapas
 dessas luas em runtime. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **38.131.729 bytes**.
+todas as luas na RAM. O pacote adicional ocupa **38.792.056 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -101,14 +111,16 @@ versionados. O processo preserva os pacotes de Terra/Lua/Sol e planetas.
 
 Mimas ainda exige reprojetar seu atlas de dois hemisférios; o globo atmosférico
 de Titã requer um tratamento próprio. Hyperion e Phoebe continuam artísticos.
-Fobos/Deimos ainda usam formas artísticas e órbitas aproximadas; faltam seus
-modelos, imagens e orientação observados. Nereida e Proteus também permanecem
+Fobos/Deimos já têm mapas, elipsoides de referência e orientação IAU; faltam
+modelos detalhados de forma/relevo e órbitas mais precisas. Nereida e Proteus permanecem
 sem mapas próprios embarcados.
 
 ## Formas artísticas dos pequenos corpos
 
-Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Phobos, Deimos,
-Hyperion e Phoebe também recebem formas rochosas ilustrativas. Crateras,
+Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Hyperion e
+Phoebe também recebem formas rochosas ilustrativas. Fobos/Deimos usam o modelo
+triaxial acima quando seus mapas estão disponíveis; a forma artística permanece
+apenas como fallback para bibliotecas antigas sem esses assets. Crateras,
 silhuetas, variações de material e microrelevo são procedurais, com semente por
 objeto, sem emendas de textura. 67P tem uma silhueta com dois lobos. Não são
 reconstruções fotogramétricas nem modelos de missão; a interface deixa essa

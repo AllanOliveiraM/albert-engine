@@ -108,7 +108,8 @@ albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets)
         s->material=material(s->day.get(),s->height.get(),s->mask.get());
         s->mesh=Mesh::create(SphereGeometry::create(static_cast<float>(core::surfaceRadius(asset.body)/core::earthRadiusMeters),192,96),s->material);
         const auto* definition=core::surfaceBody(asset.body);
-        if(definition->polarRadiusMeters>0)s->mesh->scale.y=static_cast<float>(definition->polarRadiusMeters/definition->radiusMeters);
+        if(definition->axesMeters[0]>0){const auto& axes=definition->axesMeters;const double r=definition->radiusMeters;s->mesh->scale.set(static_cast<float>(axes[0]/r),static_cast<float>(axes[2]/r),static_cast<float>(axes[1]/r));}
+        else if(definition->polarRadiusMeters>0)s->mesh->scale.y=static_cast<float>(definition->polarRadiusMeters/definition->radiusMeters);
         if(asset.ring){
             s->ringTexture=colorTexture(std::move(*asset.ring));const float r=static_cast<float>(definition->radiusMeters/core::earthRadiusMeters);
             s->ringMaterial=rings(s->ringTexture.get(),r);auto geometry=RingGeometry::create(r*1.23f,r*2.3309f,256);

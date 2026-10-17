@@ -12,6 +12,7 @@ struct NaturalBody {
     std::span<const RotationTerm> terms;
     double polarRadiusMeters=0;bool cloudSurface=false;
     bool partialMap=false; // Visual coverage only; never a terrain/ephemeris property.
+    std::array<double,3> axesMeters{}; // Optional IAU x/y/z reference semiaxes.
 };
 // Additional solid bodies. Existing Earth/Moon/Sun keep their specialized models.
 std::span<const NaturalBody> naturalBodies();

@@ -41,13 +41,17 @@ def generate(path):
  for source in json.loads((ROOT/'assets/moon-sources.json').read_text())['bodies']:
   body,name,target,radius=[source[k] for k in ['id','name','horizons_id','radius_m']]
   key='BODY'+str(target);amps=[values(key+'_NUT_PREC_'+kind,[]) for kind in ['PM','RA','DEC']];terms=[]
+  degree=2 if target//100==4 else 1
   angles=values('BODY'+str(target//100)+'_NUT_PREC_ANGLES') if any(amps) else []
   for i in range(max(map(len,amps))):
    w,a,d=[v[i] if i<len(v) else 0 for v in amps]
-   if any([w,a,d]):terms.append([angles[2*i],angles[2*i+1]/36525,w,0,a,d])
+   if any([w,a,d]):
+    phase=angles[i*(degree+1):i*(degree+1)+degree+1]
+    terms.append([phase[0],phase[1]/36525,w,phase[2]/36525**2 if degree==2 else 0,a,d])
   if terms:moon_out.append('constexpr RotationTerm '+body+'Terms[]{'+','.join('{'+','.join(map(fmt,t))+'}' for t in terms)+'};')
   arr=lambda x:'{'+','.join(map(fmt,x))+'}'
-  moon_records.append('{"'+body+'","'+name+'",'+str(target)+','+fmt(radius)+',0,0,'+arr(values(key+'_POLE_RA'))+','+arr(values(key+'_POLE_DEC'))+','+arr(values(key+'_PM'))+','+(body+'Terms' if terms else '{}')+',0,false,'+str(source.get('partial_map',False)).lower()+'}')
+  axes=[v*1000 for v in values(key+'_RADII')] if source.get('shape')=='iau-triaxial' else [0,0,0]
+  moon_records.append('{"'+body+'","'+name+'",'+str(target)+','+fmt(radius)+',0,0,'+arr(values(key+'_POLE_RA'))+','+arr(values(key+'_POLE_DEC'))+','+arr(values(key+'_PM'))+','+(body+'Terms' if terms else '{}')+',0,false,'+str(source.get('partial_map',False)).lower()+','+arr(axes)+'}')
  moon_out.append('const NaturalBody moonSurfaces[]{'+',\n'.join(moon_records)+'};')
  write_changed(ROOT/'src/core/moon_frames.inc','\n'.join(moon_out)+'\n')
  names={401: 'Phobos', 402: 'Deimos', 501: 'Io', 502: 'Europa', 503: 'Ganymede', 504: 'Callisto', 505: 'Amalthea', 506: 'Himalia', 507: 'Elara', 508: 'Pasiphae', 509: 'Sinope', 510: 'Lysithea', 511: 'Carme', 512: 'Ananke', 513: 'Leda', 514: 'Thebe', 515: 'Adrastea', 516: 'Metis', 601: 'Mimas', 602: 'Enceladus', 603: 'Tethys', 604: 'Dione', 605: 'Rhea', 606: 'Titan', 607: 'Hyperion', 608: 'Iapetus', 609: 'Phoebe', 610: 'Janus', 611: 'Epimetheus', 612: 'Helene', 613: 'Telesto', 614: 'Calypso', 615: 'Atlas', 616: 'Prometheus', 617: 'Pandora', 618: 'Pan', 701: 'Ariel', 702: 'Umbriel', 703: 'Titania', 704: 'Oberon', 705: 'Miranda', 706: 'Cordelia', 707: 'Ophelia', 708: 'Bianca', 709: 'Cressida', 710: 'Desdemona', 711: 'Juliet', 712: 'Portia', 713: 'Rosalind', 714: 'Belinda', 715: 'Puck', 801: 'Triton', 802: 'Nereid', 803: 'Naiad', 804: 'Thalassa', 805: 'Despina', 806: 'Galatea', 807: 'Larissa', 808: 'Proteus', 901: 'Charon'}
