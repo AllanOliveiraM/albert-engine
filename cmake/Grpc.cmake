@@ -64,6 +64,10 @@ function(albert_fetch_grpc)
     set(protobuf_INSTALL OFF CACHE BOOL "" FORCE)
     set(utf8_range_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
     set(protobuf_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    # The whole program links the static MSVC runtime (/MT). Abseil otherwise
+    # forces the DLL runtime in its own directory, so protoc failed with LNK2038.
+    set(ABSL_MSVC_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
+    set(CARES_MSVC_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
     set(protobuf_MSVC_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
     set(gRPC_MSVC_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
     if(WIN32)
