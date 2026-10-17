@@ -1,43 +1,61 @@
 # Albert Engine — contexto para continuidade
 
-**Estado em 17/10/2026 (madrugada), continuação por Claude Opus 5.5.** Entregues
-nesta sessão: correção do build Windows no CI, cache de LFS/compilação no CI e
-**Mimas** completo. Próxima feature decidida pelo Allan: **download dos assets por
-níveis no primeiro uso** (seção própria em `ROADMAP.md`); depois as luas restantes.
-Ordem combinada: Mimas → downloader → Titã, Hipérion/Febe, Proteu, Nereida.
+**Estado em 17/10/2026 (manhã), continuação por Claude Opus 5.5.** Entregues nesta
+sessão: correções do Windows no CI, cache de LFS/compilação no CI, **Mimas**
+completo e o **download dos assets por níveis** (versão leve). Próximo: luas
+restantes, na ordem Titã → Hipérion/Febe → Proteu → Nereida; depois cometas.
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
-com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/LOCAL_SYSTEM.md` e `docs/RPC.md`.
-**A etapa de fidelidade das luas ainda tem cinco corpos pendentes.** Atualizar este
-arquivo ao concluir essa etapa, conforme pedido do Allan, e a cada entrega relevante.
+com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
+e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem cinco corpos pendentes.**
+Atualizar este arquivo ao concluir essa etapa, conforme pedido do Allan, e a cada
+entrega relevante.
 
 ### CI, releases e cache (17/10/2026)
 
-O Windows/MSVC falhava primeiro por CRLF em `countries.geojson` (corrigido com
-`assets/** -text`, regressão em `tests/asset_checkout_fixture.py`) e depois porque
-`scripts/assemble-assets.ps1` chamava `Math.Min(Int32, Int64)`: o PowerShell escolhia
-a sobrecarga `Int32` e estourava com o pacote base de 2.855.439.799 bytes. Corrigido
-em `3384f53`; reproduzido e validado com `mcr.microsoft.com/powershell:7.4-debian-12`
-montando a biblioteca real, **bytes idênticos** ao montador Linux. Não mudar hashes.
+O Windows/MSVC tinha três bloqueios em sequência, todos anteriores a esta sessão
+e escondidos um atrás do outro: CRLF em `countries.geojson` (`assets/** -text`),
+`Math.Min(Int32, Int64)` em `scripts/assemble-assets.ps1` com o pacote de 2,86 GB
+(corrigido; montagem validada com PowerShell 7.4 em Docker, **bytes idênticos** ao
+Linux) e a macro `max` do `windows.h` puxado pelo `curl.h` em `src/net/download.cpp`
+(`NOMINMAX` definido antes, como em `time_service.cpp`). Não mudar hashes.
 
 **Banda LFS:** downloads LFS do Actions contam na cota da conta (10 GiB/mês no
-plano Free, bloqueio ao estourar). Cada run sem cache baixava ~4,9 GB por job.
-`build.yml` agora: checkout sem LFS, chave pelos OIDs LFS, um cache compartilhado
-Linux/Windows (`enableCrossOsArchive`, ~4,82 GB, confirmado na API de caches),
-`git lfs pull` só do que falta, e apaga `.git/lfs/objects` após copiar (libera disco).
-ccache no Linux; `build/windows/_deps` em cache no Windows (MSBuild incremental,
-chave por versão da imagem + `cmake/Dependencies.cmake`/`Grpc.cmake`/presets).
-`concurrency` cancela runs antigos da mesma branch. O limite de cache do repositório
-é 10 GB (LRU). `release.yml` continua compilando do zero (sem cache) e ainda baixa
-LFS completo. Releases/tags não foram criadas. Não fazer merge/tag automaticamente.
+plano Free, bloqueio ao estourar). `build.yml`: checkout sem LFS, chave pelos OIDs,
+um cache compartilhado Linux/Windows (`enableCrossOsArchive`, ~4,8 GB), `git lfs pull`
+só do que falta, e apaga `.git/lfs/objects` após copiar. ccache no Linux e
+`build/windows/_deps` no Windows são restaurados/salvos explicitamente e **salvos
+mesmo quando o build falha** (`!cancelled()`), para uma falha não custar outra
+compilação de gRPC. `concurrency` cancela runs antigos da mesma branch: **um push
+cancela o Windows em andamento** e esse cache não é salvo; quando o Windows estiver
+compilando dependências pela primeira vez, esperar terminar antes de enviar.
+Resultado medido: job Linux de 20–42 min para **5 min** (LFS do cache, build 64 s).
+`release.yml` compila do zero, apaga `.git/lfs/objects` após o checkout e publica
+completa + leve; containers só quando `assets-<id>` não existe. Releases/tags não
+foram criadas. Não fazer merge/tag automaticamente.
 
-Primeiro run com cache (`1df71ec`): LFS salvo no cache; ver no Actions se os runs
-seguintes restauram sem baixar e quanto o build Windows com `_deps` em cache economiza.
-**Até o último registro desta sessão o build MSVC completo ainda não tinha terminado;**
-não declarar Windows verde sem consultar o resultado remoto.
+**Até o último registro, o build MSVC com a correção `NOMINMAX` ainda não tinha
+terminado** (run de `a5250b0`). Não declarar Windows verde sem consultar o Actions.
 
-`gh` não está instalado. A API pública lista runs/jobs/caches sem token; logs
-brutos exigem login (a sessão anterior usou o navegador do Allan para lê-los).
+`gh` não está instalado. A API pública (60 req/h sem token) lista runs/jobs/caches;
+logs brutos exigem login: abrir `https://github.com/<repo>/commit/<sha completo>/checks/<job>/logs`
+no navegador do Allan e filtrar com `fetch(location.href)` (o texto da página corta em 1 MB).
+
+### Download por níveis (entregue em 17/10/2026)
+
+Decisão do Allan: versão leve baixa tudo, por **níveis de resolução**, com tela de
+loading só para o essencial e o resto em segundo plano, indicador minimalista no
+canto, retentativa e continuação; zoom limitado ao que chegou, nunca imagem
+inventada. `scripts/split-asset-pack.py` gera `essential.pak` (63 MB) + 18
+containers `<corpo>-<nível>.pak`/`moons-<nível>.pak` e `catalog.json`;
+`AssetPack` indexa vários arquivos e limita cada camada ao maior nível completo;
+`AssetDownloads` (`src/render/asset_downloads.*`) baixa da release `assets-<id>`
+(`ALBERT_ASSET_BASE_URL` para testes) para `assets/packs` ou `data/packs`.
+`scripts/light-dist.py` deriva a pasta leve. Testes: `asset_containers`,
+`asset_downloads` (servidor local com 503, corte, Range ignorado, corrupção,
+redirect, lentidão, preempção, reserva de disco e cancelamento) e `release_archive`.
+App real testado contra servidor local (scripts em `build/light-*.py`, ignorados).
+Pendente: Windows nativo e uma release real `assets-<id>` no GitHub.
 
 ## Como trabalhar com o Allan
 
@@ -116,7 +134,8 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
   fade, sem exigir câmera parada; descarte ao afastar/trocar objeto. Evitar
   imagens inteiras em UHD residentes para todos os planetas.
 - Cache persistente para dados dinâmicos, bootstrap com dados recentes e atualização
-  em segundo plano; tamanho/limpeza/limite na UI. Imagens estáticas vêm no pacote.
+  em segundo plano; tamanho/limpeza/limite na UI. Imagens estáticas vêm no pacote
+  completo ou são baixadas por níveis na versão leve (ver seção acima).
 - Tempo sincronizado por múltiplas fontes NTP; NTS/leap seconds completos pendentes.
 - Eclipses Terra/Lua: disco solar finito, umbra/penumbra/antumbra e avermelhamento
   atmosférico aproximado documentado. Outros sistemas de eclipses ainda pendentes.
@@ -174,11 +193,7 @@ aproximada de dois corpos. Planetas e Lua preservam os provedores existentes.
 
 ## Próxima fila, por valor/viabilidade
 
-1. **Download dos assets por níveis** (decidido em 17/10/2026, desenho no
-   ROADMAP): release própria de assets (anexos sem limite de banda; nunca LFS),
-   loading dedicado só para ~80 MB de níveis globais, demais níveis em segundo
-   plano com indicador minimalista no canto, retentativa/retomada, zoom limitado
-   ao nível já baixado (nunca imagem inventada), containers por corpo e nível.
+1. ~~Download dos assets por níveis~~ — entregue (seção acima).
 2. **Titã:** atmosfera e aparência visível próprias; não usar mapa infravermelho
    da superfície como fotografia em luz visível sem identificação.
 3. **Hipérion/Febe:** imagens e formas observadas; substituir o procedural onde
@@ -228,8 +243,9 @@ GPU física, Windows real, viagens extensas e limites de RAM/VRAM.
 
 Assets estáticos otimizados estão versionados em `assets/imagery/`, via Git LFS,
 divididos apenas no Git e reunidos automaticamente no build em **um arquivo**.
-A distribuição futura deve carregar a qualidade localmente, sem baixar imagens
-estáticas em runtime. Esse empacotamento dificulta abertura casual; não é DRM.
+A versão completa carrega a qualidade localmente, sem baixar imagens estáticas
+em runtime; a leve baixa os mesmos bytes por níveis (decisão de 17/10/2026).
+Esse empacotamento dificulta abertura casual; não é DRM.
 Originais e intermediários ficam em `asset-packs/`, ignorados. Não espalhar cópias
 de imagens pelo projeto; documentação/capas ficam em `docs/images/`.
 
@@ -305,6 +321,10 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
   geometria (72 interseções), orientação contra CSPICE e OpenGL passaram.
 - Nenhuma distribuição gerada nesta entrega.
 
-Próxima ação concreta: conferir Actions do último commit (Windows MSVC completo e
-cache), depois iniciar o **download de assets por níveis**, mantendo pacote,
-inventário, testes e documentação sincronizados.
+- Downloader: 27 CTests Linux; `asset_containers`/`asset_downloads` também via Wine
+  (MinGW). App real em modo leve: cena em 16,9 s, 19 containers em 235 s a 25 MB/s,
+  foco à frente, retomada com Range após reinício, pico RSS ~1,06–1,20 GB (llvmpipe).
+
+Próxima ação concreta: conferir o Actions (Windows MSVC com `NOMINMAX` e cache de
+`_deps`), depois iniciar **Titã**, mantendo inventário, pacote, testes e
+documentação sincronizados.

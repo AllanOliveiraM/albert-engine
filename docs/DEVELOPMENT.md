@@ -237,7 +237,9 @@ A distribuição guarda toda a biblioteca de imagens em `assets/visuals.pak`.
 Catálogo estelar, fonte, paleta meteorológica e fronteiras ficam organizados no
 mesmo diretório. `assets/manifest.json` verifica os dados auxiliares no build;
 o índice do pacote declara e verifica SHA-256 de cada bloco lido.
-Não há downloads de superfícies durante a execução. A biblioteca está versionada em `assets/imagery/` com Git LFS. O build reúne
+Na versão completa não há downloads de superfícies durante a execução; a versão
+leve as baixa por níveis, como descrito em [ASSETS.md](ASSETS.md#download-por-níveis).
+A biblioteca está versionada em `assets/imagery/` com Git LFS. O build reúne
 as partes automaticamente e verifica SHA-256, sem processar as imagens novamente.
 A regeneração a partir dos originais usa Docker, separadamente da compilação.
 `ALBERT_ASSET_DIR` e `ALBERT_PACK_PATH` permitem caminhos explícitos no desenvolvimento.
@@ -392,8 +394,9 @@ orbital. Uma vista aproximada da superfície não contém a órbita inteira.
 
 ## Detalhes conforme o zoom e cache
 
-A biblioteca completa acompanha as duas distribuições em `assets/visuals.pak`,
-com os mesmos bytes e hashes. Ela não é extraída nem copiada para o cache.
+A biblioteca completa acompanha as versões completas em `assets/visuals.pak`,
+com os mesmos bytes e hashes; a versão leve monta o mesmo índice a partir dos
+containers baixados. Ela não é extraída nem copiada para o cache.
 O índice é carregado uma vez; cada worker abre seu próprio stream e lê somente
 os blocos necessários. JPEG/PNG já são comprimidos, portanto os payloads são
 armazenados diretamente, com offsets de 64 bits e SHA-256. O formato próprio

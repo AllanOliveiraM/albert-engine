@@ -13,12 +13,11 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Download dos assets por níveis no primeiro uso | Hoje toda a biblioteca de 4,89 GB acompanha o programa; ver seção abaixo |
-| **Alta — 2** | Completar Titã, Hipérion, Febe, Proteu e Nereida | Lua terrestre detalhada; 19 luas adicionais com mapas/IAU; Fobos/Deimos/Mimas com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
-| **Alta — 3** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion/Febe já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
-| **Alta — 4** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
-| **Alta — 5** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
-| **Alta — 6** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
+| **Alta — 1** | Completar Titã, Hipérion, Febe, Proteu e Nereida | Lua terrestre detalhada; 19 luas adicionais com mapas/IAU; Fobos/Deimos/Mimas com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
+| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion/Febe já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
+| **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
+| **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
+| **Alta — 5** | Validar GPU física, Windows nativo (inclui a versão leve e seus downloads) e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
 | **Média — 1** | Efemérides/orientações locais mais precisas para luas e pequenos corpos, avaliando SPICE | Catálogo adicional usa propagação aproximada de dois corpos |
 | **Média — 2** | NTS e tratamento completo de leap seconds/smear | NTP com múltiplas fontes já existe, sem autenticação criptográfica |
 | **Média — 3** | Texturas GLB/glTF, animação de peças e controles avançados de câmera pela API | GLB estático/PBR sólido e streaming de posição/atitude já existem |
@@ -26,7 +25,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | **Média — 5** | Data de simulação, gravação/reprodução e cenários de eventos/eclipses | Eclipses acompanham a geometria em tempo real; não há seletor de datas históricas |
 | **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
 
-### Download dos assets por níveis — decidido em 17/10/2026
+### Download dos assets por níveis — decidido e entregue em 17/10/2026
 
 O Allan aprovou trocar a biblioteca embutida por um download no primeiro uso,
 organizado por nível de resolução. Ordem combinada: concluir Mimas (entregue em
@@ -85,6 +84,16 @@ Hipérion, Febe, Proteu e Nereida. A forma artística e a esfera de referência
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — download dos assets por níveis.** Versão leve com `assets/catalog.json`:
+essencial de 63 MB na tela de carregamento, 18 containers por corpo/nível em
+segundo plano, foco à frente (inclusive interrompendo a transferência atual sem
+perda), HTTP Range com `.part`, SHA-256 incremental, troca atômica da biblioteca,
+reserva de disco e indicador no canto. O leitor usa a melhor resolução já
+baixada, nunca inventa detalhe. Releases publicam versões completa e leve e,
+quando necessário, a release `assets-<id>`. Teste do app real contra servidor
+local: cena em 16,9 s, 19 containers em 235 s a 25 MB/s e retomada após reinício.
+Ainda falta validar em Windows nativo e contra uma release real do GitHub.
 
 **17/10 — Mimas com forma medida e mosaico registrado.** Modelo de Gaskell
 (PDS, Cassini ISS e Voyager 1), Q=256: 393.218 vértices e 786.432 triângulos em

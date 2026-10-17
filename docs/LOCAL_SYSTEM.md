@@ -138,8 +138,9 @@ de rotação inercial pode diferir em cerca de 4°. As regiões polares do mosai
 borradas e a resolução da fonte varia de ~0,2 a 1,6 km/pixel; a interface avisa ao
 focar a lua. Não há DEM separado: o relevo vem da própria malha medida.
 
-O build comum já reúne `assets/imagery/moons/` à biblioteca única. Não baixa mapas
-dessas luas em runtime. Cada base usa até 1024 pixels de largura; o recorte de
+O build comum já reúne `assets/imagery/moons/` à biblioteca única. A versão completa
+não baixa esses mapas; a leve traz o nível de 1024 px de cada lua no container
+essencial e baixa os níveis seguintes em `moons-2` e `moons-3`. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
 todas as luas na RAM. O pacote adicional ocupa **65.474.691 bytes**.

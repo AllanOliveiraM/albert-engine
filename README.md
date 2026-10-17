@@ -77,10 +77,14 @@ o horário é estimado ou local. Fonte e qualidade ficam em **Dados** e também
 estão disponíveis pela API. Esta versão ainda não autentica NTP com NTS;
 [funcionamento e limites](docs/TIME.md).
 
-**As imagens estáticas acompanham o aplicativo.** Superfícies, luzes das cidades,
-relevo e referência solar estão em uma biblioteca de aproximadamente **4,86 GB**. Na distribuição,
-ela fica em um único `assets/visuals.pak`. Aproximar a câmera carrega recortes
-mais detalhados dessa biblioteca; a resolução máxima depende dos dados de origem.
+**As imagens estáticas ficam no computador, completas ou baixadas aos poucos.**
+Superfícies, luzes das cidades, relevo e referência solar formam uma biblioteca de
+aproximadamente **4,89 GB**. A versão completa a traz em um único `assets/visuals.pak`
+e funciona offline. A versão leve baixa ao abrir só o essencial (~63 MB, todos os
+corpos em resolução global) e completa as demais resoluções em segundo plano, com
+o corpo em foco à frente; o canto inferior esquerdo mostra o andamento. Aproximar
+a câmera carrega recortes mais detalhados; a resolução máxima depende dos dados de
+origem e, na versão leve, do que já chegou.
 
 **Os recursos entram conforme a necessidade.** O Albert prepara os detalhes em
 segundo plano e divide o envio de texturas à GPU entre quadros, mantendo a
