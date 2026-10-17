@@ -38,7 +38,7 @@ try {
                 $buffer=New-Object byte[] 1048576
                 $remaining=$size
                 while ($remaining -gt 0) {
-                    $count=$inputStream.Read($buffer,0,[int][Math]::Min($buffer.Length,$remaining))
+                    $count=$inputStream.Read($buffer,0,[int][Math]::Min([long]$buffer.Length,$remaining))
                     if ($count -le 0) { throw 'Incomplete asset archive' }
                     [void]$sha.TransformBlock($buffer,0,$count,$buffer,0);$remaining-=$count
                 }
