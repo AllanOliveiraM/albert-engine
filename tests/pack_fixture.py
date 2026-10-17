@@ -34,40 +34,41 @@ def fixture(path,names=None,tint=0):
     index=json.dumps(dict(container='albert-pack-v1',layers=layers,files=entries)).encode()
     path.write_bytes(b'ALBRTPK1'+struct.pack('<Q',len(index))+index+b''.join(payloads))
 
-with tempfile.TemporaryDirectory(prefix='albert-pack-') as directory:
-    path=pathlib.Path(directory)/'visuals.pak';fixture(path)
-    # Wine commands receive a Windows path, native commands keep their path.
-    command=sys.argv[1:]
-    argument='Z:'+str(path).replace('/','\\') if any(pathlib.Path(s).name=='wine' for s in command) else str(path)
-    subprocess.run([*command,argument],check=True)
+if __name__=='__main__':
+    with tempfile.TemporaryDirectory(prefix='albert-pack-') as directory:
+        path=pathlib.Path(directory)/'visuals.pak';fixture(path)
+        # Wine commands receive a Windows path, native commands keep their path.
+        command=sys.argv[1:]
+        argument='Z:'+str(path).replace('/','\\') if any(pathlib.Path(s).name=='wine' for s in command) else str(path)
+        subprocess.run([*command,argument],check=True)
 
-    swap=pathlib.Path(directory)/'swap.pak';replacement=pathlib.Path(directory)/'replacement.pak';fixture(swap);fixture(replacement,tint=20)
-    windows=any(pathlib.Path(s).name=='wine' for s in command)
-    path_arg=lambda p:'Z:'+str(p).replace('/','\\') if windows else str(p)
-    subprocess.run([*command,path_arg(swap),'--replace',path_arg(replacement)],check=True)
+        swap=pathlib.Path(directory)/'swap.pak';replacement=pathlib.Path(directory)/'replacement.pak';fixture(swap);fixture(replacement,tint=20)
+        windows=any(pathlib.Path(s).name=='wine' for s in command)
+        path_arg=lambda p:'Z:'+str(p).replace('/','\\') if windows else str(p)
+        subprocess.run([*command,path_arg(swap),'--replace',path_arg(replacement)],check=True)
 
-    # Independent archives preserve the old payload and assemble into one file.
-    import importlib.util
-    spec=importlib.util.spec_from_file_location('assemble',pathlib.Path(__file__).parents[1]/'scripts/assemble-assets.py')
-    assembler=importlib.util.module_from_spec(spec);spec.loader.exec_module(assembler)
-    root=pathlib.Path(directory);base=root/'base.pak';fixture(base)
-    child=root/'mercury';child.mkdir();extra=child/'extra.pak';fixture(extra,['mercury-day','mercury-height'])
-    def manifest(payload,extensions=None):
-        data=payload.read_bytes();part=payload.with_suffix('.pakpart');part.write_bytes(data)
-        entry=dict(bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),parts=[dict(path=part.name,bytes=len(data),sha256=hashlib.sha256(data).hexdigest())])
-        if extensions:entry['extensions']=extensions
-        target=payload.parent/'manifest.json';target.write_text(json.dumps(entry));return target
-    top=manifest(base,[dict(manifest='mercury/manifest.json')]);manifest(extra)
-    combined=root/'combined.pak';assembler.assemble(top,combined)
-    original=combined.read_bytes();assert original.startswith(base.read_bytes())
-    argument='Z:'+str(combined).replace('/','\\') if any(pathlib.Path(s).name=='wine' for s in command) else str(combined)
-    subprocess.run([*command,argument,'--collection'],check=True)
-    broken=root/'broken-trailer.pak';broken.write_bytes(original[:-8]+b'BADMAGIC')
-    invalid_argument='Z:'+str(broken).replace('/','\\') if any(pathlib.Path(s).name=='wine' for s in command) else str(broken)
-    subprocess.run([*command,invalid_argument,'--invalid'],check=True)
-    # A failed assembly leaves the previously complete library intact.
-    extra.with_suffix('.pakpart').write_bytes(b'broken')
-    previous=combined.read_bytes()
-    try:assembler.assemble(top,combined);raise AssertionError('Corrupted extension accepted')
-    except RuntimeError:pass
-    assert combined.read_bytes()==previous
+        # Independent archives preserve the old payload and assemble into one file.
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('assemble',pathlib.Path(__file__).parents[1]/'scripts/assemble-assets.py')
+        assembler=importlib.util.module_from_spec(spec);spec.loader.exec_module(assembler)
+        root=pathlib.Path(directory);base=root/'base.pak';fixture(base)
+        child=root/'mercury';child.mkdir();extra=child/'extra.pak';fixture(extra,['mercury-day','mercury-height'])
+        def manifest(payload,extensions=None):
+            data=payload.read_bytes();part=payload.with_suffix('.pakpart');part.write_bytes(data)
+            entry=dict(bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),parts=[dict(path=part.name,bytes=len(data),sha256=hashlib.sha256(data).hexdigest())])
+            if extensions:entry['extensions']=extensions
+            target=payload.parent/'manifest.json';target.write_text(json.dumps(entry));return target
+        top=manifest(base,[dict(manifest='mercury/manifest.json')]);manifest(extra)
+        combined=root/'combined.pak';assembler.assemble(top,combined)
+        original=combined.read_bytes();assert original.startswith(base.read_bytes())
+        argument='Z:'+str(combined).replace('/','\\') if any(pathlib.Path(s).name=='wine' for s in command) else str(combined)
+        subprocess.run([*command,argument,'--collection'],check=True)
+        broken=root/'broken-trailer.pak';broken.write_bytes(original[:-8]+b'BADMAGIC')
+        invalid_argument='Z:'+str(broken).replace('/','\\') if any(pathlib.Path(s).name=='wine' for s in command) else str(broken)
+        subprocess.run([*command,invalid_argument,'--invalid'],check=True)
+        # A failed assembly leaves the previously complete library intact.
+        extra.with_suffix('.pakpart').write_bytes(b'broken')
+        previous=combined.read_bytes()
+        try:assembler.assemble(top,combined);raise AssertionError('Corrupted extension accepted')
+        except RuntimeError:pass
+        assert combined.read_bytes()==previous

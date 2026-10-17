@@ -13,6 +13,35 @@ void require(bool condition,const char* message) {
 int main(int argc,char** argv) {
     try {
         require(argc>=2 && argc<=4,"Pack fixture argument missing");
+        if(argc==4&&std::string(argv[1])=="--split"){
+            namespace fs=std::filesystem;const fs::path directory(argv[2]);albert::AssetPack original{fs::path(argv[3])};albert::DownloadProgress progress;
+            const auto catalog=albert::readAssetCatalog(directory/"catalog.json");const auto essential=directory/catalog.containers.front().file;
+            auto same=[](const threepp::Image& a,const threepp::Image& b){return a.width()==b.width()&&a.height()==b.height()&&a.isFloat()==b.isFloat()&&(a.isFloat()?a.data<float>()==b.data<float>():a.data()==b.data());};
+            albert::AssetPack first(std::vector<fs::path>{essential});
+            require(first.availableLevel("earth-day")==0&&first.maximumLevel("earth-day")==1&&first.contains("sun"),"Essential container must stop at the startup level");
+            require(same(first.image("earth-day",{},8,progress),original.image("earth-day",{},4,progress)),"Missing detail must fall back to the coarse level, never invent pixels");
+            require(albert::AssetPack(std::vector<fs::path>{essential,directory/"moons-2.pak"}).availableLevel("jupiter-day")==0,"A level gap exposed finer tiles");
+            std::vector<fs::path> paths;for(const auto& container:catalog.containers)paths.push_back(directory/container.file);
+            albert::AssetPack all(paths);
+            for(const std::string layer:{"earth-day","earth-night","earth-height","moon-day","moon-height","jupiter-day","sun","mercury-day","mercury-height"}){
+                require(all.availableLevel(layer)==original.availableLevel(layer)&&all.availableLevel(layer)==all.maximumLevel(layer),"Containers lost a resolution level");
+                const albert::GeoRegion region=layer=="sun"?albert::GeoRegion{0,0,1,1}:albert::GeoRegion{};
+                for(unsigned size:{2u,8u,32u})require(same(all.image(layer,region,size,progress),original.image(layer,region,size,progress)),"Container images differ from the complete library");
+            }
+            auto rejects=[](std::vector<fs::path> files){try{albert::AssetPack value(files);}catch(const std::exception&){return true;}return false;};
+            require(rejects({essential,essential}),"Duplicate container accepted");
+            require(rejects({essential,directory/"divergent.pak"}),"Divergent layer description accepted");
+            // Library holder: installs publish new snapshots; a rejected container changes nothing.
+            require(!albert::visualAssetsComplete()&&albert::visualAssetPack()->availableLevel("earth-day")==0,"Holder ignored the catalogued containers");
+            const auto generation=albert::visualAssetGeneration();const auto held=albert::visualAssetPack();
+            albert::installVisualAssetContainer(directory/"earth-1.pak");
+            require(albert::visualAssetGeneration()==generation+1&&albert::visualAssetPack()->availableLevel("earth-day")==1&&held->availableLevel("earth-day")==0,"Install did not publish a new immutable snapshot");
+            bool rejected=false;try{albert::installVisualAssetContainer(directory/"divergent.pak");}catch(const std::exception&){rejected=true;}
+            require(rejected&&albert::visualAssetGeneration()==generation+1&&albert::visualAssetPack()->availableLevel("earth-day")==1,"Rejected container replaced the library");
+            for(const auto& file:paths)albert::installVisualAssetContainer(file);
+            require(albert::visualAssetsComplete()&&albert::visualAssetPack()->availableLevel("jupiter-day")==2,"Holder did not complete the catalogue");
+            std::cout<<"Pack: download containers, level caps, exact images, rejection and atomic library install OK\n";return 0;
+        }
         const std::filesystem::path path(argv[1]);
         if(argc==3&&std::string(argv[2])=="--invalid"){
             bool rejected=false;try{albert::AssetPack invalid(path);}catch(const std::exception&){rejected=true;}

@@ -39,6 +39,7 @@ if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
     add_test(NAME asset_source_download COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/fetch_fixture.py)
     set_tests_properties(asset_source_download PROPERTIES TIMEOUT 30)
     add_test(NAME bundled_asset_pack COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/pack_fixture.py $<TARGET_FILE:pack_test>)
+    add_test(NAME asset_containers COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/split_fixture.py $<TARGET_FILE:pack_test>)
 endif()
 
 add_executable(wms_test wms_test.cpp ../src/render/wms.cpp)
