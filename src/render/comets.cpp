@@ -95,17 +95,13 @@ std::shared_ptr<ShaderMaterial> tailMaterial(Texture* phase){
     return m;
 }
 
-// Radiation-pressure apex of beta = 0.1 grains: X = v^2/(2 beta g).
-double apexMetres(const albert::core::CometActivity& c,double r){
-    const double speed=c.grainSpeed/std::sqrt(r),gravity=albert::core::solarGM/(r*AU*r*AU);
-    return speed*speed/(2*.1*gravity);
-}
 }
 
 struct albert::CometVisuals::Comet {
     const core::CometActivity* activity;const core::LocalOrbit* orbit;
     std::shared_ptr<Mesh> coma,tail;std::shared_ptr<ShaderMaterial> comaShader,tailShader;
     double afrho=0,distance=0,computedJd=std::numeric_limits<double>::quiet_NaN();
+    core::StateVector computedState; // Heliocentric state of the last grain grid.
     std::chrono::steady_clock::time_point computed{};
     float reference=1,stretch=0,stretchTarget=0;
     ~Comet(){coma->geometry()->dispose();tail->geometry()->dispose();comaShader->dispose();tailShader->dispose();}
@@ -128,7 +124,7 @@ albert::CometVisuals::CometVisuals(Scene& scene):scene_(scene),phase_(phaseTextu
         for(auto* mesh:{c->coma.get(),c->tail.get()}){mesh->frustumCulled=false;mesh->renderOrder=3;mesh->visible=false;}
         scene.add(c->coma);scene.add(c->tail);
         // Stretch reference: the coma at a fifth of the apex, at the reference activity.
-        const double apex=apexMetres(activity,activity.referenceAu);
+        const double apex=albert::core::radiationApex(activity,activity.referenceAu);
         c->reference=static_cast<float>(activity.afrhoMetres/(8*.2*apex));
         comets_[std::string(activity.id)]=std::move(c);
     }
@@ -150,7 +146,7 @@ void albert::CometVisuals::update(const PerspectiveCamera& camera,const Vector3&
         c.stretch=animateValue(c.stretch,c.stretchTarget,seconds); // Blended in log radiance by the shaders.
         const bool shown=nucleus!=nuclei.end()&&c.afrho>0;c.coma->visible=c.tail->visible=shown;
         if(!shown){c.computedJd=std::numeric_limits<double>::quiet_NaN();continue;}
-        const double apex=apexMetres(*c.activity,r),intensity=2.4/(r*r);
+        const double apex=albert::core::radiationApex(*c.activity,r),intensity=2.4/(r*r);
         Vector3 solar=sun;solar.sub(nucleus->second).normalize();
         // Coma shell: 80 apexes, where the faded column is far below the stretch floor.
         const float radius=render(80*apex);c.coma->position.copy(nucleus->second);c.coma->scale.setScalar(radius);
@@ -163,10 +159,12 @@ void albert::CometVisuals::update(const PerspectiveCamera& camera,const Vector3&
         c.tailShader->uniforms.at("solar").setValue(solar);
         for(auto* m:{c.comaShader.get(),c.tailShader.get()}){m->uniforms.at("intensity").setValue(static_cast<float>(intensity));m->uniforms.at("stretch").setValue(c.stretch);m->uniforms.at("reference").setValue(c.reference);}
         c.tail->position.copy(nucleus->second);
-        // Recompute the grains after a simulated minute, at most ten times a second.
+        // Recompute the grains after a simulated minute, or when the state itself moved
+        // (a table replacing the elements at the same date), at most ten times a second.
         const auto clock=std::chrono::steady_clock::now();
-        if(!(std::abs(jd-c.computedJd)<1./1440.)&&clock-c.computed>std::chrono::milliseconds(100)){
-            c.computedJd=jd;c.computed=clock;
+        const bool moved=length(now.position-c.computedState.position)>1e-6*length(now.position)||length(now.velocity-c.computedState.velocity)>1e-6*length(now.velocity);
+        if((!(std::abs(jd-c.computedJd)<1./1440.)||moved)&&clock-c.computed>std::chrono::milliseconds(100)){
+            c.computedJd=jd;c.computed=clock;c.computedState=now;
             const double speed=c.activity->grainSpeed/std::sqrt(r),young=std::max(600.,apex/speed);
             std::vector<double> betas(BETAS),ages(AGES);
             for(std::size_t i=0;i<BETAS;++i)betas[i]=.003*std::pow(.9/.003,static_cast<double>(i)/(BETAS-1));

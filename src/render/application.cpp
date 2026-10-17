@@ -128,6 +128,7 @@ struct Ephemerides {
     std::vector<State> moon;
     std::map<std::string,std::vector<State>> bodies;
     std::map<std::string,std::vector<State>> comets; // Geocentric, by scene id.
+    std::vector<std::string> failures; // Comet tables that failed; the rest still apply.
 };
 
 struct Orbits {
@@ -315,7 +316,14 @@ Ephemerides loadEphemerides(double utc, double rate, PlaybackPlan plan, albert::
         const std::string id(comet.id);
         const auto window = albert::providers::playbackWindow(utc, rate, ephemerisPlayback(id, plan));
         e.windows[id] = window;
-        e.comets[id] = queryComet(std::string(comet.designation), window, progress, bootstrap, &e.cached);
+        // One comet's table must not discard the others: it keeps its elements meanwhile.
+        try { e.comets[id] = queryComet(std::string(comet.designation), window, progress, bootstrap, &e.cached); }
+        catch (const Superseded&) { throw; }
+        catch (const std::exception& error) {
+            if (progress && progress->cancelled) throw;
+            e.windows.erase(id);
+            e.failures.push_back("Cometa " + std::string(comet.designation) + ": " + error.what());
+        }
     }
     return e;
 }
@@ -639,6 +647,19 @@ std::string civilClock(double utc) {
 struct SpeedPreset {double rate;const char* label;};
 constexpr SpeedPreset SPEEDS[]{{1.,"1x"},{60.,"1 min/s"},{3600.,"1 h/s"},{21600.,"6 h/s"},{86400.,"1 dia/s"},{604800.,"1 sem/s"}};
 
+// Moments to visit: paused there, with the camera arriving from the side that shows it.
+// Eclipse instants are greatest eclipse in TD from F. Espenak (NASA GSFC) minus the
+// observed Delta T (~69 s); the others are mission records (NASA, ESA).
+enum class EventView {Default, FromSun, FromEarth};
+struct SimulationEvent {const char* label;const char* utc;const char* focus;EventView view;bool enhance;};
+constexpr SimulationEvent EVENTS[]{
+    {"Eclipse solar total, 8 abr 2024","2024-04-08 18:17:25","earth",EventView::FromSun,false},   // 18:18:34 TD
+    {"Eclipse lunar total, 3 mar 2026","2026-03-03 11:33:43","moon",EventView::FromEarth,false},  // 11:34:52 TD
+    {"Eclipse solar total, 2 ago 2027","2027-08-02 10:06:44","earth",EventView::FromSun,false},   // 10:07:53 TD
+    {"Apollo 11 pousa na Lua, 20 jul 1969","1969-07-20 20:17:40","moon",EventView::FromEarth,false},
+    {"Giotto passa pelo Halley, 14 mar 1986","1986-03-14 00:03:02","halley",EventView::Default,true},
+    {"67P no perielio (Rosetta), 13 ago 2015","2015-08-13 02:03:00","67p",EventView::Default,true}};
+
 std::string speedLabel(double rate) {
     for (const auto& speed : SPEEDS) if (std::abs(rate) == speed.rate) return speed.label;
     char text[32];std::snprintf(text, sizeof text, "%.0fx", std::abs(rate));
@@ -878,6 +899,7 @@ Vector3 arcDirection(Vector3 a, Vector3 b, float t) {
 struct CameraTransition {
     bool active = false;
     bool preserveDirection = false;
+    std::optional<float> arrivalDistance; // Overrides the target's default framing.
     float elapsed = 0;
     float duration = 1.f;
 
@@ -1174,9 +1196,10 @@ int albert::runRenderer(int argc, char** argv) {
             return minimum;
         };
 
-        auto setFocus = [&](Focus next, bool resetZoom = false) {
+        // arrival: direction from the target to the arriving camera, overriding the default.
+        auto setFocus = [&](Focus next, bool resetZoom = false, std::optional<Vector3> arrival = {}, std::optional<float> distance = {}) {
             registry.get(targetId(next));
-            if (focus == next && !transition.active && !resetZoom) return;
+            if (focus == next && !transition.active && !resetZoom && !arrival) return;
             // Local surfaces (moons and small bodies) share the "moons" download containers.
             if(assetDownloads){const auto id=targetId(next);assetDownloads->prioritize(id!=targets::Moon&&albert::core::surfaceBody(id)&&!albert::core::naturalBody(id)?std::string("moons"):id);}
 
@@ -1192,11 +1215,13 @@ int albert::runRenderer(int argc, char** argv) {
             transition.startOffset.copy(camera->position);
             transition.startOffset.sub(controls.target);
             transition.destination = next;
+            transition.arrivalDistance = distance;
             transition.arrivalDirection.copy(camera->position).sub(targetFor(next));
             if(transition.arrivalDirection.lengthSq()<1e-12f)transition.arrivalDirection.copy(transition.startOffset);
             if(next==targets::Overview||next==targets::Inner||next==targets::EarthMoon)transition.arrivalDirection.set(.2f,.9f,.7f);
+            if(arrival&&arrival->lengthSq()>1e-12f){transition.arrivalDirection.copy(*arrival);transition.preserveDirection=false;}
             transition.arrivalDirection.normalize();
-            const float scaleChange = std::abs(std::log(distanceFor(next) / std::max(1e-9f, transition.startOffset.length())));
+            const float scaleChange = std::abs(std::log(distance.value_or(distanceFor(next)) / std::max(1e-9f, transition.startOffset.length())));
             const float travel=transition.startTarget.distanceTo(targetFor(next));
             transition.duration = albert::flightDuration(scaleChange,
                 travel/std::max(.01f,radiusFor(next)),resetZoom);
@@ -1216,6 +1241,9 @@ int albert::runRenderer(int argc, char** argv) {
         bool backwards = false;
         std::array<char,32> dateText{};
         std::string dateError;
+        // A chosen event waits for positions at its date before flying there.
+        struct PendingEvent {const SimulationEvent* event;std::uint64_t generation;};
+        std::optional<PendingEvent> pendingEvent;
         bool menuOpen = false;
         float menuProgress = 0.f;
         float resetZoomProgress = 0.f;
@@ -1700,6 +1728,15 @@ int albert::runRenderer(int argc, char** argv) {
                         if (ImGui::Button(steps[i].first, ImVec2(quarter, 32))) choose(simulatedUtc + steps[i].second);
                     }
                     if (!dateError.empty()) ImGui::TextColored(attention, "%s", dateError.c_str());
+                    ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
+                    ImGui::TextDisabled("EVENTOS");
+                    for (const auto& event : EVENTS) {
+                        if (!ImGui::Button(event.label, ImVec2(full, 32))) continue;
+                        simulation.choose(albert::time::parseUtc(event.utc).value(), 0.);
+                        pendingEvent = PendingEvent{&event, simulation.read().generation};dateError.clear();
+                        const auto text = albert::time::formatUtc(*albert::time::parseUtc(event.utc)).substr(0, 16);
+                        std::snprintf(dateText.data(), dateText.size(), "%s", text.c_str());
+                    }
                     ImGui::Spacing();
                     ImGui::BeginDisabled(shown.live);
                     if (ImGui::Button("Agora", ImVec2(full, 36))) {simulation.live();chosenSpeed = 1.;backwards = false;dateError.clear();}
@@ -1944,6 +1981,7 @@ int albert::runRenderer(int argc, char** argv) {
                 refreshError.clear();
                 const bool current=updated->timeGeneration==frameTime.generation&&updated->simulationGeneration==moment.generation;
                 nextRefresh = current ? steadyNow+std::chrono::seconds(REFRESH_SECONDS):steadyNow;
+                if(!ephemerides.failures.empty()){refreshError=ephemerides.failures.front();std::cerr<<refreshError<<'\n';nextRefresh=std::min(nextRefresh,steadyNow+std::chrono::seconds(120));}
                 nextOrbitRefresh = current ? steadyNow+std::chrono::hours(24):steadyNow;
                 ephemerisFailures = orbitFailures = 0;
             }
@@ -1966,6 +2004,8 @@ int albert::runRenderer(int argc, char** argv) {
                     ephemerisRetry = steadyNow;
                     dataValid = true;
                     refreshError.clear();
+                    // A missing comet table is retried in two minutes.
+                    if (!ephemerides.failures.empty()) {refreshError = ephemerides.failures.front();std::cerr << refreshError << '\n';nextRefresh = std::min(nextRefresh, steadyNow + std::chrono::seconds(120));}
                 } catch (const Superseded&) {
                     nextRefresh = steadyNow;
                 } catch (const std::exception& e) {
@@ -2107,7 +2147,10 @@ int albert::runRenderer(int argc, char** argv) {
                 // Comets: Horizons tables for the apparition of the date, else the elements.
                 tabulatedComets.clear();cometStates.clear();
                 const bool sunMoves=covered(ephemerides.sun,tdb);
-                for(const auto& [id,samples]:ephemerides.comets){
+                static const std::vector<State> untabulated;
+                for(const auto& comet:albert::core::cometActivities()){
+                    const std::string id(comet.id);const auto table=ephemerides.comets.find(id);
+                    const auto& samples=table!=ephemerides.comets.end()?table->second:untabulated; // Failed: elements.
                     const auto* orbit=albert::core::localOrbit(id);if(!orbit)continue;
                     const auto local=albert::core::localState(*orbit,tdb);
                     const Vec3 elements=Vec3{local.positionMeters.x/1000.,local.positionMeters.y/1000.,local.positionMeters.z/1000.}+sunState;
@@ -2167,6 +2210,20 @@ int albert::runRenderer(int argc, char** argv) {
             sunlight->position.copy(direction).multiplyScalar(150.f).add(lightTarget->position);
             sun->lookAt(earthPosition);
             moon->setRotationFromMatrix(albert::moonOrientation(tdb));
+            if(pendingEvent&&pendingEvent->generation==simulationGeneration){
+                const auto& event=*pendingEvent->event;std::optional<Vector3> arrival;
+                if(event.view==EventView::FromSun)arrival=Vector3(sunPosition).sub(earthPosition);
+                else if(event.view==EventView::FromEarth)arrival=Vector3(earthPosition).sub(moonPosition);
+                // Comets: far enough to frame the coma and the young tail (beta 0.1, ten days).
+                std::optional<float> distance;
+                if(const auto state=cometStates.find(event.focus);state!=cometStates.end()){
+                    const auto& p=state->second.position;const double r=std::hypot(p.x,p.y,p.z);
+                    const double tail=.5*.1*albert::core::solarGM/(r*r)*std::pow(10*86400.,2);
+                    distance=static_cast<float>(std::max(30*albert::core::radiationApex(*albert::core::cometActivity(event.focus),r/149597870700.),.5*tail)/albert::core::earthRadiusMeters);
+                }
+                setFocus(event.focus,false,arrival,distance);if(event.enhance)comets.enhance(event.focus,true);
+                pendingEvent.reset();
+            }
 
             auto rotation = earthOrientation(utc);
             earth->setRotationFromMatrix(rotation);
@@ -2191,7 +2248,7 @@ int albert::runRenderer(int argc, char** argv) {
                 transition.elapsed += std::min(elapsed,.1f);
 
                 const float progress=std::clamp(transition.elapsed/transition.duration,0.f,1.f);
-                const float destinationDistance=distanceFor(transition.destination);
+                const float destinationDistance=transition.arrivalDistance.value_or(distanceFor(transition.destination));
                 const float startDistance=std::max(1e-9f,transition.startOffset.length());
                 if(transition.preserveDirection){
                     const float distance=albert::framingDistance(startDistance,destinationDistance,albert::flightEase(progress));
@@ -2228,7 +2285,7 @@ int albert::runRenderer(int argc, char** argv) {
                 if (transition.elapsed >= transition.duration) {
                     transition.active = false;
                     automaticOrbit=focus.front()!='@';automaticOrbitAge=0.f;
-                    zoomTarget = zoomDisplayed = distanceFor(focus);
+                    zoomTarget = zoomDisplayed = transition.arrivalDistance.value_or(distanceFor(focus));
                     controls.minDistance = minimumFor(focus);
                 }
             } else {

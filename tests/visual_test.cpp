@@ -19,6 +19,8 @@
 #include <iostream>
 #include <span>
 #include <stdexcept>
+#include <thread>
+#include <chrono>
 #include <vector>
 
 using namespace threepp;
@@ -486,6 +488,16 @@ void graphics() {
         for(int y=0;y<192;++y)for(int x=0;x<192;++x){const float dx=(x-95.5f)/96.f,dy=(y-95.5f)/96.f; // Rows from the bottom (glReadPixels).if(dx*dx+dy*dy<.01f)continue;
             (dx*ax+dy*ay>0?anti:sunward)+=luminance(tail,x,y);}
         require(anti>4*sunward+300,"Dust tail not antisunward");
+        // Same date, another state (as when a table replaces the elements): the grains
+        // must follow it. Reversed motion bends the tail the other way.
+        auto reversed=state;reversed.velocity=reversed.velocity*-1.;
+        const std::map<std::string,albert::core::StateVector> replaced{{"67p",reversed}};
+        std::this_thread::sleep_for(std::chrono::milliseconds(150)); // Past the 10 Hz recompute limit.
+        view->position.copy(Vector3(pole).multiplyScalar(3000.f));view->lookAt(Vector3());view->updateMatrixWorld();
+        comets.update(*view,sun,nuclei,replaced,jd,.1f);renderer.render(*world,*view);const auto bent=renderer.readRGBPixels();
+        long changed=0;for(int y=0;y<192;++y)for(int x=0;x<192;++x){const float dx=(x-95.5f)/96.f,dy=(y-95.5f)/96.f;if(dx*dx+dy*dy<.01f)continue;
+            changed+=std::abs(luminance(bent,x,y)-luminance(tail,x,y));}
+        require(changed>std::max(50,anti/4),"Dust tail kept the previous state at the same date");
     }
     std::cout<<"Graphics OK: incremental upload, terrain occlusion, paths, clouds, objects, artistic rocks, lunar eclipse and comet dust\n";
 }

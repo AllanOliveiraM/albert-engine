@@ -51,6 +51,11 @@ double afrho(const CometActivity& c,double r,bool inbound){
     if(!(r>0))throw std::invalid_argument("Invalid heliocentric distance");
     return c.afrhoMetres*std::pow(c.referenceAu/r,inbound?c.inboundSlope:c.outboundSlope)*smooth((c.onsetAu-r)/(c.onsetAu-c.fullAu));
 }
+double radiationApex(const CometActivity& c,double r){
+    if(!(r>0))throw std::invalid_argument("Invalid heliocentric distance");
+    constexpr double au=149597870700.;const double speed=c.grainSpeed/std::sqrt(r),gravity=solarGM/(r*au*r*au);
+    return speed*speed/(2*.1*gravity);
+}
 double dustPhase(double degrees){
     const double a=std::clamp(degrees,0.,180.);const auto i=std::min<std::size_t>(179,static_cast<std::size_t>(a));const double t=a-static_cast<double>(i);
     return std::exp(std::lerp(std::log(phase[i]),std::log(phase[i+1]),t)); // Log-linear between degrees.

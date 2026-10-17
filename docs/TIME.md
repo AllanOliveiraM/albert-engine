@@ -91,6 +91,15 @@ Antes de 1972 o UTC tinha segundos de duração variável, que o ERFA modela des
 TT = UT + 32,184 s; o erro em TT chega a cerca de 35 s em 1900 (dezenas de
 quilômetros na posição da Lua).
 
+**Eventos.** O painel lista momentos para visitar, pausados, com a câmera chegando pelo
+lado que os mostra: eclipses solares totais de 8/4/2024 e 2/8/2027 (vista do lado do
+Sol, com a sombra da Lua sobre a Terra), eclipse lunar total de 3/3/2026 (Lua vista da
+Terra), pouso da Apollo 11 (20/7/1969 20:17:40 UTC), passagem da Giotto pelo Halley
+(14/3/1986 00:03:02 UTC) e periélio da 67P (13/8/2015 02:03 UTC); nos cometas o realce
+liga e a câmera enquadra coma e cauda. Os eclipses usam o máximo em TD das cartas de
+F. Espenak (NASA GSFC) menos o ΔT observado (~69 s). No eclipse de 2027 a sombra cai
+sobre o Egito, perto de Luxor, como no ponto de máximo publicado (25°29′N, 33°13′E).
+
 **Efemérides por data.** Cada tabela do Horizons cobre ao menos um dia simulado e
 os próximos 600 s de reprodução, mais o tempo medido da última consulta, com no
 máximo 200 linhas. O passo é escolhido pela precisão do Hermite cúbico, cujo erro

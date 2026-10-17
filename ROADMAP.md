@@ -22,7 +22,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | **Média — 2** | NTS e tratamento completo de leap seconds/smear | NTP com múltiplas fontes já existe, sem autenticação criptográfica |
 | **Média — 3** | Texturas GLB/glTF, animação de peças e controles avançados de câmera pela API | GLB estático/PBR sólido e streaming de posição/atitude já existem |
 | **Média — 4** | Rótulos, polígonos/GeoJSON e camadas raster/clima selecionadas | Camadas atuais: pontos e polilinhas; nuvens GIBS continuam opcionais |
-| **Média — 5** | ~~Data de simulação~~ — entregue em 17/10/2026; faltam gravação/reprodução e cenários de eventos/eclipses | 1900–2100, até 1 semana/s; tabelas do JPL acompanham até 6 h/s, acima disso modelos analíticos do ERFA ajustados às últimas tabelas |
+| **Média — 5** | ~~Data de simulação~~ e primeiros eventos (eclipses, Apollo 11, Giotto, 67P) — entregues em 17/10/2026; faltam gravação/reprodução e mais cenários | 1900–2100, até 1 semana/s; tabelas do JPL acompanham até 6 h/s, acima disso modelos analíticos do ERFA ajustados às últimas tabelas |
 | **Posterior** | Satélites artificiais/OMM e mais provedores (exemplos de assistente de IA cancelados por ora em 17/10/2026, decisão do Allan) | Catálogo extra permanece na API; não reintroduzir importação online na UI |
 
 ### Download dos assets por níveis — decidido e entregue em 17/10/2026

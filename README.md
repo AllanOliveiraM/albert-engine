@@ -223,6 +223,7 @@ as imagens e não precisa de Git LFS.
 - Arraste para girar e use a roda do mouse para aproximar.
 - Use o botão **Restaurar zoom**, no canto inferior direito, para voltar à distância inicial.
 - Clique no horário, no canto superior direito, para escolher data e velocidade; **Agora** volta ao tempo real.
+- Em **Eventos**, no mesmo painel, vá direto a eclipses (2024, 2026, 2027), ao pouso da Apollo 11, à passagem da Giotto pelo Halley ou ao periélio da 67P.
 - Na 67P ou no Halley perto do periélio (por exemplo 2021-11-02 ou 1986-03-13), ative **Realçar coma e cauda de poeira** e afaste a câmera.
 - Abra **☰ → Cena** para ajustar atmosfera, nuvens, cidades, fronteiras, sombras e órbitas.
 - Ative **Nuvens em tempo real** em **Cena** para buscar as observações automaticamente.

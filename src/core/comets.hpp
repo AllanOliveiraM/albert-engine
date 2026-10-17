@@ -18,6 +18,8 @@ struct CometActivity {
 const CometActivity* cometActivity(std::string_view id);
 std::span<const CometActivity> cometActivities();
 double afrho(const CometActivity&,double rAu,bool inbound);
+// Sunward turnaround of beta = 0.1 grains under radiation pressure: X = v^2/(2 beta g), metres.
+double radiationApex(const CometActivity&,double rAu);
 // Halley-Marcus composite dust phase function (Schleicher 2010), 1.0 at 0°.
 double dustPhase(double degrees);
 

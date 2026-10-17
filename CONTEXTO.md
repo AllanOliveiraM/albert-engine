@@ -647,6 +647,20 @@ das estrelas só era aplicado na abertura: agora vai no shader (`motion` + `year
 `setStarEpoch` a cada quadro); regressão no `astronomy_test` com Toliman em 1900
 (6,2′ desde J2000). O achado anterior dos anéis foi dado como corrigido.
 
-Próxima ação concreta: revisão do Codex sobre coma/cauda e cometas pelo Horizons;
-depois cauda de íons (se houver fonte medida para o brilho) ou cenários de eventos
-(Média 5); validação em Windows nativo (Alta 5) depende do Allan.
+Revisão do Codex (17/10, `e6cb123..0b8f4db`): dois P2, confirmados e corrigidos.
+(1) Com a data pausada a cauda não se refazia quando a tabela do JPL trocava o estado
+do cometa: agora a grade também se refaz quando o estado heliocêntrico muda (regressão
+OpenGL: mesmo instante, movimento invertido, a cauda precisa mudar; falha sem a
+correção). (2) Falha na tabela de um cometa descartava todas as efemérides novas e podia
+travar o carregamento: agora o cometa fica nos elementos, as demais tabelas valem e a
+consulta volta em 2 min (`Ephemerides::failures`); sem teste unitário (código do
+aplicativo), conferido no programa real forçando falha do Halley.
+
+Eventos (Média 5, primeiro corte): lista no painel de tempo (`EVENTS` no aplicativo),
+pausa na data e voo com `setFocus(..., arrival, distance)` calculado só depois das
+posições da nova data (`pendingEvent`); eclipses vistos do Sol/da Terra, cometas com
+realce e distância de 30 ápices ou metade da cauda de 10 dias. Eclipse de 2027
+conferido: sombra sobre Luxor como na carta da NASA.
+
+Próxima ação concreta: cauda de íons (se houver fonte medida para o brilho), mais
+cenários/gravação (Média 5) ou validação em Windows nativo (Alta 5, depende do Allan).
