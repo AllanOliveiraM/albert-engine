@@ -9,8 +9,9 @@ medida, orientação ilustrativa ancorada em 2005); repasse do Codex sem achados
 **Proteu** (forma de Stooke, cinza neutro medido) e **Nereida** (esfera com albedo
 medido e aviso). **Etapa das luas concluída**, com repasse do Codex sem achados novos.
 Em andamento: pequenos corpos medidos (Alta 2) — **67P** (forma OSIRIS/Rosetta, cor
-medida) e **Halley** (Stooke, rotação ilustrativa) entregues. Próximo: Pallas → Vesta;
-depois coma/caudas.
+medida), **Halley** (Stooke, rotação ilustrativa) e **Vesta** (mosaico + DTM da Dawn)
+entregues; Pallas segue artística (dimensões não verificadas). Próximo: **Ceres** pelo
+mesmo caminho de Vesta. Coma/caudas adiadas até haver seletor de data (ver abaixo).
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
@@ -120,8 +121,8 @@ reais ou RAM/VRAM.
 Decisão do Allan: versão leve baixa tudo, por **níveis de resolução**, com tela de
 loading só para o essencial e o resto em segundo plano, indicador minimalista no
 canto, retentativa e continuação; zoom limitado ao que chegou, nunca imagem
-inventada. `scripts/split-asset-pack.py` gera `essential.pak` (68 MB com Febe e Hipérion) + 18
-containers `<corpo>-<nível>.pak`/`moons-<nível>.pak` e `catalog.json`;
+inventada. `scripts/split-asset-pack.py` gera `essential.pak` (73 MB com as malhas medidas e
+as bases de Vesta) + 20 containers `<corpo>-<nível>.pak`/`moons-<nível>.pak` e `catalog.json`;
 `AssetPack` indexa vários arquivos e limita cada camada ao maior nível completo;
 `AssetDownloads` (`src/render/asset_downloads.*`) baixa da release `assets-<id>`
 (`ALBERT_ASSET_BASE_URL` para testes) para `assets/packs` ou `data/packs`.
@@ -519,7 +520,30 @@ equirretangular 64 px/grau + polos estereográficos, ±6 m) e mosaicos HAMO/LAMO
 (`DWNVFC2_2`); o caminho natural é o pipeline de Mercúrio (mapa + DEM com LOD), não
 uma malha de placas. Ceres tem conjunto equivalente (`dwarf_planet-ceres.dawn.shape-models-maps`).
 
-Próxima ação concreta: **coma e caudas** da 67P e de Halley (atividade em função da
-distância heliocêntrica, identificada como modelo visual), depois **Vesta** (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
+Vesta (entregue): `assets/planetary-sources.json` (pipeline de Mercúrio,
+`prepare-body-assets.py`) com `format: pds3-cylindrical` → `scripts/pds_maps.py`
+(rótulo PDS3, memmap, média de área por blocos; DSMAP: lon = centro + (amostra −
+SAMPLE_PROJECTION_OFFSET)/res, lat = (LINE_PROJECTION_OFFSET − linha)/res, índices a
+partir de 0). Mosaico HAMO `VE_HAMO_00N_330E_CYL_CLEAR.IMG` (26703×13351, 74,18 px/grau,
+SHA 0f3311ed…) → 23040×11520; DTM SPG `VE_HAMO_G_00N_330E_EQU_DTM.IMG` (23040×11521,
+grade registrada, raio = 2 m·DN + 255000 m, SHA 9814d8b3…) → 11520×5760 uint16, altura
+= −70000 + 2·amostra acima de 262700 m (0 = sem dado). Ambos Claudia double-prime =
+pck00011. Relevo medido: raio máximo 293.002 m, dimensões 576,1 × 555,9 × 467,3 km
+(`relief` em ambos os inventários; o gerador falha se divergir). Em `moon-sources.json`
+Vesta é `kind: external` (só frames/aviso). Pacote `assets/imagery/vesta`: 105,6 MB.
+PDS SBN recusa o User-Agent do Python: `fetch-ranges.py` agora se identifica. Fixture
+CSPICE via `tipbod`. App real: forma, mosaico e detalhe regional OK, pico RSS 1,46 GB.
+
+Coma/caudas **adiadas**: a simulação usa a data real e não há seletor de data
+(ROADMAP Média 5). Em 17/10/2026 a 67P está a 4,45 UA (atividade começa a ~4,3 UA,
+Snodgrass et al. 2013; periélio em 9/4/2028) e Halley a 35 UA (periélio em 2061):
+o efeito ficaria invisível e não validável. Fazer junto com o seletor de data. Notas
+para o modelo: atividade ∝ (q/r)² com limiar de início, iluminação física ∝ 1/r² (lei
+de magnitude total n = 4), coma pela coluna analítica de n ∝ 1/r² na esfera (como a
+casca de Titã), cauda de íons antissolar com aberração pelo vento solar (~400 km/s) e
+cauda de poeira curvada para trás da velocidade; brilho absoluto realçado e declarado.
+
+Próxima ação concreta: **Ceres** (PDS4 `dwarf_planet-ceres.dawn.shape-models-maps`),
+pelo mesmo caminho de Vesta (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
 `register-moon-map.py`). Depois coma/caudas com atividade coerente com a distância
 heliocêntrica (Halley perto do afélio em 2026 não deve ter coma).

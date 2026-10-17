@@ -53,6 +53,8 @@ def generate(path):
   axes=[v*1000 for v in values(key+'_RADII')] if source.get('shape')=='iau-triaxial' else [0,0,0]
   shape=source.get('shape_source',{});bounds=shape.get('bounds_m',[[0,0,0],[0,0,0]])
   dimensions=[bounds[1][i]-bounds[0][i] for i in range(3)]
+  # A measured height map (Vesta) gives the same extent as a plate model.
+  if 'relief' in source:shape=dict(bounding_radius_m=source['relief']['bounding_radius_m']);dimensions=source['relief']['dimensions_m']
   # Bodies without an IAU model (Hyperion's chaotic spin) carry an illustrative orientation in the inventory.
   o=source.get('orientation');ra,dec,pm=([o['pole_ra_deg'],0,0],[o['pole_dec_deg'],0,0],[o['w0_deg'],o['rate_deg_per_day'],0]) if o else (values(key+'_POLE_RA'),values(key+'_POLE_DEC'),values(key+'_PM'))
   moon_records.append('{"'+body+'","'+name+'",'+str(target)+','+fmt(radius)+',0,0,'+arr(ra)+','+arr(dec)+','+arr(pm)+','+(body+'Terms' if terms else '{}')+',0,false,'+str(source.get('partial_map',False)).lower()+','+arr(axes)+','+fmt(shape.get('bounding_radius_m',0))+','+arr(dimensions)+','+json.dumps(source.get('notice',''))+','+arr(source.get('haze',{}).get('albedo_linear',[0,0,0]))+','+fmt(source.get('haze',{}).get('altitude_m',0))+'}')

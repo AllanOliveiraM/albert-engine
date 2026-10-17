@@ -70,6 +70,10 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   em cor natural PIA08240, https://photojournal.jpl.nasa.gov/catalog/PIA08240; polo e
   taxa de rotação da solução instantânea de 2005 em J. Bauer e P. Thomas,
   "Hyperion: the sponge moon" (JPL/Cornell, 2007).
+- NASA/JPL-Caltech/UCLA/MPS/DLR/IDA (Dawn Framing Camera 2), DLR: mosaico global
+  HAMO de Vesta (DAWN-A-FC2-5-MOSAIC-V1.0, Roatsch et al.) e DTM estereofotogramétrico
+  (DAWN-A-FC2-5-VESTADTMSPG-V1.0, Preusker et al. 2016), NASA PDS,
+  https://sbnarchive.psi.edu/pds3/dawn/fc/.
 - 67P: cor do núcleo de Fornasier et al. (2015), A&A 583, A30,
   https://doi.org/10.1051/0004-6361/201525901.
 - Nereida: albedo, cor e período de rotação de Kiss et al. (2016), MNRAS,

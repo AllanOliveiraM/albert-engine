@@ -46,8 +46,8 @@
     },
     {
       "path": "imagery/manifest.json",
-      "bytes": 833,
-      "sha256": "e8a857a909cb786c698e2be4e89d2258cdb5db2cb14ee68f6c5affd6ab31314f",
+      "bytes": 886,
+      "sha256": "87e3a0b0b68500fe4e7f24c66a1b11e220986dad669ab83ce5dd0168d788433c",
       "source": "Generated from the source plan in highres-sources.json",
       "license": "Imagery retains the credits in the packed SOURCES.json",
       "processing": "Ordered Git LFS parts; lossless assembly into visuals.pak"
@@ -68,8 +68,8 @@
     },
     {
       "path": "planetary-sources.json",
-      "bytes": 2357,
-      "sha256": "ec13e78ec69ce1e4de48aee431e16d8d5700c9c535e1138ebd624910646a8cee",
+      "bytes": 5167,
+      "sha256": "422d286e2802b02ce68280bee3eb9dd24c61e509943b5eb9ceedbdb8011abd36",
       "source": "NASA/PDS and USGS product inventory",
       "license": "Provenance and terms in the source plan",
       "processing": "Declared source grids, datum, credits and physical encoding"
@@ -111,12 +111,20 @@
       "license": "Credits in the packed source records",
       "processing": "SHA-256 verified Git LFS parts; one distribution container",
       "bytes": 325,
-      "sha256": "142e84a9b2ec291e193ea65c2ebc8a6373bbb5bd0deaaeb0b6c9e8f85df3319a"
+      "sha256": "3d6a1ad3fc0cccf7ae91ed0fa3a7ae14800452c60d7a73a47bcfc13ea791c7a1"
+    },
+    {
+      "path": "imagery/vesta/manifest.json",
+      "source": "Generated imagery archive manifest",
+      "license": "Credits in the packed source records",
+      "processing": "SHA-256 verified Git LFS parts; one distribution container",
+      "bytes": 327,
+      "sha256": "c211f824e0bcfbd953cf27d5f2ea89e7ced772ec9e8e9f8ae6aef7b58392a1c1"
     },
     {
       "path": "moon-sources.json",
-      "bytes": 42162,
-      "sha256": "e55408cbc5c903b58d4063f6e21daf3d14d2dcdaa8fa2203d2bc37cfda71b2b0",
+      "bytes": 43336,
+      "sha256": "6269f981211da754d4e320e84bac37df9f409786932fc8fdd4b2c1ee4c55a6d9",
       "source": "NASA/JPL/USGS visual resources",
       "license": "Credits and limits in source inventory"
     }

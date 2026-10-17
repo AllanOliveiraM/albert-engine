@@ -110,6 +110,8 @@ def prepare(offline=False):
  if public.exists():shutil.rmtree(public)
  public.mkdir();layers=[];files=[]
  for body in plan['bodies']:
+  # Bodies with their own height-mapped pack (Vesta: prepare-body-assets.py) only need frames here.
+  if body.get('kind')=='external':continue
   if body.get('kind')=='uniform':
    # No observed map registered to the measured shape: one measured colour, no invented detail.
    colour=tuple(int(v) for v in np.rint(255*srgb(np.array(body['colour']['albedo_linear']))))

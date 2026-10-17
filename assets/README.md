@@ -3,7 +3,7 @@
 As imagens otimizadas ficam em um único **`visuals.pak`**, incluído em cada
 pasta de distribuição. O aplicativo lê blocos diretamente desse contêiner,
 conforme o zoom, sem extrair imagens nem baixar superfícies. O pacote contém
-os níveis globais e regionais, cidades, relevo terrestre/lunar, a imagem solar e superfície/relevo de Mercúrio.
+os níveis globais e regionais, cidades, relevo terrestre/lunar, a imagem solar, superfície/relevo de Mercúrio e de Vesta.
 Suas partes são versionadas em `imagery/` com Git LFS e reunidas no build.
 O gerador preserva originais e blocos de trabalho em `asset-packs/`, fora do Git;
 esses intermediários não entram na distribuição. Veja [preparação e formato](../docs/ASSETS.md).

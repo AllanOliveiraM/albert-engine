@@ -42,7 +42,7 @@ void Scene::include(const LocalOrbit& o){
     body.source="NASA/JPL Horizons: elementos embarcados; propagacao de dois corpos aproximada; superficie conforme assets locais";
     body.appearance={Shape::Sphere,{o.radius*2,o.radius*2,o.radius*2},o.category==Category::Comet?0x8f908eu:0xb6b2aau};
     const auto* surface=surfaceBody(o.id);const bool triaxial=surface&&surface->axesMeters[0]>0;
-    if(surface&&surface->shapeRadiusMeters>0){const auto& size=surface->shapeDimensionsMeters;body.appearance.sizeMeters={size[0],size[1],size[2]};body.source+="; forma observada: placas medidas (DSK ou Gaskell/PDS) no referencial da fonte";}
+    if(surface&&surface->shapeRadiusMeters>0){const auto& size=surface->shapeDimensionsMeters;body.appearance.sizeMeters={size[0],size[1],size[2]};body.source+="; forma observada: placas ou relevo medidos, no referencial da fonte";}
     else if(triaxial){const auto& axes=surface->axesMeters;body.appearance.sizeMeters={2*axes[0],2*axes[1],2*axes[2]};body.source+="; elipsoide IAU de referencia";}
     body.samples.push_back({});create(std::move(body));auto& included=objects_.at(std::string(o.id));included.builtin=true;
     // Built-in radius remains the nominal datum used by surface LOD; API size

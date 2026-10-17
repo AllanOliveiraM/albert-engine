@@ -5,6 +5,8 @@ Requires HTTP byte ranges and stable ETag/Last-Modified. No credentials or syste
 packages. Originals, chunk journal and source records stay outside Git.
 """
 import argparse, concurrent.futures, hashlib, json, os, pathlib, re, threading, time, random, urllib.request, urllib.error
+# Some archives (PDS SBN) refuse Python's default agent; identify the project instead.
+AGENT='AlbertEngine-assets/1 (+https://github.com/AllanOliveiraM/albert-engine)'
 
 def fetch(url, destination, workers=8, chunk_bytes=16*1024*1024, expected_sha256=None):
     destination=pathlib.Path(destination);destination.parent.mkdir(parents=True,exist_ok=True)
@@ -12,7 +14,7 @@ def fetch(url, destination, workers=8, chunk_bytes=16*1024*1024, expected_sha256
         with destination.open('rb') as stream:checksum=hashlib.file_digest(stream,'sha256').hexdigest()
         if expected_sha256 and checksum!=expected_sha256:raise RuntimeError('Existing source checksum mismatch')
         return dict(url=url,bytes=destination.stat().st_size,sha256=checksum)
-    probe=urllib.request.Request(url,headers={'Range':'bytes=0-16383','Accept-Encoding':'identity'})
+    probe=urllib.request.Request(url,headers={'Range':'bytes=0-16383','Accept-Encoding':'identity','User-Agent':AGENT})
     for attempt in range(6):
         try:
             response=urllib.request.urlopen(probe,timeout=20);break
@@ -49,7 +51,7 @@ def fetch(url, destination, workers=8, chunk_bytes=16*1024*1024, expected_sha256
                 try:
                     while written<length:
                         range_start=start+written;range_end=min(start+length-1,range_start+2*1024*1024-1)
-                        request=urllib.request.Request(url,headers={'Range':f'bytes={range_start}-{range_end}','If-Range':identity,'Accept-Encoding':'identity'})
+                        request=urllib.request.Request(url,headers={'Range':f'bytes={range_start}-{range_end}','If-Range':identity,'Accept-Encoding':'identity','User-Agent':AGENT})
                         with urllib.request.urlopen(request,timeout=30) as response:
                             if response.status!=206 or response.headers.get('Content-Range')!=f'bytes {range_start}-{range_end}/{size}':raise RuntimeError('Source changed or range response is invalid')
                             while start+written<=range_end:

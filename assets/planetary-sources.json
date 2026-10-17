@@ -44,6 +44,70 @@
           "bytes": 530913601
         }
       ]
+    },
+    {
+      "id": "vesta",
+      "datum_radius_m": 262700,
+      "orientation": "Claudia double-prime (IAU 2015), NASA/NAIF pck00011 BODY2000004",
+      "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA (Dawn Framing Camera 2); mosaic and DTM by DLR",
+      "license": "NASA/PDS mission data products. Cite original authors. No endorsement implied.",
+      "relief": {
+        "bounding_radius_m": 293002.0,
+        "dimensions_m": [
+          576119.5,
+          555879.9,
+          467265.3
+        ]
+      },
+      "sources": [
+        {
+          "id": "dawn-fc2-vesta-hamo-clear-mosaic",
+          "layer": "vesta-day",
+          "format": "pds3-cylindrical",
+          "url": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_2/DATA/HAMO_CLEAR/VE_HAMO_00N_330E_CYL_CLEAR.IMG",
+          "filename": "VE_HAMO_00N_330E_CYL_CLEAR.IMG",
+          "product": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_2/",
+          "grid": [
+            26703,
+            13351
+          ],
+          "target_grid": [
+            23040,
+            11520
+          ],
+          "tile_size": 1440,
+          "longitude": "east-positive, Claudia double-prime; source edge at -210 deg, area-averaged onto -180 to 180; planetocentric latitude",
+          "lighting": "Clear-filter HAMO mosaic (about 60 m/pixel) keeping the illumination of the source images; not calibrated albedo.",
+          "epoch": "Dawn HAMO-1 and HAMO-2, 2011-2012; DAWN-A-FC2-5-MOSAIC-V1.0 (Roatsch et al.)",
+          "sha256": "0f3311ed248de9915918544c9c76165edd696add90050331bc7fee0178190d60",
+          "bytes": 356591862
+        },
+        {
+          "id": "dawn-fc2-vesta-hamo-dtm-spg",
+          "layer": "vesta-height",
+          "kind": "elevation",
+          "format": "pds3-cylindrical",
+          "url": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVSPG_2/DATA/VE_HAMO_G_00N_330E_EQU_DTM.IMG",
+          "filename": "VE_HAMO_G_00N_330E_EQU_DTM.IMG",
+          "product": "https://sbn.psi.edu/pds/resource/dawn/dwnvfcshape.html",
+          "grid": [
+            23040,
+            11521
+          ],
+          "target_grid": [
+            11520,
+            5760
+          ],
+          "tile_size": 720,
+          "longitude": "east-positive, Claudia double-prime; source edge at -210 deg, area-averaged onto -180 to 180 at 32 pixels/degree",
+          "epoch": "Dawn HAMO-1 and HAMO-2; DAWN-A-FC2-5-VESTADTMSPG-V1.0 (Preusker et al. 2016), lateral spacing about 70 m, vertical accuracy about 6 m",
+          "encoding": "Source MSB int16, radius = 2 m x DN + 255000 m; stored as uint16 height above the 262700 m catalogue radius",
+          "height_scale_m": 2,
+          "height_offset_m": -70000,
+          "sha256": "9814d8b377265f8dfc91ca9378ef71ec0899ef0091305e0cfa3b49c4cd552fc2",
+          "bytes": 531025920
+        }
+      ]
     }
   ]
 }

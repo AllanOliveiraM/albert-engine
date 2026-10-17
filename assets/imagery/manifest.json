@@ -29,6 +29,9 @@
     },
     {
       "manifest": "moons/manifest.json"
+    },
+    {
+      "manifest": "vesta/manifest.json"
     }
   ]
 }

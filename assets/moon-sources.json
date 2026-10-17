@@ -769,6 +769,25 @@
         "credit": "Stooke, P. (2025). Stooke small bodies shape models V1.0, urn:nasa:pds:small_bodies.stooke.shape-models::1.0, NASA Planetary Data System, doi:10.26033/yt84-5y91; pointing by A. Abergel (IAS, Paris); Giotto and Vega images",
         "limits": "Radius every 5 deg from limb and terminator fits to Giotto and Vega images; the author rates the model extremely uncertain (absolute errors probably 500-1000 m, point-to-point about 100 m). Volume-equivalent radius 4.58 km against the 5.5 km catalogue radius. Triangulated through the published points only; seam and pole repeats differ by 1 mm of rounding."
       }
+    },
+    {
+      "id": "vesta",
+      "name": "Vesta",
+      "horizons_id": 2000004,
+      "radius_m": 262700,
+      "kind": "external",
+      "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA (Dawn Framing Camera 2); mosaic (Roatsch et al.) and DTM (Preusker et al. 2016) by DLR",
+      "product": "https://sbn.psi.edu/pds/resource/dawn/dwnvfcshape.html",
+      "limits": "Imagery and relief come from the vesta pack (assets/planetary-sources.json, scripts/prepare-body-assets.py): HAMO clear-filter mosaic area-averaged to 64 pixels/degree (about 70 m) and stereo-photogrammetric DTM to 32 pixels/degree (about 140 m), both in the IAU Claudia double-prime system used by pck00011. The mosaic keeps the source illumination and is not calibrated albedo; heights are drawn on a sphere of the 262.7 km catalogue radius, so the measured shape (radii 212-293 km) comes from the DTM.",
+      "relief": {
+        "bounding_radius_m": 293002.0,
+        "dimensions_m": [
+          576119.5,
+          555879.9,
+          467265.3
+        ]
+      },
+      "notice": "Mosaico e relevo medidos pela sonda Dawn (DLR), no sistema IAU. O mosaico mantem a iluminacao das imagens originais."
     }
   ]
 }

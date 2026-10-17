@@ -248,6 +248,20 @@ Fobos/Deimos já têm mapas, modelos medidos e orientação IAU;
 faltam validar o registro das imagens Viking, como já feito para Mimas, e melhorar
 as órbitas.
 
+## Vesta
+
+Vesta usa os produtos da câmera FC2 da sonda Dawn processados pelo DLR e publicados no
+PDS: o mosaico global HAMO em filtro claro (Roatsch et al.; ~60 m/pixel na origem) e o
+modelo digital de terreno estereofotogramétrico (Preusker et al. 2016; espaçamento de
+~70 m e precisão vertical de ~6 m), ambos no sistema IAU "Claudia double-prime", o
+mesmo da rotação do pck00011. O gerador faz média de área do mosaico para 64 pixels por
+grau (~70 m) e do relevo para 32 pixels por grau (~140 m), em longitude leste −180…180,
+e ambos ganham pirâmides com detalhe regional por zoom, como Mercúrio. As alturas são
+desenhadas sobre a esfera do raio de catálogo (262,7 km): os raios medidos vão de
+212 a 293 km, com a bacia Rheasilvia no sul e o pico central a ~20 km acima do
+elipsoide. O mosaico mantém a iluminação das imagens originais e não é albedo
+calibrado. A distância mínima da câmera usa o raio máximo medido (293,0 km).
+
 ## Cometa 67P/Churyumov-Gerasimenko
 
 A 67P usa o modelo de forma da câmera OSIRIS da Rosetta (estereofotoclinometria
@@ -279,8 +293,9 @@ da eclíptica. Coma e cauda ainda não são desenhadas.
 
 ## Formas artísticas dos pequenos corpos
 
-Vesta e Pallas usam malhas irregulares individuais. Fobos, Deimos, Febe, Hipérion,
-Proteu, a 67P e Halley usam o modelo medido acima quando a biblioteca contém as malhas.
+Pallas usa uma malha irregular individual: sem sonda, as dimensões publicadas a partir
+de óptica adaptativa ainda não foram verificadas para uso aqui. Fobos, Deimos, Febe,
+Hipérion, Proteu, a 67P e Halley usam o modelo medido acima quando a biblioteca contém as malhas.
 Numa biblioteca antiga sem as malhas, usam o elipsoide IAU (Hipérion, uma esfera)
 sob o mapa; sem nenhum asset do corpo, a forma rochosa ilustrativa. Crateras,
 silhuetas, variações de material e microrelevo são procedurais, com semente por

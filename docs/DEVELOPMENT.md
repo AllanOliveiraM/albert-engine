@@ -191,7 +191,7 @@ O CI comum de branches/PRs não gera distribuições.
 Cada sistema recebe duas versões. A **completa** contém o executável na raiz,
 os assets e bibliotecas/licenças necessários, sem código, logs, cache ou README,
 e funciona offline. A **leve** (`-light`) é a mesma pasta sem `assets/visuals.pak`
-e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~71 MB) numa
+e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~73 MB) numa
 tela de carregamento e completa as demais resoluções em segundo plano (ver
 [ASSETS.md](ASSETS.md#download-por-níveis)). `scripts/light-dist.py` deriva a
 pasta leve da completa. Os containers baixados ficam numa release própria
@@ -592,6 +592,8 @@ auxiliar e descarte de recortes são os mesmos de `SolidBodies`. Globos usam
 interseção elipsoidal; formas medidas usam BVH das placas, sem varrer todos os
 triângulos a cada hover. Detalhes e limitações
 em [LOCAL_SYSTEM.md](LOCAL_SYSTEM.md#mapas-das-luas).
+O fixture opcional `python3 tests/pds_maps_fixture.py` (só NumPy) confere o reamostrador PDS3
+com rótulos sintéticos (registro em grade e em célula, vazios, emenda e deslocamentos).
 O fixture opcional `python3 tests/moon_assets_fixture.py` usa Pillow/NumPy, sem rede;
 `natural_bodies` testa orientação contra CSPICE e `visual_test --graphics` exercita
 renderização, clique, escala, upload e descarte para cada lua com mapas.
@@ -640,7 +642,16 @@ atravessada pelo eixo polar longe dos vértices (corpos não convexos, como a 67
 cruzam o eixo mais de duas vezes) recebe uma única longitude. O exportador DSK remove
 aletas de espessura zero (placa e sua inversa) deixadas por decimação.
 `assets/moon-sources.json` cobre todas as superfícies locais (luas e pequenos corpos);
-o nome é histórico. Elas compartilham os containers `moons-<nível>` da versão leve. Não recentra nem redimensiona.
+o nome é histórico. Elas compartilham os containers `moons-<nível>` da versão leve.
+`kind: "external"` marca um corpo cujas imagens e relevo vêm de pacote próprio (Vesta:
+`assets/planetary-sources.json` + `scripts/prepare-body-assets.py`, como Mercúrio); o
+campo `relief` (raio máximo e dimensões medidos no mapa de alturas) dá a distância
+segura da câmera e as dimensões da API. Fontes PDS3 cilíndricas (`format:
+pds3-cylindrical`) passam por `scripts/pds_maps.py`: leitura do rótulo, `memmap` e média
+de área por blocos de linhas até a grade alvo, respeitando os deslocamentos de
+projeção do rótulo, a emenda e os vazios; alturas viram uint16 acima do datum com
+escala e deslocamento explícitos no inventário. `fetch-ranges.py` envia User-Agent
+próprio (o arquivo PDS SBN recusa o padrão do Python). Não recentra nem redimensiona.
 Os recortes desses corpos têm `textureOnly`, sem malha esférica ou máscara extra.
 
 `measured_shapes` lê o pacote real e compara 192 interseções independentes (CSPICE
