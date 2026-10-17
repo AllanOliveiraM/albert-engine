@@ -24,6 +24,23 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | **Média — 5** | Data de simulação, gravação/reprodução e cenários de eventos/eclipses | Eclipses acompanham a geometria em tempo real; não há seletor de datas históricas |
 | **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
 
+### Ordem das luas pendentes
+
+Das 25 luas do catálogo, 19 têm mapas próprios, incluindo a Lua terrestre.
+Isso não significa geometria, relevo, cor ou cobertura completos.
+
+1. **Fobos e Deimos:** modelos detalhados de forma/relevo. Já têm mosaicos Viking,
+   orientação IAU e elipsoides de referência; a geometria detalhada é prioritária.
+2. **Mimas:** reprojetar o atlas próprio, depois melhorar a forma/relevo.
+3. **Titã:** aparência atmosférica própria; distinguir visão visível de mapas da superfície.
+4. **Hipérion e Febe:** modelos irregulares e imagens próprios, substituindo o procedural.
+5. **Proteu:** modelo e cobertura de imagens disponíveis, explicitando lacunas.
+6. **Nereida:** representação limitada aos dados disponíveis, sem inventar detalhes observados.
+
+Os seis corpos ainda sem mapas/modelos próprios embarcados são Mimas, Titã,
+Hipérion, Febe, Proteu e Nereida. A forma artística e a esfera de referência
+continuam identificadas como aproximações até cada substituição.
+
 ### Andamento
 
 **16/10 — primeiro aprimoramento de Fobos e Deimos.** Mosaicos próprios Viking
