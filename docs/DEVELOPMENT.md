@@ -526,16 +526,18 @@ fixtures de CSPICE são independentes. Não há DEM artificial derivado de image
 
 `surfaceBodies()/surfaceBody()` descrevem superfícies e orientações separadamente
 de `naturalBodies()`, que permanece sendo o conjunto de planetas dos provedores
-online. O primeiro lote de luas usa `moon_frames.inc` (IAU pck00011), mapas NASA
+online. As nove luas com mapas usam `moon_frames.inc` (IAU pck00011), mapas NASA
 VTAD fixados em `assets/moon-sources.json` e `scripts/prepare-moon-assets.py`.
 O pacote `imagery/moons/` é unido automaticamente à biblioteca; não cria consultas
 Horizons extras nem objetos duplicados. LOD, uploads incrementais, fades, iluminação
 auxiliar e descarte de recortes são os mesmos de `SolidBodies`. Seleção usa a esfera
 local da malha, evitando percorrer triângulos a cada hover. Detalhes e limitações
-em [LOCAL_SYSTEM.md](LOCAL_SYSTEM.md#mapas-das-luas-de-júpiter).
+em [LOCAL_SYSTEM.md](LOCAL_SYSTEM.md#mapas-das-luas-de-júpiter-e-saturno).
 O fixture opcional `python3 tests/moon_assets_fixture.py` usa Pillow, sem rede;
 `natural_bodies` testa orientação contra CSPICE e `visual_test --graphics` exercita
-renderização, clique, escala, upload e descarte para as quatro luas.
+renderização, clique, escala, upload e descarte para cada lua com mapas.
+O gerador de orientação lê IDs/raios do mesmo inventário de fontes e seleciona
+os argumentos periódicos do sistema planetário correspondente.
 
 `providers/small_bodies` consulta SBDB API 1.3, valida respostas e resolve designações
 em SPK/diâmetro. `catalog::Manager::search` atende à UI assíncrona e a `SearchObjects`.

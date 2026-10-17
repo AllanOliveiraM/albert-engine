@@ -322,7 +322,8 @@ void graphics() {
     require(solids.takeEviction()&&!solids.takeEviction(),"Regional loader was not notified of eviction exactly once");
     // Local moons share surface LOD/lighting while retaining their local registry
     // ownership and category; their mesh radius must not be scaled twice.
-    for(const std::string id:{"io","europa","ganymede","callisto"}){
+    for(const auto& definition:albert::core::surfaceBodies()){
+        const std::string id(definition.id);if(!albert::core::localOrbit(id))continue;
         auto world=Scene::create();world->background=Color(0x000000);
         std::vector<albert::SurfaceAssets> maps;maps.push_back({id,rgba(140),height(0)});
         albert::SolidBodies moons(*world,std::move(maps));albert::core::Scene registry;

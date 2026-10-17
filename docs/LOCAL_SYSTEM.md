@@ -33,7 +33,7 @@ São elipses de dois corpos, propagadas localmente. Luas são relativas a seus
 planetas; os demais são heliocêntricos. Perturbações, precessão e forças não
 gravitacionais não são integradas. Não são efemérides precisas em tempo real;
 o erro cresce com a distância temporal à época de referência. A interface
-identifica a aproximação ao focar esses corpos. Io, Europa, Ganimedes e Calisto
+identifica a aproximação ao focar esses corpos. Nove luas de Júpiter e Saturno
 têm mapas próprios NASA/VTAD, orientação IAU e detalhes regionais por zoom.
 Os demais usam esferas de referência ou formas rochosas artísticas descritas
 abaixo, sem reutilizar fotografias de outros objetos. Mais mapas/modelos observados
@@ -55,13 +55,15 @@ independente de vetores Horizons, além de verificar fechamento, limites radiais
 referencial do planeta principal e busca aproximada. Essa comparação valida a
 conversão dos elementos; não mede o erro de propagação fora da época inicial.
 
-## Mapas das luas de Júpiter
+## Mapas das luas de Júpiter e Saturno
 
 As fontes e limitações estão em `assets/moon-sources.json`: [Io](https://science.nasa.gov/resource/io-3d-model/),
 [Europa](https://science.nasa.gov/resource/europa-3d-model/),
 [Ganimedes](https://science.nasa.gov/resource/ganymede-3d-model/) e
 [Calisto](https://science.nasa.gov/resource/callisto-3d-model/), NASA VTAD.
-Io/Europa usam imagens de 4096×2048; Ganimedes/Calisto, 2048×1024. São referências
+Encélado, Tétis, Dione, Reia e Jápeto também usam mapas NASA/VTAD, das páginas
+oficiais indicadas no mesmo inventário. Io, Europa e essas cinco luas de Saturno
+usam imagens de 4096×2048; Ganimedes/Calisto, 2048×1024. São referências
 visuais estáticas, com processamento de cor e cobertura variável, sem DEM.
 Não representam atividade atual nem albedo calibrado. O registro da longitude
 da textura contra marcos IAU ainda exige validação; a orientação do corpo usa
@@ -71,13 +73,17 @@ O build comum já reúne `assets/imagery/moons/` à biblioteca única. Não baix
 dessas luas em runtime. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **8.508.002 bytes**.
+todas as luas na RAM. O pacote adicional ocupa **34.983.581 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
 `bash scripts/prepare-assets.sh --moons --offline`. Originais e intermediários
 ficam fora do Git em `asset-packs/moons/`; o pacote otimizado e os hashes são
 versionados. O processo preserva os pacotes de Terra/Lua/Sol e planetas.
+
+Mimas ainda exige reprojetar seu atlas de dois hemisférios; o globo atmosférico
+de Titã requer um tratamento próprio. Hyperion e Phoebe continuam artísticos.
+As demais luas ainda não têm mapas próprios embarcados.
 
 ## Formas artísticas dos pequenos corpos
 

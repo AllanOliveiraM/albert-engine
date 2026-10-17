@@ -13,7 +13,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Expandir mapas próprios, formas e relevo das luas por sistema | Lua terrestre detalhada; Io/Europa/Ganimedes/Calisto com mapas NASA/VTAD e orientação IAU; demais luas ilustrativas; generalizar eclipses além de Terra/Lua |
+| **Alta — 1** | Expandir mapas próprios, formas e relevo das luas por sistema | Lua terrestre detalhada; nove luas de Júpiter/Saturno com mapas NASA/VTAD e orientação IAU; demais luas ilustrativas; generalizar eclipses além de Terra/Lua |
 | **Alta — 2** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 3** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
 | **Alta — 4** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
@@ -25,6 +25,17 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
 
 ### Andamento
+
+**16/10 — mapas das luas de Saturno.** Encélado, Tétis, Dione, Reia e Jápeto
+recebem mapas próprios NASA/VTAD de 4096×2048 e orientação IAU pck00011,
+incluindo termos periódicos quando publicados. São nove luas adicionais com
+mapas embarcados; o pacote conjunto ocupa 34,98 MB. Mesma base de 1K, recortes
+regionais, upload incremental, fade e descarte de memória do lote anterior.
+Descritores agora são gerados diretamente do inventário de fontes, mantendo
+separados o catálogo visual e os provedores de posições. Sem DEM dessas luas;
+registro cartográfico e órbitas aproximadas continuam com os limites documentados.
+Mimas (reprojeção de atlas), Titã (atmosfera), Hyperion/Phoebe (formas observadas),
+luas dos outros sistemas e eclipses adicionais continuam pendentes.
 
 **16/10 — primeiro lote de superfícies das luas.** Io e Europa com mapas NASA/VTAD
 de 4096×2048; Ganimedes e Calisto, 2048×1024. Pacote local adicional de 8,51 MB,

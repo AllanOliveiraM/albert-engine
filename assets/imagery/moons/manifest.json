@@ -1,13 +1,13 @@
 {
   "format": "albert-pack-v1",
-  "bytes": 8508002,
-  "sha256": "f6dc99410901fb65af25825133c2d318e030f91182ccf9aa80998d396b500f25",
-  "files": 109,
+  "bytes": 34983581,
+  "sha256": "79cfbcf8594f541f724f9f12ff781e6aa6b240319854487b2f371adcf76cd38d",
+  "files": 324,
   "parts": [
     {
       "path": "visuals-000.pakpart",
-      "bytes": 8508002,
-      "sha256": "f6dc99410901fb65af25825133c2d318e030f91182ccf9aa80998d396b500f25"
+      "bytes": 34983581,
+      "sha256": "79cfbcf8594f541f724f9f12ff781e6aa6b240319854487b2f371adcf76cd38d"
     }
   ]
 }

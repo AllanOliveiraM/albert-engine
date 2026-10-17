@@ -14,7 +14,10 @@
       ],
       "credit": "NASA Visualization Technology Applications and Development (VTAD)",
       "product": "https://science.nasa.gov/resource/io-3d-model/",
-      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks.",
+      "name": "Io",
+      "horizons_id": 501,
+      "radius_m": 1821500
     },
     {
       "id": "europa",
@@ -28,7 +31,10 @@
       ],
       "credit": "NASA Visualization Technology Applications and Development (VTAD)",
       "product": "https://science.nasa.gov/resource/europa-3d-model/",
-      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks.",
+      "name": "Europa",
+      "horizons_id": 502,
+      "radius_m": 1560800
     },
     {
       "id": "ganymede",
@@ -42,7 +48,10 @@
       ],
       "credit": "NASA Visualization Technology Applications and Development (VTAD)",
       "product": "https://science.nasa.gov/resource/ganymede-3d-model/",
-      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks.",
+      "name": "Ganimedes",
+      "horizons_id": 503,
+      "radius_m": 2631200
     },
     {
       "id": "callisto",
@@ -56,6 +65,94 @@
       ],
       "credit": "NASA Visualization Technology Applications and Development (VTAD)",
       "product": "https://science.nasa.gov/resource/callisto-3d-model/",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks.",
+      "name": "Calisto",
+      "horizons_id": 504,
+      "radius_m": 2410300
+    },
+    {
+      "id": "enceladus",
+      "filename": "enceladus.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/e/Enceladus_1_504.glb",
+      "bytes": 17925448,
+      "sha256": "7548234bae15047d6c1af6bec4f348748b1acae7d4e7bfbe50e5bb3dda75506f",
+      "product": "https://science.nasa.gov/resource/enceladus-3d-model/",
+      "name": "Encelado",
+      "horizons_id": 602,
+      "radius_m": 252100,
+      "grid": [
+        4096,
+        2048
+      ],
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+    },
+    {
+      "id": "tethys",
+      "filename": "tethys.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/t/Tethys_1_1077-1.glb",
+      "bytes": 15431660,
+      "sha256": "5e195fa1faf454f7af6808d74a9416b0f97321536a0fcacc5687c0428a9d8659",
+      "product": "https://science.nasa.gov/resource/tethys-3d-model/",
+      "name": "Tetis",
+      "horizons_id": 603,
+      "radius_m": 531000,
+      "grid": [
+        4096,
+        2048
+      ],
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+    },
+    {
+      "id": "dione",
+      "filename": "dione.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/d/Dione_1_1123.glb",
+      "bytes": 18048520,
+      "sha256": "9feee62be971d47ef55448e58304072e89d973c3a3454c812314e1f9dca27674",
+      "product": "https://science.nasa.gov/resource/dione-3d-model/",
+      "name": "Dione",
+      "horizons_id": 604,
+      "radius_m": 561433.333333,
+      "grid": [
+        4096,
+        2048
+      ],
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+    },
+    {
+      "id": "rhea",
+      "filename": "rhea.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/r/Rhea_1_1529.glb",
+      "bytes": 16232384,
+      "sha256": "9cb351462fdc149303de79f9b8e33fb3deb9ce60102a190876a7ad280f307d57",
+      "product": "https://science.nasa.gov/resource/rhea-3d-model/",
+      "name": "Reia",
+      "horizons_id": 605,
+      "radius_m": 763500,
+      "grid": [
+        4096,
+        2048
+      ],
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
+      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
+    },
+    {
+      "id": "iapetus",
+      "filename": "iapetus.glb",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/Iapetus_1_1471.glb",
+      "bytes": 11755660,
+      "sha256": "7a7212ac69e022cf37ae96fe4d34f04e9cfea00fd66a266aa3b1c970c475746d",
+      "product": "https://science.nasa.gov/resource/iapetus-3d-model/",
+      "name": "Japeto",
+      "horizons_id": 608,
+      "radius_m": 734500,
+      "grid": [
+        4096,
+        2048
+      ],
+      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
       "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
     }
   ]

@@ -110,13 +110,13 @@
       "source": "Generated imagery archive manifest",
       "license": "Credits in the packed source records",
       "processing": "SHA-256 verified Git LFS parts; one distribution container",
-      "bytes": 323,
-      "sha256": "d7f1ad10946bd2af4f98d32c25b98126651097f782e386d2807e7c4244def54f"
+      "bytes": 325,
+      "sha256": "d612c00243f9c15b8e82e317263f3260325712868b2ca090a58ae9c202e22736"
     },
     {
       "path": "moon-sources.json",
-      "bytes": 3196,
-      "sha256": "9388c8faaa379924f98ee40a2733a39d45a90567b902537daa1e58b1faed83e5",
+      "bytes": 7659,
+      "sha256": "d2c23d00da01585607700cc144bf0bd728c45a63c6a959a48fe0c0d4d71c1a1e",
       "source": "NASA VTAD visual resources",
       "license": "Credits and limits in source inventory"
     }

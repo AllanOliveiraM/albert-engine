@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Generate checked-in planetary rotation descriptors from NAIF pck00011."""
-import argparse,hashlib,pathlib,re,urllib.request
+import argparse,hashlib,json,pathlib,re,urllib.request
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 URL='https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc'
+def write_changed(path,text):
+ if not path.exists() or path.read_text()!=text:path.write_text(text)
 def generate(path):
  if hashlib.sha256(path.read_bytes()).hexdigest()!='3dff7b1dbeceaa01f25467767d3fa25816051c85d162d1edf04acb310ee28bb1':raise ValueError('Unexpected pck00011 checksum; review source changes')
  text=path.read_text();blocks=[];active=False
@@ -34,24 +36,26 @@ def generate(path):
   arr=lambda x:'{'+','.join(map(fmt,x))+'}'
   records.append('{"'+body+'","'+name+'",'+str(target)+','+fmt(radii[0]*1000)+','+str(half)+','+str(step)+','+arr(ra)+','+arr(dec)+','+arr(pm)+','+(body+'Terms' if terms else '{}')+','+fmt(radii[2]*1000)+','+str(cloud).lower()+'}')
  out.append('const NaturalBody additionalBodies[]{'+',\n'.join(records)+'};')
- (ROOT/'src/core/planet_frames.inc').write_text('\n'.join(out)+'\n')
+ write_changed(ROOT/'src/core/planet_frames.inc','\n'.join(out)+'\n')
  moon_out=out[:2];moon_records=[]
- for body,name,target,radius in [('io','Io',501,1821500),('europa','Europa',502,1560800),('ganymede','Ganimedes',503,2631200),('callisto','Calisto',504,2410300)]:
-  key='BODY'+str(target);amps=[values(key+'_NUT_PREC_'+kind,[]) for kind in ['PM','RA','DEC']];angles=values('BODY5_NUT_PREC_ANGLES');terms=[]
+ for source in json.loads((ROOT/'assets/moon-sources.json').read_text())['bodies']:
+  body,name,target,radius=[source[k] for k in ['id','name','horizons_id','radius_m']]
+  key='BODY'+str(target);amps=[values(key+'_NUT_PREC_'+kind,[]) for kind in ['PM','RA','DEC']];terms=[]
+  angles=values('BODY'+str(target//100)+'_NUT_PREC_ANGLES') if any(amps) else []
   for i in range(max(map(len,amps))):
    w,a,d=[v[i] if i<len(v) else 0 for v in amps]
    if any([w,a,d]):terms.append([angles[2*i],angles[2*i+1]/36525,w,0,a,d])
-  moon_out.append('constexpr RotationTerm '+body+'Terms[]{'+','.join('{'+','.join(map(fmt,t))+'}' for t in terms)+'};')
+  if terms:moon_out.append('constexpr RotationTerm '+body+'Terms[]{'+','.join('{'+','.join(map(fmt,t))+'}' for t in terms)+'};')
   arr=lambda x:'{'+','.join(map(fmt,x))+'}'
-  moon_records.append('{"'+body+'","'+name+'",'+str(target)+','+str(radius)+',0,0,'+arr(values(key+'_POLE_RA'))+','+arr(values(key+'_POLE_DEC'))+','+arr(values(key+'_PM'))+','+body+'Terms}')
+  moon_records.append('{"'+body+'","'+name+'",'+str(target)+','+fmt(radius)+',0,0,'+arr(values(key+'_POLE_RA'))+','+arr(values(key+'_POLE_DEC'))+','+arr(values(key+'_PM'))+','+(body+'Terms' if terms else '{}')+'}')
  moon_out.append('const NaturalBody moonSurfaces[]{'+',\n'.join(moon_records)+'};')
- (ROOT/'src/core/moon_frames.inc').write_text('\n'.join(moon_out)+'\n')
+ write_changed(ROOT/'src/core/moon_frames.inc','\n'.join(moon_out)+'\n')
  names={401: 'Phobos', 402: 'Deimos', 501: 'Io', 502: 'Europa', 503: 'Ganymede', 504: 'Callisto', 505: 'Amalthea', 506: 'Himalia', 507: 'Elara', 508: 'Pasiphae', 509: 'Sinope', 510: 'Lysithea', 511: 'Carme', 512: 'Ananke', 513: 'Leda', 514: 'Thebe', 515: 'Adrastea', 516: 'Metis', 601: 'Mimas', 602: 'Enceladus', 603: 'Tethys', 604: 'Dione', 605: 'Rhea', 606: 'Titan', 607: 'Hyperion', 608: 'Iapetus', 609: 'Phoebe', 610: 'Janus', 611: 'Epimetheus', 612: 'Helene', 613: 'Telesto', 614: 'Calypso', 615: 'Atlas', 616: 'Prometheus', 617: 'Pandora', 618: 'Pan', 701: 'Ariel', 702: 'Umbriel', 703: 'Titania', 704: 'Oberon', 705: 'Miranda', 706: 'Cordelia', 707: 'Ophelia', 708: 'Bianca', 709: 'Cressida', 710: 'Desdemona', 711: 'Juliet', 712: 'Portia', 713: 'Rosalind', 714: 'Belinda', 715: 'Puck', 801: 'Triton', 802: 'Nereid', 803: 'Naiad', 804: 'Thalassa', 805: 'Despina', 806: 'Galatea', 807: 'Larissa', 808: 'Proteus', 901: 'Charon'}
  rows=[]
  for target,name in names.items():
   radii=values('BODY'+str(target)+'_RADII');radius=sum(radii)/3*1000
   rows.append('{"'+name.lower()+'","'+name+'",'+str(target)+','+format(radius,'.12g')+',0xb6b2aa}')
- (ROOT/'src/catalog/moons.inc').write_text('// Reference mean radii from NASA/NAIF pck00011. Spherical placeholders only.\n'+',\n'.join(rows)+'\n')
+ write_changed(ROOT/'src/catalog/moons.inc','// Reference mean radii from NASA/NAIF pck00011. Spherical placeholders only.\n'+',\n'.join(rows)+'\n')
 
 if __name__=='__main__':
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--source',type=pathlib.Path);args=parser.parse_args()

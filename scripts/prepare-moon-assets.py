@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproduce the small, local Galilean surface pack from pinned NASA GLBs.
+"""Reproduce the local moon surface pack from pinned NASA GLBs.
 
 Python 3 + Pillow (also available in scripts/Dockerfile.assets).
 Originals/intermediates remain in ignored asset-packs/moons/.
