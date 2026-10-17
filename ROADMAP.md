@@ -14,15 +14,31 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
 | **Alta — 1** | Modelos detalhados de Fobos/Deimos; completar formas, relevo e luas pendentes | Lua terrestre detalhada; 18 luas adicionais com mapas NASA e orientação IAU; demais luas ilustrativas; generalizar eclipses além de Terra/Lua |
-| **Alta — 2** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
-| **Alta — 3** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
-| **Alta — 4** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
+| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion/Febe já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
+| **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
+| **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
+| **Alta — 5** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
 | **Média — 1** | Efemérides/orientações locais mais precisas para luas e pequenos corpos, avaliando SPICE | Catálogo adicional usa propagação aproximada de dois corpos |
 | **Média — 2** | NTS e tratamento completo de leap seconds/smear | NTP com múltiplas fontes já existe, sem autenticação criptográfica |
 | **Média — 3** | Texturas GLB/glTF, animação de peças e controles avançados de câmera pela API | GLB estático/PBR sólido e streaming de posição/atitude já existem |
 | **Média — 4** | Rótulos, polígonos/GeoJSON e camadas raster/clima selecionadas | Camadas atuais: pontos e polilinhas; nuvens GIBS continuam opcionais |
 | **Média — 5** | Data de simulação, gravação/reprodução e cenários de eventos/eclipses | Eclipses acompanham a geometria em tempo real; não há seletor de datas históricas |
 | **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
+
+### Pequenos corpos artísticos — prioridade alta
+
+O primeiro corte já existe: malhas irregulares próprias para Vesta, Pallas,
+Halley, 67P, Hipérion e Febe; 67P tem dois lobos, Halley é alongado. Crateras,
+variações de material e microrelevo são procedurais e identificados como arte.
+
+Próximo corte: silhuetas e materiais mais característicos por objeto, detalhes
+por zoom sem picos de memória e coma/caudas de cometas quando aplicáveis,
+com comportamento coerente com a geometria solar e limites dos dados disponíveis.
+Não afirmar atividade observada a partir de um efeito artístico. Preferir modelos
+medidos quando disponíveis, com proveniência e escala verificadas. Preservar o
+raio nominal, a seleção e a distância segura da câmera ao trocar a representação.
+Objetos fisicamente arredondados podem manter esfera/elipsoide apropriado;
+o critério é a forma do corpo, não deformar todos os objetos indistintamente.
 
 ### Ordem das luas pendentes
 
