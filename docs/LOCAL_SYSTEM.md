@@ -262,6 +262,14 @@ desenhadas sobre a esfera do raio de catálogo (262,7 km): os raios medidos vão
 elipsoide. O mosaico mantém a iluminação das imagens originais e não é albedo
 calibrado. A distância mínima da câmera usa o raio máximo medido (293,0 km).
 
+Ceres segue o mesmo caminho, com os produtos HAMO do DLR no sistema IAU "Kait" (o do
+pck00011): mosaico em filtro claro reamostrado para 60 pixels por grau (~140 m) e
+relevo para 30 pixels por grau (~270 m), sobre a esfera do raio de catálogo
+(469,7 km); os raios medidos vão de 442 a 487 km. O mosaico tem contraste realçado
+(as faculas de Occator saturam) e mantém a iluminação original; as áreas polares
+nunca imageadas, sobretudo ao sul de 80° S, recebem a média local das observações
+vizinhas dissolvida no cinza mediano, e o painel avisa.
+
 ## Cometa 67P/Churyumov-Gerasimenko
 
 A 67P usa o modelo de forma da câmera OSIRIS da Rosetta (estereofotoclinometria

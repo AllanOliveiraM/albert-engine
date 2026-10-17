@@ -191,7 +191,7 @@ O CI comum de branches/PRs não gera distribuições.
 Cada sistema recebe duas versões. A **completa** contém o executável na raiz,
 os assets e bibliotecas/licenças necessários, sem código, logs, cache ou README,
 e funciona offline. A **leve** (`-light`) é a mesma pasta sem `assets/visuals.pak`
-e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~73 MB) numa
+e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~75 MB) numa
 tela de carregamento e completa as demais resoluções em segundo plano (ver
 [ASSETS.md](ASSETS.md#download-por-níveis)). `scripts/light-dist.py` deriva a
 pasta leve da completa. Os containers baixados ficam numa release própria
@@ -650,7 +650,9 @@ segura da câmera e as dimensões da API. Fontes PDS3 cilíndricas (`format:
 pds3-cylindrical`) passam por `scripts/pds_maps.py`: leitura do rótulo, `memmap` e média
 de área por blocos de linhas até a grade alvo, respeitando os deslocamentos de
 projeção do rótulo, a emenda e os vazios; alturas viram uint16 acima do datum com
-escala e deslocamento explícitos no inventário. `fetch-ranges.py` envia User-Agent
+escala e deslocamento explícitos no inventário; `fill_gaps` preenche áreas não
+imageadas com a média local (calculada numa grade 16× menor) dissolvida no cinza
+mediano. `fetch-ranges.py` envia User-Agent
 próprio (o arquivo PDS SBN recusa o padrão do Python). Não recentra nem redimensiona.
 Os recortes desses corpos têm `textureOnly`, sem malha esférica ou máscara extra.
 

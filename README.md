@@ -41,7 +41,7 @@ medida de Thomas com a cor média medida pela Cassini, sem mapa de albedo; como 
 rotação é caótica, a orientação é ilustrativa. Proteu usa a forma de Stooke derivada
 das imagens da Voyager 2, com cor neutra uniforme e sem mapa de albedo. Nereida, que
 nunca foi resolvida em imagem, aparece como esfera com o albedo medido e um aviso.
-Vesta usa o mosaico e o relevo medidos pela sonda Dawn, com detalhe por zoom.
+Vesta e Ceres usam o mosaico e o relevo medidos pela sonda Dawn, com detalhe por zoom.
 O cometa 67P usa a forma medida pela câmera OSIRIS da Rosetta, com a cor escura do
 núcleo medida pela missão; Halley usa a forma estimada com as imagens da Giotto e
 das Vega, muito incerta, com rotação ilustrativa.
@@ -92,7 +92,7 @@ estão disponíveis pela API. Esta versão ainda não autentica NTP com NTS;
 **As imagens estáticas ficam no computador, completas ou baixadas aos poucos.**
 Superfícies, luzes das cidades, relevo e referência solar formam uma biblioteca de
 aproximadamente **4,89 GB**. A versão completa a traz em um único `assets/visuals.pak`
-e funciona offline. A versão leve baixa ao abrir só o essencial (~73 MB, todos os
+e funciona offline. A versão leve baixa ao abrir só o essencial (~75 MB, todos os
 corpos em resolução global) e completa as demais resoluções em segundo plano, com
 o corpo em foco à frente; o canto inferior esquerdo mostra o andamento. Aproximar
 a câmera carrega recortes mais detalhados; a resolução máxima depende dos dados de

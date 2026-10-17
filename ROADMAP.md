@@ -14,7 +14,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
 | **Alta — 1** | ~~Completar as luas~~ — concluído em 17/10/2026 | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion/Proteu com formas medidas (Hipérion e Proteu sem mapa; Hipérion com orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
-| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P (Rosetta), Halley (Giotto/Vega) e Vesta (Dawn: mosaico + relevo) medidos; Pallas ainda artística; coma/caudas dependem do seletor de data (Média 5); melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
+| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P (Rosetta), Halley (Giotto/Vega), Vesta e Ceres (Dawn: mosaico + relevo) medidos; Pallas ainda artística; coma/caudas dependem do seletor de data (Média 5); melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
 | **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
 | **Alta — 5** | Validar GPU física, Windows nativo (inclui a versão leve e seus downloads) e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
@@ -83,6 +83,12 @@ Todas as 25 luas têm agora representação própria, com os limites de cada fon
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — Ceres com mosaico e relevo da Dawn.** Mesmo caminho de Vesta: mosaico e
+modelo de terreno HAMO do DLR, no sistema IAU, com detalhe por zoom; as faculas de
+Occator caem no lugar certo. Áreas polares nunca imageadas recebem a média local das
+vizinhas. Pacote de 167 MB; essencial da versão leve com +2 MB. Validação: 27 testes
+Linux, frame contra CSPICE, OpenGL no Xvfb e no Wine e programa real focando Ceres.
 
 **17/10 — Vesta com mosaico e relevo da Dawn.** Mosaico global e modelo de terreno do
 DLR (PDS), no sistema IAU, reamostrados por média de área e servidos em pirâmide com

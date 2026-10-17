@@ -32,6 +32,9 @@
     },
     {
       "manifest": "vesta/manifest.json"
+    },
+    {
+      "manifest": "ceres/manifest.json"
     }
   ]
 }

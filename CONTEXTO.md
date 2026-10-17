@@ -10,8 +10,8 @@ medida, orientação ilustrativa ancorada em 2005); repasse do Codex sem achados
 medido e aviso). **Etapa das luas concluída**, com repasse do Codex sem achados novos.
 Em andamento: pequenos corpos medidos (Alta 2) — **67P** (forma OSIRIS/Rosetta, cor
 medida), **Halley** (Stooke, rotação ilustrativa) e **Vesta** (mosaico + DTM da Dawn)
-entregues; Pallas segue artística (dimensões não verificadas). Próximo: **Ceres** pelo
-mesmo caminho de Vesta. Coma/caudas adiadas até haver seletor de data (ver abaixo).
+e **Ceres** (idem) entregues; Pallas segue artística (dimensões não verificadas).
+Coma/caudas adiadas até haver seletor de data (ver abaixo).
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
@@ -122,7 +122,7 @@ Decisão do Allan: versão leve baixa tudo, por **níveis de resolução**, com 
 loading só para o essencial e o resto em segundo plano, indicador minimalista no
 canto, retentativa e continuação; zoom limitado ao que chegou, nunca imagem
 inventada. `scripts/split-asset-pack.py` gera `essential.pak` (73 MB com as malhas medidas e
-as bases de Vesta) + 20 containers `<corpo>-<nível>.pak`/`moons-<nível>.pak` e `catalog.json`;
+as bases de Vesta e Ceres) + 20 containers `<corpo>-<nível>.pak`/`moons-<nível>.pak` e `catalog.json`;
 `AssetPack` indexa vários arquivos e limita cada camada ao maior nível completo;
 `AssetDownloads` (`src/render/asset_downloads.*`) baixa da release `assets-<id>`
 (`ALBERT_ASSET_BASE_URL` para testes) para `assets/packs` ou `data/packs`.
@@ -543,7 +543,17 @@ de magnitude total n = 4), coma pela coluna analítica de n ∝ 1/r² na esfera 
 casca de Titã), cauda de íons antissolar com aberração pelo vento solar (~400 km/s) e
 cauda de poeira curvada para trás da velocidade; brilho absoluto realçado e declarado.
 
-Próxima ação concreta: **Ceres** (PDS4 `dwarf_planet-ceres.dawn.shape-models-maps`),
-pelo mesmo caminho de Vesta (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
+Ceres (entregue): DLR HAMO `CE_HAMO_G_00N_180E_EQU_CLR.IMG` (21093×10546, 58,59
+px/grau, SHA e8f5fee4…, 8,9% sem dado, sobretudo polos) → 21600×10800 com `fill_gaps`
+(média local numa grade 16× menor, dissolvida na mediana); DTM `CE_HAMO_G_00N_180E_EQU_DTM.IMG`
+(21600×10800, raio = DN + 470000 m, SHA ea645488…) → 10800×5400, altura = −32768 + 1·amostra
+acima de 469700 m. Sistema Kait = pck00011 (W0 170,65°, conferido no documento de
+coordenadas da Dawn). Relevo: raio máximo 487.051 m, 970,0 × 967,4 × 901,1 km. Faculas
+de Occator caem em 239° L, 19,8° N (registro conferido). Pacote 167 MB; os mapas SPC
+de 2222×1111 px do PDS4 foram descartados por resolução.
+
+Próxima ação concreta: conferir o CI dos últimos commits; depois, pela prioridade,
+**seletor de data da simulação** (ROADMAP Média 5, destrava coma/caudas) ou os itens
+Alta 3–5 (anéis de Júpiter/Urano/Netuno; Plutão; validação em Windows nativo) (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
 `register-moon-map.py`). Depois coma/caudas com atividade coerente com a distância
 heliocêntrica (Halley perto do afélio em 2026 não deve ter coma).

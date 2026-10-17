@@ -72,7 +72,8 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   "Hyperion: the sponge moon" (JPL/Cornell, 2007).
 - NASA/JPL-Caltech/UCLA/MPS/DLR/IDA (Dawn Framing Camera 2), DLR: mosaico global
   HAMO de Vesta (DAWN-A-FC2-5-MOSAIC-V1.0, Roatsch et al.) e DTM estereofotogramétrico
-  (DAWN-A-FC2-5-VESTADTMSPG-V1.0, Preusker et al. 2016), NASA PDS,
+  (DAWN-A-FC2-5-VESTADTMSPG-V1.0, Preusker et al. 2016), e os produtos HAMO
+  equivalentes de Ceres (mosaico em filtro claro e DTM estereofotogramétrico), NASA PDS,
   https://sbnarchive.psi.edu/pds3/dawn/fc/.
 - 67P: cor do núcleo de Fornasier et al. (2015), A&A 583, A30,
   https://doi.org/10.1051/0004-6361/201525901.

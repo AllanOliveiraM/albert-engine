@@ -25,9 +25,32 @@ def pds_layer(root,record,datum):
                 sample=np.where(valid>=.5,np.clip(sample,1,65535),0).astype(np.uint16)
             else:sample=np.where(valid>=.5,np.clip(np.rint(values),0,255),0).astype(np.uint8)
             output.GetRasterBand(1).WriteArray(sample,0,top)
+        if record.get('fill_gaps'):fill_gaps(output)
         output.FlushCache();output=None;temporary.replace(path)
     info=dict(kind='elevation',sample_type='uint16',height_scale_m=record['height_scale_m'],height_offset_m=record['height_offset_m'],nodata_sample=0) if elevation else dict(kind='reflectance',lighting=record['lighting'],nodata=0)
     return gdal.Open(str(path)),(width,height),info
+
+def fill_gaps(output,factor=16):
+    # Unobserved pixels (0) take the local mean of the observations around them
+    # (about 2 deg), fading to the observed median, as the moon maps: computed on a
+    # grid factor x coarser and interpolated into the gaps only; no detail is invented.
+    import numpy as np
+    blur=module('moon','prepare-moon-assets.py').blur;band=output.GetRasterBand(1);width,height=output.RasterXSize,output.RasterYSize
+    coarse=(height//factor,width//factor);total=np.zeros(coarse);count=np.zeros(coarse);median=[]
+    for top in range(0,coarse[0]*factor,factor):
+        block=band.ReadAsArray(0,top,coarse[1]*factor,factor).astype(np.float64).reshape(factor,coarse[1],factor).transpose(1,0,2).reshape(coarse[1],-1)
+        total[top//factor]=block.sum(1);count[top//factor]=(block>0).sum(1);median.append(block[block>0][::97])
+    median=float(np.median(np.concatenate(median)));observed=(count>0).astype(np.float64)
+    radius=max(1,coarse[1]//180*2);weight=blur(observed,radius);local=blur(np.divide(total,np.maximum(count,1))*observed,radius)/np.maximum(weight,1e-6)
+    field=np.clip(weight*4,0,1)*local+(1-np.clip(weight*4,0,1))*median
+    for top in range(0,height,256):
+        rows=min(256,height-top);block=band.ReadAsArray(0,top,width,rows)
+        if not (block==0).any():continue
+        y=np.clip((top+np.arange(rows)+.5)/factor-.5,0,coarse[0]-1);x=(np.arange(width)+.5)/factor-.5
+        y0=np.minimum(y.astype(int),coarse[0]-2);fy=(y-y0)[:,None];x0=np.floor(x).astype(int);fx=x-x0
+        a,b=field[y0][:,x0%coarse[1]],field[y0][:,(x0+1)%coarse[1]];c,d=field[y0+1][:,x0%coarse[1]],field[y0+1][:,(x0+1)%coarse[1]]
+        value=(a*(1-fx)+b*fx)*(1-fy)+(c*(1-fx)+d*fx)*fy
+        band.WriteArray(np.where(block==0,np.clip(np.rint(value),1,255),block).astype(np.uint8),0,top)
 
 def relief(path,datum,scale,offset):
     # Measured extent of a height map: largest radius and the body-axis dimensions.

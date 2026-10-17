@@ -108,6 +108,71 @@
           "bytes": 531025920
         }
       ]
+    },
+    {
+      "id": "ceres",
+      "datum_radius_m": 469700,
+      "orientation": "Kait (IAU 2015; Dawn post-Survey update), NASA/NAIF pck00011 BODY2000001",
+      "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA (Dawn Framing Camera 2); mosaic and DTM by DLR",
+      "license": "NASA/PDS mission data products. Cite original authors. No endorsement implied.",
+      "relief": {
+        "bounding_radius_m": 487051.0,
+        "dimensions_m": [
+          969995.9,
+          967365.1,
+          901051.6
+        ]
+      },
+      "sources": [
+        {
+          "id": "dawn-fc2-ceres-hamo-clear-mosaic",
+          "layer": "ceres-day",
+          "format": "pds3-cylindrical",
+          "url": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNCHCFC2_2/DATA/CE_HAMO_G_00N_180E_EQU_CLR.IMG",
+          "filename": "CE_HAMO_G_00N_180E_EQU_CLR.IMG",
+          "product": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNCHCFC2_2/",
+          "grid": [
+            21093,
+            10546
+          ],
+          "target_grid": [
+            21600,
+            10800
+          ],
+          "tile_size": 1440,
+          "fill_gaps": true,
+          "longitude": "east-positive, Kait; source 0 to 360, area-averaged onto -180 to 180; planetocentric latitude",
+          "lighting": "Clear-filter HAMO mosaic (about 140 m/pixel) keeping the illumination of the source images, contrast-stretched (the Occator faculae saturate); not calibrated albedo. Unimaged polar areas (mostly south of 80 S) are filled with the local mean of the surroundings, fading to the median grey.",
+          "epoch": "Dawn HAMO, 2015; DLR global mosaic in the IAU Kait system",
+          "sha256": "e8f5fee4350d85fded008410f4b3140ed375ba1d451556d9dd38e3b884b71f1f",
+          "bytes": 222510058
+        },
+        {
+          "id": "dawn-fc2-ceres-hamo-dtm-spg",
+          "layer": "ceres-height",
+          "kind": "elevation",
+          "format": "pds3-cylindrical",
+          "url": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNCHSPG_2/DATA/CE_HAMO_G_00N_180E_EQU_DTM.IMG",
+          "filename": "CE_HAMO_G_00N_180E_EQU_DTM.IMG",
+          "product": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNCHSPG_2/",
+          "grid": [
+            21600,
+            10800
+          ],
+          "target_grid": [
+            10800,
+            5400
+          ],
+          "tile_size": 720,
+          "longitude": "east-positive, Kait; source 0 to 360, area-averaged onto -180 to 180 at 30 pixels/degree",
+          "epoch": "Dawn HAMO, 2015; DLR stereo-photogrammetric DTM (60 pixels/degree, about 137 m)",
+          "encoding": "Source MSB int16, radius = 1 m x DN + 470000 m; stored as uint16 height above the 469700 m catalogue radius",
+          "height_scale_m": 1,
+          "height_offset_m": -32768,
+          "sha256": "ea6454880fa48adce97382a0c6c735119a6f6593d03805540dd7a90fedd418b4",
+          "bytes": 466689600
+        }
+      ]
     }
   ]
 }

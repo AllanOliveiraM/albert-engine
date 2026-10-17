@@ -788,6 +788,25 @@
         ]
       },
       "notice": "Mosaico e relevo medidos pela sonda Dawn (DLR), no sistema IAU. O mosaico mantem a iluminacao das imagens originais."
+    },
+    {
+      "id": "ceres",
+      "name": "Ceres",
+      "horizons_id": 2000001,
+      "radius_m": 469700,
+      "kind": "external",
+      "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA (Dawn Framing Camera 2); mosaic and DTM by DLR",
+      "product": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNCHSPG_2/",
+      "limits": "Imagery and relief come from the ceres pack (assets/planetary-sources.json, scripts/prepare-body-assets.py): HAMO clear-filter mosaic area-averaged to 60 pixels/degree (about 140 m) and stereo-photogrammetric DTM to 30 pixels/degree (about 270 m), both in the IAU Kait system used by pck00011. The mosaic keeps the source illumination, is contrast-stretched (Occator's faculae saturate) and is not calibrated albedo; unimaged polar areas are filled with the local mean of their surroundings. Heights are drawn on a sphere of the 469.7 km catalogue radius; measured radii span 442-487 km.",
+      "relief": {
+        "bounding_radius_m": 487051.0,
+        "dimensions_m": [
+          969995.9,
+          967365.1,
+          901051.6
+        ]
+      },
+      "notice": "Mosaico e relevo medidos pela sonda Dawn (DLR), no sistema IAU. Areas polares nao imageadas preenchidas com cinza medio."
     }
   ]
 }
