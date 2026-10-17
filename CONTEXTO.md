@@ -13,12 +13,18 @@ entrega relevante.
 
 ### CI, releases e cache (17/10/2026)
 
-O Windows/MSVC tinha três bloqueios em sequência, todos anteriores a esta sessão
-e escondidos um atrás do outro: CRLF em `countries.geojson` (`assets/** -text`),
-`Math.Min(Int32, Int64)` em `scripts/assemble-assets.ps1` com o pacote de 2,86 GB
-(corrigido; montagem validada com PowerShell 7.4 em Docker, **bytes idênticos** ao
-Linux) e a macro `max` do `windows.h` puxado pelo `curl.h` em `src/net/download.cpp`
-(`NOMINMAX` definido antes, como em `time_service.cpp`). Não mudar hashes.
+O Windows/MSVC **nunca tinha compilado o projeto** (os 22 runs anteriores falharam).
+Bloqueios removidos em sequência, cada um escondido atrás do anterior: CRLF em
+`countries.geojson` (`assets/** -text`); `Math.Min(Int32, Int64)` em
+`scripts/assemble-assets.ps1` com o pacote de 2,86 GB; macro `max` do `windows.h`
+puxado pelo `curl.h` em `src/net/download.cpp` (`NOMINMAX`); Abseil forçando o CRT
+dinâmico (`ABSL_MSVC_STATIC_RUNTIME ON`, LNK2038 no `protoc`); Windows PowerShell 5.1
+sem `Get-FileHash` quando iniciado a partir do PowerShell 7 (`make.cmd` limpa
+`PSModulePath`; montagem usa SHA-256 do .NET — afeta também usuários no Windows
+Terminal); bit de execução do `AlbertEngine` perdido ao empacotar no Windows.
+No run de `da906d2` o MSVC **compilou e linkou tudo em 8 min** (cache de `_deps`) e
+passou 25/26 testes; o restante (`release_archive`) foi corrigido em `dd196a3`.
+Montagem PowerShell validada em Docker com bytes idênticos ao Linux. Não mudar hashes.
 
 **Banda LFS:** downloads LFS do Actions contam na cota da conta (10 GiB/mês no
 plano Free, bloqueio ao estourar). `build.yml`: checkout sem LFS, chave pelos OIDs,
@@ -31,15 +37,50 @@ cancela o Windows em andamento** e esse cache não é salvo; quando o Windows es
 compilando dependências pela primeira vez, esperar terminar antes de enviar.
 Resultado medido: job Linux de 20–42 min para **5 min** (LFS do cache, build 64 s).
 `release.yml` compila do zero, apaga `.git/lfs/objects` após o checkout e publica
-completa + leve; containers só quando `assets-<id>` não existe. Releases/tags não
+completa + leve; containers só quando `assets-<id>` não existe completa. Releases/tags não
 foram criadas. Não fazer merge/tag automaticamente.
 
-**Até o último registro, o build MSVC com a correção `NOMINMAX` ainda não tinha
-terminado** (run de `a5250b0`). Não declarar Windows verde sem consultar o Actions.
+Não declarar Windows verde sem consultar o Actions do último commit.
 
-`gh` não está instalado. A API pública (60 req/h sem token) lista runs/jobs/caches;
-logs brutos exigem login: abrir `https://github.com/<repo>/commit/<sha completo>/checks/<job>/logs`
-no navegador do Allan e filtrar com `fetch(location.href)` (o texto da página corta em 1 MB).
+**Erros do CI sem login:** os builds gravam a saída (`build-windows.log`,
+`build-linux.log`) e, se falharem, `scripts/ci-errors.py` publica erros únicos de
+compilador, linker, CMake e scripts PowerShell como anotações, legíveis pela API
+pública: `GET /repos/<repo>/check-runs/<job id>/annotations`. Falhas de teste ainda
+exigem o log (`ctest --output-on-failure`). `gh` não está instalado e a API pública
+tem 60 req/h; logs brutos: abrir `https://github.com/<repo>/commit/<sha completo>/checks/<job>/logs`
+no navegador do Allan e filtrar com `fetch(location.href)`; o filtro de privacidade do
+navegador bloqueia saídas com aparência de URL/cookie, então remover esses caracteres.
+
+### Revisão periódica pelo Codex
+
+Fluxo pedido pelo Allan: ao concluir etapa relevante ou antes de release (nunca por
+alteração pequena nem em paralelo), na raiz:
+
+```sh
+codex exec --sandbox read-only -c 'approval_policy="never"' -o build/revisao-codex.txt \
+  resume 01a131bd-6526-7473-865a-137544a04ecf "<prompt de revisão do Allan>"
+```
+
+Ler `build/revisao-codex.txt`, conferir cada achado no código, corrigir os confirmados
+com regressões, registrar justificativa técnica quando discordar e atualizar este
+arquivo antes do próximo repasse.
+
+Revisão de 17/10/2026 (recebida do Allan), três achados, **todos confirmados e
+corrigidos em `3356cb5`**:
+1. Alta — container no disco aceito só pelo tamanho; byte alterado contava como
+   completo. Agora `<arquivo>.verified` (SHA-256, tamanho, mtime) é gravado após
+   cada verificação; sem registro válido o container é re-hasheado e substituído
+   se divergir; a biblioteca só abre containers registrados. Limite conhecido:
+   alteração que preserve tamanho e mtime só é pega na leitura (SHA por bloco).
+2. Alta — release leve podia sair com `assets-<id>` ausente ou parcial. Agora os
+   catálogos Linux/Windows têm de ser idênticos, release parcial é refeita com
+   `--clobber`, e `scripts/asset-release.py` confirma todos os containers antes da
+   release versionada.
+3. Média — após trocar o foco, o primeiro nível mais fino não recarregava o detalhe.
+   `DetailRefresh` registra o nível do corpo novo na troca de foco.
+Regressões: cópia corrompida rebaixada sem rebaixar as íntegras (servidor confere),
+holder recusando container sem registro, refresh após troca de foco, completude
+da release de assets; mutação (confiar só no tamanho) faz o teste falhar.
 
 ### Download por níveis (entregue em 17/10/2026)
 
