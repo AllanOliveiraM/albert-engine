@@ -111,12 +111,12 @@
       "license": "Credits in the packed source records",
       "processing": "SHA-256 verified Git LFS parts; one distribution container",
       "bytes": 325,
-      "sha256": "b91d42d6b378a50fa3037e04d816dd34cef0c4760f750c49c490f29054e39c28"
+      "sha256": "b5a1d3e12b4e9f56b2b8fa916c07d979c6971b075c265b30531482d44239127d"
     },
     {
       "path": "moon-sources.json",
-      "bytes": 34678,
-      "sha256": "7c347f9ee8dab419ba5ae1bfc689a78bca45802e8a2d1635548df8d710eb4faa",
+      "bytes": 36420,
+      "sha256": "bfafca1281c958a6cccbf84360121dc6a2afb20376fe9f5d99f1b78a517b150d",
       "source": "NASA/JPL/USGS visual resources",
       "license": "Credits and limits in source inventory"
     }

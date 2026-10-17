@@ -6,11 +6,13 @@ completo, o **download dos assets por níveis** (versão leve), correções da r
 do Codex, **Titã** (névoa visível + superfície em 938 nm), **Febe** (forma Gaskell +
 mapa Cassini com lacunas preenchidas) e **Hipérion** (forma Thomas, cor uniforme
 medida, orientação ilustrativa ancorada em 2005); repasse do Codex sem achados novos;
-**Proteu** (forma de Stooke, cinza neutro medido). Próximo: Nereida; depois cometas.
+**Proteu** (forma de Stooke, cinza neutro medido) e **Nereida** (esfera com albedo
+medido e aviso). **Etapa das luas concluída.** Próximo: revisão do Codex sobre Proteu e
+Nereida; depois cometas (prioridade Alta 2).
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
-e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem um corpo pendente (Nereida).**
+e `docs/RPC.md`. **A etapa de fidelidade das 25 luas está concluída** (limites de cada uma no inventário).
 Atualizar este arquivo ao concluir essa etapa, conforme pedido do Allan, e a cada
 entrega relevante.
 
@@ -296,6 +298,13 @@ leques polares), 2.522 vértices/5.040 placas, malha fechada, estrelada, raio m�
 triangula a grade de forma independente. Sem mapa (Voyager viu parte; nenhum mosaico
 ou modelo 3D NASA): `kind: uniform` cinza neutro 0,096 (cor plana 0,4–0,6 µm, Thomas e
 Veverka 1991; Voyager sem oposição ~0,06). Orientação pck00011 com termos de Netuno.
+
+Nereida: sem forma nem imagem resolvida (Voyager a ~4,7 milhões de km). Esfera do raio
+de catálogo (170 km; Kiss et al. 2016, doi:10.1093/mnras/stw081: D 335–345 km, pV
+0,25 ± 0,02 por NEATM, cor perto do grupo neutro-escuro; curvas de luz admitem ≤ 1,3:1),
+`kind: uniform` cinza 0,25, sem `shape_source`. `orientation` ilustrativa sem âncora:
+período K2 11,594 h (745,213°/dia), polo de Netuno, W0 0; sem efeito visível. Fixture
+CSPICE com essas constantes num PCK de texto.
 A mesma técnica pode validar os mosaicos Viking de Fobos/Deimos (ainda não feito).
 
 Orientações IAU `pck00011` e termos periódicos/quadráticos foram testados contra
@@ -312,8 +321,7 @@ aproximada de dois corpos. Planetas e Lua preservam os provedores existentes.
    feições. `NaturalBody::hazeAlbedo/hazeAltitudeMeters`, `SolidBodies::showSurface`.
 3. ~~Hipérion e Febe~~ — entregues em 17/10/2026 (ver acima).
 4. ~~Proteu~~ — entregue em 17/10/2026 (forma de Stooke, cor neutra uniforme).
-5. **Nereida:** poucos dados; visual artisticamente plausível e identificado
-   quando necessário, sem prometer fotorealismo observado indisponível.
+5. ~~Nereida~~ — entregue em 17/10/2026 (esfera com albedo medido e aviso).
 6. Consolidar a etapa: registro cartográfico/limites, testes/visual/RAM e atualizar
    este contexto para a próxima IA. Melhorias adicionais de órbitas/relevo ficam explícitas.
 7. Pequenos corpos, coma/caudas coerentes com geometria solar; anéis próprios de
@@ -362,9 +370,9 @@ Esse empacotamento dificulta abertura casual; não é DRM.
 Originais e intermediários ficam em `asset-packs/`, ignorados. Não espalhar cópias
 de imagens pelo projeto; documentação/capas ficam em `docs/images/`.
 
-Pacote adicional das 23 luas: **73.953.490 bytes**. Biblioteca reunida neste build:
-**4.898.654.541 bytes** (~4,90 GB decimal); essencial da versão leve: 67,8 MB (era 63,3; as malhas de Febe, Hipérion e Proteu vão no essencial). Ao regenerar com Proteu, as 690 entradas anteriores
-saíram idênticas; só `SOURCES.json` mudou e entraram 4 entradas de Proteu. Não confundir disco com RAM/VRAM:
+Pacote adicional das 24 luas: **73.965.556 bytes**. Biblioteca reunida neste build:
+**4.898.666.607 bytes** (~4,90 GB decimal); essencial da versão leve: 67,8 MB (era 63,3; as malhas de Febe, Hipérion e Proteu vão no essencial). Ao regenerar com Nereida, as 694 entradas anteriores
+saíram idênticas; só `SOURCES.json` mudou e entraram 3 entradas de Nereida. Não confundir disco com RAM/VRAM:
 recortes são limitados e descartáveis; as seis malhas/BVH medidas permanecem residentes.
 Após mudar o inventário, regenerar pacote/hashes coerentes. Nunca versionar
 originais enormes nem saltar a verificação de integridade para acelerar.
@@ -460,7 +468,11 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
   com e sem gráficos); app real no Xvfb, câmera fora da malha, pico RSS 1,25 GB
   (`build/proteus-preview-*.png`).
 
-Próxima ação concreta: **Nereida** — sem forma medida (Voyager a 4,7 milhões de km);
-K2 (Kiss et al. 2016, MNRAS, doi:10.1093/mnras/stw081): período 11,594 ± 0,017 h,
-amplitude 0,033 mag, alongamento no máximo ~1,3:1. Representar como esfera com cor
-medida e aviso, sem inventar relevo. Conferir o CI de `1f97e52` e do commit de Proteu.
+- Nereida: 27 CTests Linux (IAU_NEREID ilustrativo contra CSPICE; laço das luas do
+  OpenGL inclui Nereida); OpenGL no Xvfb; MinGW + Wine (`bodies_test`, `shape_test`,
+  `visual_test --graphics`); app real no Xvfb, pico RSS 1,27 GB
+  (`build/nereid-preview-*.png`).
+
+Próxima ação concreta: revisão do Codex sobre Proteu e Nereida (fim da etapa das luas),
+conferir o CI dos últimos commits e então **cometas** (prioridade Alta 2: coma e caudas
+de Halley/67P, materiais e detalhe por zoom).

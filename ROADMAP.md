@@ -13,7 +13,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Completar Nereida | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion/Proteu com formas medidas (Hipérion e Proteu sem mapa; Hipérion com orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
+| **Alta — 1** | ~~Completar as luas~~ — concluído em 17/10/2026 | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion/Proteu com formas medidas (Hipérion e Proteu sem mapa; Hipérion com orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
 | **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
 | **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
@@ -77,12 +77,18 @@ as malhas ainda requer conferência cartográfica. A próxima fila é:
 2. ~~**Titã**~~ — entregue em 17/10/2026: névoa visível e superfície em 938 nm opcional.
 3. ~~**Hipérion e Febe**~~ — entregues em 17/10/2026: formas medidas no lugar do procedural.
 4. ~~**Proteu**~~ — entregue em 17/10/2026: forma de Stooke e cor neutra medida.
-5. **Nereida:** representação limitada aos dados disponíveis, sem inventar detalhes observados.
+5. ~~**Nereida**~~ — entregue em 17/10/2026: esfera com albedo medido, identificada no painel.
 
-O único corpo ainda sem representação própria embarcada é Nereida. A forma artística e a esfera de referência
+Todas as 25 luas têm agora representação própria, com os limites de cada fonte explícitos. A forma artística e a esfera de referência
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — Nereida e fim da etapa das luas.** Nereida nunca foi resolvida em imagem
+(a Voyager 2 passou a 4,7 milhões de km): aparece como esfera de 340 km com o albedo
+0,25 medido por Kepler/K2, Herschel e Spitzer (Kiss et al. 2016) e um aviso no painel;
+a rotação de 11,6 h é a do K2, com polo e fase ilustrativos. Validação: 27 testes Linux,
+frame contra CSPICE, OpenGL no Xvfb e no Wine e programa real focando Nereida.
 
 **17/10 — Proteu com forma medida.** Modelo de Stooke (PDS), feito com limbos e
 terminadores das imagens da Voyager 2: raio a cada 5°, triangulado só nos pontos

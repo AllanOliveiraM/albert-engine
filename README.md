@@ -39,7 +39,8 @@ Febe usa a forma medida de Gaskell e o mapa Cassini de 2005; as áreas nunca
 observadas aparecem em cinza neutro, identificadas no painel. Hipérion usa a forma
 medida de Thomas com a cor média medida pela Cassini, sem mapa de albedo; como sua
 rotação é caótica, a orientação é ilustrativa. Proteu usa a forma de Stooke derivada
-das imagens da Voyager 2, com cor neutra uniforme e sem mapa de albedo.
+das imagens da Voyager 2, com cor neutra uniforme e sem mapa de albedo. Nereida, que
+nunca foi resolvida em imagem, aparece como esfera com o albedo medido e um aviso.
 Titã aparece como em luz visível, coberta pela névoa alaranjada; a superfície em
 infravermelho (938 nm) da Cassini é uma opção identificada no painel.
 Os oito planetas e a Lua preservam suas efemérides Horizons

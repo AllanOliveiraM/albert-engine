@@ -475,6 +475,37 @@
       "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
     },
     {
+      "id": "nereid",
+      "name": "Nereida",
+      "horizons_id": 802,
+      "radius_m": 170000,
+      "kind": "uniform",
+      "map_grid": [
+        1024,
+        512
+      ],
+      "colour": {
+        "albedo_linear": [
+          0.25,
+          0.25,
+          0.25
+        ],
+        "reference": "Visible geometric albedo 0.25 +/- 0.02 (NEATM fit to Spitzer and Herschel data, Kiss et al. 2016, MNRAS, doi:10.1093/mnras/stw081; 0.24-0.29 across their models). Its spectral slope is close to the dark-neutral group of Centaurs and trans-Neptunian objects; rendered neutral."
+      },
+      "credit": "Albedo and colour after Kiss et al. (2016), Kepler/K2, Herschel and Spitzer",
+      "product": "https://doi.org/10.1093/mnras/stw081",
+      "limits": "No shape model or resolved image: Voyager 2 observed Nereid only from about 4.7 million km. Rendered as a sphere of the catalogue radius (diameter 340 km; Kiss et al. 2016 give 335-345 km, Voyager 350 +/- 50 km) with one uniform colour. Light curves allow at most a 1.3:1 elongation, so the real outline may differ by tens of kilometres.",
+      "orientation": {
+        "illustrative": true,
+        "pole_ra_deg": 299.36,
+        "pole_dec_deg": 43.46,
+        "rate_deg_per_day": 745.213,
+        "w0_deg": 0,
+        "reference": "No IAU model and no measured pole. Rotation period 11.594 +/- 0.017 h from Kepler/K2 (Kiss et al. 2016); the pole is set to Neptune's pck00011 pole (without periodic terms) and the phase is arbitrary. On a uniform sphere the orientation has no visible effect."
+      },
+      "notice": "Sem forma nem imagem resolvida (Voyager 2 a 4,7 milhoes de km): esfera de 340 km com albedo e cor medidos. O alongamento real pode chegar a 1,3:1."
+    },
+    {
       "id": "proteus",
       "name": "Proteu",
       "horizons_id": 808,

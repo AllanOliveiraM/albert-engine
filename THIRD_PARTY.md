@@ -67,6 +67,8 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   em cor natural PIA08240, https://photojournal.jpl.nasa.gov/catalog/PIA08240; polo e
   taxa de rotação da solução instantânea de 2005 em J. Bauer e P. Thomas,
   "Hyperion: the sponge moon" (JPL/Cornell, 2007).
+- Nereida: albedo, cor e período de rotação de Kiss et al. (2016), MNRAS,
+  https://doi.org/10.1093/mnras/stw081 (Kepler/K2, Herschel e Spitzer).
 
 Dados dinâmicos:
 

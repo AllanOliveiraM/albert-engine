@@ -201,6 +201,16 @@ Veverka, 1991) com albedo geométrico de 0,096, o valor mais citado; estimativas
 da Voyager, sem o efeito de oposição, davam cerca de 0,06. A orientação segue o
 pck00011, com os termos periódicos de Netuno, validada contra CSPICE.
 
+Nereida **não tem forma medida nem imagem resolvida**: a Voyager 2 só a observou a cerca
+de 4,7 milhões de km. O Albert a mostra como esfera de 340 km (Kiss et al. 2016, Kepler/K2
+com Herschel e Spitzer: 335–345 km; Voyager: 350 ± 50 km), em cinza neutro com albedo
+geométrico de 0,25 ± 0,02 do mesmo estudo, cuja inclinação espectral é próxima do grupo
+neutro-escuro de Centauros e objetos transnetunianos. As curvas de luz admitem
+alongamento de no máximo 1,3:1, então o contorno real pode diferir em dezenas de
+quilômetros. Não há modelo IAU de rotação: o período de 11,594 h vem do K2, e o polo
+(o de Netuno) e a fase são arbitrários, sem efeito visível numa esfera uniforme. O
+painel avisa essas limitações.
+
 Titã aparece por padrão como em **luz visível**: uma névoa opaca alaranjada, sem
 superfície visível. A cor vem da cromaticidade do disco iluminado na composição em
 cor natural Cassini [PIA06230](https://pds-rings.seti.org/press_releases/pages/PIA06xxx/PIA06230.html)
@@ -226,7 +236,7 @@ não baixa esses mapas; a leve traz o nível de 1024 px de cada lua no container
 essencial e baixa os níveis seguintes em `moons-2` e `moons-3`. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **73.953.490 bytes**.
+todas as luas na RAM. O pacote adicional ocupa **73.965.556 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -236,7 +246,7 @@ versionados. O processo preserva os pacotes de Terra/Lua/Sol e planetas.
 
 Fobos/Deimos já têm mapas, modelos medidos e orientação IAU;
 faltam validar o registro das imagens Viking, como já feito para Mimas, e melhorar
-as órbitas. Nereida permanece sem forma ou mapa próprios embarcados.
+as órbitas.
 
 ## Formas artísticas dos pequenos corpos
 
