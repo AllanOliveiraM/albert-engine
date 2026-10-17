@@ -27,17 +27,19 @@ albert::ShapeMesh albert::decodeShape(std::string_view bytes){
     // Duplicate only UV seam/pole vertices, retaining source smooth normals and
     // exact plate positions. Interpolating across the seam would smear a face.
     std::map<unsigned,unsigned> shifted;
-    for(size_t i=0;i<indices.size();i+=3){float lo=1,hi=0;
-        for(int j=0;j<3;++j){lo=std::min(lo,uv[2*indices[i+j]]);hi=std::max(hi,uv[2*indices[i+j]]);}
-        for(int j=0;j<3;++j){const unsigned original=indices[i+j];const bool shift=hi-lo>.5f&&uv[2*original]<.5f;
-            // Measured poles may sit metres off the axis (Gaskell ICQ face centres); their longitude is arbitrary.
-            const bool pole=std::abs(positions[3*original+1])>0&&std::hypot(positions[3*original],positions[3*original+2])<1e-4f*std::abs(positions[3*original+1]);
-            if(!shift&&!pole)continue;
-            if(shift&&!pole&&shifted.contains(original)){indices[i+j]=shifted.at(original);continue;}
+    for(size_t i=0;i<indices.size();i+=3){
+        // Measured poles may sit metres to ~100 m off the axis (Gaskell ICQ face centres): a vertex
+        // much closer to the axis than the rest of its plate has an arbitrary longitude.
+        float axis[3],lo=1,hi=0;bool pole[3];
+        for(int j=0;j<3;++j){const auto k=indices[i+j];axis[j]=std::hypot(positions[3*k],positions[3*k+2]);}
+        for(int j=0;j<3;++j){pole[j]=axis[j]<.25f*std::min(axis[(j+1)%3],axis[(j+2)%3]);if(!pole[j]){lo=std::min(lo,uv[2*indices[i+j]]);hi=std::max(hi,uv[2*indices[i+j]]);}}
+        for(int j=0;j<3;++j){const unsigned original=indices[i+j];const bool shift=!pole[j]&&hi-lo>.5f&&uv[2*original]<.5f;
+            if(!shift&&!pole[j])continue;
+            if(shift&&shifted.contains(original)){indices[i+j]=shifted.at(original);continue;}
             const auto next=static_cast<unsigned>(positions.size()/3);for(int k=0;k<3;++k){const float p=positions[3*original+k],n=normals[3*original+k];positions.push_back(p);normals.push_back(n);}
             float u=uv[2*original]+(shift?1.f:0.f);
-            if(pole){const auto a=indices[i+(j+1)%3],b=indices[i+(j+2)%3];float ua=uv[2*a],ub=uv[2*b];if(std::abs(ua-ub)>.5f){if(ua<.5f)ua+=1;else ub+=1;}u=(ua+ub)*.5f;}
-            const float v=uv[2*original+1];uv.push_back(u);uv.push_back(v);indices[i+j]=next;if(!pole)shifted[original]=next;
+            if(pole[j]){const auto a=indices[i+(j+1)%3],b=indices[i+(j+2)%3];float ua=uv[2*a],ub=uv[2*b];if(std::abs(ua-ub)>.5f){if(ua<.5f)ua+=1;else ub+=1;}u=(ua+ub)*.5f;}
+            const float v=uv[2*original+1];uv.push_back(u);uv.push_back(v);indices[i+j]=next;if(!pole[j])shifted[original]=next;
         }
     }
     geometry->setAttribute("position",FloatBufferAttribute::create(std::move(positions),3));geometry->setAttribute("normal",FloatBufferAttribute::create(std::move(normals),3));geometry->setAttribute("uv",FloatBufferAttribute::create(std::move(uv),2));geometry->setIndex(std::move(indices));geometry->computeBoundingBox();geometry->computeBoundingSphere();

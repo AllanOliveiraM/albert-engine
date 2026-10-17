@@ -33,7 +33,7 @@ São elipses de dois corpos, propagadas localmente. Luas são relativas a seus
 planetas; os demais são heliocêntricos. Perturbações, precessão e forças não
 gravitacionais não são integradas. Não são efemérides precisas em tempo real;
 o erro cresce com a distância temporal à época de referência. A interface
-identifica a aproximação ao focar esses corpos. Vinte luas adicionais
+identifica a aproximação ao focar esses corpos. Vinte e uma luas adicionais
 têm mapas próprios NASA, orientação IAU e detalhes regionais por zoom.
 Os demais usam esferas de referência ou formas rochosas artísticas descritas
 abaixo, sem reutilizar fotografias de outros objetos. Mais mapas/modelos observados
@@ -138,6 +138,30 @@ de rotação inercial pode diferir em cerca de 4°. As regiões polares do mosai
 borradas e a resolução da fonte varia de ~0,2 a 1,6 km/pixel; a interface avisa ao
 focar a lua. Não há DEM separado: o relevo vem da própria malha medida.
 
+Febe usa o mapa Cassini ISS [PIA07775](https://photojournal.jpl.nasa.gov/catalog/PIA07775)
+(NASA/JPL/Space Science Institute, dezembro de 2005), em tons de cinza, com 8 pixels
+por grau (cerca de 230 m/pixel no equador), sobre a forma medida de
+[Gaskell](https://sbnarchive.psi.edu/pds4/non_mission/gaskell.phoebe.shape-model/)
+(PDS, 208 imagens Cassini ISS), versão Q=128: 98.306 vértices, 196.608 triângulos,
+arestas de 1,1–1,8 km e raio máximo de 122,277 km. O mapa tem iluminação embutida e
+grandes áreas borradas, vindas de imagens de baixa resolução. Não há observação ao
+norte de cerca de 60° N (em parte desde 30° N) nem ao sul de 81° S. O gerador recorta
+a moldura e os rótulos e preenche essas áreas (o preto do mapa, o ruído quase preto
+ligado a ele e a borda suavizada de 2 px) com a média local das observações vizinhas,
+em cerca de 2°, que se dissolve no cinza mediano. Nenhum detalhe é inventado: ali, o
+relevo vem só da malha. Manchas cinzentas uniformes no sul são o preenchimento dos
+próprios autores do mapa.
+
+O registro foi conferido pela mesma correlação com o sombreamento sintético da malha,
+nas 58 regiões sem lacunas: correlação média de 0,109 com a grade publicada. Os
+melhores modelos de uma varredura ampla (k de 1,00 a 1,05, longitude +1° a +2°) chegam
+a 0,118, sem diferença significativa num teste pareado de dois erros-padrão. A grade
+publicada foi mantida, com incerteza de cerca de 2° (4 km). As crateras do Gazetteer,
+de 30 a 100 km num corpo de 213 km, dispersam cerca de 5° no ajuste das bordas e não
+restringem o registro. A malha usa o mesmo meridiano e a mesma rotação do pck00011;
+o polo difere 0,08° em declinação. `scripts/register-moon-map.py phoebe --search`
+reproduz a análise.
+
 Titã aparece por padrão como em **luz visível**: uma névoa opaca alaranjada, sem
 superfície visível. A cor vem da cromaticidade do disco iluminado na composição em
 cor natural Cassini [PIA06230](https://pds-rings.seti.org/press_releases/pages/PIA06xxx/PIA06230.html)
@@ -163,7 +187,7 @@ não baixa esses mapas; a leve traz o nível de 1024 px de cada lua no container
 essencial e baixa os níveis seguintes em `moons-2` e `moons-3`. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **68.972.875 bytes**.
+todas as luas na RAM. O pacote adicional ocupa **73.307.457 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -171,15 +195,15 @@ Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 ficam fora do Git em `asset-packs/moons/`; o pacote otimizado e os hashes são
 versionados. O processo preserva os pacotes de Terra/Lua/Sol e planetas.
 
-Hyperion e Phoebe continuam artísticos. Fobos/Deimos já têm mapas, modelos medidos e orientação IAU;
+Hyperion continua artístico. Fobos/Deimos já têm mapas, modelos medidos e orientação IAU;
 faltam validar o registro das imagens Viking, como já feito para Mimas, e melhorar
 as órbitas. Nereida e Proteus permanecem
 sem mapas próprios embarcados.
 
 ## Formas artísticas dos pequenos corpos
 
-Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Hyperion e
-Phoebe também recebem formas rochosas ilustrativas. Fobos/Deimos usam o modelo
+Vesta, Pallas, Halley e 67P usam malhas irregulares individuais. Hyperion também
+recebe uma forma rochosa ilustrativa. Fobos, Deimos e Febe usam o modelo
 medido acima quando a biblioteca contém as malhas; elipsoides IAU e a forma artística permanecem
 apenas como fallback para bibliotecas antigas sem esses assets. Crateras,
 silhuetas, variações de material e microrelevo são procedurais, com semente por

@@ -28,4 +28,14 @@ latitude=np.radians(90-(np.arange(height)+.5)*180/height);expected=((90-np.degre
 assert np.abs(out-expected)[3:-3].max()<=.5,'Latitude registration sampled the wrong source rows'
 cols=np.asarray(module.registered(Image.fromarray(np.repeat((np.arange(width)).astype(np.uint8)[None],height,0)).convert('RGB'),dict(longitude_offset_deg=-4)))[0,:,0].astype(float)
 assert np.abs(cols-(np.arange(width)-2))[3:-3].max()<=.5,'Longitude offset moved the map the wrong way'
-print('Moon assets: material texture selection, source grid, GLB chunks, unsupported UV transforms and map registration OK')
+# Framed maps: crop to 2:1; fill the black cap, near-black noise touching it and the south band, keep isolated shadows.
+framed=np.zeros((40,70,3),np.uint8);framed[4:36,3:67]=120;inside=framed[4:36,3:67];inside[:8]=0;inside[8,10]=7;inside[20,30]=5
+crop=dict(crop=[3,4,67,36]);spec=dict(crop,no_data=dict(value=0,dark_max=12,south_of_lat=-80,fringe_px=1))
+assert np.array_equal(np.asarray(module.published(Image.fromarray(framed),crop)),inside),'Cropping changed observed pixels'
+try:module.published(Image.fromarray(framed),dict(crop=[3,4,66,36]));raise AssertionError('Non 2:1 crop accepted')
+except ValueError:pass
+mask=module.no_data(Image.fromarray(inside),spec['no_data'])
+assert mask[:9].all() and mask[9,10] and not mask[9,11] and not mask[20,30] and mask[29:].all() and not mask[10:29].any(),'Unobserved pixels misclassified'
+filled=np.asarray(module.published(Image.fromarray(framed),spec))[...,0]
+assert filled[20,30]==5 and (filled[~mask][filled[~mask]!=5]==120).all() and filled[mask].min()>=100 and filled[mask].max()<=120,'Gap fill invented detail or changed observations'
+print('Moon assets: material texture selection, source grid, GLB chunks, unsupported UV transforms, map registration, cropping and gap filling OK')

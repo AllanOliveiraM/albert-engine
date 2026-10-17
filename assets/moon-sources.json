@@ -240,6 +240,69 @@
       "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks."
     },
     {
+      "id": "phoebe",
+      "name": "Febe",
+      "horizons_id": 609,
+      "radius_m": 106566.666667,
+      "kind": "image",
+      "shape": "iau-triaxial",
+      "filename": "PIA07775.tif",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia07/pia07775/PIA07775.tif",
+      "bytes": 18399823,
+      "sha256": "f8cf68ec4c570d77af8663d271f95c623cf0980c37bdf2534488e16aff47d946",
+      "grid": [
+        3228,
+        1900
+      ],
+      "partial_map": true,
+      "projection": {
+        "crop": [
+          190,
+          183,
+          3070,
+          1623
+        ],
+        "west_edge_lon": -180,
+        "no_data": {
+          "value": 0,
+          "dark_max": 12,
+          "south_of_lat": -81,
+          "fringe_px": 2
+        }
+      },
+      "credit": "NASA/JPL/Space Science Institute",
+      "product": "https://photojournal.jpl.nasa.gov/catalog/PIA07775",
+      "limits": "Static Cassini ISS greyscale map (PIA07775, December 2005), contrast-stretched with baked illumination; not calibrated albedo. Source resolution varies widely: large areas are smeared from low-resolution images. North of about 60 deg N (partly from 30 deg N) and south of 81 deg S are unobserved: the pack fills them (black fill, the near-black noise connected to it and a 2 px anti-aliased edge) with the local mean of the observed surroundings (about 2 deg), fading to the median grey; uniform grey patches in the south are the map authors' own fill. Published simple cylindrical grid, 8 pixels per degree: west longitude 180-0-180 left to right (east longitude -180 to 180); frame and labels cropped.",
+      "registration": "Checked on 2026-10-17 by correlating the packed map with synthetic shading of the Gaskell shape in the 58 regions without gaps: mean correlation 0.109 as published. The best models of a wide scan (k 1.00-1.05, longitude +1 to +2 deg, mean up to 0.118) are not significantly better (paired test, two standard errors), so the published grid is kept; registration uncertainty is about 2 deg (4 km). Rim-crest fits of 13 IAU gazetteer craters scatter by about 5 deg (craters of 30-100 km on a 213 km body) and do not constrain it.",
+      "notice": "Forma medida (Gaskell/Cassini) e mapa Cassini em tons de cinza. Sem observacao ao norte de ~60N e ao sul de 81S: cinza medio. Registro do mapa incerto em ~2 graus.",
+      "shape_source": {
+        "format": "gaskell-vertex-facet",
+        "filename": "phoebe_ver128q.tab",
+        "url": "https://sbnarchive.psi.edu/pds4/non_mission/gaskell.phoebe.shape-model/data/phoebe_ver128q.tab",
+        "bytes": 16897992,
+        "sha256": "92550ba0625255a2f91cd5d9a7b52e020fc4ba76c7ef3fd76a9728a66df697c2",
+        "body": 609,
+        "frame": "Gaskell Phoebe body-fixed frame (pole RA 356.90, Dec 77.88 deg; W0 178.58 deg, as pck00011 except Dec 77.80)",
+        "vertices": 98306,
+        "plates": 196608,
+        "bounds_m": [
+          [
+            -108887.79,
+            -111620.51,
+            -104192.1
+          ],
+          [
+            117208.99,
+            116770.98,
+            104822.64
+          ]
+        ],
+        "bounding_radius_m": 122276.61258627915,
+        "credit": "Gaskell, R.W. (2013). Gaskell Phoebe Shape Model V1.0, urn:nasa:pds:gaskell.phoebe.shape-model::1.0 (migrated from CO-SA-ISSNA-5-PHOEBESHAPE-V2.0), NASA Planetary Data System; 208 Cassini ISS images",
+        "limits": "Q=128 vertex-facet version of the ICQ model (522 landmarks, RMS position uncertainty 147 m/dof per source); plate edges about 1.1-1.8 km. Original coordinates converted from km to metres without rescaling or recentring; only ICQ duplicate vertices unused by any plate are dropped. The source pole differs from pck00011 by 0.08 deg in declination; prime meridian and rotation rate are the same."
+      }
+    },
+    {
       "id": "ariel",
       "filename": "ariel.glb",
       "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/a/Ariel_1_1158.glb",

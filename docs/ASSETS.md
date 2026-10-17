@@ -1,10 +1,11 @@
 # Biblioteca visual incluída
 
 A biblioteca completa está versionada em **`assets/imagery/`** usando Git LFS.
-São cinco partes de até 1 GiB, reunidas automaticamente em `visuals.pak` durante
+São sete partes de até 1 GiB, reunidas automaticamente em `visuals.pak` durante
 o build, com verificação SHA-256 de cada parte e do resultado completo.
-O arquivo final tem **4.549.090.604 bytes (4,55 GB / 4,24 GiB)**: biblioteca
-original de 2,86 GB e Mercúrio de 1,69 GB, com índice de coleção.
+O arquivo final tem **4.898.008.508 bytes (4,90 GB / 4,56 GiB)**: biblioteca
+original de 2,86 GB, Mercúrio de 1,69 GB, Sol de 276 MB e luas de 73 MB, com
+índice de coleção.
 As partes preservam exatamente os mesmos bytes; não reduzem a qualidade.
 
 Quem clona o projeto com Git LFS não precisa gerar as imagens novamente.
@@ -135,7 +136,7 @@ apontar para um caminho dentro da montagem `/work` quando usado via Docker.
 A versão leve não traz `visuals.pak`. `scripts/split-asset-pack.py` divide a
 biblioteca reunida em containers `albert-pack-v1` comuns, sem recodificar nada:
 
-- `essential.pak` (~63 MB): todos os blocos com que o programa abre (o nível
+- `essential.pak` (~67 MB): todos os blocos com que o programa abre (o nível
   global de cada camada pedido na inicialização, malhas medidas e registros de
   fontes). Todo o Sistema Solar fica navegável com ele.
 - `<corpo>-<nível>.pak`: as resoluções seguintes de Terra, Lua, Sol, Mercúrio e

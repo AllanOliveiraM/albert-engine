@@ -52,6 +52,41 @@ def cubic(values,coords,axis,wrap):
   out=out+np.take(values,index,axis=axis)*weight.reshape(shape)
  return out
 
+def blur(values,radius):
+ # Three box passes, close to a Gaussian of sigma ~radius; longitude wraps, rows clamp.
+ for axis,mode in ((0,'edge'),(1,'wrap')):
+  for _ in range(3):
+   pad=[(0,0)]*values.ndim;pad[axis]=(radius+1,radius);total=np.cumsum(np.pad(values,pad,mode=mode),axis=axis,dtype=np.float64);n=values.shape[axis]
+   values=(np.take(total,np.arange(2*radius+1,2*radius+1+n),axis=axis)-np.take(total,np.arange(n),axis=axis))/(2*radius+1)
+ return values
+
+def no_data(image,spec):
+ """Unobserved pixels of a published map: the exact fill value, near-fill noise
+ connected to it (up to dark_max; isolated dark shadows stay), every row south of
+ the last observed (published) latitude, and the anti-aliased fringe (fringe_px)."""
+ def grow(mask):
+  grown=mask|np.roll(mask,1,1)|np.roll(mask,-1,1);grown[1:]|=mask[:-1];grown[:-1]|=mask[1:];return grown
+ values=np.asarray(image.convert('L'));mask=values==spec.get('value',0);dark=values<=spec.get('dark_max',spec.get('value',0))
+ if 'south_of_lat' in spec:mask[int(round((90-spec['south_of_lat'])*image.height/180)):]=True
+ while (grown:=grow(mask)&(dark|mask)).sum()>mask.sum():mask=grown
+ for _ in range(spec.get('fringe_px',1)):mask=grow(mask)
+ return mask
+
+def published(source,projection):
+ """Crop a framed map to its 2:1 grid and fill unobserved pixels with the local mean
+ of the observed surroundings (about 2 deg), fading to the observed median: no
+ invented detail, and no black edges for the resampling or the renderer."""
+ image=source.crop(tuple(projection['crop'])) if 'crop' in projection else source.copy()
+ if image.width!=2*image.height:raise ValueError('Map grid is not 2:1 after cropping')
+ image=image.convert('RGB')
+ if 'no_data' not in projection:return image
+ gaps=no_data(image,projection['no_data']);observed=(~gaps).astype(np.float32);weight=blur(observed,max(1,image.width//180));bands=[]
+ for band in image.split():
+  values=np.asarray(band,dtype=np.float32);median=float(np.median(values[~gaps]))
+  local=blur(values*observed,max(1,image.width//180))/np.maximum(weight,1e-6);alpha=np.clip(weight*4,0,1)
+  bands.append(np.where(gaps,alpha*local+(1-alpha)*median,values))
+ return Image.merge('RGB',[Image.fromarray(np.clip(np.rint(b),0,255).astype(np.uint8)) for b in bands])
+
 def registered(image,projection):
  """Resample a published map to planetocentric latitude and east longitude -180..180.
  A feature at (lat, lon) appears in the source at tan(lat')=k*tan(lat), lon+offset;
@@ -75,8 +110,8 @@ def prepare(offline=False):
   path=source_file(body,sources,offline)
   if body.get('kind')=='image':
    with Image.open(path) as source:
-    if list(source.size)!=body['grid'] or source.width!=2*source.height:raise ValueError('Unexpected source image grid')
-    image=source.convert('RGB')
+    if list(source.size)!=body['grid']:raise ValueError('Unexpected source image grid')
+    image=published(source,body.get('projection',{}))
    if 'projection' in body:image=registered(image,body['projection'])
   else:image=visual(path.read_bytes(),body['grid'])
   record=image_tiles(public,body['id']+'-day',image);image.close()

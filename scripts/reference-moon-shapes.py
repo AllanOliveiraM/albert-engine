@@ -40,7 +40,7 @@ for record in json.loads((ROOT/'assets/moon-sources.json').read_text())['bodies'
  source=record['shape_source'];path=ROOT/'asset-packs/moons/sources'/source['filename']
  if path.stat().st_size!=source['bytes'] or hashlib.sha256(path.read_bytes()).hexdigest()!=source['sha256']:raise ValueError('Original shape hash/size mismatch')
  rng=np.random.default_rng(source['body'])
- distance={'phobos':40,'mimas':400}.get(record['id'],25);rays=[]
+ distance={'phobos':40,'mimas':400,'phoebe':250}.get(record['id'],25);rays=[]
  for _ in range(24):
   direction=rng.normal(size=3);direction/=np.linalg.norm(direction);rays.append((direction*distance,-direction))
  hits=gaskell_intersections(path,rays) if source.get('format')=='gaskell-vertex-facet' else dsk_intersections(path,source,rays)

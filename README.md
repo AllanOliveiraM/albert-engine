@@ -29,12 +29,14 @@ câmera. A renderização, a navegação e as animações ficam dentro do Albert
 Hoje, a cena inclui **43 corpos**: o Sol, oito planetas, 25 luas, cinco planetas
 anões, Vesta, Pallas, Halley e 67P. A seleção é local, organizada por categorias,
 e aceita nomes aproximados. Luas adicionais, planetas anões e pequenos corpos
-usam órbitas aproximadas embarcadas. Vinte luas adicionais já têm mapas
+usam órbitas aproximadas embarcadas. Vinte e uma luas adicionais já têm mapas
 próprios NASA, detalhes por zoom e orientação IAU; outras superfícies adicionais
 continuam ilustrativas. Fobos e Deimos usam modelos de forma medidos de missões,
 com mapas Viking; o alinhamento das imagens sobre esses modelos ainda exige validação.
 Mimas usa a forma medida de Gaskell e o mosaico Cassini em cores realçadas,
 reprojetado e alinhado à forma, com conferência por crateras catalogadas pela IAU.
+Febe usa a forma medida de Gaskell e o mapa Cassini de 2005; as áreas nunca
+observadas aparecem em cinza neutro, identificadas no painel.
 Titã aparece como em luz visível, coberta pela névoa alaranjada; a superfície em
 infravermelho (938 nm) da Cassini é uma opção identificada no painel.
 Os oito planetas e a Lua preservam suas efemérides Horizons
@@ -82,7 +84,7 @@ estão disponíveis pela API. Esta versão ainda não autentica NTP com NTS;
 **As imagens estáticas ficam no computador, completas ou baixadas aos poucos.**
 Superfícies, luzes das cidades, relevo e referência solar formam uma biblioteca de
 aproximadamente **4,89 GB**. A versão completa a traz em um único `assets/visuals.pak`
-e funciona offline. A versão leve baixa ao abrir só o essencial (~63 MB, todos os
+e funciona offline. A versão leve baixa ao abrir só o essencial (~67 MB, todos os
 corpos em resolução global) e completa as demais resoluções em segundo plano, com
 o corpo em foco à frente; o canto inferior esquerdo mostra o andamento. Aproximar
 a câmera carrega recortes mais detalhados; a resolução máxima depende dos dados de

@@ -350,7 +350,7 @@ void graphics() {
         require(!moons.uploading(),"Moon detail upload did not finish");moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);
         moons.update(renderer,*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(moons.takeEviction(),"Moon detail stayed resident after focus changed");
     }
-    for(const std::string id:{"phobos","deimos","mimas"}){
+    for(const std::string id:{"phobos","deimos","mimas","phoebe"}){
         auto world=Scene::create();world->background=Color(0x000000);auto shape=albert::decodeShape(albert::visualAssetPack()->payload("v1/"+id+"/shape.bin"));auto geometry=shape.geometry;
         std::vector<albert::SurfaceAssets> maps;maps.push_back({id,rgba(140),height(0),{},std::move(shape)});albert::SolidBodies measured(*world,std::move(maps));
         albert::core::Scene registry;registry.include(*albert::core::localOrbit(id));albert::SceneObjects objects(*world);objects.bind(id,measured.nodes().at(id),measured.picker(id));objects.sync(registry,0,{});

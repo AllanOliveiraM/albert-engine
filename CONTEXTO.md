@@ -3,12 +3,13 @@
 **Estado em 17/10/2026 (manhã), continuação por Claude Opus 5.5.** Entregues nesta
 sessão: correções do Windows no CI, cache de LFS/compilação no CI, **Mimas**
 completo, o **download dos assets por níveis** (versão leve), correções da revisão
-do Codex e **Titã** (névoa visível + superfície em 938 nm). Próximo: Hipérion/Febe →
-Proteu → Nereida; depois cometas.
+do Codex, **Titã** (névoa visível + superfície em 938 nm) e **Febe** (forma Gaskell +
+mapa Cassini com lacunas preenchidas). Próximo: Hipérion → Proteu → Nereida; depois
+cometas. Revisão do Codex prevista ao concluir Hipérion (cobre Febe e Hipérion).
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
-e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem quatro corpos pendentes.**
+e `docs/RPC.md`. **A etapa de fidelidade das luas ainda tem três corpos pendentes (Hipérion, Proteu, Nereida).**
 Atualizar este arquivo ao concluir essa etapa, conforme pedido do Allan, e a cada
 entrega relevante.
 
@@ -99,7 +100,7 @@ extensão do VS Code; nesse caso pedir ao Allan para liberá-la, não abrir sess
 Decisão do Allan: versão leve baixa tudo, por **níveis de resolução**, com tela de
 loading só para o essencial e o resto em segundo plano, indicador minimalista no
 canto, retentativa e continuação; zoom limitado ao que chegou, nunca imagem
-inventada. `scripts/split-asset-pack.py` gera `essential.pak` (63 MB) + 18
+inventada. `scripts/split-asset-pack.py` gera `essential.pak` (67 MB com Febe) + 18
 containers `<corpo>-<nível>.pak`/`moons-<nível>.pak` e `catalog.json`;
 `AssetPack` indexa vários arquivos e limita cada camada ao maior nível completo;
 `AssetDownloads` (`src/render/asset_downloads.*`) baixa da release `assets-<id>`
@@ -193,20 +194,20 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
 - Eclipses Terra/Lua: disco solar finito, umbra/penumbra/antumbra e avermelhamento
   atmosférico aproximado documentado. Outros sistemas de eclipses ainda pendentes.
 - Somente Saturno tem anéis renderizados. Outros anéis continuam prioritários.
-- Formas artísticas próprias para Vesta, Pallas, Halley alongado, 67P bilobado,
-  Hipérion e Febe; crateras/material procedural identificados como arte. Não são
+- Formas artísticas próprias para Vesta, Pallas, Halley alongado, 67P bilobado e
+  Hipérion; crateras/material procedural identificados como arte. Não são
   reconstruções medidas. Coma/caudas ainda não implementadas.
 - Ícones de janela Linux/Windows e registro de atalho por usuário (`make desktop`).
   O comando não instala o executável. GPU física/Windows nativo ainda exigem validação.
 
 ## Luas — qualidade real e lacunas
 
-21 das 25 luas têm imagens próprias, incluindo a Lua terrestre. As 20 adicionais:
+22 das 25 luas têm imagens próprias, incluindo a Lua terrestre. As 21 adicionais:
 
 | Grupo | Corpos / fonte atual |
 | --- | --- |
 | Júpiter | Io/Europa 4096×2048; Ganimedes/Calisto 2048×1024, NASA VTAD |
-| Saturno | Mimas 6356×3178 Cassini PIA18437 + forma Gaskell; Titã névoa visível + 938 nm PIA22770 5760×2880; Encélado/Tétis/Dione/Reia/Jápeto 4096×2048, NASA VTAD |
+| Saturno | Mimas 6356×3178 Cassini PIA18437 + forma Gaskell; Titã névoa visível + 938 nm PIA22770 5760×2880; Febe PIA07775 2880×1440 + forma Gaskell; Encélado/Tétis/Dione/Reia/Jápeto 4096×2048, NASA VTAD |
 | Urano | Ariel/Titânia/Oberon 2048×1024; Umbriel/Miranda 1024×512, cobertura parcial |
 | Outros | Tritão 4096×2048 e Caronte 1264×632, cobertura parcial |
 | Marte | Fobos/Deimos, mosaicos Viking 1440×720 e modelos DSK medidos |
@@ -235,8 +236,26 @@ correlação com sombreamento sintético da malha em 84 regiões (0,04 → 0,51,
 melhores) e conferido em 21 crateras do Gazetteer; `scripts/register-moon-map.py
 mimas` reproduz. A malha usa W0 337,46° e o Albert usa pck00011 (333,46°): longitudes
 da superfície batem com o Gazetteer; a fase inercial pode diferir ~4° (documentado).
-Polos de Gaskell ficam a 3–5 m do eixo; `decodeShape` agora trata vértices a menos
-de 1e-4 rad do eixo como polos (sem isso, dois triângulos cruzavam a emenda).
+Polos de Gaskell ficam a 3–5 m do eixo em Mimas e a 47–133 m em Febe. `decodeShape`
+trata como polo o vértice com distância ao eixo menor que 1/4 da dos outros dois
+vértices da placa: recebe a longitude da placa e fica fora do cálculo da emenda (a
+tolerância fixa de 1e-4 falhava em Febe; regressão sintética em `shape_test`).
+
+Febe: forma Gaskell/PDS Q=128 (`phoebe_ver128q.tab`, 2013), 98.306 vértices usados
+e 196.608 placas, raio máximo 122.276,613 m; polo da fonte 0,08° diferente do
+pck00011 em declinação, mesmo W0/rotação. Mapa PIA07775 (NASA/JPL/SSI, dez/2005),
+cinza, 3228×1900 com moldura: `projection.crop` recorta 2880×1440 (8 px/grau,
+oeste 180–0–180 = leste −180…180). Sem observação ao norte de ~60° N e ao sul de
+81° S (faixa uniforme de valor 5) e ruído quase preto nas lacunas:
+`projection.no_data` (valor 0, `dark_max` 12 conectado ao preenchimento, `south_of_lat`
+−81, `fringe_px` 2) marca 27% da grade, preenchida com a média local (~2°) dissolvida
+no cinza mediano. Manchas cinza 137–139 no sul são preenchimento dos autores (mantidas).
+Registro: correlação 0,109 em 58 regiões; nenhum modelo da varredura é melhor por mais
+de dois erros-padrão (melhor: k 1,00, +2°, 0,118), então a grade publicada foi mantida
+(incerteza ~2°, 4 km). O critério do `register-moon-map.py` passou de "melhor modelo
+exato" para esse teste pareado; Mimas continua aprovado (0,514, 83/84). O ajuste de
+bordas de crateras do Gazetteer não serve em Febe (MAD ~5°: crateras de 30–100 km num
+corpo de 213 km); o script agora imprime a dispersão.
 A mesma técnica pode validar os mosaicos Viking de Fobos/Deimos (ainda não feito).
 
 Orientações IAU `pck00011` e termos periódicos/quadráticos foram testados contra
@@ -251,8 +270,8 @@ aproximada de dois corpos. Planetas e Lua preservam os provedores existentes.
    principal H = 60 km e camada alta a 400 km com Henyey-Greenstein g = 0,65); opção
    "Superfície em infravermelho (938 nm)" com PIA22770, registro conferido em 12
    feições. `NaturalBody::hazeAlbedo/hazeAltitudeMeters`, `SolidBodies::showSurface`.
-3. **Hipérion/Febe:** imagens e formas observadas; substituir o procedural onde
-   houver modelo confiável, preservando escala, picking e segurança da câmera.
+3. **Hipérion** (Febe entregue): forma Thomas plate e textura VTAD reprojetada após
+   alinhar as malhas; orientação ilustrativa (rotação caótica), identificada como tal.
 4. **Proteu:** fontes disponíveis e cobertura limitada explicitadas.
 5. **Nereida:** poucos dados; visual artisticamente plausível e identificado
    quando necessário, sem prometer fotorealismo observado indisponível.
@@ -286,7 +305,7 @@ GPU física, Windows real, viagens extensas e limites de RAM/VRAM.
   reproduzível com fontes fixadas por hash. SpicePy 8.3.0 somente na autoria,
   sem dependência SPICE no executável. `shape.bin` indexado little-endian:
   `ALBMSH1\0`, contagens uint32, xyz float32 em metros IAU, índices uint32.
-- `scripts/reference-moon-shapes.py`: 72 raios independentes (CSPICE/DSKX02 nos
+- `scripts/reference-moon-shapes.py`: 96 raios independentes (CSPICE/DSKX02 nos
   DSKs, float64 com parser próprio na tabela Gaskell); `tests/measured_shape_fixture.inc`.
 - `scripts/moon_shapes.py` exporta DSK (SpicePy) e Gaskell vértice-faceta (só NumPy).
   Inventário aceita `projection` (registro de mapas publicados) e `notice` (aviso
@@ -304,10 +323,10 @@ Esse empacotamento dificulta abertura casual; não é DRM.
 Originais e intermediários ficam em `asset-packs/`, ignorados. Não espalhar cópias
 de imagens pelo projeto; documentação/capas ficam em `docs/images/`.
 
-Pacote adicional das 20 luas: **68.972.875 bytes**. Biblioteca reunida neste build:
-**4.893.673.926 bytes** (~4,89 GB decimal); essencial da versão leve: 63,3 MB. Ao regenerar, as 432 entradas anteriores
-saíram idênticas; só `SOURCES.json` mudou e entraram 130 entradas de Mimas. Não confundir disco com RAM/VRAM:
-recortes são limitados e descartáveis; as duas malhas/BVH permanecem residentes.
+Pacote adicional das 21 luas: **73.307.457 bytes**. Biblioteca reunida neste build:
+**4.898.008.508 bytes** (~4,90 GB decimal); essencial da versão leve: 67,1 MB (era 63,3; a malha de Febe vai no essencial). Ao regenerar com Febe, as 659 entradas anteriores
+saíram idênticas; só `SOURCES.json` mudou e entraram 27 entradas de Febe. Não confundir disco com RAM/VRAM:
+recortes são limitados e descartáveis; as quatro malhas/BVH medidas permanecem residentes.
 Após mudar o inventário, regenerar pacote/hashes coerentes. Nunca versionar
 originais enormes nem saltar a verificação de integridade para acelerar.
 
@@ -384,6 +403,13 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
   Linux e no Wine; `bodies_test` contra CSPICE no Wine; app real no Xvfb em fase
   moderada e contra o Sol (`build/titan-preview-*.png`).
 
-Próxima ação concreta: conferir o Actions do último commit (Windows MSVC agora
-compila; ver testes), rodar a revisão do Codex sobre Titã/correções, e então
-**Hipérion/Febe**, mantendo inventário, pacote, testes e documentação sincronizados.
+- Febe: 27 CTests Linux (`measured_shapes` com 96 interseções, `natural_bodies` com
+  IAU_PHOEBE em quatro épocas, regressão do polo fora do eixo); `moon_assets_fixture.py`
+  com recorte/lacunas; OpenGL no Xvfb; MinGW + Wine (`shape_test`, `bodies_test`,
+  `visual_test --graphics`); app real no Xvfb com foco/zoom/detalhe, câmera fora da
+  malha, pico RSS 1,24 GB (`build/phoebe-preview-*.png`). A regressão do polo falha no
+  `shapes.cpp` anterior.
+
+Próxima ação concreta: **Hipérion** (parser Thomas plate, alinhamento VTAD→Thomas,
+orientação ilustrativa), depois a revisão do Codex sobre Febe + Hipérion, mantendo
+inventário, pacote, testes e documentação sincronizados.

@@ -49,13 +49,17 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   (Júpiter); NASA/JPL/Caltech/USGS Viking (Marte, Fobos e Deimos).
 - Formas medidas: DLR, Willner, Shi e Oberst (2014), conversão NAIF (Fobos);
   P. Thomas / ESA SPICE v0.2 (Deimos); Gaskell, R.W. (2020), Gaskell Mimas Shape
-  Model V1.0, NASA PDS, https://doi.org/10.26033/22n9-v553 (Mimas).
+  Model V1.0, NASA PDS, https://doi.org/10.26033/22n9-v553 (Mimas); Gaskell, R.W.
+  (2013), Gaskell Phoebe Shape Model V1.0, NASA PDS,
+  urn:nasa:pds:gaskell.phoebe.shape-model::1.0 (Febe).
 - NASA/JPL-Caltech/Space Science Institute/Lunar and Planetary Institute, mosaico
   de Paul Schenk: mapa global de Mimas PIA18437 em cores realçadas,
   https://science.nasa.gov/photojournal/color-maps-of-mimas-2014.
 - NASA/JPL-Caltech/University of Arizona (Cassini ISS): mosaico global de Titã em
   938 nm PIA22770, https://photojournal.jpl.nasa.gov/catalog/PIA22770; cor da névoa
   medida em NASA/JPL/Space Science Institute PIA06230.
+- NASA/JPL/Space Science Institute (Cassini ISS): mapa de Febe PIA07775 (2005),
+  https://photojournal.jpl.nasa.gov/catalog/PIA07775.
 
 Dados dinâmicos:
 
