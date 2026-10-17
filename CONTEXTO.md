@@ -511,7 +511,15 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
 - Halley: 27 CTests Linux (192 interseções; frame contra CSPICE); OpenGL no Xvfb; MinGW
   + Wine; app real no Xvfb, câmera fora da malha (`build/halley-preview-*.png`).
 
-Próxima ação concreta: **Pallas** (sem sonda: elipsoide do pck00011 + cor medida) e
-**Vesta** (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
+Pallas: o pck00011 traz polo (33°, −3°) e rotação (1105,8036°/dia), mas **não os
+semieixos**; não consegui verificar as dimensões publicadas (Marsset et al. 2020,
+VLT/SPHERE, Nature Astronomy 4, 569). Mantida a forma artística identificada até haver
+dimensões/forma verificáveis. Vesta: o PDS tem o DTM SPG da DLR (`DWNVSPG_2`, 2,1 GB:
+equirretangular 64 px/grau + polos estereográficos, ±6 m) e mosaicos HAMO/LAMO
+(`DWNVFC2_2`); o caminho natural é o pipeline de Mercúrio (mapa + DEM com LOD), não
+uma malha de placas. Ceres tem conjunto equivalente (`dwarf_planet-ceres.dawn.shape-models-maps`).
+
+Próxima ação concreta: **coma e caudas** da 67P e de Halley (atividade em função da
+distância heliocêntrica, identificada como modelo visual), depois **Vesta** (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
 `register-moon-map.py`). Depois coma/caudas com atividade coerente com a distância
 heliocêntrica (Halley perto do afélio em 2026 não deve ter coma).
