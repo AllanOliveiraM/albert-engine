@@ -4,7 +4,11 @@
 (foguete da superfície à órbita, software de voo externo, Terra/Lua/Marte, clima só ao vivo).
 Plano em fases no topo do `ROADMAP.md`, consolidado com pareceres do Codex e do Fable;
 OpenGL mantido até a fase 4 (candidata WebGPU). Windows nativo adiado; eclipses de outras
-luas descartados. Próxima ação: fase 1 (núcleo físico headless + lançamento validado).
+luas descartados. **Fase 1 em andamento:** núcleo `src/physics` entregue (tempo TT em ns,
+GCRF/ITRF IAU 2006, gravidade J2–J4, Sol/Lua, USSA76, 6DOF de massa variável com İω e
+amortecimento por jato, pad/pouso) e validado contra os casos NESC 1/4/6/9/10/17
+(`docs/PHYSICS.md`). Próximos: API gRPC em lockstep + veículo no render + cliente de
+exemplo (C3), depois EGM2008 20×20 (C4) e revisão do Codex no marco.
 
 **Estado em 17/10/2026 (manhã), continuação por Claude Opus 5.5.** Entregues nesta
 sessão: correções do Windows no CI, cache de LFS/compilação no CI, **Mimas**

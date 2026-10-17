@@ -1,0 +1,143 @@
+#include "physics/vehicles.hpp"
+#include <erfa.h>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <iostream>
+#include <random>
+#include <stdexcept>
+using namespace albert::physics;
+namespace {
+#include "nesc_fixture.inc"
+constexpr double ft=.3048,pi=3.14159265358979323846,deg=pi/180;
+void require(bool ok,const char* m){if(!ok)throw std::runtime_error(m);}
+void near(double a,double b,double tol,const char* m){if(!(std::abs(a-b)<=tol)){std::fprintf(stderr,"%s: %.12g vs %.12g (tolerance %.3g)\n",m,a,b,tol);throw std::runtime_error(m);}}
+// WGS 84 with the NESC J2; cases 4-5 use the authalic sphere.
+Environment nesc(bool round,bool rotating,bool drag){
+    Environment e;
+    e.planet=round?Planet{3.986004418e14,6371007.1809,0,0,6371007.1809,{},0}:Planet{3.986004418e14,6378137.,1/298.257223563,7.292115e-5,6378137.,{0,0,1.08262982e-3},2};
+    e.rotation=Rotation::uniform(rotating?7.292115e-5:0);e.atmosphere=drag;e.sunMoon=false;return e;
+}
+// Case 17: first stage ignites at release, coasts 96.79 s after depletion, then stages.
+Flight rocket(Tt step,double until,std::vector<State>* trace=nullptr,double every=25){
+    const Environment e=nesc(false,true,true);const Vehicle v=nescTwoStage();
+    Flight f(v,e,Flight::free(e,v,0,{0,0,0},{0,0,-.1},{90*deg,55.22*deg,0}));f.ignite();
+    Tt staging=-1;const Tt end=static_cast<Tt>(std::llround(until*1e9));Tt next=0;
+    while(f.state().time<end){
+        if(trace&&f.state().time>=next){trace->push_back(f.state());next+=static_cast<Tt>(every*1e9);}
+        Tt h=std::min(step,end-f.state().time);
+        if(staging<0&&f.state().stage==0&&!f.state().burning)staging=f.state().time+static_cast<Tt>(96.79e9);
+        if(staging>=0&&f.state().stage==0){if(f.state().time>=staging){f.separate();f.ignite();}else h=std::min(h,staging-f.state().time);}
+        if(trace)h=std::min(h,next-f.state().time);
+        f.advance(h);
+    }
+    if(trace)trace->push_back(f.state());
+    return f;
+}
+}
+int main(){try{
+    // Geodesy: closed-form inverse against the forward transform.
+    std::mt19937_64 random(3);std::uniform_real_distribution<double> u(0,1);
+    for(int i=0;i<20000;++i){
+        const Geodetic g{(u(random)-.5)*pi,(u(random)*2-1)*pi,-5000+u(random)*2e6};const Geodetic r=geodetic(earth,fixedPosition(earth,g));
+        near(r.height,g.height,1e-6,"Geodetic height");near(r.latitude,g.latitude,1e-13,"Geodetic latitude");
+        if(std::abs(g.latitude)<pi/2-1e-9)near(std::remainder(r.longitude-g.longitude,2*pi),0,1e-13,"Longitude");
+    }
+    // Zonal attraction against the numerical gradient of its potential.
+    for(V3 r:{V3{6.5e6,1e6,2e6},V3{1e5,-3e5,6.4e6},V3{-4e6,4e6,-3e6}}){
+        auto potential=[&](V3 p){const double rn=norm(p),s=p.z/rn;double sum=0,p0=1,p1=s;
+            for(int n=2;n<=4;++n){const double p2=((2*n-1)*s*p1-(n-1)*p0)/n;sum+=earth.zonal[n]*std::pow(earth.gravityRadius/rn,n)*p2;p0=p1;p1=p2;}
+            return earth.gm/rn*(1-sum);};
+        const V3 a=gravitation(earth,r);const double h=1;
+        const V3 n{(potential(r+V3{h,0,0})-potential(r-V3{h,0,0}))/(2*h),(potential(r+V3{0,h,0})-potential(r-V3{0,h,0}))/(2*h),(potential(r+V3{0,0,h})-potential(r-V3{0,0,h}))/(2*h)};
+        near(norm(a-n),0,1e-8,"Zonal gradient");
+    }
+    // U.S. Standard Atmosphere 1976 (published tables, 5 digits) and the NESC values.
+    struct Ref {double z,t,p,rho;};
+    for(const Ref& r:{Ref{0,288.15,101325,1.2250},Ref{10000,223.25,26500,.41351},Ref{30000,226.51,1197.0,.018410},Ref{50000,270.65,79.779,1.0269e-3},Ref{86000-1e-6,186.87,.37338,6.958e-6}}){
+        const Air a=standardAtmosphere(r.z);near(a.temperature/r.t,1,3e-5,"USSA76 temperature");near(a.pressure/r.p,1,1e-4,"USSA76 pressure");near(a.density/r.rho,1,1e-4,"USSA76 density");
+    }
+    require(standardAtmosphere(86000).density==0&&standardAtmosphere(2e5).pressure==0,"Vacuum above 86 km");
+    for(const auto& r:nescAir){
+        const Air a=standardAtmosphere(r.altitude*ft);
+        // Above 80 km the simulations report the molecular-scale temperature (no M/M0).
+        if(r.altitude*ft<80000)near(a.temperature/(r.temperature*5/9),1,1e-5,"NESC temperature");
+        near(a.pressure/(r.pressure*47.88025898033584),1,3e-5,"NESC pressure");near(a.density/(r.density*515.3788183931961),1,3e-5,"NESC density");near(a.sound/(r.sound*ft),1,1e-5,"NESC speed of sound");
+    }
+    // Two-body orbit: ten revolutions against Kepler's equation; energy.
+    {
+        Environment e;e.planet={earth.gm,6378137.,0,0,6378137.,{},0};e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;
+        const double a=7e6,ecc=.01,n=std::sqrt(e.planet.gm/(a*a*a)),period=2*pi/n;
+        State s;s.position={a*(1-ecc),0,0};s.velocity={0,std::sqrt(e.planet.gm/a*(1+ecc)/(1-ecc))*.8,std::sqrt(e.planet.gm/a*(1+ecc)/(1-ecc))*.6};
+        Flight f(nescSphere(),e,s);const Tt step=second;const Tt end=static_cast<Tt>(std::llround(10*period*1e9));
+        auto energy=[&]{return dot(f.state().velocity,f.state().velocity)/2-e.planet.gm/norm(f.state().position);};const double e0=energy();
+        while(f.state().time<end)f.advance(std::min(step,end-f.state().time));
+        near(energy()/e0,1,1e-10,"Two-body energy");
+        const double m=n*secondsSinceJ2000(end);double E=m;for(int i=0;i<20;++i)E-=(E-ecc*std::sin(E)-m)/(1-ecc*std::cos(E));
+        const double x=a*(std::cos(E)-ecc),y=a*std::sqrt(1-ecc*ecc)*std::sin(E);
+        near(norm(f.state().position-V3{x,y*.8,y*.6}),0,1e-3,"Kepler position after ten orbits");
+    }
+    // NESC spheres: 1 dragless (J2, rotating), 4 round non-rotating, 6 ellipsoidal, 9-10 cannonballs.
+    for(int c:{1,4,6,9,10}){
+        const Environment e=nesc(c==4,c!=4,c!=1);const Vehicle v=nescSphere();
+        const V3 ned=c==9?V3{0,1000*ft,-1000*ft}:c==10?V3{1000*ft,0,-1000*ft}:V3{};
+        Flight f(v,e,Flight::free(e,v,0,{0,0,c<9?30000*ft:0},ned,{}));
+        for(int t=0;t<=30;t+=10){
+            if(t)for(int i=0;i<10000;++i)f.advance(second/1000);
+            double worst=0,worstV=0,best=1e9,bestV=1e9,spread=0,spreadV=0;const NescPoint* first=nullptr;
+            for(const auto& p:nescSpheres)if(p.nescCase==c&&p.t==t){
+                const V3 r{p.x*ft,p.y*ft,p.z*ft},vv{p.vx*ft,p.vy*ft,p.vz*ft};
+                if(std::getenv("NESC_DEBUG"))std::printf("  sim %d: %.4f m\n",p.sim,norm(f.state().position-r));
+                worst=std::max(worst,norm(f.state().position-r));worstV=std::max(worstV,norm(f.state().velocity-vv));
+                best=std::min(best,norm(f.state().position-r));bestV=std::min(bestV,norm(f.state().velocity-vv));
+                if(first){spread=std::max(spread,norm(r-V3{first->x*ft,first->y*ft,first->z*ft}));spreadV=std::max(spreadV,norm(vv-V3{first->vx*ft,first->vy*ft,first->vz*ft}));}else first=&p;
+            }
+            std::printf("case %02d t=%2d position %.4f m velocity %.5f m/s (simulations differ %.4f m, %.5f m/s)\n",c,t,worst,worstV,spread,spreadV);
+            // Within 1 cm and 1 mm/s of the closest reference, and of the other within their spread.
+            near(best,0,.01,"NESC sphere position");near(bestV,0,1e-3,"NESC sphere velocity");
+            near(worst,0,spread+.01,"NESC sphere spread");near(worstV,0,spreadV+1e-3,"NESC sphere velocity spread");
+        }
+    }
+    // NESC 17: two-stage rocket to orbit against sims 4 and 5 (US 1976 below 86 km only).
+    {
+        std::vector<State> trace;const Flight f=rocket(second/1000,200,&trace);
+        for(const auto& s:trace){
+            const double t=std::round(secondsSinceJ2000(s.time));double d[2]{},dv[2]{},spread=0;V3 other;int n=0;
+            for(const auto& p:nescRocket)if(p.t==t){const V3 r{p.x*ft,p.y*ft,p.z*ft};
+                d[n]=norm(s.position-r);dv[n]=norm(s.velocity-V3{p.vx*ft,p.vy*ft,p.vz*ft});if(n)spread=norm(r-other);other=r;++n;}
+            std::printf("case 17 t=%3.0f sim 4: %.3f m %.4f m/s, sim 5: %.3f m %.4f m/s (simulations differ %.3f m) stage %d\n",t,d[0],dv[0],d[1],dv[1],spread,s.stage);
+            // Inside the disagreement of the two references (6.6 m after 250 km of ascent).
+            near(std::min(d[0],d[1]),0,spread+.5,"NESC rocket position");near(std::max(d[0],d[1]),0,2*spread+1,"NESC rocket position spread");
+            near(std::min(dv[0],dv[1]),0,.3,"NESC rocket velocity");
+        }
+        require(f.state().stage==1&&!f.state().burning&&f.state().propellant==0,"Both stages burned out");
+        const Flight half=rocket(second/2000,200);const double moved=norm(half.state().position-f.state().position);
+        std::printf("case 17 halving the step moves the final position %.4f m\n",moved);near(moved,0,1,"Step convergence");
+        require(rocket(second/1000,200).hash()==rocket(second/1000,200).hash(),"Deterministic replay"); // Same step sequence.
+    }
+    // Time scales and Earth orientation.
+    require(ttFromUtc(1483228800.)==static_cast<Tt>(536500869184000000),"TT at 2017-01-01 (ΔAT 37 s)");
+    near(utcFromTt(ttFromUtc(1792238400.25)),1792238400.25,1e-6,"UTC round trip");
+    {
+        const Rotation r=Rotation::iau(69.184);const Tt t=ttFromUtc(1792238400.)+12345678901;const Orientation o=r.at(t);
+        const double days=secondsSinceJ2000(t)/86400.,ut1=days-69.184/86400.;double m[3][3];eraC2t06a(2451545.0,days,2451545.0,ut1,0,0,m);
+        double worst=0;for(int i=0;i<3;++i)for(int j=0;j<3;++j)worst=std::max(worst,std::abs(o.fixed.m[i][j]-m[i][j]));
+        near(worst,0,2e-10,"IAU 2006/2000A orientation");near(norm(o.omega),7.292115146706979e-5,1e-15,"Earth rotation rate");
+        const Perturbers p=perturbers(t);near(norm(p.moon),3.8e8,3e7,"Moon distance");near(norm(p.sun),1.496e11,3e9,"Sun distance");
+    }
+    // Launch pad: clamped until thrust exceeds weight; a dropped sphere comes to rest on the ground.
+    {
+        Environment e;e.ground=0;const Vehicle v=genericLauncher();
+        Flight f(v,e,Flight::pad(e,v,ttFromUtc(1792238400.),{28.6082*deg,-80.6041*deg,0},90*deg,90*deg));
+        Sample x=f.sample();near(x.specificForce.x,9.79,.02,"Specific force on the pad");near(norm(x.fixedVelocity),0,1e-9,"Pad at rest");
+        f.advance(second);require(f.state().clamped&&norm(f.sample().fixedVelocity)<1e-9,"Held without thrust");
+        f.ignite();for(int i=0;i<10000;++i)f.advance(second/1000);
+        x=f.sample();require(!f.state().clamped&&!f.state().landed,"Released at ignition");
+        std::printf("generic launcher after 10 s: %.1f m, %.2f m/s, %.0f kg, specific force %.2f m/s²\n",x.geodetic.height,-x.nedVelocity.z,x.mass,x.specificForce.x);
+        near(x.geodetic.height,250,60,"Liftoff altitude");near(x.specificForce.x,x.thrust/x.mass+x.aeroForce.x/x.mass,1e-9,"Accelerometer");
+        Environment d=nesc(false,true,false);d.ground=0;const Vehicle sphere=nescSphere();
+        Flight drop(sphere,d,Flight::free(d,sphere,0,{0,0,100},{},{}));Tt t=0;while(t<10*second)t+=drop.advance(10*second-t);
+        require(drop.state().landed&&std::abs(drop.sample().geodetic.height)<1e-6&&norm(drop.sample().fixedVelocity)<1e-9,"Touchdown");
+    }
+    std::cout<<"physics_test: ok\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

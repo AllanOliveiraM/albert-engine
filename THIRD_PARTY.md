@@ -43,6 +43,10 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - Lowell Observatory / D. Schleicher (2010): função de fase de poeira composta
   Halley-Marcus, tabela em `src/core/comets.cpp`,
   https://asteroid.lowell.edu/comet/dustphase.html (Schleicher et al. 1998; Marcus 2007).
+- NASA Engineering and Safety Center: check cases 6-DOF (NASA/TM-2015-218675),
+  https://nescacademy.nasa.gov/flightsim/2015; valores de referência em
+  `tests/nesc_fixture.inc` e modelos DAVE-ML da esfera e do foguete de dois estágios
+  convertidos em `src/physics/vehicles.cpp`. Obra do governo dos EUA.
 - NASA GIBS: paleta pública de fração de nuvens MODIS, convertida para JSON,
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml.
 - Planetas e luas (créditos e limites por corpo em `assets/planetary-sources.json`,
