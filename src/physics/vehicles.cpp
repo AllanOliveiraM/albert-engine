@@ -42,7 +42,7 @@ Aerodynamics slender(double area){
 Vehicle nescSphere(){
     Stage s;s.name="NESC sphere";s.massFull=s.massEmpty=slug;s.inertiaFull=s.inertiaEmpty={3.6*slugft2,3.6*slugft2,3.6*slugft2};
     s.aero.area=.1963495*ft*ft;s.aero.length=s.aero.span=.5*ft;s.aero.lift=s.aero.side=s.aero.roll=s.aero.pitch=s.aero.yaw=constant(0);s.aero.drag=constant(.1);
-    s.length=.5*ft;return{"NESC sphere",{s},0,1,true,.5*ft};
+    s.length=.5*ft;s.cgFull=s.cgEmpty=s.reference=.25*ft;return{"NESC sphere",{s},0,1,true,.5*ft};
 }
 Vehicle nescTwoStage(){
     Stage a;a.name="NESC first stage";a.propellant=180000;a.massFull=314000;a.massEmpty=134000;a.cgFull=16.91879;a.cgEmpty=9.421642;a.reference=16.91879;

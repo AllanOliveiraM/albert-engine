@@ -78,6 +78,27 @@ int main(){try{
         const double x=a*(std::cos(E)-ecc),y=a*std::sqrt(1-ecc*ecc)*std::sin(E);
         near(norm(f.state().position-V3{x,y*.8,y*.6}),0,1e-3,"Kepler position after ten orbits");
     }
+    // J2 secular nodal rate (Vallado, mean elements to first order) from one-orbit averages
+    // of the osculating elements, 13 orbits apart; ISS-like and sun-synchronous inclinations.
+    for(const double inclination:{51.6*deg,98*deg}){
+        Environment e;e.planet=earth;e.planet.degree=2;e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;
+        const double mu=e.planet.gm,a0=7e6,ecc=.001,vp=std::sqrt(mu/a0*(1+ecc)/(1-ecc)),period=2*pi*std::sqrt(a0*a0*a0/mu);
+        State s;s.position={a0*(1-ecc),0,0};s.velocity={0,vp*std::cos(inclination),vp*std::sin(inclination)};
+        Flight f(nescSphere(),e,s);constexpr int per=600;const Tt dt=static_cast<Tt>(period/per*1e9);
+        struct Mean {double a=0,e=0,i=0,node=0,t=0;};
+        auto average=[&]{Mean m;double previous=0;
+            for(int k=0;k<per;++k){
+                const V3 r=f.state().position,v=f.state().velocity,h=cross(r,v),ev=cross(v,h)/mu-r/norm(r);double node=std::atan2(h.x,-h.y);
+                if(k)node=previous+std::remainder(node-previous,2*pi);previous=node;
+                m.a+=1/(2/norm(r)-dot(v,v)/mu)/per;m.e+=norm(ev)/per;m.i+=std::acos(h.z/norm(h))/per;m.node+=node/per;m.t+=secondsSinceJ2000(f.state().time)/per;f.advance(dt);
+            }
+            return m;};
+        const Mean m0=average();for(int k=0;k<per*13;++k)f.advance(dt);const Mean m1=average();
+        const double a=(m0.a+m1.a)/2,ec=(m0.e+m1.e)/2,c=std::cos((m0.i+m1.i)/2),p=a*(1-ec*ec),k=e.planet.zonal[2]*std::pow(e.planet.gravityRadius/p,2);
+        const double n=std::sqrt(mu/(a*a*a))*(1+.75*k*std::sqrt(1-ec*ec)*(3*c*c-1)),theory=-1.5*n*k*c,measured=(m1.node-m0.node)/(m1.t-m0.t);
+        std::printf("J2 nodal rate at %.1f deg: %.5f deg/day (theory %.5f)\n",inclination/deg,measured/deg*86400,theory/deg*86400);
+        near(measured/theory,1,1e-3,"J2 secular nodal rate");
+    }
     // NESC spheres: 1 dragless (J2, rotating), 4 round non-rotating, 6 ellipsoidal, 9-10 cannonballs.
     for(int c:{1,4,6,9,10}){
         const Environment e=nesc(c==4,c!=4,c!=1);const Vehicle v=nescSphere();
@@ -130,15 +151,32 @@ int main(){try{
     {
         Environment e;e.ground=0;const Vehicle v=genericLauncher();
         Flight f(v,e,Flight::pad(e,v,ttFromUtc(1792238400.),{28.6082*deg,-80.6041*deg,0},90*deg,90*deg));
-        Sample x=f.sample();near(x.specificForce.x,9.79,.02,"Specific force on the pad");near(norm(x.fixedVelocity),0,1e-9,"Pad at rest");
+        Sample x=f.sample();near(x.specificForce.x,9.79,.02,"Specific force on the pad");
+        near(x.geodetic.height,v.stages[0].length-v.stages[0].cgFull,1e-6,"Base of the stack on the ground");near(norm(x.fixedVelocity),0,1e-9,"Pad at rest");
         f.advance(second);require(f.state().clamped&&norm(f.sample().fixedVelocity)<1e-9,"Held without thrust");
         f.ignite();for(int i=0;i<10000;++i)f.advance(second/1000);
         x=f.sample();require(!f.state().clamped&&!f.state().landed,"Released at ignition");
         std::printf("generic launcher after 10 s: %.1f m, %.2f m/s, %.0f kg, specific force %.2f m/s²\n",x.geodetic.height,-x.nedVelocity.z,x.mass,x.specificForce.x);
-        near(x.geodetic.height,250,60,"Liftoff altitude");near(x.specificForce.x,x.thrust/x.mass+x.aeroForce.x/x.mass,1e-9,"Accelerometer");
+        near(x.geodetic.height-(v.stages[0].length-v.stages[0].cgFull),250,60,"Liftoff altitude");near(x.specificForce.x,x.thrust/x.mass+x.aeroForce.x/x.mass,1e-9,"Accelerometer");
         Environment d=nesc(false,true,false);d.ground=0;const Vehicle sphere=nescSphere();
         Flight drop(sphere,d,Flight::free(d,sphere,0,{0,0,100},{},{}));Tt t=0;while(t<10*second)t+=drop.advance(10*second-t);
         require(drop.state().landed&&std::abs(drop.sample().geodetic.height)<1e-6&&norm(drop.sample().fixedVelocity)<1e-9,"Touchdown");
+    }
+    // Depletion exactly at the end of a step burns all propellant within it; burning in
+    // free space with the complete model: d(Iω)/dt = -ṁ l² ω, so with constant l and
+    // linear inertia Iω = H0 (I/I0)^(ṁ l²/|İ|).
+    {
+        Environment e;e.planet={0,6378137.,0,0,6378137.,{},0};e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;
+        Stage st;st.name="test";st.propellant=100;st.massFull=200;st.massEmpty=100;st.cgFull=st.cgEmpty=5;st.inertiaFull={100,2000,2000};st.inertiaEmpty={50,1000,1000};
+        st.thrust=1e4;st.exhaust=1e3;st.nozzle=9;st.length=10;st.aero.lift=st.aero.drag=st.aero.side=st.aero.roll=st.aero.pitch=st.aero.yaw={{0},{0},{0}};
+        const Vehicle v{"test",{st},0};auto run=[&](Tt step,double rate){State s;s.position={1e8,0,0};s.rate={0,rate,0};s.propellant=st.propellant;
+            Flight f(v,e,s);f.ignite();Tt t=0;while(t<10*second)t+=f.advance(std::min(step,10*second-t));return f;};
+        const Flight a=run(10*second,0),b=run(second/100,0); // ṁ 10 kg/s: exactly 10 s of propellant.
+        require(a.state().propellant==0&&!a.state().burning&&b.state().propellant==0&&!b.state().burning,"Depleted at the step boundary");
+        std::printf("rocket equation: one 10 s step %.6f, 10 ms steps %.9f, exact %.9f m/s\n",norm(a.state().velocity),norm(b.state().velocity),1e3*std::log(2.));
+        near(norm(a.state().velocity),1e3*std::log(2.),2,"Rocket equation, one RK4 step"); // Simpson error 1.3 m/s; thrust lost in k4 would cost ~140.near(norm(b.state().velocity),1e3*std::log(2.),1e-7,"Rocket equation");
+        const Flight c=run(second/1000,.1);const double h0=2000*.1,i1=1000,expected=h0*std::pow(i1/2000.,10*16./100); // ṁ l²/|İ| = 1.6
+        near(i1*c.state().rate.y,expected,1e-9*h0,"Jet damping and inertia loss");
     }
     // The example flight computer (examples/gravity_turn.hpp) flies the generic launcher to orbit at 50 Hz.
     {

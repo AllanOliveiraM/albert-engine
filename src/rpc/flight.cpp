@@ -43,8 +43,10 @@ struct FlightServices::Impl {
         if(!force&&now-published<std::chrono::milliseconds(33))return;
         published=now;const core::Sample s=scene();
         if(flight->state().stage!=shown){ // The stack got shorter: replace the cylinder, keeping the camera on it.
-            shown=flight->state().stage;const auto snap=bridge.snapshot();const bool followed=snap&&snap->camera.target==objectId;
-            (void)bridge.submit(core::Remove{objectId});(void)bridge.submit(core::Create{object()});if(followed)(void)bridge.submit(core::Focus{objectId,false});
+            const auto snap=bridge.snapshot();const bool followed=snap&&snap->camera.target==objectId;
+            (void)bridge.submit(core::Remove{objectId});
+            if(wait(bridge.submit(core::Create{object()})).code!=core::Code::Ok)return; // Retried on the next publication.
+            shown=flight->state().stage;if(followed)(void)bridge.submit(core::Focus{objectId,false});
         }else (void)bridge.submit(core::Append{objectId,{s}});
         (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),{},false,true});
     }
@@ -64,7 +66,6 @@ struct FlightServices::Impl {
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
         o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));
     }
-    void event(api::FlightEvent::Kind kind,int stage){api::FlightEvent e;e.set_kind(kind);e.set_elapsed_seconds(elapsed());e.set_stage(static_cast<unsigned>(stage));events.push_back(std::move(e));}
 };
 FlightServices::FlightServices(core::Bridge& bridge):impl_(std::make_unique<Impl>(bridge)){}
 FlightServices::~FlightServices()=default;
@@ -96,7 +97,7 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext*,const api::Create
     if(r->focus_camera())(void)wait(m.bridge.submit(core::Focus{objectId,true}));
     m.published=std::chrono::steady_clock::now();m.fill(out);return grpc::Status::OK;
 }
-grpc::Status FlightServices::Step(grpc::ServerContext*,const api::StepRequest* r,api::FlightSample* out){
+grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
     std::lock_guard lock(impl_->mutex);auto& m=*impl_;
     if(!m.flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     if(r->ticks()>600000)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 600000 ticks per step"};
@@ -113,16 +114,21 @@ grpc::Status FlightServices::Step(grpc::ServerContext*,const api::StepRequest* r
             default:throw std::invalid_argument("Empty command");
         }
     }catch(const std::invalid_argument& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}catch(const std::logic_error& e){return{grpc::StatusCode::FAILED_PRECONDITION,e.what()};}
-    *m.flight=std::move(next);bool changed=std::any_of(r->commands().begin(),r->commands().end(),[](const auto& c){return c.command_case()<=api::FlightCommand::kRelease;});
+    // Integrated on the copy and committed whole: a cancelled call leaves the flight untouched.
+    bool changed=std::any_of(r->commands().begin(),r->commands().end(),[](const auto& c){return c.command_case()<=api::FlightCommand::kRelease;});
+    const std::size_t pending=m.events.size();std::uint64_t tick=m.tick;
+    auto event=[&](api::FlightEvent::Kind kind,const ph::Flight& f){api::FlightEvent e;e.set_kind(kind);e.set_elapsed_seconds(ph::secondsSinceJ2000(f.state().time-m.start));e.set_stage(static_cast<unsigned>(f.state().stage));m.events.push_back(std::move(e));changed=true;};
     for(std::uint32_t i=0;i<r->ticks();++i){
+        if(i%4096==4095&&context->IsCancelled()){m.events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
         for(ph::Tt left=m.step;left>0;){
-            const auto before=m.flight->state();left-=m.flight->advance(left);const auto& after=m.flight->state();
-            if(before.clamped&&!after.clamped){m.event(api::FlightEvent::LIFTOFF,after.stage);changed=true;}
-            if(before.burning&&!after.burning&&after.propellant<=0){m.event(api::FlightEvent::DEPLETED,after.stage);changed=true;}
-            if(!before.landed&&after.landed){m.event(api::FlightEvent::TOUCHDOWN,after.stage);changed=true;}
+            const auto before=next.state();left-=next.advance(left);const auto& after=next.state();
+            if(before.clamped&&!after.clamped)event(api::FlightEvent::LIFTOFF,next);
+            if(before.burning&&!after.burning&&after.propellant<=0)event(api::FlightEvent::DEPLETED,next);
+            if(!before.landed&&after.landed)event(api::FlightEvent::TOUCHDOWN,next);
         }
-        ++m.tick;
+        ++tick;
     }
+    *m.flight=std::move(next);m.tick=tick;
     if(r->ticks())m.publish(changed||m.flight->state().stage!=m.shown);
     m.fill(out);return grpc::Status::OK;
 }

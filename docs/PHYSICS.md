@@ -17,7 +17,7 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Propulsão | `F = F_vac·throttle − p_a·A_e`; `ṁ = F_vac·throttle/v_e`; cardã em arfagem e guinada | sem transiente de ignição |
 | Massa | propriedades do conjunto lineares no propelente restante; estagiamento move o CG | inércia principal (sem produtos) |
 | Rotação | `I ω̇ = M − ω×Iω − İω − ṁ l² ω⊥` (perda de inércia do propelente e amortecimento por jato) | — |
-| Solo | pad preso girando com a Terra até empuxo > peso; toque a uma altura elipsoidal fixa | sem terreno, contato nem atrito |
+| Solo | pad com a base do conjunto no solo, preso girando com a Terra até empuxo > peso; toque a uma altura elipsoidal fixa, detectado no CG | sem terreno, contato nem atrito |
 
 Integração RK4 com passo fixo (1 ms por padrão); `advance` divide o passo no instante
 exato do fim do propelente e para ali, para que estagiamentos programados sejam exatos.
@@ -44,7 +44,11 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
   Reproduzir esse caso exige a convenção das referências: metade do termo İω e sem
   fluxo de momento angular do jato (`Vehicle::inertiaRate`, `jetDamping`). Reduzir o
   passo à metade move o ponto final 0,22 m (critério <1 m).
-- Pad, liberação no empuxo, acelerômetro e pouso.
+- Taxa secular do nodo por J2 a 51,6° e 98° (heliossíncrona): <0,1% da teoria de primeira ordem (Vallado).
+- Esgotamento exatamente no fim do passo; equação do foguete (Tsiolkovsky) a 1e-7 m/s;
+  amortecimento por jato e perda de inércia contra a solução fechada `Iω = H0 (I/I0)^(ṁ l²/|İ|)`.
+- Pad (base no solo), liberação no empuxo, acelerômetro e pouso.
+- O guiamento de exemplo leva o lançador genérico a uma órbita ~182 × 212 km.
 
 ## API
 

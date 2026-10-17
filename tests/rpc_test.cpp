@@ -103,6 +103,9 @@ int main(){try{
         {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&!s.burning()&&s.tick()==0,"A rejected step changed the flight");}
         {grpc::ClientContext c;api::StepRequest r;r.set_ticks(3000);r.add_commands()->set_ignite(true);require(flight->Step(&c,r,&s).ok(),"Step failed");}
         require(s.tick()==3000&&std::abs(s.elapsed_seconds()-3)<1e-9&&!s.clamped()&&s.geodetic().height_meters()>10&&s.events_size()==1&&s.events(0).kind()==api::FlightEvent::LIFTOFF,"Liftoff");
+        {grpc::ClientContext c;c.set_deadline(std::chrono::system_clock::now()+std::chrono::milliseconds(30));api::StepRequest r;r.set_ticks(600000);
+            require(!flight->Step(&c,r,&s).ok(),"Long step finished before its deadline");}
+        {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&s.tick()==3000,"A cancelled step changed the flight");}
         {grpc::ClientContext c;api::StepRequest r;r.set_ticks(1);r.add_commands()->set_separate(true);r.add_commands()->set_separate(true);
             require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Separating past the last stage accepted");}
         std::this_thread::sleep_for(std::chrono::milliseconds(50));

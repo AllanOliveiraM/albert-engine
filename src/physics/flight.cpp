@@ -41,6 +41,7 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
     padPosition_=o.fixed*s_.position;padAttitude_=quaternion(o.fixed*matrix(s_.attitude));
 }
 State Flight::pad(const Environment& e,const Vehicle& v,Tt t,Geodetic site,double heading,double pitch,double roll){
+    const Stage& st=v.stages.at(0);site.height+=(st.length-st.cgFull)*std::sin(pitch); // Base on the ground.
     State s=free(e,v,t,site,{},{heading,pitch,roll});s.clamped=true;return s;
 }
 State Flight::free(const Environment& e,const Vehicle& v,Tt t,Geodetic g,V3 ned,V3 euler,V3 relative){
@@ -81,7 +82,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         ma+=cross(V3{ms.cg-st.reference,0,0},fa);
     }
     V3 ft,mt;double thrust=0,flow=0;
-    if(s.burning&&s.propellant>0&&st.thrust>0){
+    if(s.burning&&st.thrust>0){ // Steps end at depletion, so the engine state holds through all RK4 stages.
         thrust=std::max(0.,s.throttle*st.thrust-atm.pressure*st.exitArea);flow=s.throttle*st.thrust/st.exhaust;
         const double cp=std::cos(s.gimbalPitch),sp=std::sin(s.gimbalPitch),cy=std::cos(s.gimbalYaw),sy=std::sin(s.gimbalYaw);
         ft=thrust*V3{cp*cy,-sy,sp*cy};mt=cross(V3{ms.cg-st.nozzle,0,0},ft);
@@ -131,7 +132,7 @@ Tt Flight::advance(Tt dt){
             if(dot(b*(x.thrustForce+x.aeroForce),up)>x.mass*dot(x.acceleration-x.gravity,up))s_.clamped=false;
         }
         Tt h=left;bool depleted=false;const double flow=massFlow();
-        if(flow>0){const double t=s_.propellant/flow*1e9;if(t<static_cast<double>(h)){h=std::max<Tt>(1,static_cast<Tt>(t));depleted=true;}}
+        if(flow>0){const double t=s_.propellant/flow*1e9;if(t<=static_cast<double>(h)+1){h=std::clamp<Tt>(static_cast<Tt>(t),1,h);depleted=true;}} // Within 1 ns.
         integrate(h);left-=h;
         if(depleted){s_.propellant=0;s_.burning=false;return dt-left;}
         if(!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){

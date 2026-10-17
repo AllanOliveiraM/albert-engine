@@ -10,8 +10,11 @@ amortecimento por jato, pad/pouso) e validado contra os casos NESC 1/4/6/9/10/17
 (`docs/PHYSICS.md`). Entregue também (C3): `FlightService` gRPC em lockstep (comandos
 atômicos, eventos, hash), veículo `flight` na cena com relógio seguindo o voo (`SetTime`
 com `hold`), `examples/gravity_turn.hpp` + `albert_flight_client` (KSC → órbita 181×212 km
-em 421 s, também testado headless em `physics_test`). Próximo: EGM2008 20×20 + taxas
-seculares J2 (C4) e revisão do Codex no marco. Pré-visualização: `build/flight-preview.py`
+em 421 s, também testado headless em `physics_test`). Revisão do Codex do marco (4 P2) corrigida com regressões: esgotamento no fim exato
+do passo, recriação do cilindro no estagiamento só após confirmação, base do conjunto no
+solo no pad e `Step` cancelável e atômico; ramo padrão İω + jet damping testado em forma
+fechada; taxas seculares J2 testadas. Pendente: EGM2008 20×20 (download de 109 MB da NGA
+aguardando autorização do Allan; alternativa EGM96) e passo maior em coast. Pré-visualização: `build/flight-preview.py`
 (Xvfb; `FAST=1` voa até a órbita).
 
 **Estado em 17/10/2026 (manhã), continuação por Claude Opus 5.5.** Entregues nesta

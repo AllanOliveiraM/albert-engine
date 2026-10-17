@@ -65,7 +65,8 @@ struct Sample {
 class Flight {
 public:
     Flight(Vehicle vehicle,Environment environment,State state);
-    // At rest on the ground, clamped until thrust exceeds weight or release().
+    // At rest with the base of the stack on the ground at the site height, clamped until
+    // thrust exceeds weight or release(). Touchdown is detected at the CG (no contact model).
     static State pad(const Environment& e,const Vehicle& v,Tt time,Geodetic site,double heading,double pitch,double roll=0);
     // Free state from geodetic position, NED velocity relative to Earth and NED Euler angles;
     // body rates relative to Earth (rad/s).

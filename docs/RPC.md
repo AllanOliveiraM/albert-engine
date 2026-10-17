@@ -253,10 +253,11 @@ personalizados e camadas raster ainda são próximas entregas.
 
 `FlightService` controla um veículo de seis graus de liberdade integrado pelo núcleo de
 física do Albert ([PHYSICS.md](PHYSICS.md)); o software externo faz o papel do
-computador de voo. `CreateFlight` põe o veículo preso no pad (`GENERIC_LAUNCHER`,
+computador de voo. `CreateFlight` põe o veículo preso no pad, com a base no solo, (`GENERIC_LAUNCHER`,
 `NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
 instante exibido), com passo fixo de 1 ms (de 10 µs a 100 ms). Cada `Step` aplica os
-comandos — todos ou nenhum — e avança `ticks` passos (até 600 mil); a resposta traz a
+comandos — todos ou nenhum — e avança `ticks` passos (até 600 mil; uma chamada cancelada ou
+vencida não altera o voo); a resposta traz a
 amostra do novo tick. Assim, comandos do tick *k* produzem os sensores do tick *k+1*,
 e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 
