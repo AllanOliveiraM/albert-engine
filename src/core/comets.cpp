@@ -13,9 +13,12 @@ namespace {
 // Halley: peak phase-adjusted Afρ ~8e4 cm (Schleicher et al. 1998, as compared by
 // Schleicher & Farnham 2024), taken at 0.9 AU; dust release ∝ r^-3.0±0.7 (Planet.
 // Space Sci. 1997); OH measured out to 5.1 AU. Grain speed: hundreds of m/s.
+// Gas: 67P peak Q(H2O) 3.5e28 /s about 1.3 AU (Hansen et al. 2016, ROSINA), CO/H2O
+// below 1.9% (VIRTIS-H); Halley 6.9e29 /s of gas, ~80% water, at Giotto, 0.89 AU
+// (Krankowsky et al. 1986), total CO/H2O ~11% (Eberhardt et al. 1987).
 constexpr std::array<CometActivity,2> comets{{
-    {"67p","67P",15.,1.25,2.7,4.2,4.3,3.6,20.},
-    {"halley","1P",800.,.9,3.,3.,6.,5.1,300.}}};
+    {"67p","67P",15.,1.25,2.7,4.2,4.3,3.6,20.,3.5e28,1.3,.019},
+    {"halley","1P",800.,.9,3.,3.,6.,5.1,300.,5.5e29,.89,.11}}};
 // Halley-Marcus composite, 0°-normalised, 0-180° in 1° steps (Lowell Observatory,
 // dustphaseHM_table.txt, SHA-256 84b92184...).
 constexpr std::array<double,181> phase{
@@ -51,6 +54,22 @@ double afrho(const CometActivity& c,double r,bool inbound){
     if(!(r>0))throw std::invalid_argument("Invalid heliocentric distance");
     return c.afrhoMetres*std::pow(c.referenceAu/r,inbound?c.inboundSlope:c.outboundSlope)*smooth((c.onsetAu-r)/(c.onsetAu-c.fullAu));
 }
+double ionProduction(const CometActivity& c,double r,bool inbound){
+    const double reference=afrho(c,c.waterAu,false);if(!(reference>0))return 0;
+    return c.water*afrho(c,r,inbound)/reference*c.carbonMonoxide*(6e-7/(6e-7+5e-7));
+}
+Vector ionTailAxis(const StateVector& s){
+    const double r=norm(s.position);if(!(r>0))throw std::invalid_argument("Invalid comet state");
+    const Vector wind=s.position*(solarWind/r)-s.velocity;return wind*(1/norm(wind));
+}
+double ionSpeed(double x){return 1e4+2.5e5*(1-std::exp(-x/3e9));}
+double ionWidth(double x){return 3e6+3e7*(1-std::exp(-x/3e7))+.02*x;}
+double ionColumn(const CometActivity& c,double r,bool inbound,double x){
+    // Neutral CO (~1 km/s) is ionized over ~1e9 m at 1 AU (rates ∝ r^-2).
+    const double neutral=1e3/(1.1e-6/(r*r)),ionized=1-std::exp(-(x+1e7)/neutral);
+    return ionProduction(c,r,inbound)*ionized/(ionSpeed(x)*std::sqrt(2*std::numbers::pi)*ionWidth(x));
+}
+double ionReflectance(double column){return 3.06e-14*(column*1e-4)/(4*1.9e5);}
 double radiationApex(const CometActivity& c,double r){
     if(!(r>0))throw std::invalid_argument("Invalid heliocentric distance");
     constexpr double au=149597870700.;const double speed=c.grainSpeed/std::sqrt(r),gravity=solarGM/(r*au*r*au);

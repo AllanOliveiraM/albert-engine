@@ -498,8 +498,25 @@ void graphics() {
         long changed=0;for(int y=0;y<192;++y)for(int x=0;x<192;++x){const float dx=(x-95.5f)/96.f,dy=(y-95.5f)/96.f;if(dx*dx+dy*dy<.01f)continue;
             changed+=std::abs(luminance(bent,x,y)-luminance(tail,x,y));}
         require(changed>std::max(50,anti/4),"Dust tail kept the previous state at the same date");
+
     }
-    std::cout<<"Graphics OK: incremental upload, terrain occlusion, paths, clouds, objects, artistic rocks, lunar eclipse and comet dust\n";
+    {   // CO+ ion tail of Halley at the Giotto encounter (67P's CO is too scarce to show):
+        // blue light along the aberrated antisolar axis, seen across the orbit.
+        auto world=Scene::create();world->background=Color(0x000000);albert::CometVisuals comets(*world);comets.enhance("halley",true);
+        const double jd=2446503.5;const auto state=albert::core::heliocentricState(*albert::core::localOrbit("halley"))(jd);
+        auto graphical=[](albert::core::Vector v){return Vector3(static_cast<float>(v.x),static_cast<float>(v.z),static_cast<float>(-v.y)).normalize();};
+        const Vector3 sun=graphical(state.position*-1.).multiplyScalar(23455.f*.89f);
+        const Vector3 pole=graphical({state.position.y*state.velocity.z-state.position.z*state.velocity.y,state.position.z*state.velocity.x-state.position.x*state.velocity.z,state.position.x*state.velocity.y-state.position.y*state.velocity.x});
+        auto view=PerspectiveCamera::create(60,1,1e-3f,1e6f);view->position.copy(Vector3(pole).multiplyScalar(10000.f));view->lookAt(Vector3());view->updateMatrixWorld();
+        for(int i=0;i<60;++i)comets.update(*view,sun,{{"halley",Vector3()}},{{"halley",state}},jd,1.f);
+        renderer.render(*world,*view);const auto pixels=renderer.readRGBPixels();
+        Vector3 far=graphical(albert::core::ionTailAxis(state)).multiplyScalar(4000.f);far.project(*view);
+        int blue=0;for(int step=8;step<=80;step+=4){const float t=step/96.f,length=std::hypot(far.x,far.y);
+            const int x=static_cast<int>(95.5f+96.f*far.x/length*t),y=static_cast<int>(95.5f+96.f*far.y/length*t); // Rows from the bottom.
+            if(x<0||y<0||x>=192||y>=192)continue;const auto i=3*(y*192+x);if(pixels[i+2]>pixels[i]+4&&pixels[i+2]>=pixels[i+1])++blue;}
+        require(blue>=5,"Ion tail missing along its axis");
+    }
+    std::cout<<"Graphics OK: incremental upload, terrain occlusion, paths, clouds, objects, artistic rocks, lunar eclipse, comet dust and ions\n";
 }
 }
 // Revolution period of a sampled path and the folded highlight time.

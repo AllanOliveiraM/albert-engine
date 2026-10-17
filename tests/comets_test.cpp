@@ -36,6 +36,13 @@ int main(){try{
         const auto then=localState(orbit,jd-730),now=localState(orbit,jd);
         const auto moved=propagate({then.positionMeters,then.velocityMetersPerSecond},solarGM,730*86400.);
         require(norm(moved.position-now.positionMeters)<1e3,"Propagation disagrees with the comet elements");}
+    // Ion tail: production from measured gas, aberration, the measured knot speed and
+    // the CO+ brightness scale (Halley at Giotto: a few 1e-9 in blue I/F at 1e6 km).
+    require(std::abs(ionProduction(halley,.89,false)/(5.5e29*.11*6./11.)-1)<1e-9&&ionProduction(halley,6.5,true)==0,"CO+ production");
+    {const StateVector s{{1.5e11,0,0},{0,4e4,0}};const auto axis=ionTailAxis(s);
+     require(std::abs(std::atan2(-axis.y,axis.x)-std::atan(4e4/solarWind))<1e-12&&std::abs(norm(axis)-1)<1e-12,"Ion tail aberration");}
+    require(std::abs(ionSpeed(6.5e8)-58e3)<5e3&&ionSpeed(5e10)>2.5e5,"Ion acceleration");
+    {const double reflectance=ionReflectance(ionColumn(halley,.89,false,1e9));require(reflectance>1e-9&&reflectance<1e-8,"CO+ tail brightness");}
     // Osculating path through a state: closes on itself after one revolution, passes
     // through the state and reaches the elements' perihelion (Halley, 1986).
     {const auto& orbit=*localOrbit("halley");const double jd=2446470.5;const auto s=heliocentricState(orbit)(jd);

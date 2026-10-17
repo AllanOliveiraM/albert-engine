@@ -76,7 +76,7 @@ Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 | Navegação | Foco por objeto, órbita manual, zoom e transições animadas |
 | Apresentação | Órbita lenta ao chegar a um objeto; arraste ou use o zoom para parar |
 | Pequenos corpos | Formas rochosas individuais; representações artísticas identificadas, sem novas imagens baixadas |
-| Cometas | Coma e cauda de poeira da 67P e do Halley a partir da atividade medida, em brilho físico ou realçado |
+| Cometas | Coma, cauda de poeira e cauda de íons da 67P e do Halley a partir da atividade medida, em brilho físico ou realçado |
 | Eclipses Terra/Lua | Umbra, penumbra e eclipses anulares; luz avermelhada lunar aproximada. [Limites](docs/ECLIPSES.md) |
 | Camadas | Pontos e linhas programáveis, inclusive sobre o relevo terrestre, com controle no menu |
 | Catálogo local | Categorias, busca aproximada e foco em corpos já incluídos; objetos adicionais entram pela API |
@@ -224,7 +224,7 @@ as imagens e não precisa de Git LFS.
 - Use o botão **Restaurar zoom**, no canto inferior direito, para voltar à distância inicial.
 - Clique no horário, no canto superior direito, para escolher data e velocidade; **Agora** volta ao tempo real.
 - Em **Eventos**, no mesmo painel, vá direto a eclipses (2024, 2026, 2027), ao pouso da Apollo 11, à passagem da Giotto pelo Halley ou ao periélio da 67P.
-- Na 67P ou no Halley perto do periélio (por exemplo 2021-11-02 ou 1986-03-13), ative **Realçar coma e cauda de poeira** e afaste a câmera.
+- Na 67P ou no Halley perto do periélio (por exemplo 2021-11-02 ou 1986-03-13), ative **Realçar coma e caudas** e afaste a câmera.
 - Abra **☰ → Cena** para ajustar atmosfera, nuvens, cidades, fronteiras, sombras e órbitas.
 - Ative **Nuvens em tempo real** em **Cena** para buscar as observações automaticamente.
 - O brilho auxiliar de cada objeto com lado escuro ajuda a enxergar o lado escuro; começa desligado e é ajustável.

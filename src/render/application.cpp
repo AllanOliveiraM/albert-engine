@@ -1388,12 +1388,12 @@ int albert::runRenderer(int argc, char** argv) {
                     ImGui::PushTextWrapPos(0);ImGui::TextDisabled(enhanced?"Brilho esticado, como em longa exposicao; proporcoes mantidas.":"Aneis escuros ou de poeira: quase invisiveis em luz visivel.");ImGui::PopTextWrapPos();
                 }
                 if(comets.known(focus)){
-                    bool enhanced=comets.enhanced(focus);if(ImGui::Checkbox("Realcar coma e cauda de poeira",&enhanced))comets.enhance(focus,enhanced);
+                    bool enhanced=comets.enhanced(focus);if(ImGui::Checkbox("Realcar coma e caudas",&enhanced))comets.enhance(focus,enhanced);
                     ImGui::PushTextWrapPos(0);
                     if(comets.afrho(focus)>0)ImGui::TextDisabled("Atividade medida (Afrho): %.0f cm a %.2f UA do Sol. %s",comets.afrho(focus)*100,comets.distanceAu(focus),
                         enhanced?"Brilho em escala asinh, como em astrofotografia: coma e cauda juntas.":"Em brilho fisico, quase invisivel como numa exposicao curta.");
                     else ImGui::TextDisabled("Sem coma: a %.1f UA do Sol, alem do inicio da atividade. Escolha uma data perto do perielio.",comets.distanceAu(focus));
-                    ImGui::TextDisabled("Cauda de ions nao desenhada.");
+                    ImGui::TextDisabled("Poeira em cinza; ions de CO+ em azul, na direcao do vento solar.");
                     ImGui::PopTextWrapPos();
                 }
                 if(focus.front()!='@' && !registry.get(focus).builtin) {

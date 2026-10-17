@@ -353,7 +353,7 @@ pela espessura. A direção foi conferida com a cauda da 67P observada em 23/09/
 observados por Knight et al. 2017.
 
 **Brilho.** O padrão é físico, com a mesma iluminação e exposição dos sólidos: quase
-invisível, como numa exposição curta. **Realçar coma e cauda de poeira**, no painel do
+invisível, como numa exposição curta. **Realçar coma e caudas**, no painel do
 cometa, passa a uma escala asinh como em astrofotografia, levando a coma a 1/5 do ápice
 na atividade de referência a I/F 0,15 e chegando ao preto cinco ordens abaixo; assim a
 cauda, milhares de vezes mais tênue por área, aparece junto. A escala não é linear, e
@@ -370,8 +370,25 @@ cauda (órbita osculante do estado atual) e o trajeto desenhado (uma revolução
 órbita osculante, redesenhada a cada 20 dias simulados, nova data ou troca de fonte)
 seguem esse estado.
 
-Limites: a cauda de íons não é desenhada; jatos, rotação, fragmentação, explosões e o
-rastro de grãos grandes ao longo da órbita também não.
+**Cauda de íons.** Íons de CO+ produzidos pela água medida (67P: 3,5×10²⁸ s⁻¹ perto de
+1,3 UA, Hansen et al. 2016; Halley: ~5,5×10²⁹ s⁻¹ a 0,89 UA, Krankowsky et al. 1986),
+escalada com a atividade da poeira, vezes CO/H₂O (67P < 1,9%, VIRTIS-H; Halley ~11%,
+Eberhardt et al. 1987) e a fração das fotodestruições do CO que ionizam (6×10⁻⁷ contra
+5×10⁻⁷ s⁻¹ a 1 UA; Huebner et al. 1992; Huebner e Mukherjee 2015). O eixo segue o vento
+solar de 400 km/s visto do núcleo em movimento (aberração). Os íons aceleram de 10 km/s
+a ~260 km/s numa escala de 3×10⁶ km, passando pelos 58 km/s medidos entre 4 e 9×10⁵ km
+(Saito et al. 1987), ionizam ao longo do comprimento de escala do CO neutro e se espalham
+numa gaussiana de ~3×10³ km no núcleo a 3,3×10⁴ km, abrindo cerca de 1°. A coluna dá o
+brilho das bandas (2,0)+(3,0) do CO+, 3,06×10⁻¹⁴ erg s⁻¹ por íon a 1 UA (Rousselot et al.
+2024), como I/F equivalente numa banda azul de 100 nm; a fita voltada para a câmera
+recebe a coluna exata de um cilindro gaussiano, dividida pelo seno entre visada e eixo.
+No Halley de 1986 isso dá alguns 10⁻⁹ em I/F a 10⁶ km, perto da cauda de poeira; na 67P,
+pobre em CO, a cauda de íons fica abaixo até do realce, como foi observado. A largura,
+a escala de aceleração e a soma de bandas são aproximações declaradas; o H₂O+ (vermelho)
+não entra.
+
+Limites: jatos, rotação, fragmentação, explosões, raios e torções da cauda de íons e o
+rastro de grãos grandes ao longo da órbita não são desenhados.
 
 ## Formas artísticas dos pequenos corpos
 

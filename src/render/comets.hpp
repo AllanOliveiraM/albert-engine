@@ -13,8 +13,8 @@ namespace albert {
 // Finson-Probstein grains drawn as a sheet whose albedo cross-section per area sets
 // its brightness. Physical brightness by default, as in short exposures, where both
 // are nearly invisible; the optional stretch uses an asinh scale, as astrophotography
-// does, so the tail, orders of magnitude fainter, shows with the coma. The ion tail
-// is not drawn.
+// does, so the tail, orders of magnitude fainter, shows with the coma. Ion tail: CO+
+// fluorescence along the aberrated solar-wind axis (core::ionColumn), as a ribbon.
 class CometVisuals {
 public:
     explicit CometVisuals(threepp::Scene& scene);

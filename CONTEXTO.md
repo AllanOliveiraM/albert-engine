@@ -578,8 +578,10 @@ planetas), `updateLocalSystem` aceita estados tabelados, coma/cauda pelo estado
 osculante (`core::osculating`) e trajeto por `core::revolution` (redesenhado após 20
 dias, nova data ou troca de fonte depois da transição; antes ficava com o estado de
 dois corpos do instante do salto). Programa real: 67P a 1,340 UA em 23/09/2015 (antes
-1,83), Halley a 0,888 UA em 13/03/1986. Pendentes: cauda de íons (CO+, antissolar com
-aberração ~400 km/s; brilho exige fonte medida), jatos e rastro de grãos grandes.
+1,83), Halley a 0,888 UA em 13/03/1986. Cauda de íons entregue depois
+(`core::ionProduction/ionTailAxis/ionSpeed/ionWidth/ionColumn/ionReflectance`, fita voltada
+para a câmera em `render/comets`; fontes em `docs/LOCAL_SYSTEM.md`); a 67P, pobre em CO,
+fica sem cauda visível. Pendentes: jatos, raios da cauda de íons e rastro de grãos grandes.
 
 Ceres (entregue): DLR HAMO `CE_HAMO_G_00N_180E_EQU_CLR.IMG` (21093×10546, 58,59
 px/grau, SHA e8f5fee4…, 8,9% sem dado, sobretudo polos) → 21600×10800 com `fill_gaps`
@@ -662,5 +664,5 @@ posições da nova data (`pendingEvent`); eclipses vistos do Sol/da Terra, comet
 realce e distância de 30 ápices ou metade da cauda de 10 dias. Eclipse de 2027
 conferido: sombra sobre Luxor como na carta da NASA.
 
-Próxima ação concreta: cauda de íons (se houver fonte medida para o brilho), mais
-cenários/gravação (Média 5) ou validação em Windows nativo (Alta 5, depende do Allan).
+Próxima ação concreta: mais cenários/gravação (Média 5), luas com tabelas do Horizons
+quando em foco (Média 1) ou validação em Windows nativo (Alta 5, depende do Allan).
