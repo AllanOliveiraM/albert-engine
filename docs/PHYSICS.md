@@ -46,6 +46,11 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
   passo à metade move o ponto final 0,22 m (critério <1 m).
 - Pad, liberação no empuxo, acelerômetro e pouso.
 
+## API
+
+`FlightService` (gRPC, lockstep) expõe o voo a software externo e espelha o veículo na
+cena; ver [RPC.md](RPC.md#voo-físico-em-lockstep).
+
 ## Veículos
 
 - `nescSphere`, `nescTwoStage`: modelos DAVE-ML da NESC convertidos para SI. O foguete da

@@ -16,7 +16,7 @@ struct Append {ObjectId id;std::vector<Sample> values;};
 struct Replace {ObjectId id;std::vector<Sample> values;};
 struct Focus {ObjectId id;bool reset=false;};
 struct Orbit {double azimuthRadians=0,elevationRadians=0,distanceScale=1;};
-struct SetTime {std::optional<double> utcSeconds,rate;bool live=false;}; // Unset fields keep their value.
+struct SetTime {std::optional<double> utcSeconds,rate;bool live=false,hold=false;}; // Unset fields keep their value; hold moves the instant without a discontinuity.
 using Command=std::variant<Create,Remove,Visibility,Append,Replace,Focus,Orbit,InstallModel,RemoveModel,CreateLayer,RemoveLayer,LayerVisibility,SetTime>;
 enum class Code {Ok,Invalid,NotFound,Exhausted,Unavailable,Cancelled};
 struct Reply {Code code=Code::Ok;std::string message;std::uint64_t revision=0;};

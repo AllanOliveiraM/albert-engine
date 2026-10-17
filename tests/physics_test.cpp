@@ -1,4 +1,5 @@
 #include "physics/vehicles.hpp"
+#include "gravity_turn.hpp"
 #include <erfa.h>
 #include <cmath>
 #include <cstdio>
@@ -138,6 +139,25 @@ int main(){try{
         Environment d=nesc(false,true,false);d.ground=0;const Vehicle sphere=nescSphere();
         Flight drop(sphere,d,Flight::free(d,sphere,0,{0,0,100},{},{}));Tt t=0;while(t<10*second)t+=drop.advance(10*second-t);
         require(drop.state().landed&&std::abs(drop.sample().geodetic.height)<1e-6&&norm(drop.sample().fixedVelocity)<1e-9,"Touchdown");
+    }
+    // The example flight computer (examples/gravity_turn.hpp) flies the generic launcher to orbit at 50 Hz.
+    {
+        namespace ex=albert::example;auto vec=[](V3 v){return ex::Vec{v.x,v.y,v.z};};
+        Environment e;e.ground=0;const Vehicle v=genericLauncher();
+        Flight f(v,e,Flight::pad(e,v,ttFromUtc(1792238400.),{28.6082*deg,-80.6041*deg,0},90*deg,90*deg));
+        ex::GravityTurn g(90*deg);const Tt t0=f.state().time;double maxq=0;
+        while(g.phase()!=ex::GravityTurn::Phase::orbit&&f.state().time-t0<900*second&&!f.state().landed){
+            const Sample s=f.sample();ex::Reading r;r.elapsed=secondsSinceJ2000(f.state().time-t0);r.height=s.geodetic.height;r.nedVelocity=vec(s.nedVelocity);
+            r.qw=s.nedAttitude.w;r.qx=s.nedAttitude.x;r.qy=s.nedAttitude.y;r.qz=s.nedAttitude.z;r.rate=vec(f.state().rate);r.specificForce=vec(s.specificForce);
+            r.position=vec(f.state().position);r.velocity=vec(f.state().velocity);r.stage=f.state().stage;r.burning=f.state().burning;r.clamped=f.state().clamped;r.propellant=f.state().propellant;
+            const auto c=g.step(r);if(c.ignite)f.ignite();if(c.separate)f.separate();if(c.cutoff)f.cutoff();f.gimbal(c.gimbalPitch,c.gimbalYaw);f.torque({c.torque.x,c.torque.y,c.torque.z});
+            maxq=std::max(maxq,s.dynamicPressure);
+            for(Tt left=20*second/1000;left>0;)left-=f.advance(left);
+        }
+        const double perigee=ex::GravityTurn::perigee(vec(f.state().position),vec(f.state().velocity)),r=norm(f.state().position),v2=dot(f.state().velocity,f.state().velocity);
+        const double a=1/(2/r-v2/3.986004418e14),apogee=2*a-perigee-2*6378137.;
+        std::printf("example guidance: orbit %.0f x %.0f km after %.0f s, %.0f kg left, max q %.0f Pa\n",perigee/1e3,apogee/1e3,secondsSinceJ2000(f.state().time-t0),f.state().propellant,maxq);
+        require(g.phase()==ex::GravityTurn::Phase::orbit&&perigee>=180e3&&apogee<300e3&&f.state().propellant>0&&maxq<6e4,"Example guidance reaches orbit");
     }
     std::cout<<"physics_test: ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

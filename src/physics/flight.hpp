@@ -27,11 +27,12 @@ struct Stage {
     V3 inertiaFull,inertiaEmpty;                      // Principal moments about the CG (kg m²).
     double thrust=0,exhaust=0,exitArea=0;             // Vacuum N, effective exhaust m/s, nozzle exit m².
     double nozzle=0,gimbal=0,minThrottle=1;           // Pivot (m aft), max deflection (rad), deepest throttle.
+    double length=1;                                  // Stack length (m), for display.
     Aerodynamics aero;
 };
 // torque: ideal attitude torque limit (N m per axis). inertiaRate scales the İω term and
 // jetDamping enables the exhaust momentum flux: 1/true is the complete variable-mass model.
-struct Vehicle {std::string name;std::vector<Stage> stages;double torque=0,inertiaRate=1;bool jetDamping=true;};
+struct Vehicle {std::string name;std::vector<Stage> stages;double torque=0,inertiaRate=1;bool jetDamping=true;double diameter=1;};
 
 struct Environment {
     Planet planet=earth;
@@ -57,6 +58,7 @@ struct Sample {
     Air air;Geodetic geodetic{};
     V3 fixedPosition,fixedVelocity,nedVelocity; // ECEF m, m/s; velocity relative to the ground in NED.
     V3 euler;                  // Yaw, pitch, roll relative to local NED (rad, 3-2-1).
+    Q nedAttitude;             // Body to local NED.
     V3 specificForce;          // Non-gravitational acceleration, body axes (what an ideal IMU measures).
     V3 aeroForce,aeroMoment,thrustForce,acceleration,gravity; // Body N, N m about the CG; inertial m/s².
 };

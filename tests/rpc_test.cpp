@@ -2,7 +2,9 @@
 #include "model_fixture.hpp"
 #include "albert/v1/engine.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -24,7 +26,7 @@ int main(){try{
                 else if constexpr(std::is_same_v<T,Visibility>)registry.visible(value.id,value.enabled);
                 else if constexpr(std::is_same_v<T,Append>)registry.samples(value.id,std::move(value.values));
                 else if constexpr(std::is_same_v<T,Focus>){registry.get(value.id);camera.target=value.id;registry.cameraChanged();}
-                else if constexpr(std::is_same_v<T,SetTime>){if(value.live)simulation.live();else simulation.choose(value.utcSeconds,value.rate);}
+                else if constexpr(std::is_same_v<T,SetTime>){if(value.live)simulation.live();else if(value.hold&&value.utcSeconds)simulation.stall(*value.utcSeconds);else simulation.choose(value.utcSeconds,value.rate);}
             },command);return Reply{Code::Ok,{},registry.revision()};});
             const auto simulated=simulation.read();
             auto snapshot=registry.snapshot(simulated.utcSeconds,camera);snapshot.simulation=simulated;snapshot.clock.utcSeconds=100.5;snapshot.clock.quality=albert::time::Quality::Holdover;
@@ -86,6 +88,35 @@ int main(){try{
     {grpc::ClientContext c;api::VisibilityRequest request;request.set_id(layer.id());request.set_visible(false);require(layers->SetVisibility(&c,request,&applied).ok(),"Layer visibility routed to object service");}
     {bool found=false;for(int i=0;i<100&&!found;++i){grpc::ClientContext c;api::Layers result;require(layers->ListLayers(&c,{},&result).ok(),"Layer query failed");if(result.layers_size()==1){const auto& l=result.layers(0);found=l.id()==layer.id()&&!l.visible()&&l.anchor_id()=="earth"&&l.point_count()==41;}if(!found)std::this_thread::sleep_for(std::chrono::milliseconds(1));}require(found,"Layer metadata/snapshot lost");}
     {grpc::ClientContext c;api::ObjectRequest request;request.set_id(layer.id());require(layers->RemoveLayer(&c,request,&applied).ok(),"Layer removal RPC failed");}
+    {   // Flight: pad, lockstep steps, events, atomic commands, scene mirror and clock.
+        auto flight=api::FlightService::NewStub(channel);api::FlightSample s;
+        api::CreateFlightRequest create;create.set_vehicle(api::GENERIC_LAUNCHER);create.set_heading_degrees(90);create.set_utc_unix_seconds(1792238400.);
+        create.mutable_site()->set_latitude_degrees(28.6082);create.mutable_site()->set_longitude_degrees(-80.6041);
+        {grpc::ClientContext c;api::StepRequest r;r.set_ticks(1);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Step without flight accepted");}
+        {grpc::ClientContext c;api::CreateFlightRequest bad=create;bad.set_step_seconds(1);require(flight->CreateFlight(&c,bad,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Invalid step accepted");}
+        {grpc::ClientContext c;const auto st=flight->CreateFlight(&c,create,&s);if(!st.ok())std::cerr<<st.error_message()<<"\n";require(st.ok(),"CreateFlight failed");}
+        require(s.clamped()&&s.tick()==0&&std::abs(s.specific_force_meters_per_second2().x()-9.79)<.02&&s.stages()==2,"Pad sample");
+        {const auto snap=bridge.snapshot();require(snap&&std::any_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Vehicle not in the scene");}
+        require(simulation.read().utcSeconds==1792238400.&&simulation.read().rate==0,"Clock not set to the flight");
+        {grpc::ClientContext c;api::StepRequest r;r.set_ticks(5);r.add_commands()->set_ignite(true);r.add_commands()->set_throttle(std::nan(""));
+            require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"NaN throttle accepted");}
+        {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&!s.burning()&&s.tick()==0,"A rejected step changed the flight");}
+        {grpc::ClientContext c;api::StepRequest r;r.set_ticks(3000);r.add_commands()->set_ignite(true);require(flight->Step(&c,r,&s).ok(),"Step failed");}
+        require(s.tick()==3000&&std::abs(s.elapsed_seconds()-3)<1e-9&&!s.clamped()&&s.geodetic().height_meters()>10&&s.events_size()==1&&s.events(0).kind()==api::FlightEvent::LIFTOFF,"Liftoff");
+        {grpc::ClientContext c;api::StepRequest r;r.set_ticks(1);r.add_commands()->set_separate(true);r.add_commands()->set_separate(true);
+            require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Separating past the last stage accepted");}
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        {grpc::ClientContext c;api::StepRequest r;r.set_ticks(100);require(flight->Step(&c,r,&s).ok()&&s.stage()==0,"Step after rejection");}
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        require(std::abs(simulation.read().utcSeconds-s.utc_unix_seconds())<1e-6,"Clock follows the flight");
+        {grpc::ClientContext c;api::StepRequest r;r.set_ticks(1);r.add_commands()->set_separate(true);require(flight->Step(&c,r,&s).ok()&&s.stage()==1,"Separation");}
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        {const auto snap=bridge.snapshot();const auto o=std::find_if(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";});
+            require(o!=snap->objects.end()&&o->appearance.sizeMeters.y==27,"Upper stack shown after separation");}
+        {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        {const auto snap=bridge.snapshot();require(std::none_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Vehicle left in the scene");}
+    }
     bridge.close();{grpc::ClientContext c;require(scene->CreateObject(&c,create,&applied).error_code()==grpc::StatusCode::UNAVAILABLE,"Shutdown did not reject commands");}
-    std::cout<<"gRPC OK: create/focus/stream/remove, validation, revisions, snapshots and shutdown\n";return 0;
+    std::cout<<"gRPC OK: create/focus/stream/remove, validation, revisions, snapshots, flight and shutdown\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

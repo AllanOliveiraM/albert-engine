@@ -2094,7 +2094,7 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::RemoveLayer>)registry.removeLayer(value.id);
                     else if constexpr(std::is_same_v<T,albert::core::LayerVisibility>)registry.layerVisible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Focus>) setFocus(value.id,value.reset);
-                    else if constexpr(std::is_same_v<T,albert::core::SetTime>) {if(value.live)simulation.live();else simulation.choose(value.utcSeconds,value.rate);}
+                    else if constexpr(std::is_same_v<T,albert::core::SetTime>) {if(value.live)simulation.live();else if(value.hold&&value.utcSeconds)simulation.stall(*value.utcSeconds);else simulation.choose(value.utcSeconds,value.rate);}
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
                             throw std::invalid_argument("Invalid orbit parameters");

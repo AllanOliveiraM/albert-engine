@@ -81,6 +81,7 @@ Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 | Camadas | Pontos e linhas programáveis, inclusive sobre o relevo terrestre, com controle no menu |
 | Catálogo local | Categorias, busca aproximada e foco em corpos já incluídos; objetos adicionais entram pela API |
 | Controle externo | API gRPC local para consultar a cena, importar GLB estático, criar/remover objetos e transmitir posição, velocidade e orientação |
+| Física de voo | Foguete de seis graus de liberdade da superfície à órbita, comandado em lockstep por software externo; validado contra casos da NASA. [Modelos e limites](docs/PHYSICS.md) |
 | Distribuição | Executável portátil para Linux e Windows, com a biblioteca visual acompanhando o programa |
 
 ## Como funciona
@@ -255,6 +256,18 @@ O servidor é ativado com `--rpc` e aceita conexões em `127.0.0.1`.
 O [guia gRPC](docs/RPC.md) traz os comandos Windows, contrato, coordenadas,
 limites, streaming e remoção do exemplo.
 
+**Voo físico.** `albert_flight_client` faz o papel de um computador de voo externo:
+lê os sensores simulados (IMU, pressão, posição) e comanda motor, cardã e
+estagiamento de um lançador genérico de dois estágios, de Kennedy até a órbita, passo a
+passo. O Albert integra o voo (gravidade, atmosfera padrão, rotação da Terra, massa
+variável) e mostra o veículo na cena:
+
+```sh
+./build/linux/src/rpc/albert_flight_client
+```
+
+O veículo genérico usa números públicos aproximados; não representa um foguete real.
+
 Essa base permite construir integradores de simulação e ferramentas educativas.
 O primeiro catálogo interno já reutiliza o Horizons. O suporte inicial a GLB estático também está disponível. Pontos e linhas geográficas também podem ser adicionados por gRPC.
 Texturas/animação de modelos, polígonos, rótulos, camadas raster e novas fontes
@@ -298,6 +311,7 @@ deve preservar precisão, fluidez e compatibilidade Linux/Windows.
 - [Roadmap e andamento](ROADMAP.md)
 - [Compilação, arquitetura, precisão e validação](docs/DEVELOPMENT.md)
 - [API gRPC e exemplo de integração](docs/RPC.md)
+- [Física de voo: modelos, limites e validação](docs/PHYSICS.md)
 - [Fontes das imagens e dos dados](assets/README.md)
 - [Preparação da biblioteca visual](docs/ASSETS.md)
 - [Dependências e créditos](THIRD_PARTY.md)

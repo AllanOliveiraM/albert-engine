@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "flight.hpp"
 #include "core/model.hpp"
 #include "core/layers.hpp"
 #include "catalog/catalog.hpp"
@@ -178,12 +179,12 @@ struct LayerServices final:api::LayerService::Service {
     grpc::Status RemoveLayer(grpc::ServerContext* c,const api::ObjectRequest* r,api::Applied* out)override{return services.RemoveLayer(c,r,out);}
     grpc::Status SetVisibility(grpc::ServerContext* c,const api::VisibilityRequest* r,api::Applied* out)override{return services.apply(c,core::LayerVisibility{r->id(),r->visible()},out);}
 };
-struct Server::Impl {core::Bridge& bridge;Services services;LayerServices layers;std::unique_ptr<grpc::Server> server;int port=0;explicit Impl(core::Bridge& b,catalog::Manager* c):bridge(b),services(b,c),layers(services){}};
+struct Server::Impl {core::Bridge& bridge;Services services;LayerServices layers;FlightServices flights;std::unique_ptr<grpc::Server> server;int port=0;explicit Impl(core::Bridge& b,catalog::Manager* c):bridge(b),services(b,c),layers(services),flights(b){}};
 Server::Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog):impl_(std::make_unique<Impl>(bridge,catalog)){
     if(port>65535)throw std::invalid_argument("Invalid gRPC port");grpc::ServerBuilder builder;
     builder.AddListeningPort("127.0.0.1:"+std::to_string(port),grpc::InsecureServerCredentials(),&impl_->port);
     builder.RegisterService(static_cast<api::SceneService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CameraService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::TimeService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::CatalogService::Service*>(&impl_->services));builder.RegisterService(static_cast<api::AssetService::Service*>(&impl_->services));
-    builder.RegisterService(&impl_->layers);
+    builder.RegisterService(&impl_->layers);builder.RegisterService(&impl_->flights);
     builder.SetMaxReceiveMessageSize(1024*1024);builder.SetMaxSendMessageSize(4*1024*1024);
     grpc::ResourceQuota quota;quota.SetMaxThreads(16);quota.Resize(64*1024*1024);builder.SetResourceQuota(quota);
     builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::NUM_CQS,1);

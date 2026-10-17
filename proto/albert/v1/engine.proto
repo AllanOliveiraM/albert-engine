@@ -167,3 +167,56 @@ service LayerService {
   rpc SetVisibility(VisibilityRequest) returns (Applied);
   rpc RemoveLayer(ObjectRequest) returns (Applied);
 }
+// Flight: one 6-DOF vehicle integrated in lockstep by Albert's physics core (docs/PHYSICS.md).
+// Commands apply at the current tick; Step then advances `ticks` fixed steps and returns
+// the sample at the new tick. Body axes: x forward, y right, z down. The scene shows the
+// vehicle as object "flight" and the simulated clock follows the flight while it is not live.
+message Geodetic { double latitude_degrees=1; double longitude_degrees=2; double height_meters=3; }
+enum Vehicle { VEHICLE_UNSPECIFIED=0; GENERIC_LAUNCHER=1; NESC_TWO_STAGE=2; NESC_SPHERE=3; }
+message CreateFlightRequest {
+  Vehicle vehicle=1;
+  optional double payload_kilograms=2;   // GENERIC_LAUNCHER only; default 5000.
+  Geodetic site=3;                      // Clamped on the pad; the ground is the site height.
+  double heading_degrees=4;             // Body x azimuth, clockwise from north.
+  optional double pitch_degrees=5;      // Above the horizon; default 90 (vertical).
+  optional double utc_unix_seconds=6;   // Default: the current simulated instant.
+  optional double step_seconds=7;       // Default 0.001; 1e-5 to 0.1.
+  bool focus_camera=8;
+}
+message Gimbal { double pitch_radians=1; double yaw_radians=2; } // + pitch: nose up; + yaw: nose right.
+message FlightCommand {
+  oneof command {
+    bool ignite=1; bool cutoff=2; bool separate=3; bool release=4;
+    double throttle=5;                  // Clamped to the stage's deepest throttle and 1.
+    Gimbal gimbal=6;                    // Clamped to the stage's limit.
+    Vector3 torque_newton_meters=7;     // Ideal attitude torque, body axes, clamped per axis.
+  }
+}
+message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; } // Up to 600000 ticks.
+message FlightEvent {
+  enum Kind { KIND_UNSPECIFIED=0; LIFTOFF=1; DEPLETED=2; TOUCHDOWN=3; }
+  Kind kind=1; double elapsed_seconds=2; uint32 stage=3;
+}
+message FlightSample {
+  uint64 tick=1; double elapsed_seconds=2; double utc_unix_seconds=3;
+  // Ideal sensors at the centre of mass: IMU specific force (zero in free fall) and
+  // angular rate relative to inertial space, static pressure and air temperature.
+  Vector3 specific_force_meters_per_second2=4; Vector3 angular_rate_radians_per_second=5;
+  double static_pressure_pascals=6; double air_temperature_kelvin=7;
+  // Truth.
+  Vector3 position_meters=8; Vector3 velocity_meters_per_second=9; Quaternion attitude=10; // GCRF; body to GCRF.
+  Vector3 position_ecef_meters=11; Vector3 velocity_ecef_meters_per_second=12; Geodetic geodetic=13;
+  Vector3 velocity_ned_meters_per_second=14; Quaternion attitude_ned=15; // Relative to the ground; body to NED.
+  double mach=16; double dynamic_pressure_pascals=17; double alpha_radians=18; double beta_radians=19; double air_density_kilograms_per_meter3=20;
+  uint32 stage=21; uint32 stages=22; double propellant_kilograms=23; double mass_kilograms=24; double thrust_newtons=25;
+  bool burning=26; bool clamped=27; bool landed=28; double throttle=29; Gimbal gimbal=30;
+  repeated FlightEvent events=31;       // Since the previous Step.
+  uint64 state_hash=32;                 // Same commands and steps reproduce it.
+  string vehicle=33; double step_seconds=34;
+}
+service FlightService {
+  rpc CreateFlight(CreateFlightRequest) returns (FlightSample); // Replaces any current flight.
+  rpc Step(StepRequest) returns (FlightSample);
+  rpc GetFlight(Empty) returns (FlightSample);
+  rpc EndFlight(Empty) returns (Applied);                       // Removes the vehicle from the scene.
+}

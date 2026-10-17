@@ -249,6 +249,48 @@ O exemplo marca três localizações no Brasil e desenha uma linha ilustrativa;
 não representa uma rota real. Polígonos, rótulos, importação GeoJSON, ícones
 personalizados e camadas raster ainda são próximas entregas.
 
+## Voo físico em lockstep
+
+`FlightService` controla um veículo de seis graus de liberdade integrado pelo núcleo de
+física do Albert ([PHYSICS.md](PHYSICS.md)); o software externo faz o papel do
+computador de voo. `CreateFlight` põe o veículo preso no pad (`GENERIC_LAUNCHER`,
+`NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
+instante exibido), com passo fixo de 1 ms (de 10 µs a 100 ms). Cada `Step` aplica os
+comandos — todos ou nenhum — e avança `ticks` passos (até 600 mil); a resposta traz a
+amostra do novo tick. Assim, comandos do tick *k* produzem os sensores do tick *k+1*,
+e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
+
+| Comando | Efeito |
+| --- | --- |
+| `ignite`, `cutoff` | Liga/desliga o motor do estágio ativo |
+| `separate` | Solta o estágio ativo; o CG passa ao conjunto superior |
+| `release` | Solta as garras do pad (também ocorre sozinho quando o empuxo supera o peso) |
+| `throttle` | 0–1, limitado ao mínimo do motor |
+| `gimbal` | Cardã em arfagem/guinada (rad), limitado ao curso do motor |
+| `torque_newton_meters` | Torque ideal de atitude nos eixos do corpo, limitado por eixo |
+
+A amostra traz sensores ideais no centro de massa (força específica do IMU — zero em
+queda livre, +g no pad —, taxa angular inercial, pressão estática e temperatura do ar),
+a verdade em GCRF, ECEF, geodésica e NED, dados de ar (Mach, pressão dinâmica, α, β),
+massa, propelente, empuxo e eventos desde o passo anterior (`LIFTOFF`, `DEPLETED`,
+`TOUCHDOWN`). Eixos do corpo: x à frente, y à direita, z para baixo.
+
+Enquanto o voo existe, a cena mostra o veículo como o objeto `flight` (cilindro com o
+comprimento do conjunto atual) e o relógio simulado acompanha o tempo de voo, pausado
+entre passos; ao voltar ao horário ao vivo, o voo continua, mas a cena deixa de
+segui-lo. `EndFlight` remove o veículo.
+
+O exemplo [flight_client.cpp](../examples/flight_client.cpp) leva o lançador genérico
+de Kennedy (LC-39A) à órbita com a lógica de [gravity_turn.hpp](../examples/gravity_turn.hpp):
+subida vertical, pitch kick, gravity turn sem incidência, controle da taxa vertical no
+segundo estágio e corte quando o perigeu passa de 180 km (órbita ~180 × 212 km em 421 s).
+
+```sh
+./build/linux/bin/AlbertEngine --rpc
+./build/linux/src/rpc/albert_flight_client            # tempo real
+./build/linux/src/rpc/albert_flight_client --fast     # o mais rápido possível
+```
+
 ## Coordenadas e tempo
 
 - Posições em metros e velocidades em m/s, no **ICRF com origem no centro da Terra**.
