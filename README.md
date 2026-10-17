@@ -4,6 +4,8 @@
 
 <h1 align="center">Albert Engine</h1>
 
+[![Build and tests](https://github.com/AllanOliveiraM/albert-engine/actions/workflows/build.yml/badge.svg)](https://github.com/AllanOliveiraM/albert-engine/actions/workflows/build.yml)
+
 <p align="center">Exploração astronômica em 3D, com dados reais e controle programável.</p>
 
 <p align="center">
@@ -221,6 +223,15 @@ Texturas/animação de modelos, polígonos, rótulos, camadas raster e novas fon
 públicas são próximas entregas.
 
 ## Criar uma versão para compartilhar
+
+O GitHub Actions também gera os pacotes dos dois sistemas. Em **Actions → Portable
+releases → Run workflow**, você pode testar o empacotamento e baixar os artefatos.
+Ao enviar uma tag de versão, como `v0.2.1`, ele compila, testa e publica a release
+automaticamente. [Instruções de publicação](docs/DEVELOPMENT.md#releases-no-github-actions).
+
+Como a biblioteca visual ultrapassa o limite por arquivo das releases do GitHub,
+o ZIP é dividido em volumes. Baixe todas as partes do seu sistema na mesma pasta
+e abra a `.zip.001` com 7-Zip para extrair. O programa fica na raiz da pasta extraída.
 
 Execute `make dist` no Linux ou `.\make.cmd dist` no Windows. Depois, zipe
 **a pasta inteira** `dist/linux` ou `dist/windows`.

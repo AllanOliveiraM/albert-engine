@@ -1,10 +1,61 @@
 # Albert Engine — contexto para continuidade
 
+**Ponto de parada solicitado pelo Allan (17/10/2026):** tokens acabando; encerrar
+em estado seguro para outro modelo. Última entrega: correção LF/CRLF do Windows,
+badge e workflow de releases. Não iniciar outra feature antes de ler este estado.
+Primeiro conferir o Actions do commit mais recente; depois retomar **Mimas**.
+
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/LOCAL_SYSTEM.md` e `docs/RPC.md`.
 Este registro acompanha a entrega das formas medidas de Fobos e Deimos.
 **A etapa de fidelidade das luas ainda tem seis corpos pendentes.** Atualizar este
 arquivo ao concluir essa etapa, conforme pedido do Allan, e a cada entrega relevante.
+
+### Atualização — CI e releases (17/10/2026)
+
+O Allan reportou falha Windows/MSVC no Actions: hash de `countries.geojson`.
+`core.autocrlf` alterava LF para CRLF; `.gitattributes` agora usa `assets/** -text`
+para preservar bytes. Não mudar hashes para aceitar a corrupção. Regressão de
+checkout Windows em `tests/asset_checkout_fixture.py`, executada antes de configurar.
+Badge **Build and tests** incluído no README, com a URL pedida pelo usuário.
+
+O usuário também autorizou geração automática de distribuições no Actions:
+`.github/workflows/release.yml`, tags `v[0-9]*` publicam após os dois builds/testes;
+execução manual produz somente artefatos. Linux Debian 12/glibc 2.36+, Windows
+MSVC x64. CI normal de branches/PRs permanece sem geração de dist.
+ZIPs usam volumes até 1900 MiB, pois cada anexo GitHub deve ter menos de 2 GiB.
+`scripts/package-release.py` escreve volumes por streaming, preserva modo Linux,
+ZIP64 e gera SHA-256; nenhuma cópia integral do ZIP na RAM. Usuário baixa todas
+as partes e extrai `.zip.001` com 7-Zip. Documentado em `docs/DEVELOPMENT.md`.
+Testes adicionais: `asset_checkout` e `release_archive`; total Linux agora 25.
+Releases públicas/tags não foram criadas manualmente nesta sessão.
+
+Mimas: pesquisa começou, sem alterar inventário/pacote ainda. Originais obtidos
+em `asset-packs/moons/sources/` (ignorados): `mimas_ver128q.tab` Gaskell/PDS,
+99.846 vértices (98.306 usados), 196.608 placas, coordenadas km; e
+`mimas-cassini-lpi.jpg` 6356×3178, Schenk/LPI/Cassini. LPI declara mapas como
+propriedade pública com créditos em https://www.lpi.usra.edu/icy_moons/.
+Essa imagem tem cores realçadas; não declarar cor natural. Registro/projeção
+precisam ser conferidos antes da integração. `mimas-pia14926-fig1.jpg` baixado
+é HTML redirecionado, **não é uma imagem válida**. Há atlas NASA GLB alternativo.
+Retomar Mimas após fechar os ajustes de CI/releases.
+
+Validação do corte de CI/releases: build incremental Linux e **25 CTests passaram**;
+workflows passaram no actionlint 1.7.12. Testes pequenos verificam CRC, conteúdo,
+modo executável, volumes e hashes. Teste adicional com payload esparso acima de
+2 GiB gerou dois volumes ZIP64 e passou no `7z t` (7-Zip 26.02), sem criar uma
+distribuição real. Fixture de releases também passou no Python 3.11 do container.
+O container antigo `albert-toolchains` não tem Git: a regressão de checkout não
+roda nele até instalar Git ou reconstruir a imagem. **Dockerfile.build agora
+declara Git**, necessário para esse teste; o teste passou no host com Git.
+
+**Ainda não validado:** execução integral do novo workflow em GitHub-hosted
+Linux/Windows, build MSVC após a correção e publicação/upload de releases reais.
+Não declarar Actions verde sem consultar o resultado remoto. Nenhuma tag ou
+release pública foi criada, nenhum empacotamento real local foi gerado.
+A publicação ocorre apenas em tags; a execução manual só cria artefatos.
+Como estamos numa feature branch, o workflow manual precisa chegar à branch
+padrão para aparecer na lista do GitHub. Não fazer merge/tag automaticamente.
 
 ## Como trabalhar com o Allan
 

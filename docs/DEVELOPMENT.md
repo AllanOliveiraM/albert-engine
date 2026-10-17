@@ -163,6 +163,54 @@ Os testes Linux são executados no container. Testes do executável Windows prec
 de Windows ou Wine e não são executados automaticamente por esse script.
 O caminho `build/portable-*` separa esses builds dos builds nativos.
 
+## Releases no GitHub Actions
+
+O workflow `.github/workflows/release.yml` gera Linux x64 em Debian 12
+(glibc 2.36+) e Windows x64 com MSVC no Windows Server 2022. As dependências
+continuam declaradas pelo projeto; não instala o Albert na máquina de destino.
+Os dois builds e testes precisam passar antes da publicação automática.
+
+Para testar sem publicar, abra **Actions → Portable releases → Run workflow**.
+Os artefatos `portable-linux-x64` e `portable-windows-x64` ficam disponíveis
+por três dias. Se o workflow ainda não aparecer, a definição precisa estar
+na branch padrão do repositório; depois é possível selecionar a branch desejada.
+
+Para publicar uma versão, atualize a versão do projeto e envie uma tag sobre
+o commit que deseja distribuir, por exemplo:
+
+```sh
+git tag -a v0.2.1 -m "Albert Engine 0.2.1"
+git push origin v0.2.1
+```
+
+O workflow publica a tag existente; não cria tags por conta própria. Tags com
+sufixo, como `v0.2.1-rc1`, geram pré-releases. Reexecutar uma tag existente
+substitui seus anexos; releases imutáveis continuam protegidas pelo GitHub.
+O CI comum de branches/PRs não gera distribuições.
+
+Cada pacote contém o executável na raiz, os assets e bibliotecas/licenças
+necessários, sem código, logs, cache ou README. Os arquivos `.sha256` ficam
+ao lado dos downloads, fora da pasta do programa. O ZIP preserva a permissão
+de execução Linux e inclui arquivos grandes com ZIP64.
+
+O [GitHub limita cada anexo de release a menos de 2 GiB](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
+Por isso `scripts/package-release.py` escreve volumes de até 1900 MiB,
+diretamente em disco, com buffer de 1 MiB e SHA-256. Não mantém o ZIP inteiro
+na RAM nem cria uma segunda cópia completa antes de dividi-lo. Assets já
+comprimidos são armazenados sem recompressão desnecessária.
+
+Baixe todas as partes do sistema desejado, coloque-as na mesma pasta e extraia
+a `.zip.001` com 7-Zip. Após extrair, basta abrir `AlbertEngine` ou
+`AlbertEngine.exe`. Pacotes pequenos são gerados como um `.zip` comum.
+O nome segue `AlbertEngine-<versão>-<linux|windows>-x64.zip.001`.
+
+Os assets têm `-text` em `.gitattributes`: seu conteúdo deve ser preservado
+byte a byte, inclusive no Windows com `core.autocrlf=true`. Não afrouxar os
+hashes de `cmake/Assets.cmake` para contornar conversões de LF/CRLF.
+`tests/asset_checkout_fixture.py` simula esse checkout e confirma rejeição de
+corrupção; `tests/release_fixture.py` verifica reconstrução dos volumes, CRC,
+conteúdo, modos e hashes. Os dois são executados antes do build de releases.
+
 ## Dependências declaradas
 
 As versões e os SHA-256 ficam em `cmake/Dependencies.cmake`. O CMake baixa e compila

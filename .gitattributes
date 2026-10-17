@@ -1,3 +1,5 @@
+# Assets are verified byte for byte. Windows core.autocrlf must not rewrite them.
+assets/** -text
 assets/fonts/OFL.txt -whitespace
 assets/imagery/*.pakpart filter=lfs diff=lfs merge=lfs -text
 assets/imagery/*/*.pakpart filter=lfs diff=lfs merge=lfs -text

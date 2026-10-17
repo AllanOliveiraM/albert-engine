@@ -1,0 +1,120 @@
+name: Portable releases
+
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-release-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: windows-2022
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Check asset checkout and release packager
+        run: |
+          python tests/asset_checkout_fixture.py
+          python tests/release_fixture.py
+      - name: Free hosted Linux runner space
+        if: runner.os == 'Linux'
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+      - name: Build and test portable Linux (Debian 12)
+        if: runner.os == 'Linux'
+        run: bash scripts/build-portable.sh linux
+      - name: Build and test portable Windows (MSVC x64)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # The checkout drive is small; keep build, dist and ZIP volumes on C:.
+          $workspace = Join-Path ($env:SystemDrive + '\') 'albert-release'
+          New-Item -ItemType Directory -Force $workspace | Out-Null
+          & robocopy $env:GITHUB_WORKSPACE $workspace /E /NFL /NDL /NJH /NJS /NP
+          if ($LASTEXITCODE -ge 8) { throw 'Failed to prepare Windows release workspace' }
+          Set-Location $workspace
+          & .\make.cmd render-dist -Jobs 2
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release build or tests failed' }
+          "RELEASE_WORKSPACE=$workspace" >> $env:GITHUB_ENV
+      - name: Archive portable distribution
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          TAG_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == push ]]; then
+            version="$TAG_NAME"
+          else
+            version="preview-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          fi
+          if [[ "$RUNNER_OS" == Windows ]]; then cd "$(cygpath -u "$RELEASE_WORKSPACE")"; fi
+          python scripts/package-release.py "dist/$PLATFORM" release \
+            --name "AlbertEngine-$version-$PLATFORM-x64"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            echo "RELEASE_OUTPUT=$(cygpath -w "$(pwd)/release")" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_OUTPUT=$(pwd)/release" >> "$GITHUB_ENV"
+          fi
+      - name: Upload portable ZIP volumes
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-${{ matrix.platform }}-x64
+          path: ${{ env.RELEASE_OUTPUT }}/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Free hosted runner space for both platforms
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: portable-*-x64
+          path: release
+          merge-multiple: true
+      - name: Publish both platforms after all tests pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          for sums in release/*.sha256; do (cd release && sha256sum --check "$(basename "$sums")"); done
+          cat > release-notes.md <<'NOTES'
+          Versões portáteis para Linux x64 (glibc 2.36+) e Windows x64.
+          Baixe todos os volumes `.zip.001`, `.zip.002`, etc. do seu sistema na mesma pasta.
+          Abra `.zip.001` com 7-Zip e extraia. Abra AlbertEngine / AlbertEngine.exe na pasta extraída.
+          Se houver apenas um `.zip`, extraia normalmente. O pacote já inclui todos os assets.
+          Driver OpenGL 3.3+ necessário. Nenhuma instalação do Albert é exigida.
+          Os arquivos `.sha256` permitem conferir a integridade dos downloads.
+          NOTES
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" release/* --clobber
+          else
+            options=()
+            if [[ "$TAG_NAME" == *-* ]]; then options+=(--prerelease); fi
+            gh release create "$TAG_NAME" release/* --verify-tag \
+              --title "Albert Engine $TAG_NAME" --notes-file release-notes.md "${options[@]}"
+          fi
