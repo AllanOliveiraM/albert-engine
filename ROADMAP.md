@@ -1,6 +1,6 @@
 # Albert Engine — plano de evolução
 
-Documento de planejamento e acompanhamento, atualizado em **16/10/2026**.
+Documento de planejamento e acompanhamento, atualizado em **17/10/2026**.
 A seção de andamento registra as entregas realizadas. Os demais requisitos
 formam o backlog para entregas incrementais conforme as prioridades acordadas.
 Este documento reúne os pedidos, a proposta de arquitetura
@@ -13,17 +13,44 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Completar Mimas, Titã, Hipérion, Febe, Proteu e Nereida | Lua terrestre detalhada; 18 luas adicionais com mapas/IAU; Fobos/Deimos com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
-| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion/Febe já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
-| **Alta — 3** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
-| **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
-| **Alta — 5** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
+| **Alta — 1** | Concluir Mimas (em andamento) | Mosaico Cassini PIA18437 e malha medida de Gaskell escolhidos; corrigir o registro de ~4° do mosaico antes de integrar |
+| **Alta — 2** | Download dos assets por níveis no primeiro uso | Hoje toda a biblioteca de 4,87 GB acompanha o programa; ver seção abaixo |
+| **Alta — 3** | Completar Titã, Hipérion, Febe, Proteu e Nereida | Lua terrestre detalhada; 18 luas adicionais com mapas/IAU; Fobos/Deimos com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
+| **Alta — 4** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion/Febe já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
+| **Alta — 5** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
+| **Alta — 6** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
+| **Alta — 7** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
 | **Média — 1** | Efemérides/orientações locais mais precisas para luas e pequenos corpos, avaliando SPICE | Catálogo adicional usa propagação aproximada de dois corpos |
 | **Média — 2** | NTS e tratamento completo de leap seconds/smear | NTP com múltiplas fontes já existe, sem autenticação criptográfica |
 | **Média — 3** | Texturas GLB/glTF, animação de peças e controles avançados de câmera pela API | GLB estático/PBR sólido e streaming de posição/atitude já existem |
 | **Média — 4** | Rótulos, polígonos/GeoJSON e camadas raster/clima selecionadas | Camadas atuais: pontos e polilinhas; nuvens GIBS continuam opcionais |
 | **Média — 5** | Data de simulação, gravação/reprodução e cenários de eventos/eclipses | Eclipses acompanham a geometria em tempo real; não há seletor de datas históricas |
 | **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
+
+### Download dos assets por níveis — decidido em 17/10/2026
+
+O Allan aprovou trocar a biblioteca embutida por um download no primeiro uso,
+organizado por nível de resolução. Ordem combinada: concluir Mimas, implementar
+este download e então retomar as luas restantes.
+
+- **Hospedagem:** anexos de uma release própria de assets no GitHub, publicada
+  somente quando os assets mudam. Anexos de release não têm limite de banda;
+  o LFS do repositório não serve, pois cada download gastaria a cota da conta.
+  O executável conhece os hashes esperados e recusa dados de outra versão.
+- **Tela de loading dedicada** apenas para o essencial, cerca de 80 MB: nível
+  global de todos os corpos (Terra 5400 px, Lua 6750 px, Mercúrio 5760 px),
+  luas pequenas e malhas medidas. Todo o Sistema Solar fica navegável.
+- **Segundo plano por nível:** Terra/Lua nível 1, depois nível 2 e seguintes;
+  depois Mercúrio e Marte. O corpo em foco passa à frente da fila. Indicador
+  elegante e minimalista no canto, com retentativa e continuação.
+- **O zoom é que fica limitado, não o corpo:** sem o detalhe, mostra-se a melhor
+  resolução já baixada, nunca imagem inventada; o indicador informa o andamento.
+- **Containers por corpo e nível**, cada um com índice e SHA-256 e abaixo do
+  limite de 2 GiB por anexo. Retomada por HTTP Range com `.part`, verificação
+  antes de liberar o nível, retomada ao reabrir; arquivos em `assets/` ao lado
+  do executável, preservando a distribuição portátil.
+- Medição de 17/10/2026: Terra+Lua completas somam 2,85 GB, por isso a
+  prioridade é por nível, não por corpo. O nível 4 concentra cerca de 3,1 GB.
 
 ### Pequenos corpos artísticos — prioridade alta
 
