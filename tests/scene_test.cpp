@@ -20,6 +20,9 @@ int main(){try{
     rejects([&]{scene.create(object());});rejects([&]{scene.remove("earth");});rejects([&]{scene.samples("moon",{{100,{}}});});
     auto bad=object();bad.id="nan";bad.samples[0].positionMeters.x=std::numeric_limits<double>::quiet_NaN();rejects([&]{scene.create(bad);});
     bad=object();bad.id="bad-quaternion";bad.samples[0].attitude=Quaternion{0,0,0,0};rejects([&]{scene.create(bad);});
+    // Simulated dates reach 1900: instants before 1970 are valid, far earlier ones are not.
+    scene.builtinState("moon",{-14182940.,{1,2,3}});require(scene.evaluate("moon",-14182940.).state.utcSeconds==-14182940.,"Pre-1970 instant rejected");
+    rejects([&]{scene.builtinState("moon",{-2e10,{1,2,3}});});
     std::vector<Sample> values;for(int i=0;i<256;++i)values.push_back({103.+i,{double(i),0,0}});scene.samples("test",std::move(values));
     require(scene.get("test").samples.size()==256,"History is unbounded");scene.remove("test");require(scene.objects().size()==3,"Removal failed");
     Bridge bridge;auto cancelled=bridge.submit(Focus{"earth"});*cancelled.cancelled=true;bool applied=false;

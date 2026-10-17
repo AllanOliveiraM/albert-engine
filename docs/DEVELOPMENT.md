@@ -525,12 +525,19 @@ vetores Horizons; `src/catalog/` gerencia importações e renovação; `src/core
 aplica comandos e interpola estados. UI e gRPC usam o mesmo catálogo. Apenas a
 thread gráfica modifica a cena; o worker aguarda a aplicação e expõe operações
 assíncronas com revisão, fonte, validade e falhas. O render continua atualizando
-objetos independentes quando efemérides de corpos embarcados ficam indisponíveis.
+objetos independentes quando efemérides de corpos embarcados ficam indisponíveis;
+Sol, Lua e planetas passam aos modelos analíticos de `core/approximate_ephemeris`.
+
+`core/simulation` guarda o instante simulado (ao vivo, data escolhida, velocidade,
+geração) para render, catálogo e gRPC. As janelas do Horizons por velocidade vêm de
+`providers::playbackWindow`/`expiring`; o render escolhe o passo de cada corpo e
+alterna tabelas curtas e completas. Detalhes e limites em [TIME.md](TIME.md#data-simulada).
 
 `core/astro_time` usa ERFA para UTC/TAI/TT/TDB e a correção geocêntrica completa
 `eraDtdb`; não usa uma aproximação de dois termos para consultar o Horizons.
 `astronomical_providers` testa conversões, CSV, unidades, cobertura, cache,
-serialização e cancelamento. `catalog_import` testa importação/foco, atualização,
+serialização, cancelamento e janelas por velocidade. `simulated_time` testa o
+relógio simulado, datas civis e os modelos analíticos contra o Horizons. `catalog_import` testa importação/foco, atualização,
 falhas, recuperação, snapshots atrasados, propriedade do estado, remoção e RPC.
 `http_transport` exercita servidor HTTP local, truncamento, limite de
 resposta e cancelamento. As consultas públicas reais são verificações separadas:

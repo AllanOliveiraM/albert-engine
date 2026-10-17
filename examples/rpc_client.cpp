@@ -17,8 +17,12 @@ int main(int argc,char** argv){try{
     api::ClockStatus timing;
     {grpc::ClientContext c;auto time=api::TimeService::NewStub(channel);check(time->GetTime(&c,{},&timing));}
     const auto start=std::chrono::steady_clock::now();
-    const double utc=timing.utc_unix_seconds();
+    // States are evaluated at the simulated instant: stamp them in simulated time.
+    // A paused or reversed simulation is followed forwards at real speed.
+    const auto& simulated=timing.simulation();
+    const double utc=simulated.utc_unix_seconds(),rate=simulated.rate()>0?simulated.rate():1.;
     std::cout<<"Tempo Albert: "<<timing.source()<<", qualidade "<<timing.quality()<<", incerteza "<<timing.uncertainty_seconds()<<" s\n";
+    if(!simulated.live())std::cout<<"Data simulada: "<<std::fixed<<utc<<" s Unix UTC, "<<simulated.rate()<<" s/s\n";
     if(argc>2&&std::string(argv[2])=="--time")return 0;
     api::CreateObjectRequest create;create.set_id("demo-flight");create.set_name("Voo de exemplo (simulado)");create.set_source("Synthetic demonstration; not Starship telemetry");
     auto* g=create.mutable_geometry();g->set_shape(api::Geometry::CYLINDER);g->set_color_rgb(0xcbd5dd);g->mutable_size_meters()->set_x(9);g->mutable_size_meters()->set_y(120);g->mutable_size_meters()->set_z(9);
@@ -30,8 +34,8 @@ int main(int argc,char** argv){try{
     for(int i=1;i<=300;++i){
         std::this_thread::sleep_until(start+std::chrono::milliseconds(i*33));
         const double t=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()+.1;
-        api::StateBatch batch;batch.set_id(create.id());auto* s=batch.add_samples();s->set_frame(api::GEOCENTRIC_ICRF);s->set_utc_unix_seconds(utc+t);
-        s->mutable_position_meters()->set_x(6878137.+t*50);s->mutable_position_meters()->set_y(t*200);
+        api::StateBatch batch;batch.set_id(create.id());auto* s=batch.add_samples();s->set_frame(api::GEOCENTRIC_ICRF);s->set_utc_unix_seconds(utc+t*rate);
+        s->mutable_position_meters()->set_x(6878137.+t*rate*50);s->mutable_position_meters()->set_y(t*rate*200);
         s->mutable_velocity_meters_per_second()->set_x(50);s->mutable_velocity_meters_per_second()->set_y(200);
         s->mutable_attitude()->set_z(std::sin(t*.03));s->mutable_attitude()->set_w(std::cos(t*.03));
         if(!stream->Write(batch))break;

@@ -1,9 +1,10 @@
 # Referência de tempo
 
 O Albert consulta **Cloudflare, NIST e PTB** por NTP, sem modificar o relógio do
-sistema operacional. Astronomia, cena, nuvens, interface e gRPC compartilham
-`albert::time::clock()`. O relógio civil só inicializa uma estimativa provisória
-quando ainda não existe confirmação externa.
+sistema operacional. Cena, nuvens, interface e gRPC compartilham
+`albert::time::clock()`; a astronomia segue a [data simulada](#data-simulada),
+igual a esse relógio enquanto ao vivo. O relógio civil só inicializa uma
+estimativa provisória quando ainda não existe confirmação externa.
 
 ## Funcionamento
 
@@ -72,19 +73,72 @@ documentadas pelo projeto. Timestamp recebido de um integrador permanece
 inalterado. Data local muito incorreta ainda pode impedir HTTPS por validade
 dos certificados do sistema; corrigir o relógio interno não altera essa política.
 
+## Data simulada
+
+O instante astronômico da cena é o relógio acima enquanto **ao vivo**. Ao pausar,
+acelerar, voltar no tempo ou escolher uma data, ele passa a ser um instante
+escolhido que avança `rate` segundos simulados por segundo do relógio monotônico
+(`core/simulation`). Correções NTP não movem uma data escolhida; uma pausa superior a
+30 segundos do programa (suspensão) a mantém onde estava. Intervalo: 1900-01-01
+00:00:00 a 2100-12-31 23:59:59 UTC; `|rate|` até uma semana por segundo. Nos
+limites, a simulação para e informa `limited`. A geração muda ao escolher uma data
+e ao voltar para **Agora**, não ao mudar a velocidade. Datas civis usam o calendário
+gregoriano proléptico implementado no projeto, porque a biblioteca C do Windows não
+converte instantes anteriores a 1970.
+
+Antes de 1972 o UTC tinha segundos de duração variável, que o ERFA modela desde
+1960. Antes de 1960 o instante escolhido é tratado como tempo universal e
+TT = UT + 32,184 s; o erro em TT chega a cerca de 35 s em 1900 (dezenas de
+quilômetros na posição da Lua).
+
+**Efemérides por data.** Cada tabela do Horizons cobre ao menos um dia simulado e
+os próximos 600 s de reprodução, mais o tempo medido da última consulta, com no
+máximo 200 linhas. O passo é escolhido pela precisão do Hermite cúbico, cujo erro
+cresce com (2π·passo/período)⁴/384: Lua de 1 h a 1 d (até ~3 km), planetas de 1 a
+5 d (Vênus até ~100 km, os demais ~20 km). Uma data sem tabela pede primeiro uma
+tabela curta (60 s de reprodução) e depois a completa; novas datas abandonam
+pedidos em andamento entre consultas, e os trajetos cedem a fila do JPL às
+posições. Cada consulta leva de um a vários segundos, então as tabelas só
+acompanham a reprodução até **6 horas por segundo**.
+
+**Posições aproximadas.** Fora das tabelas, Sol, Lua e planetas usam modelos
+analíticos do ERFA: `epv00` para a Terra (≈5 km), `moon98` para a Lua (6 km RMS,
+32 km no pior caso em 1950–2100) e `plan94` para os planetas (direção dentro de
+1,5′; até ~2 000 km em Mercúrio, 3 700 km em Vênus, 30 000 km em Marte, 300 000 km
+em Júpiter, 650 000 km em Saturno, 1,3 milhão de km em Urano e 350 000 km em
+Netuno). Cada corpo soma a diferença entre tabela e modelo medida no último
+instante coberto; após uma nova data não há diferença conhecida. Quando uma
+tabela chega, a diferença entra em 0,6 s. O painel e a API (`approximate_positions`)
+indicam esse estado; acima de 6 h/s ele é permanente até pausar ou desacelerar.
+
+Os trajetos orbitais ficam centrados no instante e são buscados de novo após 60
+dias simulados, no máximo a cada 30 s e só até 6 h/s. Fora das amostras, o destaque
+de passado e futuro é dobrado por revoluções inteiras (até três); além disso fica
+oculto até o novo trajeto chegar. Outras luas e pequenos corpos usam órbitas de
+dois corpos com elementos de outubro de 2026, menos precisas longe dessa época.
+Objetos do catálogo seguem a data e a velocidade com tabelas de até 240 linhas;
+em velocidades altas podem ficar marcados como desatualizados. As nuvens
+observadas só aparecem a menos de um dia do presente.
+
 ## API e validação
 
 `TimeService.GetTime` retorna a referência do último quadro, também incluída em
 `Scene.clock`. São expostos UTC, qualidade, fonte, última sincronização,
-incerteza, RTT, correção pendente, erro e geração. O exemplo C++ usa essa
+incerteza, RTT, correção pendente, erro e geração. `simulation` traz o instante
+simulado, velocidade, modo ao vivo, limite, geração e se as posições são
+aproximadas; `TimeService.SetTime` escolhe data e velocidade ou volta ao vivo. O exemplo C++ usa essa
 referência para seu voo sintético; `albert_demo_client 127.0.0.1:50051 --time`
 apenas a consulta. Consulte [RPC.md](RPC.md).
 
 `external_time` usa fixtures sem internet: relógios civis dez anos errados,
 respostas inválidas/antigas, latência, rollover, duplicação de fontes, outlier,
 quorum ambíguo, perda de rede, avanço após suspensão, expiração, correção gradual
-e reconexão. `rpc_commands` confere transporte real de qualidade/proveniência e
-consistência entre relógio e cena. `time_test --network` é uma verificação manual
+e reconexão. `simulated_time` cobre o relógio simulado (continuidade, saltos,
+limites, retenção, validação atômica), datas civis anteriores a 1970 e regras de
+anos bissextos, e os modelos do ERFA contra o Horizons em 1969 e 2026.
+`astronomical_providers` confere as janelas por velocidade, `catalog_import` a
+troca de data e a retenção sem novas consultas, e `rpc_commands` o transporte real
+de qualidade/proveniência, `SetTime` e a consistência entre relógio e cena. `time_test --network` é uma verificação manual
 com os servidores públicos, fora do CTest para manter a suíte independente da
 rede. A suspensão é exercitada com avanço de tempo nas fixtures; não é um teste
 de suspensão física do computador.

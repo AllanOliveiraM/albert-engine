@@ -32,6 +32,8 @@
 #include "solids.hpp"
 #include "core/bridge.hpp"
 #include "core/time.hpp"
+#include "core/simulation.hpp"
+#include "core/approximate_ephemeris.hpp"
 #include "core/astro_time.hpp"
 #include "core/local_system.hpp"
 #include "debris.hpp"
@@ -55,12 +57,14 @@
 #include <iomanip>
 #include <iostream>
 #include <optional>
+#include <limits>
 #include <map>
 #include <set>
 #include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -116,6 +120,8 @@ struct State {
 
 struct Ephemerides {
     bool cached = false;
+    // Simulated interval of each table: "sun", "moon" and body ids.
+    std::map<std::string,albert::providers::Window> windows;
     std::vector<State> sun;
     std::vector<State> moon;
     std::map<std::string,std::vector<State>> bodies;
@@ -123,6 +129,7 @@ struct Ephemerides {
 
 struct Orbits {
     bool cached = false;
+    double centerUtc = 0; // Simulated instant the paths are centred on.
     std::vector<State> moon;
     std::vector<State> earth;
     std::map<std::string,std::vector<State>> bodies;
@@ -195,10 +202,6 @@ Vec3 geodetic(double latDeg, double lonDeg, double h = 0) {
 // Tempo astronomico
 // ----------------------------------------
 
-double jdUTC() {
-    return 2440587.5 + albert::time::clock().utcSeconds()/86400.;
-}
-
 double jdTT(double utc){return albert::astro::julianTT(utc);}
 double jdTDB(double utc){return albert::astro::julianTDB(utc);}
 
@@ -237,70 +240,113 @@ Matrix4 earthOrientation(double utc) {
 
 using albert::httpGet;
 
+// Interval in Unix UTC seconds of simulated time.
 std::vector<State> queryHorizons(int body,const std::string& center,double start,double end,const std::string& step,albert::DownloadProgress* progress=nullptr,bool bootstrap=false,bool* cached=nullptr){
-    const auto table=albert::providers::horizons().query({body,center,(start-2440587.5)*86400.,(end-2440587.5)*86400.,step,bootstrap,!bootstrap},progress);
+    const auto table=albert::providers::horizons().query({body,center,start,end,step,bootstrap,!bootstrap},progress);
     if(cached)*cached|=table.fromCache;
     std::vector<State> result;result.reserve(table.points.size());
     for(const auto& point:table.points)result.push_back({point.jdTDB,{point.positionMeters.x/1000.,point.positionMeters.y/1000.,point.positionMeters.z/1000.},{point.velocityMetersPerSecond.x/1000.,point.velocityMetersPerSecond.y/1000.,point.velocityMetersPerSecond.z/1000.}});
     return result;
 }
 
-Ephemerides loadEphemerides(albert::DownloadProgress* progress = nullptr, int offset = 0, bool bootstrap = false) {
-    double now = jdUTC();
+// Positions of the Sun, the Moon and the planets: at least one simulated day, and
+// `playbackSeconds` of playback at the current rate. Cubic Hermite error grows as
+// a*(2*pi*step/period)^4/384, so steps stay below ~1/45 of the fastest period
+// involved (the body's own, or Earth's year for geocentric positions): at the
+// coarsest rows the Moon is within ~3 km, Venus ~100 km, the Sun and others ~20 km.
+// Horizons answers each table in one to several seconds: tables stay short, and
+// above TABLE_RATE_LIMIT (simulated seconds per second) they cannot keep up with
+// playback, so positions there come from the analytic models anchored to the
+// last tables, which are fetched again once playback slows down or pauses.
+constexpr double TABLE_RATE_LIMIT = 6 * 3600.;
+struct PlaybackPlan {double seconds;unsigned rows;};
+constexpr PlaybackPlan FULL_PLAYBACK{600., 200};
+constexpr PlaybackPlan QUICK_PLAYBACK{60., 60}; // First table for a date without data.
+albert::providers::Playback ephemerisPlayback(std::string_view id, PlaybackPlan plan) {
+    constexpr double DAY = 86400.;
+    if (id == "moon") return {DAY, plan.seconds, plan.rows, 3600., DAY};
+    double coarsest = 5 * DAY;
+    if (const auto* body = albert::core::naturalBody(id)) coarsest = std::min(coarsest, 2 * body->orbitHalfDays * DAY / 45);
+    coarsest = std::max(DAY, coarsest);
+    return {DAY, plan.seconds, plan.rows, DAY, coarsest};
+}
+// A newer request replaces a running one between bodies.
+struct Superseded : std::runtime_error {Superseded() : std::runtime_error("Efemerides substituidas por outra data") {}};
 
+Ephemerides loadEphemerides(double utc, double rate, PlaybackPlan plan, albert::DownloadProgress* progress = nullptr, int offset = 0, bool bootstrap = false, const std::function<bool()>& superseded = {}) {
     Ephemerides e;
+    auto query=[&](const std::string& id, int body){
+        if (superseded && superseded()) throw Superseded();
+        const auto window = albert::providers::playbackWindow(utc, rate, ephemerisPlayback(id, plan));
+        e.windows[id] = window;
+        return queryHorizons(body, "500@399", window.startUtc, window.endUtc, window.step, progress, bootstrap, &e.cached);
+    };
 
     if (progress) progress->stage("Efemerides do Sol", 2 + offset);
-    e.sun = queryHorizons(
-        10, "500@399",
-        now - 1.0/1440.0,
-        now + 1.0,
-        "5 min", progress, bootstrap, &e.cached
-    );
+    e.sun = query("sun", 10);
 
     if (progress) progress->stage("Efemerides da Lua", 3 + offset);
-    e.moon = queryHorizons(
-        301, "500@399",
-        now - 1.0/1440.0,
-        now + 1.0,
-        "5 min", progress, bootstrap, &e.cached
-    );
+    e.moon = query("moon", 301);
 
     int bodyIndex=0;
     for(const auto* body:availableBodies()){
         if(progress)progress->stage("Efemerides: "+std::string(body->name),4+offset+bodyIndex++);
-        e.bodies[std::string(body->id)]=queryHorizons(body->horizonsId,"500@399",now-1./1440.,now+1.,"5 min",progress,bootstrap,&e.cached);
+        e.bodies[std::string(body->id)]=query(std::string(body->id), body->horizonsId);
     }
     return e;
 }
 
-Orbits loadOrbits(albert::DownloadProgress* progress = nullptr, int offset = 0, bool bootstrap = false) {
-    double now = jdUTC();
+// Some table needs replacing for the full playback ahead of the simulated instant.
+bool expiring(const Ephemerides& e, double utc, double rate) {
+    for (const auto& [id, window] : e.windows)
+        if (albert::providers::expiring(window, utc, rate, ephemerisPlayback(id, FULL_PLAYBACK))) return true;
+    return e.windows.empty();
+}
 
+// Real seconds of playback the tables still cover ahead of the instant.
+double secondsCovered(const Ephemerides& e, double utc, double rate) {
+    if (rate == 0.) return std::numeric_limits<double>::infinity();
+    double ahead = std::numeric_limits<double>::infinity();
+    for (const auto& [id, window] : e.windows) {(void)id;ahead = std::min(ahead, rate > 0 ? window.endUtc - utc : utc - window.startUtc);}
+    return std::max(0., ahead) / std::abs(rate);
+}
+
+bool covers(const Ephemerides& e, double tdb) {
+    auto inside=[&](const std::vector<State>& v){return v.size()>=2&&tdb>=v.front().jd&&tdb<=v.back().jd;};
+    if(!inside(e.sun)||!inside(e.moon))return false;
+    for(const auto& [id,samples]:e.bodies){(void)id;if(!inside(samples))return false;}
+    return true;
+}
+
+// Drawn paths only; positions never depend on them. Centred on the simulated
+// instant, one revolution or more, so the highlight can fold by whole turns.
+// Paths yield the shared JPL queue to position tables between requests.
+Orbits loadOrbits(double centerUtc, albert::DownloadProgress* progress = nullptr, int offset = 0, bool bootstrap = false, const std::function<bool()>& superseded = {}, const std::function<bool()>& yield = {}) {
+    constexpr double DAY = 86400.;
     Orbits orbits;
+    orbits.centerUtc = centerUtc;
+    auto query=[&](int body,const char* center,double halfDays,const std::string& step){
+        while (yield && yield()) {
+            if (progress) progress->checkCancelled();
+            if (superseded && superseded()) throw Superseded();
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        if (superseded && superseded()) throw Superseded();
+        return queryHorizons(body, center, centerUtc - halfDays*DAY, centerUtc + halfDays*DAY, step, progress, bootstrap, &orbits.cached);
+    };
 
     // Trajetoria geocentrica da Lua (~35 dias).
     if (progress) progress->stage("Orbita da Lua", 4 + offset);
-    orbits.moon = queryHorizons(
-        301, "500@399",
-        now - 14.0,
-        now + 14.0,
-        "3 h", progress, bootstrap, &orbits.cached
-    );
+    orbits.moon = query(301, "500@399", 14., "3 h");
 
     // Trajetoria heliocentrica da Terra (~370 dias).
     if (progress) progress->stage("Orbita da Terra", 5 + offset);
-    orbits.earth = queryHorizons(
-        399, "500@10",
-        now - 185.0,
-        now + 185.0,
-        "1 d", progress, bootstrap, &orbits.cached
-    );
+    orbits.earth = query(399, "500@10", 185., "1 d");
 
     int bodyIndex=0;
     for(const auto* body:availableBodies()){
         if(progress)progress->stage("Orbita: "+std::string(body->name),6+offset+bodyIndex++);
-        orbits.bodies[std::string(body->id)]=queryHorizons(body->horizonsId,"500@10",now-body->orbitHalfDays,now+body->orbitHalfDays,std::to_string(static_cast<int>(body->orbitStepHours))+" h",progress,bootstrap,&orbits.cached);
+        orbits.bodies[std::string(body->id)]=query(body->horizonsId,"500@10",body->orbitHalfDays,std::to_string(static_cast<int>(body->orbitStepHours))+" h");
     }
     return orbits;
 }
@@ -425,7 +471,7 @@ struct LoadedData {
     std::vector<float> borders;
     Ephemerides ephemerides;
     Orbits orbits;
-    std::uint64_t timeGeneration=0;
+    std::uint64_t timeGeneration=0,simulationGeneration=0;
 };
 
 // Network work owns its progress state and never accesses scene/UI objects.
@@ -447,7 +493,9 @@ public:
         animation = {};
         progress.cancelled = false;
         progress.stage("Preparando simulacao", 0);
-        pending_ = std::async(std::launch::async, [this, reloadAssets, bootstrap] {
+        // Planned on the render thread: the simulated instant when the load starts.
+        const auto moment = albert::time::simulation().read();
+        pending_ = std::async(std::launch::async, [this, reloadAssets, bootstrap, moment] {
             LoadedData result;
             if (reloadAssets) {
                 if (assets_) waitForEssential(*assets_, progress);
@@ -456,8 +504,9 @@ public:
                 result.borders = loadBorders(countries_);
             }
             result.timeGeneration=albert::time::clock().status().generation;
-            result.ephemerides = loadEphemerides(&progress, 5, bootstrap);
-            result.orbits = loadOrbits(&progress, 5+static_cast<int>(availableBodies().size()), bootstrap);
+            result.simulationGeneration=moment.generation;
+            result.ephemerides = loadEphemerides(moment.utcSeconds, moment.rate, FULL_PLAYBACK, &progress, 5, bootstrap);
+            result.orbits = loadOrbits(moment.utcSeconds, &progress, 5+static_cast<int>(availableBodies().size()), bootstrap);
             progress.stage("Pronto", loadSteps());
             return result;
         });
@@ -533,6 +582,46 @@ void drawLoadingBar(float fraction, bool indeterminate, bool animated, const ImV
         }
     }
     ImGui::Dummy(ImVec2(width, height));
+}
+
+// ----------------------------------------
+// Tempo simulado
+// ----------------------------------------
+
+std::string civilDate(double utc) {
+    static constexpr const char* months[]{"jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"};
+    const auto c = albert::time::civil(utc);
+    char text[32];std::snprintf(text, sizeof text, "%d %s %04d", c.day, months[c.month-1], c.year);
+    return text;
+}
+
+std::string civilClock(double utc) {
+    const auto c = albert::time::civil(utc);
+    char text[16];std::snprintf(text, sizeof text, "%02d:%02d:%02d", c.hour, c.minute, c.second);
+    return text;
+}
+
+struct SpeedPreset {double rate;const char* label;};
+constexpr SpeedPreset SPEEDS[]{{1.,"1x"},{60.,"1 min/s"},{3600.,"1 h/s"},{21600.,"6 h/s"},{86400.,"1 dia/s"},{604800.,"1 sem/s"}};
+
+std::string speedLabel(double rate) {
+    for (const auto& speed : SPEEDS) if (std::abs(rate) == speed.rate) return speed.label;
+    char text[32];std::snprintf(text, sizeof text, "%.0fx", std::abs(rate));
+    return text;
+}
+
+// Distance of the simulated date from the present, in the largest whole unit.
+std::string offsetLabel(double seconds) {
+    const double span = std::abs(seconds);
+    if (span < 60.) return "No presente";
+    struct Unit {double seconds;const char *one,*many;};
+    constexpr Unit units[]{{365.25*86400.,"ano","anos"},{30.4375*86400.,"mes","meses"},{86400.,"dia","dias"},{3600.,"hora","horas"},{60.,"minuto","minutos"}};
+    for (const auto& unit : units) if (span >= unit.seconds) {
+        const auto count = static_cast<long long>(span / unit.seconds);
+        char text[64];std::snprintf(text, sizeof text, "%lld %s %s do presente", count, count == 1 ? unit.one : unit.many, seconds > 0 ? "a frente" : "antes");
+        return text;
+    }
+    return {};
 }
 
 void drawLoadingLabel(const char* label, const char* value) {
@@ -643,6 +732,7 @@ public:
     using Mesh::Mesh;
     std::vector<Vec3> endpoints;
     Vec3 origin;
+    double epoch = 0, halfWidth = 0, period = 0; // TDB days; period 0 when unknown.
     void rebase(const Vector3& camera,Vec3 renderOrigin) {
         auto* position=geometry()->getAttribute<float>("position");
         auto* next=geometry()->getAttribute<float>("nextPosition");
@@ -696,14 +786,23 @@ std::shared_ptr<OrbitPath> makeOrbit(const std::vector<State>& samples) {
     auto material = albert::orbitMaterial(static_cast<float>((samples.back().jd-samples.front().jd)*.14));
     auto path=std::make_shared<OrbitPath>(geometry,material);
     path->endpoints=std::move(endpointsKm);
+    path->epoch=epoch;
+    path->halfWidth=(samples.back().jd-samples.front().jd)*.5;
+    // Turn about the orbit normal at the path centre (prograde by construction).
+    const auto& middle=samples[samples.size()/2];
+    const std::array<double,3> normal{middle.position.y*middle.velocity.z-middle.position.z*middle.velocity.y,
+        middle.position.z*middle.velocity.x-middle.position.x*middle.velocity.z,middle.position.x*middle.velocity.y-middle.position.y*middle.velocity.x};
+    std::vector<albert::PathPoint> points;points.reserve(samples.size());
+    for(const auto& sample:samples)points.push_back({sample.jd,sample.position.x,sample.position.y,sample.position.z});
+    path->period=albert::revolutionDays(points,normal);
     path->frustumCulled=false;
     path->renderOrder=1;
     return path;
 }
 
-void updateOrbitTime(const std::shared_ptr<Mesh>& line, const std::vector<State>& samples, double now) {
-    auto* material = line->material()->as<ShaderMaterial>();
-    material->uniforms.at("present").setValue(static_cast<float>(now - (samples.front().jd+samples.back().jd)*.5));
+void updateOrbitTime(const std::shared_ptr<OrbitPath>& path, double now) {
+    auto* material = path->material()->as<ShaderMaterial>();
+    material->uniforms.at("present").setValue(static_cast<float>(albert::pathPresent(now - path->epoch, path->halfWidth, path->period)));
 }
 
 // ----------------------------------------
@@ -800,6 +899,10 @@ int albert::runRenderer(int argc, char** argv) {
             ~CurlLifetime() { curl_global_cleanup(); }
         } curlLifetime;
         auto& timeService=albert::time::clock();
+        // Astronomy, objects and the API follow the simulated instant, read once per frame.
+        auto& simulation=albert::time::simulation();
+        double simulatedUtc=simulation.read().utcSeconds;
+        auto simulatedTDB=[&]{return jdTDB(2440587.5+simulatedUtc/86400.);};
 
         fs::path countries =
             albert::assetDirectory() / "countries.geojson";
@@ -891,6 +994,7 @@ int albert::runRenderer(int argc, char** argv) {
         auto ephemerides = std::move(loaded->ephemerides);
         auto orbits = std::move(loaded->orbits);
         const auto initialTimeGeneration=loaded->timeGeneration;
+        const auto initialSimulationGeneration=loaded->simulationGeneration;
         loaded.reset();
 
         auto scene = Scene::create();
@@ -912,7 +1016,7 @@ int albert::runRenderer(int argc, char** argv) {
         controls.minDistance = 1.01f;
         controls.maxDistance = 65000.f;
 
-        auto stars = albert::makeStarField(albert::assetDirectory() / "stars.csv", jdTDB(jdUTC()));
+        auto stars = albert::makeStarField(albert::assetDirectory() / "stars.csv", simulatedTDB());
         scene->add(stars);
         auto solidAssets=std::move(loadedAssets->surfaces);
         albert::PlanetVisuals planets(*scene, std::move(*loadedAssets));
@@ -924,7 +1028,7 @@ int albert::runRenderer(int argc, char** argv) {
         albert::VisualSettings visualSettings;
         albert::core::Scene registry;
         albert::core::Bridge commands;
-        albert::catalog::Manager catalog(commands,albert::providers::horizons());
+        albert::catalog::Manager catalog(commands,albert::providers::horizons(),{},{},[&simulation]{return simulation.read();});
 #ifdef ALBERT_HAS_RPC
         std::unique_ptr<albert::rpc::Server> rpc;
 #endif
@@ -937,7 +1041,7 @@ int albert::runRenderer(int argc, char** argv) {
         albert::core::Vector sceneOrigin;
         Focus originId="earth";
         if(demo){albert::core::Object object;object.id="demo";object.name="Exemplo (simulado)";object.source="Synthetic example";
-            object.appearance.sizeMeters={200000,200000,200000};object.samples.push_back({(jdUTC()-2440587.5)*86400.,{7500000,0,0}});registry.create(std::move(object));}
+            object.appearance.sizeMeters={200000,200000,200000};object.samples.push_back({simulatedUtc,{7500000,0,0}});registry.create(std::move(object));}
 
         albert::CloudSync cloudSync(albert::dataDirectory() / "clouds", albert::assetDirectory() / "cloud-colormap.json");
         auto bordersObject = std::make_shared<albert::BorderLines>(borders);
@@ -983,7 +1087,7 @@ int albert::runRenderer(int argc, char** argv) {
         struct LocalPath {std::shared_ptr<OrbitPath> path;double epoch,period;};
         std::map<std::string,LocalPath> localPaths;
         for(const auto& body:albert::core::localOrbits()){
-            const double now=jdTDB(jdUTC()),period=body.period/86400.;
+            const double now=simulatedTDB(),period=body.period/86400.;
             double anomaly=std::fmod(body.meanAnomaly+(now-body.epoch)*86400.*body.meanMotion,360.);if(anomaly<0)anomaly+=360.;
             const double beginning=now-anomaly/360.*period,center=beginning+period*.5;std::vector<State> samples;
             // Sample eccentric anomaly: highly eccentric comet paths need many
@@ -1009,12 +1113,12 @@ int albert::runRenderer(int argc, char** argv) {
         auto systemView = [&](const Focus& f){return f==targets::Overview||f==targets::Inner;};
         auto targetId = [&](const Focus& f) -> Focus {return systemView(f) ? targets::Sun : f==targets::EarthMoon ? targets::Earth : f;};
         auto focusName = [&](const Focus& f) -> const char* {return f==targets::Inner ? "Planetas internos" : f==targets::Overview ? "Sistema solar" : f==targets::EarthMoon ? "Terra e Lua" : registry.get(f).name.c_str();};
-        auto targetFor = [&](const Focus& f) {return albert::renderPosition(registry.evaluate(targetId(f),(jdUTC()-2440587.5)*86400.).state.positionMeters,sceneOrigin);};
+        auto targetFor = [&](const Focus& f) {return albert::renderPosition(registry.evaluate(targetId(f),simulatedUtc).state.positionMeters,sceneOrigin);};
         auto distanceFor = [&](const Focus& f) -> float {
             if(f==targets::EarthMoon)return 180.f;
             if(f==targets::Inner)return static_cast<float>(4.2*149597870700./albert::core::earthRadiusMeters/std::sin(std::atan(std::tan(camera->fov*PI/360.)*std::min(1.f,camera->aspect))));
             if(f==targets::Overview){
-                double extent=0;const double now=timeService.utcSeconds();
+                double extent=0;const double now=simulatedUtc;
                 for(const auto& [id,object]:registry.objects())if(object.visible&&!albert::core::localOrbit(id)){const auto p=registry.evaluate(id,now).state.positionMeters;extent=std::max(extent,std::hypot(p.x,p.y,p.z)+object.radiusMeters);}
                 const double angle=std::atan(std::tan(camera->fov*PI/360.)*std::min(1.f,camera->aspect));
                 return static_cast<float>(std::max(65000.,extent/albert::core::earthRadiusMeters/std::sin(angle)*1.15));
@@ -1067,6 +1171,15 @@ int albert::runRenderer(int argc, char** argv) {
 
         bool refreshing = false;
         bool refreshingOrbits = false;
+        bool approximatePositions = false; // Simulated instant outside the JPL tables.
+        // Epoch of the offline two-body elements (one epoch for the whole catalogue).
+        const double localElementsUtc = (albert::core::localOrbits().front().epoch - 2440587.5) * 86400.;
+        bool cloudsCurrent = true; // Simulated date within a day of the observations.
+        // Time panel: last chosen speed, kept while paused or reversed.
+        double chosenSpeed = 1.;
+        bool backwards = false;
+        std::array<char,32> dateText{};
+        std::string dateError;
         bool menuOpen = false;
         float menuProgress = 0.f;
         float resetZoomProgress = 0.f;
@@ -1076,7 +1189,7 @@ int albert::runRenderer(int argc, char** argv) {
         std::array<char,96> focusSearch{};bool uiPopupWasOpen=false;
         float zoomTarget = 3.5f, zoomDisplayed = 3.5f;
         // Start with the day/terminator visible, independent of UTC season.
-        Vector3 initialSun = graphical(interpolate(ephemerides.sun, jdTDB(jdUTC())));
+        Vector3 initialSun = graphical(interpolate(ephemerides.sun, simulatedTDB()));
         initialSun.normalize();
         Vector3 tangent(-initialSun.z, 0, initialSun.x);
         tangent.normalize();
@@ -1144,7 +1257,7 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::SetNextItemWidth(-1);ImGui::InputTextWithHint("##Buscar objeto","Planeta, lua, asteroide ou cometa",focusSearch.data(),focusSearch.size());
                 struct Match {const albert::core::Object* object;int score;double distance;};
                 std::array<std::vector<Match>,7> groups;
-                const double searchTime=timeService.utcSeconds();
+                const double searchTime=simulatedUtc;
                 for(const auto& [id,object]:registry.objects()){
                     const int score=albert::core::matchScore(focusSearch.data(),object.name,id);
                     if(score>=0)groups[static_cast<unsigned>(albert::core::category(id))].push_back({&object,score,albert::core::solarOrder(registry,id,searchTime)});
@@ -1211,7 +1324,7 @@ int albert::runRenderer(int argc, char** argv) {
                     ImGui::PushTextWrapPos(0);ImGui::TextDisabled(enhanced?"Brilho esticado, como em longa exposicao; proporcoes mantidas.":"Aneis escuros ou de poeira: quase invisiveis em luz visivel.");ImGui::PopTextWrapPos();
                 }
                 if(focus.front()!='@' && !registry.get(focus).builtin) {
-                    const auto state=registry.evaluate(focus,(jdUTC()-2440587.5)*86400.);
+                    const auto state=registry.evaluate(focus,simulatedUtc);
                     ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : registry.get(focus).providerManaged ? "Posicoes reais; visual simplificado" : "Dados fornecidos pelo integrador");
                 }
                 ImGui::TextDisabled("Arraste para girar. Role para aproximar.");
@@ -1443,21 +1556,121 @@ int albert::runRenderer(int argc, char** argv) {
                     ImGui::End();ImGui::PopStyleVar(2);
                 }
             }
-            if (display.x > 900) {
-                ImGui::SetNextWindowPos(ImVec2(display.x-margin,margin),ImGuiCond_Always,ImVec2(1,0));
-                ImGui::SetNextWindowSize(ImVec2(210,80),ImGuiCond_Always);
+            // Time panel: the simulated date and the state of its data; opens the time controls.
+            if (display.x > 900 || menuProgress <= 0.f) {
+                const bool wide = display.x > 900;
+                const float panelWidth = std::min(250.f, display.x - margin * 2);
+                ImGui::SetNextWindowPos(wide ? ImVec2(display.x-margin,margin) : ImVec2(margin,margin+66),ImGuiCond_Always,wide ? ImVec2(1,0) : ImVec2(0,0));
+                ImGui::SetNextWindowSize(ImVec2(panelWidth,80),ImGuiCond_Always);
                 ImGui::SetNextWindowBgAlpha(.65f);
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(18,14));
-                ImGui::Begin("Estado", nullptr, (flags & ~ImGuiWindowFlags_AlwaysAutoResize) | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                ImGui::Begin("Estado", nullptr, (flags & ~ImGuiWindowFlags_AlwaysAutoResize) | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                 protectPanel();
+                const auto panelPosition = ImGui::GetWindowPos(), panelSize = ImGui::GetWindowSize();
+                ImGui::SetCursorScreenPos(panelPosition);
+                const bool openTime = ImGui::InvisibleButton("##Tempo", panelSize);
+                if (ImGui::IsItemHovered()) ImGui::GetWindowDrawList()->AddRect(ImVec2(panelPosition.x+1,panelPosition.y+1),
+                    ImVec2(panelPosition.x+panelSize.x-1,panelPosition.y+panelSize.y-1),ImGui::GetColorU32(ImVec4(.45f,.88f,.94f,.45f)),14.f);
+                ImGui::SetCursorPos(ImVec2(18,14));
                 const auto timing=timeService.status();
-                const auto time = albert::utcTime(static_cast<std::time_t>(timing.utcSeconds));
-                ImGui::TextDisabled("%02d:%02d:%02d UTC", time.tm_hour, time.tm_min, time.tm_sec);
-                if(timing.quality==albert::time::Quality::Local)ImGui::TextColored(ImVec4(1,.7f,.4f,1),"Horario local");
-                else if(timing.quality!=albert::time::Quality::Synchronized)ImGui::TextColored(ImVec4(1,.7f,.4f,1),"Horario estimado");
-                else if (refreshing || refreshingOrbits || cloudSync.active || catalog.busy()) ImGui::TextColored(ImVec4(.4f,.85f,.9f,1), "Atualizando dados");
-                else if (!cloudSync.error.empty() || !refreshError.empty()) ImGui::TextColored(ImVec4(1,.7f,.4f,1), "Atualizacao pendente");
-                else ImGui::TextColored(ImVec4(.4f,.85f,.7f,1), "Dados sincronizados");
+                const auto shown=simulation.read();
+                ImGui::Text("%s", civilDate(simulatedUtc).c_str());
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s UTC", civilClock(simulatedUtc).c_str());
+                const ImVec4 attention(1,.7f,.4f,1), busy(.4f,.85f,.9f,1), calm(.4f,.85f,.7f,1);
+                if(approximatePositions) ImGui::TextColored(refreshError.empty() ? busy : attention, "Posicoes aproximadas");
+                else if(shown.limited) ImGui::TextColored(attention, "Limite: 1900 a 2100");
+                else if(!shown.live && shown.rate == 0.) ImGui::TextDisabled("Pausado");
+                else if(!shown.live) ImGui::TextColored(busy, "Simulado: %s%s", shown.rate < 0 ? "voltando " : "", speedLabel(shown.rate).c_str());
+                else if(timing.quality==albert::time::Quality::Local)ImGui::TextColored(attention,"Horario local");
+                else if(timing.quality!=albert::time::Quality::Synchronized)ImGui::TextColored(attention,"Horario estimado");
+                else if (refreshing || refreshingOrbits || cloudSync.active || catalog.busy()) ImGui::TextColored(busy, "Atualizando dados");
+                else if (!cloudSync.error.empty() || !refreshError.empty()) ImGui::TextColored(attention, "Atualizacao pendente");
+                else ImGui::TextColored(calm, "Dados sincronizados");
+
+                if (openTime) {
+                    const auto text = albert::time::formatUtc(simulatedUtc).substr(0, 16);
+                    std::snprintf(dateText.data(), dateText.size(), "%s", text.c_str());
+                    dateError.clear();
+                    ImGui::OpenPopup("Tempo da simulacao");
+                }
+                const float popupWidth = std::min(360.f, display.x - margin * 2), popupTop = wide ? margin+88 : margin+154;
+                ImGui::SetNextWindowPos(wide ? ImVec2(display.x-margin,popupTop) : ImVec2(margin,popupTop),ImGuiCond_Appearing,wide ? ImVec2(1,0) : ImVec2(0,0));
+                // Below the panel; scrolls instead of covering it on short windows.
+                ImGui::SetNextWindowSizeConstraints(ImVec2(popupWidth,0),ImVec2(popupWidth,std::max(120.f,display.y-popupTop-margin)));
+                if (ImGui::BeginPopup("Tempo da simulacao")) {
+                    protectPanel();
+                    // Follow changes made elsewhere (API) while the panel is open.
+                    if (shown.rate != 0.) {chosenSpeed = std::abs(shown.rate);backwards = shown.rate < 0;}
+                    const float spacing = ImGui::GetStyle().ItemSpacing.x, full = ImGui::GetContentRegionAvail().x;
+                    const float half = (full - spacing) / 2, third = (full - 2 * spacing) / 3, quarter = (full - 3 * spacing) / 4;
+                    auto selectable = [&](const char* label, bool selected, ImVec2 size) {
+                        if (selected) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.09f,.29f,.36f,1));
+                        const bool pressed = ImGui::Button(label, size);
+                        if (selected) ImGui::PopStyleColor();
+                        return pressed;
+                    };
+                    ImGui::TextDisabled("TEMPO DA SIMULACAO");
+                    ImGui::Text("%s   %s UTC", civilDate(simulatedUtc).c_str(), civilClock(simulatedUtc).c_str());
+                    if (shown.live) ImGui::TextColored(calm, "Ao vivo");
+                    else ImGui::TextDisabled("%s", offsetLabel(simulatedUtc - timing.utcSeconds).c_str());
+                    ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
+
+                    ImGui::TextDisabled("VELOCIDADE");
+                    const bool paused = shown.rate == 0.;
+                    if (ImGui::Button(paused ? "Continuar" : "Pausar", ImVec2(half, 34)))
+                        simulation.setRate(paused ? (backwards ? -chosenSpeed : chosenSpeed) : 0.);
+                    ImGui::SameLine();
+                    if (selectable("Voltar no tempo", backwards, ImVec2(half, 34))) {
+                        backwards = !backwards;
+                        if (!paused) simulation.setRate(backwards ? -chosenSpeed : chosenSpeed);
+                    }
+                    for (size_t i = 0; i < std::size(SPEEDS); ++i) {
+                        if (i % 3) ImGui::SameLine();
+                        if (selectable(SPEEDS[i].label, chosenSpeed == SPEEDS[i].rate, ImVec2(third, 32))) {
+                            chosenSpeed = SPEEDS[i].rate;
+                            simulation.setRate(backwards ? -chosenSpeed : chosenSpeed);
+                        }
+                    }
+                    ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
+
+                    ImGui::TextDisabled("IR PARA (UTC)");
+                    auto choose = [&](double utc) {
+                        try {
+                            simulation.jump(utc);dateError.clear();
+                            const auto text = albert::time::formatUtc(utc).substr(0, 16);
+                            std::snprintf(dateText.data(), dateText.size(), "%s", text.c_str());
+                        } catch (const std::invalid_argument&) {dateError = "Escolha uma data de 1900 a 2100.";}
+                    };
+                    ImGui::SetNextItemWidth(full - 80 - spacing);
+                    const bool entered = ImGui::InputTextWithHint("##Data", "AAAA-MM-DD HH:MM", dateText.data(), dateText.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+                    ImGui::SameLine();
+                    if (ImGui::Button("Ir", ImVec2(80, 0)) || entered) {
+                        if (const auto utc = albert::time::parseUtc(dateText.data())) choose(*utc);
+                        else dateError = "Use o formato AAAA-MM-DD HH:MM.";
+                    }
+                    constexpr std::pair<const char*, double> steps[]{{"-1 dia",-86400.},{"-1 h",-3600.},{"+1 h",3600.},{"+1 dia",86400.}};
+                    for (size_t i = 0; i < std::size(steps); ++i) {
+                        if (i) ImGui::SameLine();
+                        if (ImGui::Button(steps[i].first, ImVec2(quarter, 32))) choose(simulatedUtc + steps[i].second);
+                    }
+                    if (!dateError.empty()) ImGui::TextColored(attention, "%s", dateError.c_str());
+                    ImGui::Spacing();
+                    ImGui::BeginDisabled(shown.live);
+                    if (ImGui::Button("Agora", ImVec2(full, 36))) {simulation.live();chosenSpeed = 1.;backwards = false;dateError.clear();}
+                    ImGui::EndDisabled();
+                    ImGui::Spacing();
+                    ImGui::PushTextWrapPos(0);
+                    ImGui::TextDisabled("Sol, Lua e planetas: efemerides do JPL Horizons para a data.");
+                    if (approximatePositions) ImGui::TextColored(refreshError.empty() ? busy : attention, "%s",
+                        std::abs(shown.rate) > TABLE_RATE_LIMIT ? "Acima de 6 h/s: posicoes dos modelos analiticos do ERFA, ajustadas as ultimas tabelas do JPL. Pause ou desacelere para buscar as tabelas." :
+                        refreshError.empty() ? "Posicoes aproximadas (modelos analiticos do ERFA) ate as tabelas chegarem." : "Sem efemerides do JPL: posicoes aproximadas (modelos analiticos do ERFA).");
+                    if (std::abs(simulatedUtc - localElementsUtc) > 365.25 * 86400.)
+                        ImGui::TextDisabled("Outras luas e pequenos corpos: orbitas de dois corpos com elementos de %s, menos precisas longe dessa data.", civilDate(localElementsUtc).c_str());
+                    if (visualSettings.clouds && !cloudsCurrent) ImGui::TextDisabled("Nuvens observadas so aparecem perto do presente.");
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndPopup();
+                }
                 ImGui::End();
                 ImGui::PopStyleVar();
             }
@@ -1593,10 +1806,23 @@ int albert::runRenderer(int argc, char** argv) {
 
         auto nextRefresh = SteadyClock::now() + std::chrono::seconds(ephemerides.cached ? 0 : REFRESH_SECONDS);
         auto nextOrbitRefresh = SteadyClock::now() + std::chrono::hours(orbits.cached ? 0 : 24);
+        // Coverage-driven replacements wait for these: failures back off, paths recentre at most every 30 s.
+        auto ephemerisRetry = SteadyClock::now(), orbitRetry = SteadyClock::now();
+        // Duration of the last ephemeris refresh (seconds to a minute): tables also
+        // cover the playback until they arrive, and when less than that remains
+        // covered a short table is fetched first.
+        double refreshSeconds = 20.;
+        bool quickRefresh = false;
+        double quickRate = std::numeric_limits<double>::quiet_NaN(); // Rate the last short table was planned for.
+        auto refreshStarted = SteadyClock::now();
         int ephemerisFailures = 0, orbitFailures = 0;
 
         albert::DownloadProgress refreshProgress;
         albert::DownloadProgress orbitProgress;
+        // Requests compare their epoch with this one between bodies, so a new date
+        // abandons them. Declared before the futures, which wait for the requests.
+        std::atomic<std::uint64_t> refreshEpoch{0};
+        std::atomic_bool positionsLoading{false}; // Paths wait for position tables at the JPL queue.
         std::future<Ephemerides> pending;
         std::future<Orbits> pendingOrbits;
         struct CancelRefreshOnExit {
@@ -1612,18 +1838,34 @@ int albert::runRenderer(int argc, char** argv) {
         int renderedFrames = 0;
 
         auto timeGeneration=initialTimeGeneration;
-        std::uint64_t refreshEpoch=0,ephemerisRequestEpoch=0,orbitRequestEpoch=0;
+        auto simulationGeneration=initialSimulationGeneration;
+        std::uint64_t ephemerisRequestEpoch=0,orbitRequestEpoch=0;
         double lastFrameMonotonic=albert::time::monotonicSeconds();
+        double heldUtc=simulatedUtc; // Previous frame's simulated instant.
+        // Tabulated minus analytic position per body (km), eased when a table arrives.
+        struct Correction {Vec3 target, shown, from;float age=1e9f;bool tabulated=false;};
+        std::map<std::string,Correction> corrections;
         canvas.animate([&] {
             const auto frameTime=timeService.status();
+            auto moment=simulation.read();
             const float elapsed = clock.getDelta();
             const float dt = std::min(elapsed, 0.1f);
             auto steadyNow = SteadyClock::now();
             const double frameMonotonic=albert::time::monotonicSeconds();
-            if(frameTime.generation!=timeGeneration||frameMonotonic-lastFrameMonotonic>30.){
-                timeGeneration=frameTime.generation;++refreshEpoch;nextRefresh=steadyNow;nextOrbitRefresh=steadyNow;
+            const bool suspended=frameMonotonic-lastFrameMonotonic>30.;
+            const bool newDate=moment.generation!=simulationGeneration;
+            // A chosen date stays where it was across a suspension.
+            if(!newDate&&suspended&&!moment.live){simulation.stall(heldUtc);moment=simulation.read();}
+            if(newDate)corrections.clear(); // No anchor at a new date: positions jump with it.
+            if(frameTime.generation!=timeGeneration||newDate||suspended){
+                timeGeneration=frameTime.generation;simulationGeneration=moment.generation;++refreshEpoch;nextRefresh=steadyNow;nextOrbitRefresh=steadyNow;
             }
             lastFrameMonotonic=frameMonotonic;
+            heldUtc=moment.utcSeconds;
+            simulatedUtc=moment.utcSeconds;
+            approximatePositions=!covers(ephemerides,jdTDB(2440587.5+simulatedUtc/86400.));
+            // Observed clouds belong to the last day; other dates show none.
+            cloudsCurrent=std::abs(simulatedUtc-frameTime.utcSeconds)<86400.;
 
             planets.updateUploads(renderer);
             if (introductionStart) introductionElapsed = std::min(introductionDuration,
@@ -1650,12 +1892,13 @@ int albert::runRenderer(int argc, char** argv) {
                 replaceBodyOrbits(updated->orbits);
                 orbits = std::move(updated->orbits);
                 refreshError.clear();
-                nextRefresh = updated->timeGeneration==frameTime.generation ? steadyNow+std::chrono::seconds(REFRESH_SECONDS):steadyNow;
-                nextOrbitRefresh = updated->timeGeneration==frameTime.generation ? steadyNow+std::chrono::hours(24):steadyNow;
+                const bool current=updated->timeGeneration==frameTime.generation&&updated->simulationGeneration==moment.generation;
+                nextRefresh = current ? steadyNow+std::chrono::seconds(REFRESH_SECONDS):steadyNow;
+                nextOrbitRefresh = current ? steadyNow+std::chrono::hours(24):steadyNow;
                 ephemerisFailures = orbitFailures = 0;
             }
 
-            if (auto observed = cloudSync.poll(visualSettings.clouds); observed && observed->image) {
+            if (auto observed = cloudSync.poll(visualSettings.clouds&&cloudsCurrent); observed && observed->image) {
                 planets.setCloudImage(std::move(*observed->image));
                 std::cout << "Nuvens observadas: " << observed->date << " cobertura " << observed->coverage << std::endl;
             }
@@ -1666,28 +1909,44 @@ int albert::runRenderer(int argc, char** argv) {
                     std::future_status::ready) {
                 try {
                     ephemerides = pending.get();
+                    refreshSeconds = std::chrono::duration<double>(steadyNow - refreshStarted).count();
                     ephemerisFailures = 0;
-                    nextRefresh = ephemerisRequestEpoch==refreshEpoch ? steadyNow+std::chrono::seconds(REFRESH_SECONDS):steadyNow;
+                    // Live data refreshes periodically; other dates only for coverage.
+                    nextRefresh = ephemerisRequestEpoch!=refreshEpoch ? steadyNow : moment.live ? steadyNow+std::chrono::seconds(REFRESH_SECONDS) : steadyNow+std::chrono::hours(24);
+                    ephemerisRetry = steadyNow;
                     dataValid = true;
                     refreshError.clear();
+                } catch (const Superseded&) {
+                    nextRefresh = steadyNow;
                 } catch (const std::exception& e) {
-                    nextRefresh = steadyNow + std::chrono::seconds(std::min(REFRESH_SECONDS, 15 * (1 << std::min(ephemerisFailures++, 5))));
+                    nextRefresh = ephemerisRetry = steadyNow + std::chrono::seconds(std::min(REFRESH_SECONDS, 15 * (1 << std::min(ephemerisFailures++, 5))));
                     refreshError = e.what();
                     std::cerr << e.what() << '\n';
                 }
                 refreshing = false;
             }
 
-            if (!refreshing && !downloads.active && steadyNow >= nextRefresh) {
-                refreshing = true;ephemerisRequestEpoch=refreshEpoch;
-
+            const bool tablesFollow=std::abs(moment.rate)<=TABLE_RATE_LIMIT;
+            const bool ephemeridesExpiring=expiring(ephemerides,simulatedUtc,moment.rate);
+            if (!refreshing && !downloads.active && tablesFollow && (steadyNow >= nextRefresh || (ephemeridesExpiring && steadyNow >= ephemerisRetry))) {
+                refreshing = true;ephemerisRequestEpoch=refreshEpoch;positionsLoading=true;
+                // An instant without tables, or about to leave them, starts from a short
+                // table; the full one always follows.
+                quickRefresh=!(quickRefresh&&quickRate==moment.rate)&&(approximatePositions||secondsCovered(ephemerides,simulatedUtc,moment.rate)<1.5*refreshSeconds);
+                if(quickRefresh)quickRate=moment.rate;
+                refreshStarted=steadyNow;
+                // Tables arrive after the measured refresh time: cover that playback too.
+                auto playback=quickRefresh?QUICK_PLAYBACK:FULL_PLAYBACK;playback.seconds+=refreshSeconds;
                 pending = std::async(
                     std::launch::async,
-                    [&] { return loadEphemerides(&refreshProgress); }
+                    [&, utc=simulatedUtc, rate=moment.rate, playback, epoch=ephemerisRequestEpoch] {
+                        struct Loading {std::atomic_bool& flag;~Loading(){flag=false;}} loading{positionsLoading};
+                        return loadEphemerides(utc, rate, playback, &refreshProgress, 0, false, [&refreshEpoch, epoch]{return refreshEpoch.load()!=epoch;});
+                    }
                 );
             }
 
-            // Renovacao diaria dos trajetos orbitais
+            // Renovacao dos trajetos orbitais
             if (refreshingOrbits &&
                 pendingOrbits.wait_for(std::chrono::seconds(0)) ==
                     std::future_status::ready) {
@@ -1705,23 +1964,29 @@ int albert::runRenderer(int argc, char** argv) {
                     orbits = std::move(updated);
                     orbitFailures = 0;
                     nextOrbitRefresh = orbitRequestEpoch==refreshEpoch ? steadyNow+std::chrono::hours(24):steadyNow;
+                    orbitRetry = steadyNow + std::chrono::seconds(30);
 
                     scene->add(moonOrbit);
                     scene->add(earthOrbit);
+                } catch (const Superseded&) {
+                    nextOrbitRefresh = steadyNow;
                 } catch (const std::exception& e) {
-                    nextOrbitRefresh = steadyNow + std::chrono::seconds(std::min(300, 30 * (1 << std::min(orbitFailures++, 4))));
+                    nextOrbitRefresh = orbitRetry = steadyNow + std::chrono::seconds(std::min(300, 30 * (1 << std::min(orbitFailures++, 4))));
                     refreshError = e.what();
                     std::cerr << e.what() << '\n';
                 }
                 refreshingOrbits = false;
             }
 
-            if (!refreshingOrbits && !downloads.active && steadyNow >= nextOrbitRefresh) {
+            // Paths drift slowly (the Moon's nodes and apsides): recentre them after
+            // 60 simulated days. Positions come first: no path request while they load.
+            const bool orbitsDrifted=std::abs(simulatedUtc-orbits.centerUtc)>60.*86400.;
+            if (!refreshingOrbits && !refreshing && !downloads.active && tablesFollow && (steadyNow >= nextOrbitRefresh || (orbitsDrifted && steadyNow >= orbitRetry))) {
                 refreshingOrbits = true;orbitRequestEpoch=refreshEpoch;
 
                 pendingOrbits = std::async(
                     std::launch::async,
-                    [&] { return loadOrbits(&orbitProgress); }
+                    [&, center=simulatedUtc, epoch=orbitRequestEpoch] { return loadOrbits(center, &orbitProgress, 0, false, [&refreshEpoch, epoch]{return refreshEpoch.load()!=epoch;}, [&positionsLoading]{return positionsLoading.load();}); }
                 );
             }
 
@@ -1739,6 +2004,7 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::RemoveLayer>)registry.removeLayer(value.id);
                     else if constexpr(std::is_same_v<T,albert::core::LayerVisibility>)registry.layerVisible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Focus>) setFocus(value.id,value.reset);
+                    else if constexpr(std::is_same_v<T,albert::core::SetTime>) {if(value.live)simulation.live();else simulation.choose(value.utcSeconds,value.rate);}
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
                             throw std::invalid_argument("Invalid orbit parameters");
@@ -1755,25 +2021,44 @@ int albert::runRenderer(int argc, char** argv) {
             });
 
             // Posicionamento fisico dos corpos
-            double utc = 2440587.5+frameTime.utcSeconds/86400.;
+            double utc = 2440587.5+simulatedUtc/86400.;
             double tdb = jdTDB(utc);
 
-            registry.builtinState("earth",{frameTime.utcSeconds,{0,0,0}});
+            registry.builtinState("earth",{simulatedUtc,{0,0,0}});
             try {
-                Vec3 sunState = interpolate(ephemerides.sun, tdb);
-                Vec3 moonState = interpolate(ephemerides.moon, tdb);
-                Vec3 earthHelio = interpolate(orbits.earth, tdb);
+                // JPL tables where they cover the instant. Elsewhere the ERFA analytic models,
+                // shifted by their last difference from the tables (none at a new date), so
+                // positions never stop while tables load; the difference eases in on arrival.
+                constexpr float CORRECTION_EASE = .6f;
+                auto place=[&](const std::string& id,const std::vector<State>& table)->Vec3{
+                    const auto model=albert::core::approximateGeocentric(id,tdb);
+                    if(!model)return interpolate(table,tdb);
+                    const Vec3 analytic{model->x/1000.,model->y/1000.,model->z/1000.};
+                    const bool fresh=!corrections.contains(id);auto& c=corrections[id];
+                    const bool tabulated=table.size()>=2&&tdb>=table.front().jd&&tdb<=table.back().jd;
+                    if(tabulated){
+                        if(!c.tabulated&&!fresh){c.from=c.shown;c.age=0.f;}
+                        c.target=interpolate(table,tdb)-analytic;
+                    }
+                    c.tabulated=tabulated;c.age+=elapsed; // Real seconds: slow frames still finish the ease.
+                    c.shown=c.age<CORRECTION_EASE?c.from+(c.target-c.from)*static_cast<double>(smoothstep(c.age/CORRECTION_EASE)):c.target;
+                    return analytic+c.shown;
+                };
+                Vec3 sunState = place("sun", ephemerides.sun);
+                Vec3 moonState = place("moon", ephemerides.moon);
+                // Geometric states: the heliocentric Earth is the opposite of the geocentric Sun.
+                Vec3 earthHelio = sunState * -1.;
 
-                const double timestamp=frameTime.utcSeconds;
+                const double timestamp=simulatedUtc;
                 registry.builtinState("moon",{timestamp,{moonState.x*1000.,moonState.y*1000.,moonState.z*1000.}});
                 registry.builtinState("sun",{timestamp,{sunState.x*1000.,sunState.y*1000.,sunState.z*1000.}});
-                for(const auto& [id,samples]:ephemerides.bodies){const auto value=interpolate(samples,tdb);registry.builtinState(id,{timestamp,{value.x*1000.,value.y*1000.,value.z*1000.}});}
+                for(const auto& [id,samples]:ephemerides.bodies){const auto value=place(id,samples);registry.builtinState(id,{timestamp,{value.x*1000.,value.y*1000.,value.z*1000.}});}
                 // Orbitas heliocentricas convertidas
                 // para a origem geocentrica da cena.
                 earthOrbit->origin=earthHelio;
-                updateOrbitTime(moonOrbit, orbits.moon, tdb);
-                updateOrbitTime(earthOrbit, orbits.earth, tdb);
-                for(const auto& [id,path]:bodyOrbits){path->origin=earthHelio;updateOrbitTime(path,orbits.bodies.at(id),tdb);}
+                updateOrbitTime(moonOrbit, tdb);
+                updateOrbitTime(earthOrbit, tdb);
+                for(const auto& [id,path]:bodyOrbits){path->origin=earthHelio;updateOrbitTime(path,tdb);}
 
                 dataValid = true;
             } catch (const std::exception& e) {
@@ -1787,18 +2072,18 @@ int albert::runRenderer(int argc, char** argv) {
             }
 
             // Provider failure holds built-ins; independent objects and camera still advance.
-            albert::core::updateLocalSystem(registry,frameTime.utcSeconds,tdb);
+            albert::core::updateLocalSystem(registry,simulatedUtc,tdb);
             const auto nextOriginId=transition.active?Focus("@flight"):targetId(focus);
             // During flight the floating origin follows the eye, preserving the
             // departure body's detail instead of rebasing immediately to a planet AU away.
             const auto nextOrigin=transition.active?sceneOrigin+albert::core::Vector{
                 camera->position.x*albert::core::earthRadiusMeters,-camera->position.z*albert::core::earthRadiusMeters,camera->position.y*albert::core::earthRadiusMeters}:
-                registry.evaluate(nextOriginId,frameTime.utcSeconds).state.positionMeters;
+                registry.evaluate(nextOriginId,simulatedUtc).state.positionMeters;
             const auto shift=albert::renderPosition(sceneOrigin,nextOrigin);
             if(transition.active||originId!=nextOriginId){camera->position.add(shift);controls.target.add(shift);originId=nextOriginId;}
             if(transition.active)transition.startTarget.add(shift);
             sceneOrigin=nextOrigin;
-            objects.sync(registry,frameTime.utcSeconds,sceneOrigin);
+            objects.sync(registry,simulatedUtc,sceneOrigin);
             earthPosition.copy(earth->position);
             sunPosition.copy(sun->position);
             moonPosition.copy(moon->position);
@@ -1985,7 +2270,7 @@ int albert::runRenderer(int argc, char** argv) {
                 const bool family=body.parent==focus||(focused&&focused->category==albert::core::Category::Moon&&body.parent==focused->parent);
                 orbit.path->visible=orbitVisibility*secondary>.001f&&(body.id==focus||family||((systemView(focus)||focus==targets::Sun)&&body.category!=albert::core::Category::Moon));
                 if(!orbit.path->visible)continue;
-                const auto parent=registry.evaluate(std::string(body.parent),frameTime.utcSeconds).state.positionMeters;
+                const auto parent=registry.evaluate(std::string(body.parent),simulatedUtc).state.positionMeters;
                 orbit.path->origin={-parent.x/1000.,-parent.y/1000.,-parent.z/1000.};
                 orbit.path->material()->as<ShaderMaterial>()->uniforms.at("present").setValue(static_cast<float>(std::remainder(tdb-orbit.epoch,orbit.period)));
                 orbit.path->rebase(camera->position,{sceneOrigin.x/1000.,sceneOrigin.y/1000.,sceneOrigin.z/1000.});
@@ -2020,11 +2305,12 @@ int albert::runRenderer(int argc, char** argv) {
                 lastShadow = steadyNow;
             }
             Vector3 solarDirection = sunPosition;solarDirection.sub(earthPosition);
-            planets.update(solarDirection.normalize(), camera->position, visualSettings, dt);
+            auto shownSettings=visualSettings;shownSettings.clouds=visualSettings.clouds&&cloudsCurrent;
+            planets.update(solarDirection.normalize(), camera->position, shownSettings, dt);
             Vector3 earthCamera = camera->position;
             earth->worldToLocal(earthCamera);
             planets.updateImageDetail(camera->position, visualSettings.quality);
-            if (visualSettings.quality && visualSettings.clouds && focus == targets::Earth && earthCamera.length()<2.2f) {
+            if (visualSettings.quality && shownSettings.clouds && focus == targets::Earth && earthCamera.length()<2.2f) {
                 const double latitude = albert::geodeticLatitude(std::asin(std::clamp(earthCamera.y/earthCamera.length(),-1.f,1.f)))*180./PI;
                 const double lon = albert::longitude(std::atan2(earthCamera.z,-earthCamera.x)*180./PI-180.);
                 cloudSync.requestDetail(albert::cloudRegion(lon,latitude,earthCamera.length(),camera->aspect,camera->fov));
@@ -2082,10 +2368,10 @@ int albert::runRenderer(int argc, char** argv) {
             vectorLayers.update(registry,objects,sceneOrigin,Vector2(display.x,display.y),camera->nearPlane,dt,[&](ShaderMaterial& material){planets.updateBorderMaterial(material,camera->position);});
             if(rpcPort||catalog.active()) {
                 const double r=albert::core::earthRadiusMeters;
-                auto snapshot=registry.snapshot(frameTime.utcSeconds,{focus,
+                auto snapshot=registry.snapshot(simulatedUtc,{focus,
                     {sceneOrigin.x+camera->position.x*r,sceneOrigin.y-camera->position.z*r,sceneOrigin.z+camera->position.y*r},
                     camera->position.distanceTo(controls.target)*r,transition.active});
-                snapshot.clock=frameTime;commands.publish(std::move(snapshot));
+                snapshot.clock=frameTime;snapshot.simulation=moment;snapshot.simulation.utcSeconds=simulatedUtc;snapshot.approximatePositions=approximatePositions;commands.publish(std::move(snapshot));
             }
             eclipses.update(visualSettings.shadows);
             renderer.render(*scene, *camera);

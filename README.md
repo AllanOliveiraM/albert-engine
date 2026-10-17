@@ -66,6 +66,7 @@ Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 | Recurso | O que você encontra no programa |
 | --- | --- |
 | Posições astronômicas | Consultas ao NASA/JPL Horizons, atualização automática e movimento interpolado entre amostras |
+| Data simulada | Qualquer instante de 1900 a 2100, pausa, retrocesso e velocidades até uma semana por segundo |
 | Escala física | Dimensões e distâncias reais, Terra WGS84 e orientação dos corpos |
 | Visualização | Superfícies detalhadas, relevo regional, iluminação solar, atmosfera terrestre e luzes das cidades |
 | Zoom | Detalhes carregados do disco conforme a região visível e a aproximação |
@@ -86,6 +87,16 @@ Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 **O tempo e os dados definem a cena.** O Albert consulta as posições e trajetórias dos corpos embarcados no Horizons. Entre consultas, interpola
 as amostras para manter o movimento contínuo. A orientação dos corpos usa
 transformações astronômicas; a Terra considera o modelo WGS84.
+
+**A data pode ser escolhida.** Clique no horário, no canto superior direito, para
+pausar, voltar no tempo, acelerar até uma semana por segundo ou ir a um instante de
+1900 a 2100 (UTC); **Agora** retorna ao tempo real. Sol, Lua e planetas usam as
+efemérides do Horizons para a data escolhida. Enquanto as tabelas chegam, e acima
+de 6 horas por segundo, eles seguem modelos analíticos do ERFA ajustados às
+últimas tabelas, e o painel indica **Posições aproximadas**. Outras luas e os
+pequenos corpos usam órbitas de dois corpos, menos precisas longe da época dos
+elementos (outubro de 2026). As nuvens observadas aparecem só perto do presente.
+Objetos enviados pela API são avaliados no instante simulado.
 
 O horário é conferido automaticamente com **fontes NTP independentes** e
 continua avançando entre consultas. Se a rede falhar, a interface informa quando
@@ -112,8 +123,9 @@ liberados após um breve intervalo, reduzindo o consumo de memória.
 **Os downloads recentes são reutilizados.** Posições e órbitas ficam salvas
 entre execuções. Se os dados ainda cobrem o horário atual, a cena pode abrir
 com eles e renovar as consultas em segundo plano. Tabelas expiradas ou
-corrompidas são descartadas; o Albert não extrapola posições para esconder
-uma falha de conexão. A primeira abertura ainda precisa buscar os dados.
+corrompidas são descartadas. Sem tabela para o instante, as posições vêm dos
+modelos analíticos citados acima, sempre identificadas como aproximadas. A
+primeira abertura ainda precisa buscar os dados.
 
 **As nuvens são observações com atraso.** Elas começam desligadas. Quando
 ativadas, o Albert consulta mosaicos de satélite, mostra a data em **Dados** e
@@ -209,6 +221,7 @@ as imagens e não precisa de Git LFS.
 - Clique em um resultado com **+** para adicionar e acompanhar suas posições automaticamente.
 - Arraste para girar e use a roda do mouse para aproximar.
 - Use o botão **Restaurar zoom**, no canto inferior direito, para voltar à distância inicial.
+- Clique no horário, no canto superior direito, para escolher data e velocidade; **Agora** volta ao tempo real.
 - Abra **☰ → Cena** para ajustar atmosfera, nuvens, cidades, fronteiras, sombras e órbitas.
 - Ative **Nuvens em tempo real** em **Cena** para buscar as observações automaticamente.
 - O brilho auxiliar de cada objeto com lado escuro ajuda a enxergar o lado escuro; começa desligado e é ajustável.

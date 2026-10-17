@@ -13,7 +13,10 @@ struct Job {std::uint64_t id=0;std::string catalogId,objectId;Stage stage=Stage:
 class Manager {
 public:
     using Now=std::function<double()>;
-    Manager(core::Bridge&,providers::Horizons&,Now utcNow={},providers::SmallBodies::Transport discovery={});
+    using Simulated=std::function<time::Simulated()>;
+    // Tables follow `simulated` when given (date, rate and jumps of the simulation);
+    // otherwise `utcNow` is a live clock.
+    Manager(core::Bridge&,providers::Horizons&,Now utcNow={},providers::SmallBodies::Transport discovery={},Simulated simulated={});
     ~Manager();
     std::uint64_t importObject(Import request);
     std::vector<Job> jobs() const;

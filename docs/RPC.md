@@ -53,7 +53,7 @@ Para compilar somente o programa visual, configure `-DALBERT_RPC=OFF`.
 | --- | --- |
 | `SceneService` | `GetScene`, `GetCapabilities`, `CreateObject`, `RemoveObject`, `SetVisibility`, `PushStates`, `StreamStates` |
 | `CameraService` | `Focus`, `Orbit`, `GetCamera` |
-| `TimeService` | `GetTime` |
+| `TimeService` | `GetTime`, `SetTime` |
 | `LayerService` | `CreateLayer`, `ListLayers`, `SetVisibility`, `RemoveLayer` |
 | `AssetService` | `RegisterModel`, `ListModels`, `RemoveModel` |
 | `CatalogService` | `ListObjects`, `ImportObject`, `GetJob`, `GetJobs`, `RetryJob` |
@@ -254,7 +254,10 @@ personalizados e camadas raster ainda são próximas entregas.
 - Posições em metros e velocidades em m/s, no **ICRF com origem no centro da Terra**.
   Cada amostra deve declarar `GEOCENTRIC_ICRF`; referenciais diferentes são rejeitados.
 - Instante em segundos Unix UTC (`utc_unix_seconds`), definido pelo produtor.
-  Não é o horário de chegada do pacote. O Albert usa sua referência NTP interna.
+  Não é o horário de chegada do pacote. Os estados são avaliados no **instante
+  simulado** da cena (`Scene.utc_unix_seconds`), igual ao relógio NTP interno
+  enquanto ao vivo. Para acompanhar uma data escolhida, use o tempo simulado;
+  dados em tempo real só aparecem ao vivo. Instantes anteriores a 1970 são válidos.
 - Quaternion em ordem **X, Y, Z, W**, girando os eixos locais do modelo para o
   ICRF. O Albert normaliza quaternions válidos e rejeita quaternion nulo.
 - Os eixos gráficos, a escala e a origem próxima da câmera são cuidados pelo
@@ -275,6 +278,16 @@ obtém o UTC inicial dessa API; para apenas consultar:
 
 A consulta reflete o último quadro, não o instante exato de chegada da resposta.
 Detalhes, falhas de rede e política de leap seconds em [TIME.md](TIME.md).
+
+`ClockStatus.simulation` informa o instante simulado (`utc_unix_seconds`), a
+velocidade `rate` em segundos simulados por segundo (0 pausado, negativa para trás),
+`live`, `limited` (parado em 1900 ou 2100), `generation` (muda ao escolher uma data
+ou voltar ao vivo) e `approximate_positions` (Sol, Lua e planetas por modelos
+analíticos enquanto as tabelas do JPL não cobrem o instante). `SetTime` escolhe
+`utc_unix_seconds` e/ou `rate`; campos ausentes são mantidos e `live=true` volta ao
+tempo real. Valores fora de 1900–2100 ou acima de uma semana por segundo retornam
+`INVALID_ARGUMENT`. O exemplo `albert_demo_client` carimba seu voo no tempo
+simulado.
 
 Amostras devem chegar em ordem estritamente crescente por objeto, inclusive
 entre chamadas distintas. Uma chamada rejeitada não aplica parte do seu lote.

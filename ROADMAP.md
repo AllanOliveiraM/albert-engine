@@ -14,7 +14,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
 | **Alta — 1** | ~~Completar as luas~~ — concluído em 17/10/2026 | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion/Proteu com formas medidas (Hipérion e Proteu sem mapa; Hipérion com orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
-| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P (Rosetta), Halley (Giotto/Vega), Vesta e Ceres (Dawn: mosaico + relevo) medidos; Pallas ainda artística; coma/caudas dependem do seletor de data (Média 5); melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
+| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P (Rosetta), Halley (Giotto/Vega), Vesta e Ceres (Dawn: mosaico + relevo) medidos; Pallas ainda artística; coma/caudas desbloqueadas pela data simulada; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
 | **Alta — 3** | ~~Anéis de Júpiter, Urano e Netuno~~ — entregue em 17/10/2026 | Perfis das tabelas do PDS, espalhamento simples com sombra do planeta, realce opcional; faltam arcos de Adams, excentricidades e cor das partículas |
 | **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
 | **Alta — 5** | Validar GPU física, Windows nativo (inclui a versão leve e seus downloads) e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
@@ -22,7 +22,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | **Média — 2** | NTS e tratamento completo de leap seconds/smear | NTP com múltiplas fontes já existe, sem autenticação criptográfica |
 | **Média — 3** | Texturas GLB/glTF, animação de peças e controles avançados de câmera pela API | GLB estático/PBR sólido e streaming de posição/atitude já existem |
 | **Média — 4** | Rótulos, polígonos/GeoJSON e camadas raster/clima selecionadas | Camadas atuais: pontos e polilinhas; nuvens GIBS continuam opcionais |
-| **Média — 5** | Data de simulação, gravação/reprodução e cenários de eventos/eclipses | Eclipses acompanham a geometria em tempo real; não há seletor de datas históricas |
+| **Média — 5** | ~~Data de simulação~~ — entregue em 17/10/2026; faltam gravação/reprodução e cenários de eventos/eclipses | 1900–2100, até 1 semana/s; tabelas do JPL acompanham até 6 h/s, acima disso modelos analíticos do ERFA ajustados às últimas tabelas |
 | **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
 
 ### Download dos assets por níveis — decidido e entregue em 17/10/2026
@@ -83,6 +83,20 @@ Todas as 25 luas têm agora representação própria, com os limites de cada fon
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — data simulada.** O horário no canto superior direito abre pausa, retrocesso,
+velocidades de 1× a uma semana por segundo, ida a qualquer instante de 1900 a 2100 e
+**Agora**. Sol, Lua e planetas usam tabelas do Horizons para a data, com passo
+escolhido pela precisão (Lua 1 h–1 d, planetas 1–5 d) e janelas que cobrem a
+reprodução até a chegada da consulta; o Horizons leva de um a vários segundos por
+tabela, então elas só acompanham até 6 h/s. Fora das tabelas entram os modelos do
+ERFA (`epv00`, `moon98`, `plan94`) ajustados à última diferença medida, sinalizados
+como posições aproximadas: a data nunca congela. Trajetos recentrados, nuvens
+observadas ocultas longe do presente, catálogo e API seguindo o tempo simulado
+(`SetTime`, `ClockStatus.simulation`). Validação: 28 testes Linux (novo
+`simulated_time`), 7 no Wine, OpenGL no Xvfb e programa real: Lua em 1969-07-20
+20:17:40 UTC idêntica a uma consulta independente ao Horizons (0,1 m), reprodução
+contínua a 1 h/s, 1 dia/s e 1 semana/s para trás.
 
 **17/10 — Caronte com mosaico e relevo da New Horizons.** Os produtos da USGS (300 m
 por pixel no melhor caso) substituem o mapa VTAD parcial, com o relevo do hemisfério do

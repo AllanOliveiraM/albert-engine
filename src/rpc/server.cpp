@@ -44,6 +44,10 @@ void clockStatus(const time::Status& s,api::ClockStatus* out){
     out->set_authenticated(s.authenticated);out->set_synchronizing(s.synchronizing);out->set_error(s.error);
     out->set_generation(s.generation);out->set_pending_correction_seconds(s.correctionSeconds);
 }
+void simulation(const core::Snapshot& snapshot,api::SimulationTime* out){
+    const auto& s=snapshot.simulation;out->set_utc_unix_seconds(s.utcSeconds);out->set_rate(s.rate);out->set_live(s.live);out->set_limited(s.limited);out->set_generation(s.generation);
+    out->set_approximate_positions(snapshot.approximatePositions);
+}
 class Services final:public api::SceneService::Service,public api::CameraService::Service,public api::TimeService::Service,public api::CatalogService::Service,public api::AssetService::Service {
 public:
     explicit Services(core::Bridge& bridge,catalog::Manager* catalog):bridge_(bridge),catalog_(catalog){}
@@ -59,7 +63,7 @@ public:
     }
     grpc::Status GetScene(grpc::ServerContext*,const api::Empty*,api::Scene* out) override{
         const auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};
-        clockStatus(s->clock,out->mutable_clock());
+        clockStatus(s->clock,out->mutable_clock());simulation(*s,out->mutable_clock()->mutable_simulation());
         out->set_revision(s->revision);out->set_utc_unix_seconds(s->utcSeconds);camera(s->camera,out->mutable_camera());
         for(const auto& o:s->objects){auto* result=out->add_objects();result->set_id(o.id);result->set_name(o.name);result->set_source(o.source);result->set_builtin(o.builtin);result->set_visible(o.visible);result->set_radius_meters(o.radiusMeters);result->set_provider_managed(o.providerManaged);
             auto* g=result->mutable_geometry();g->set_shape(static_cast<api::Geometry::Shape>(o.appearance.shape));vector(o.appearance.sizeMeters,g->mutable_size_meters());g->set_color_rgb(o.appearance.color);g->set_model_id(o.appearance.modelId);if(o.appearance.shape==core::Shape::Model)g->set_meters_per_model_unit(o.appearance.metersPerUnit);
@@ -68,7 +72,14 @@ public:
     }
     grpc::Status GetTime(grpc::ServerContext*,const api::Empty*,api::ClockStatus* out) override{
         const auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};
-        clockStatus(s->clock,out);return grpc::Status::OK;
+        clockStatus(s->clock,out);simulation(*s,out->mutable_simulation());return grpc::Status::OK;
+    }
+    grpc::Status SetTime(grpc::ServerContext* c,const api::SetTimeRequest* r,api::Applied* out) override{
+        core::SetTime command;command.live=r->live();
+        if(r->has_utc_unix_seconds())command.utcSeconds=r->utc_unix_seconds();
+        if(r->has_rate())command.rate=r->rate();
+        if(!command.live&&!command.utcSeconds&&!command.rate)return {grpc::StatusCode::INVALID_ARGUMENT,"Nothing to change"};
+        return apply(c,std::move(command),out);
     }
     grpc::Status GetCapabilities(grpc::ServerContext*,const api::Empty*,api::Capabilities* out) override{
         out->set_catalog_available(catalog_!=nullptr);out->set_max_model_bytes(core::maxModelBytes);out->set_max_layers(core::Scene::maxLayers);out->set_max_layer_input_points(core::Scene::maxLayerInputPoints);out->add_frames(api::GEOCENTRIC_ICRF);out->set_max_objects(core::Scene::maxObjects);out->set_max_samples_per_batch(core::Scene::maxSamples);

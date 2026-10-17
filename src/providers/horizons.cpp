@@ -26,7 +26,31 @@ Query normalize(Query q){
     q.startUtc=std::floor(q.startUtc/step)*step;q.endUtc=std::ceil(q.endUtc/step)*step;
     if((q.endUtc-q.startUtc)/step>8190)throw std::length_error("Horizons query exceeds sample limit");return q;
 }
+struct Step {double seconds;const char* label;};
+constexpr Step ladder[]{{300,"5 min"},{600,"10 min"},{900,"15 min"},{1800,"30 min"},{3600,"1 h"},{7200,"2 h"},{10800,"3 h"},{21600,"6 h"},{43200,"12 h"},{86400,"1 d"},{172800,"2 d"},{432000,"5 d"}};
+struct Plan {double span;Step step;};
+Plan plan(double rate,const Playback& p){
+    if(!std::isfinite(rate)||p.maxSamples<2||p.maxSamples>8000||!(p.minimumSeconds>0)||!(p.playbackSeconds>=0)||!std::isfinite(p.minimumSeconds+p.playbackSeconds)||
+       !(p.finestStepSeconds>=ladder[0].seconds)||!(p.coarsestStepSeconds>=p.finestStepSeconds))
+        throw std::invalid_argument("Invalid playback window");
+    double span=std::max(p.minimumSeconds,std::abs(rate)*p.playbackSeconds);const Step* step=nullptr;
+    for(const auto& s:ladder){if(s.seconds<p.finestStepSeconds)continue;if(s.seconds>p.coarsestStepSeconds)break;step=&s;if(span/s.seconds<=p.maxSamples)break;}
+    if(!step)throw std::invalid_argument("Playback steps outside the ladder");
+    return {std::min(span,step->seconds*p.maxSamples),*step};
+}
 double number(const std::string& text){size_t end=0;const double v=std::stod(text,&end);if(!std::isfinite(v)||text.find_first_not_of(" \t\r",end)!=std::string::npos)throw std::runtime_error("Invalid Horizons numeric field");return v;}
+}
+Window playbackWindow(double utc,double rate,const Playback& playback){
+    if(!std::isfinite(utc))throw std::invalid_argument("Invalid playback instant");
+    const auto [span,step]=plan(rate,playback);const double behind=std::max(60.,step.seconds);
+    if(rate>0)return {utc-behind,utc+span,step.label};
+    if(rate<0)return {utc-span,utc+behind,step.label};
+    return {utc-span/2,utc+span/2,step.label};
+}
+bool expiring(const Window& window,double utc,double rate,const Playback& playback){
+    if(!(utc>=window.startUtc&&utc<=window.endUtc))return true;
+    if(rate==0)return false;
+    return (rate>0?window.endUtc-utc:utc-window.startUtc)<.5*plan(rate,playback).span;
 }
 std::vector<Point> parseVectors(const std::string& text){
     const auto begin=text.find("$$SOE"),end=text.find("$$EOE");if(begin==std::string::npos||end==std::string::npos||end<=begin)throw std::runtime_error("Horizons response has no vector table");

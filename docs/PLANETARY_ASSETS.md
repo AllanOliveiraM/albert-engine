@@ -70,8 +70,9 @@ no escopo do roadmap, sem reutilizar mapas de outro corpo como substitutos.
   terminador. Não há iluminação auxiliar ligada por padrão. Microestrutura e
   sombras presentes no mosaico de aquisição continuam sendo uma limitação real
   da textura; não são um modelo completo de transporte de luz sobre cada cratera.
-- Estado geocêntrico e órbita heliocêntrica vêm do Horizons, seguindo a mesma
-  atualização automática dos corpos atuais. Novos corpos sólidos entram pelo
+- Estado geocêntrico e órbita heliocêntrica vêm do Horizons para a data simulada,
+  seguindo a mesma atualização automática dos corpos atuais; fora das tabelas,
+  modelos analíticos do ERFA ([TIME.md](TIME.md#data-simulada)). Novos corpos sólidos entram pelo
   descritor e por camadas nomeadas; Terra, Lua e Sol preservam seus modelos próprios.
 - Detalhes regionais continuam sendo preparados no worker, enviados à GPU em
   parcelas e revelados gradualmente. A região detalhada é liberada após deixar

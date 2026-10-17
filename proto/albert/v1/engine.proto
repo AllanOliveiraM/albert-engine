@@ -47,7 +47,18 @@ message ClockStatus {
   double age_seconds=5; double round_trip_seconds=6;
   string source=7; bool authenticated=8; bool synchronizing=9;
   string error=10; uint64 generation=11; double pending_correction_seconds=12;
+  // Instant of the scene states: equals utc_unix_seconds while live.
+  SimulationTime simulation=13;
 }
+// rate: simulated seconds per second (0 paused, negative backwards). limited: held
+// at the first or last supported instant. generation changes on date jumps and on
+// returning to live time, not on rate changes.
+// approximate_positions: the Sun, Moon and planets come from analytic models (ERFA)
+// while JPL tables for the instant load or are unavailable.
+message SimulationTime { double utc_unix_seconds=1; double rate=2; bool live=3; bool limited=4; uint64 generation=5; bool approximate_positions=6; }
+// Unset fields keep their value; live=true ignores both and follows the real clock.
+message SetTimeRequest { optional double utc_unix_seconds=1; optional double rate=2; bool live=3; }
+// utc_unix_seconds is the simulated instant of the object states (see ClockStatus.simulation).
 message Scene { uint64 revision=1; double utc_unix_seconds=2; repeated Object objects=3; Camera camera=4; ClockStatus clock=5; }
 message FocusRequest { string id=1; bool reset_zoom=2; }
 message OrbitRequest { double azimuth_radians=1; double elevation_radians=2; optional double distance_scale=3; }
@@ -76,6 +87,10 @@ service CameraService {
 service TimeService {
   // Same immutable frame snapshot as GetScene. No OS clock modification.
   rpc GetTime(Empty) returns (ClockStatus);
+  // Simulated date from 1900-01-01 to 2100-12-31 UTC, |rate| up to 7 days per
+  // second. External objects are evaluated at the simulated instant, so states
+  // must be timestamped in simulated time to follow it.
+  rpc SetTime(SetTimeRequest) returns (Applied);
 }
 
 message CatalogQuery { string query=1; }

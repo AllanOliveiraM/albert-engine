@@ -49,6 +49,31 @@ void persistentCache(){
     for(int i=0;i<132;++i)saveResponse(directory/"bounded",std::to_string(i),{"test",utc},1024);
     require(std::distance(fs::directory_iterator(directory/"bounded"),fs::directory_iterator{})<=128,"Provider cache grew beyond file-count bound");
 }
+void playbackWindows(){
+    constexpr double t=1792238400.;
+    auto same=[](const Window& w,double start,double end,const char* step){return w.startUtc==start&&w.endUtc==end&&w.step==step;};
+    require(same(playbackWindow(t,1.),t-300,t+86400,"5 min"),"Live window: one day of five-minute samples");
+    require(same(playbackWindow(t,3600.),t-1800,t+25*86400.,"30 min"),"One hour per second: 25 days");
+    require(same(playbackWindow(t,86400.),t-43200,t+600*86400.,"12 h"),"One day per second: 600 days");
+    require(same(playbackWindow(t,-604800.),t-2000*86400.,t+86400,"1 d"),"Backwards, span capped by one-day steps");
+    require(same(playbackWindow(t,0.),t-43200,t+43200,"5 min"),"Paused: centred");
+    const Playback satellites{1800.,300.,240,300.,1800.};
+    // Precision floors: one-hour lunar rows at 1x; five-day planetary rows at a week per second.
+    const Playback moon{86400.,600.,1000,3600.,86400.},planet{86400.,600.,1000,86400.,432000.};
+    require(same(playbackWindow(t,1.,moon),t-3600,t+86400,"1 h")&&same(playbackWindow(t,604800.,moon),t-86400,t+1000*86400.,"1 d"),"Lunar step floor and cap");
+    require(same(playbackWindow(t,1.,planet),t-86400,t+86400,"1 d")&&same(playbackWindow(t,604800.,planet),t-432000,t+4200*86400.,"5 d"),"Planetary step floor and cap");
+    rejects([&]{playbackWindow(t,1.,{86400.,600.,1000,86400.,3600.});});rejects([&]{playbackWindow(t,1.,{86400.,600.,1000,4000.,5000.});});
+    require(same(playbackWindow(t,86400.,satellites),t-1800,t+240*1800.,"30 min"),"Satellite step limit shrinks the span");
+    for(double rate:{1.,-1.,60.,3600.,-86400.,604800.,2592000.,0.}){const auto w=playbackWindow(t,rate);horizonsURL({499,"500@399",w.startUtc,w.endUtc,w.step});
+        const auto c=playbackWindow(t,rate,satellites);horizonsURL({501,"500@399",c.startUtc,c.endUtc,c.step});}
+    const auto live=playbackWindow(t,1.);
+    require(!expiring(live,t+40000,1.)&&expiring(live,t+44000,1.),"Refresh at half of the planned coverage");
+    require(expiring(live,t-400,1.)&&expiring(live,t+86401,0.),"Instant outside the table");
+    require(!expiring(live,t+80000,0.),"A paused instant inside the table expired");
+    require(expiring(live,t,-1.),"Reversal needs coverage behind");
+    require(expiring(live,t,86400.),"Faster playback needs a longer table");
+    rejects([&]{playbackWindow(t,std::nan(""));});rejects([&]{playbackWindow(std::nan(""),1.);});rejects([&]{playbackWindow(t,1.,{86400.,600.,1,86400.});});rejects([&]{playbackWindow(t,1.,{86400.,600.,2000,60.});});
+}
 int main(int argc,char** argv){try{
     if(argc>1&&std::string(argv[1])=="--network"){
         const double now=albert::time::clock().utcSeconds();
@@ -64,6 +89,7 @@ int main(int argc,char** argv){try{
     rejects([]{parseSmallBodies(R"({"signature":{"version":"2.0"}})");});
     auto matches=parseSmallBodies(R"({"signature":{"version":"1.3"},"list":[{"pdes":"141P","name":"141P/Machholz 2"},{"pdes":"141P-A","name":"141P-A/Machholz 2"}]})");require(matches.size()==2&&matches[0].spkId==0&&matches[0].radiusMeters==0,"Ambiguous SBDB match invented a target or diameter");
     SmallBodies smallProvider([](const std::string& url,albert::DownloadProgress*){require(url.find("2024%20YR4")!=std::string::npos,"SBDB query not escaped");return R"({"signature":{"version":"1.3"},"object":{"des":"2024 YR4","fullname":"2024 YR4","spkid":"54321"}})";});require(smallProvider.resolve("2024 YR4").radiusMeters==0,"Missing diameter not preserved");
+    playbackWindows();
     auto values=parseVectors(fixture);require(values.size()==2&&values[0].positionMeters.x==1e11&&values[0].velocityMetersPerSecond.x==4000.,"Provider did not normalize SI quantities");
     rejects([&]{parseVectors("ambiguous search result");});rejects([&]{parseVectors("$$SOE\n2451545,date,1,2\n$$EOE");});
     auto invalid=fixture;invalid.replace(invalid.find("100000000"),9,"nan");rejects([&]{parseVectors(invalid);});

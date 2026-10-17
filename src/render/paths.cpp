@@ -1,4 +1,6 @@
 #include "paths.hpp"
+#include <cmath>
+#include <numbers>
 
 using namespace threepp;
 
@@ -145,4 +147,29 @@ std::shared_ptr<ShaderMaterial> albert::borderMaterial() {
     material->side=Side::Double;
     material->forceSinglePass=true;
     return material;
+}
+
+double albert::revolutionDays(std::span<const PathPoint> points,const std::array<double,3>& normal){
+    const double length=std::hypot(normal[0],normal[1],normal[2]);
+    if(points.size()<3||!(length>0))return 0;
+    const double n[]={normal[0]/length,normal[1]/length,normal[2]/length};
+    // In-plane basis from the first point.
+    const auto& first=points.front();const double along=first.x*n[0]+first.y*n[1]+first.z*n[2];
+    double u[]={first.x-along*n[0],first.y-along*n[1],first.z-along*n[2]};const double size=std::hypot(u[0],u[1],u[2]);
+    if(!(size>0))return 0;
+    for(auto& value:u)value/=size;
+    const double v[]={n[1]*u[2]-n[2]*u[1],n[2]*u[0]-n[0]*u[2],n[0]*u[1]-n[1]*u[0]};
+    auto angle=[&](const PathPoint& p){return std::atan2(p.x*v[0]+p.y*v[1]+p.z*v[2],p.x*u[0]+p.y*u[1]+p.z*u[2]);};
+    constexpr double turn=2*std::numbers::pi;double swept=0,previous=angle(first);
+    for(size_t i=1;i<points.size();++i){
+        const double current=angle(points[i]),step=std::remainder(current-previous,turn);previous=current;
+        if(swept+step>=turn&&step>0)return std::lerp(points[i-1].day,points[i].day,(turn-swept)/step)-first.day;
+        swept+=step;
+    }
+    return 0;
+}
+
+double albert::pathPresent(double days,double halfWidth,double period){
+    if(std::abs(days)<=halfWidth||!(period>0))return days;
+    return std::abs(days)<=halfWidth+3*period?std::remainder(days,period):1e7;
 }

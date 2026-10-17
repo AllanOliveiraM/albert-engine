@@ -11,8 +11,8 @@ medido e aviso). **Etapa das luas concluída**, com repasse do Codex sem achados
 Em andamento: pequenos corpos medidos (Alta 2) — **67P** (forma OSIRIS/Rosetta, cor
 medida), **Halley** (Stooke, rotação ilustrativa) e **Vesta** (mosaico + DTM da Dawn)
 **Ceres** (idem), **Plutão** e **Caronte** (mosaico + DEM da New Horizons/USGS) entregues; Pallas
-segue artística (dimensões não verificadas).
-Coma/caudas adiadas até haver seletor de data (ver abaixo).
+segue artística (dimensões não verificadas). **Data simulada** (ROADMAP Média 5)
+entregue à tarde: ver "Data simulada" abaixo. Coma/caudas desbloqueadas (próximas).
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/ASSETS.md`, `docs/LOCAL_SYSTEM.md`
@@ -555,10 +555,13 @@ Vesta é `kind: external` (só frames/aviso). Pacote `assets/imagery/vesta`: 105
 PDS SBN recusa o User-Agent do Python: `fetch-ranges.py` agora se identifica. Fixture
 CSPICE via `tipbod`. App real: forma, mosaico e detalhe regional OK, pico RSS 1,46 GB.
 
-Coma/caudas **adiadas**: a simulação usa a data real e não há seletor de data
-(ROADMAP Média 5). Em 17/10/2026 a 67P está a 4,45 UA (atividade começa a ~4,3 UA,
-Snodgrass et al. 2013; periélio em 9/4/2028) e Halley a 35 UA (periélio em 2061):
-o efeito ficaria invisível e não validável. Fazer junto com o seletor de data. Notas
+Coma/caudas: estavam adiadas por falta de data simulada, que agora existe. Em
+17/10/2026 a 67P está a 4,45 UA (atividade começa a ~4,3 UA, Snodgrass et al. 2013;
+periélio em 9/4/2028) e Halley a 35 UA (periélio em 2061); validar em datas próximas
+dos periélios (67P 2015-08-13 ou 2021-11-02; Halley 1986-02-09). As órbitas dos
+cometas são de dois corpos com elementos de 2026: em 1986 Halley sai deslocada
+(forças não gravitacionais e perturbações); avaliar tabelas do Horizons para os
+cometas antes de validar a coma em datas antigas. Notas
 para o modelo: atividade ∝ (q/r)² com limiar de início, iluminação física ∝ 1/r² (lei
 de magnitude total n = 4), coma pela coluna analítica de n ∝ 1/r² na esfera (como a
 casca de Titã), cauda de íons antissolar com aberração pelo vento solar (~400 km/s) e
@@ -600,8 +603,26 @@ Mosaico 34% sem dado, DEM 54%; `fill_gaps` como em Plutão. Raio máximo 612.911
 Substitui o VTAD (`kind: external`; o pacote das luas perdeu as 8 entradas `charon-day`).
 Pacote 49 MB.
 
-Próxima ação concreta: conferir o CI dos últimos commits; depois **seletor de data da
-simulação** (ROADMAP Média 5, destrava coma/caudas; decisões de produto pendentes com o
-Allan) e a validação em Windows nativo (Alta 5) (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
-`register-moon-map.py`). Depois coma/caudas com atividade coerente com a distância
-heliocêntrica (Halley perto do afélio em 2026 não deve ter coma).
+Data simulada (entregue em 17/10/2026, decisões aceitas pelo Allan: relógio com
+deslocamento e velocidade, escolha de data, "Agora", Horizons por data com cache,
+nuvens reais ocultas longe de hoje, API no tempo simulado). Implementação:
+`core/simulation` (instante ao vivo ou escolhido + `rate` sobre o monotônico, geração
+em saltos, 1900–2100, ≤ 1 semana/s, `stall` só para suspensão; datas civis próprias
+porque o `gmtime_s` do Windows rejeita < 1970), `scene` aceita instantes até −1e10 s,
+`providers::playbackWindow/expiring` (escada de passos 5 min–5 d), render com passo por
+corpo pela precisão do Hermite (Lua 1 h–1 d, planetas 1–5 d, ≤ 200 linhas, tabela curta
+de 60 s primeiro, latência medida somada à janela, novas datas abandonam pedidos via
+`refreshEpoch`, trajetos cedem a fila do JPL), `core/approximate_ephemeris` (ERFA
+epv00/moon98/plan94) com correção ancorada à última tabela e transição de 0,6 s,
+trajetos recentrados após 60 dias com destaque dobrado por até 3 revoluções, Terra
+heliocêntrica = −Sol geocêntrico, catálogo com janelas por velocidade (geração em vez
+da heurística de salto), `SetTime` e `ClockStatus.simulation` (proto aditivo; fontes
+pré-geradas do cross build atualizadas em `build/generated-proto`). Medido hoje: o
+Horizons levou 1–9 s por tabela independentemente do tamanho; por isso tabelas só até
+6 h/s. Validação: 28 CTests, 7 testes no Wine, visual no Xvfb e prévia real
+(`build/simulation-preview.py` + `build/time-probe`): Lua de 1969-07-20 20:17:40 UTC a
+0,1 m de consulta independente, primeiras posições 0,6 s após o salto, reprodução
+contínua a 1 h/s, 1 dia/s e 1 semana/s para trás, limite de 2100, volta ao vivo.
+
+Próxima ação concreta: revisão do Codex sobre a data simulada; depois **coma/caudas**
+(notas acima), validando em datas de periélio, e a validação em Windows nativo (Alta 5).

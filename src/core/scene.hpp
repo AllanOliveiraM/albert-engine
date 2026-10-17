@@ -1,4 +1,5 @@
 #pragma once
+#include "simulation.hpp"
 #include "time.hpp"
 #include <array>
 #include <cstdint>
@@ -44,7 +45,9 @@ struct Layer {
     bool visible=true;std::uint64_t instance=0;std::shared_ptr<const LayerData> data;
 };
 struct LayerInfo {std::string id,name,source,anchor;LayerKind kind;LayerFrame frame;std::size_t points=0;std::uint32_t color;float widthPixels;double clearanceMeters;bool visible;};
-struct Snapshot {std::uint64_t revision=0;double utcSeconds=0;std::vector<Object> objects;CameraState camera;time::Status clock;std::vector<ModelInfo> models;std::vector<LayerInfo> layers;};
+// utcSeconds is the simulated instant of the object states; clock is the disciplined
+// real clock, which equals it only while the simulation is live.
+struct Snapshot {std::uint64_t revision=0;double utcSeconds=0;std::vector<Object> objects;CameraState camera;time::Status clock;std::vector<ModelInfo> models;std::vector<LayerInfo> layers;time::Simulated simulation;bool approximatePositions=false;};
 struct NaturalBody;struct LocalOrbit;
 class Scene {
 public:

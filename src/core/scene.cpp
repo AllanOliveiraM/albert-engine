@@ -19,7 +19,7 @@ Quaternion blend(Quaternion a,Quaternion b,double t){
 }
 }
 void validate(Sample& s){
-    if(!std::isfinite(s.utcSeconds)||s.utcSeconds<0||s.utcSeconds>1e11||!finite(s.positionMeters)||length(s.positionMeters)>1e15||
+    if(!std::isfinite(s.utcSeconds)||s.utcSeconds< -1e10||s.utcSeconds>1e11||!finite(s.positionMeters)||length(s.positionMeters)>1e15||
        !finite(s.velocityMetersPerSecond)||length(s.velocityMetersPerSecond)>3e8) throw std::invalid_argument("Invalid timestamp, position or velocity");
     if(s.attitude){auto& q=*s.attitude;const double n=std::hypot(std::hypot(q.x,q.y),std::hypot(q.z,q.w));
         if(!std::isfinite(n)||n<1e-12) throw std::invalid_argument("Invalid quaternion");q={q.x/n,q.y/n,q.z/n,q.w/n};}
@@ -125,5 +125,5 @@ Evaluated Scene::evaluate(const ObjectId& id,double now) const{
     if(a.attitude&&b->attitude)r.attitude=blend(*a.attitude,*b->attitude,t);
     return {r,false};
 }
-Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera,{},{},{}};result.clock.utcSeconds=now;for(const auto& [id,l]:layers_)result.layers.push_back({id,l.name,l.source,l.anchor,l.kind,l.frame,l.data->positions.size(),l.color,l.widthPixels,l.clearanceMeters,l.visible});for(const auto& [id,m]:models_)result.models.push_back({id,m->source,m->sourceBytes,m->vertices,m->triangles,m->sizeUnits,m->radiusUnits});for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}
+Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera,{},{},{},{},false};result.clock.utcSeconds=now;result.simulation.utcSeconds=now;for(const auto& [id,l]:layers_)result.layers.push_back({id,l.name,l.source,l.anchor,l.kind,l.frame,l.data->positions.size(),l.color,l.widthPixels,l.clearanceMeters,l.visible});for(const auto& [id,m]:models_)result.models.push_back({id,m->source,m->sourceBytes,m->vertices,m->triangles,m->sizeUnits,m->radiusUnits});for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}
 }

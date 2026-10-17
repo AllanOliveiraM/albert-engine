@@ -3,6 +3,8 @@
 #include <algorithm>
 #include "core/time.hpp"
 #include <iostream>
+#include <mutex>
+#include <vector>
 #include <thread>
 #ifdef ALBERT_TEST_RPC
 #include "rpc/server.hpp"
@@ -16,8 +18,8 @@ int main(){try{
     require(catalog::entries().size()==71,"Planet/moon catalog incomplete");
     require(catalog::entry("europa").horizonsId==502&&catalog::entry("triton").radiusMeters>1e6,"Moon source identifiers/dimensions lost");
     constexpr double utc=946728000.;
-    std::atomic<double> now=utc;std::atomic_bool failRequests=false;
-    providers::Horizons provider([&](const std::string&,DownloadProgress*){if(failRequests)throw std::runtime_error("fixture network unavailable");return "$$SOE\n2451544.9,date,100000000,2,3,4,5,6,\n2451545.1,date,100000010,4,6,4,5,6,\n$$EOE\n";},[&]{return now.load();});
+    std::atomic<double> now=utc;std::atomic_bool failRequests=false;std::mutex urlMutex;std::vector<std::string> urls;
+    providers::Horizons provider([&](const std::string& url,DownloadProgress*){{std::lock_guard lock(urlMutex);urls.push_back(url);}if(failRequests)throw std::runtime_error("fixture network unavailable");return "$$SOE\n2451544.9,date,100000000,2,3,4,5,6,\n2451545.1,date,100000010,4,6,4,5,6,\n$$EOE\n";},[&]{return now.load();});
     core::Bridge bridge;core::Scene registry;std::atomic_bool holdSnapshot=true;
     bridge.publish(registry.snapshot(utc,{}));
     std::jthread owner([&](std::stop_token stop){core::CameraState camera;
@@ -59,5 +61,23 @@ int main(){try{
 #endif
     auto removal=bridge.submit(core::Remove{"mars"});require(removal.result.get().code==core::Code::Ok,"Imported object removal failed");await(id,catalog::Stage::Removed);
     const auto retry=manager.retry(id);await(retry,catalog::Stage::Tracking);
+    {   // Simulated time: windows follow the date and rate, a chosen date refreshes, a held date does not.
+        std::atomic<double> simulated=utc,rate=0;std::atomic<std::uint64_t> generation=1;
+        catalog::Manager timed(bridge,provider,{},{},[&]{return time::Simulated{simulated.load(),rate.load(),false,false,generation.load()};});
+        auto requested=[&](const char* step){std::lock_guard lock(urlMutex);return std::any_of(urls.begin(),urls.end(),[&](const auto& url){return url.find("COMMAND=%27599%27")!=std::string::npos&&url.find(step)!=std::string::npos;});};
+        auto awaitTimed=[&](std::uint64_t job,catalog::Stage expected){const double end=time::monotonicSeconds()+3.;catalog::Job result;
+            do{result=timed.job(job);if(result.stage==expected)return result;std::this_thread::sleep_for(std::chrono::milliseconds(5));}while(time::monotonicSeconds()<end);
+            throw std::runtime_error("Simulated catalog stage timeout");};
+        const auto jupiter=timed.importObject({"jupiter",{},false,{}});awaitTimed(jupiter,catalog::Stage::Tracking);
+        require(requested("STEP_SIZE=%275%20min%27"),"Paused simulated date did not use the fine step");
+        // One hour per second: two-hour rows over 12.5 simulated days, beyond the two-row fixture.
+        rate=3600.;++generation;awaitTimed(jupiter,catalog::Stage::Degraded);
+        require(requested("STEP_SIZE=%272%20h%27"),"Rate-aware catalog window not requested");
+        rate=0.;++generation;awaitTimed(jupiter,catalog::Stage::Tracking);
+        size_t before;{std::lock_guard lock(urlMutex);before=urls.size();}
+        simulated=utc+600;std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        {std::lock_guard lock(urlMutex);require(urls.size()==before,"A held simulated date was mistaken for a jump");}
+        timed.close();
+    }
     manager.close();bridge.close();std::cout<<"Catalog OK: asynchronous import, owner application, lagging snapshots, source ownership, automatic removal detection, retry and RPC\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

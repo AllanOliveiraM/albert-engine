@@ -13,9 +13,12 @@
 #include "core/model.hpp"
 #include "model_fixture.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
+#include <span>
 #include <stdexcept>
+#include <vector>
 
 using namespace threepp;
 namespace {
@@ -460,7 +463,24 @@ void graphics() {
     std::cout<<"Graphics OK: incremental upload, terrain occlusion, paths, clouds, objects, artistic rocks and lunar eclipse\n";
 }
 }
+// Revolution period of a sampled path and the folded highlight time.
+void orbitPaths() {
+    constexpr double pi=3.14159265358979323846;
+    // Tilted plane: x' = x, y' = y cos i, z' = y sin i.
+    const double tilt=.4;auto plane=[&](double day,double x,double y){return albert::PathPoint{day,x,y*std::cos(tilt),y*std::sin(tilt)};};
+    const std::array<double,3> normal{0,-std::sin(tilt),std::cos(tilt)};
+    std::vector<albert::PathPoint> circle;for(int i=0;i<=120;++i){const double day=-6+.1*i,angle=2*pi*day/10+1;circle.push_back(plane(day,std::cos(angle),std::sin(angle)));}
+    require(std::abs(albert::revolutionDays(circle,normal)-10)<1e-9,"Circular revolution period");
+    require(albert::revolutionDays(std::span(circle).first(90),normal)==0,"Less than one turn reported a period");
+    // Kepler orbit, e = 0.6, period 20 days, starting away from periapsis.
+    std::vector<albert::PathPoint> ellipse;const double e=.6;
+    for(int i=0;i<=480;++i){const double day=.05*i,mean=2*pi*day/20+2.;double E=mean;for(int k=0;k<50;++k)E-=(E-e*std::sin(E)-mean)/(1-e*std::cos(E));
+        ellipse.push_back(plane(day,std::cos(E)-e,std::sqrt(1-e*e)*std::sin(E)));}
+    require(std::abs(albert::revolutionDays(ellipse,normal)-20)<.01,"Eccentric revolution period");
+    require(albert::pathPresent(3,6,10)==3&&std::abs(albert::pathPresent(7,6,10)+3)<1e-12&&std::abs(albert::pathPresent(-26,6,10)-4)<1e-12&&albert::pathPresent(100,6,0)==100,"Folded path time");
+    require(albert::pathPresent(37,6,10)==1e7&&albert::pathPresent(-20000,6,10)==1e7,"Highlight shown far from its samples");
+}
 int main(int argc,char**) {
-    try {controls();if(argc>1) graphics();return 0;}
+    try {controls();orbitPaths();if(argc>1) graphics();return 0;}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

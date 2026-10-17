@@ -10,7 +10,7 @@
 namespace api=albert::v1;using namespace albert::core;
 void require(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
 int main(){try{
-    Scene registry;Bridge bridge;
+    Scene registry;Bridge bridge;double monotonic=0;albert::time::Simulation simulation([]{return 100.5;},[&]{return monotonic;});
     std::jthread owner([&](std::stop_token stop){CameraState camera;
         while(!stop.stop_requested()){
             bridge.drain([&](Command& command){std::visit([&](auto& value){using T=std::decay_t<decltype(value)>;
@@ -24,8 +24,10 @@ int main(){try{
                 else if constexpr(std::is_same_v<T,Visibility>)registry.visible(value.id,value.enabled);
                 else if constexpr(std::is_same_v<T,Append>)registry.samples(value.id,std::move(value.values));
                 else if constexpr(std::is_same_v<T,Focus>){registry.get(value.id);camera.target=value.id;registry.cameraChanged();}
+                else if constexpr(std::is_same_v<T,SetTime>){if(value.live)simulation.live();else simulation.choose(value.utcSeconds,value.rate);}
             },command);return Reply{Code::Ok,{},registry.revision()};});
-            auto snapshot=registry.snapshot(100.5,camera);snapshot.clock.utcSeconds=100.5;snapshot.clock.quality=albert::time::Quality::Holdover;
+            const auto simulated=simulation.read();
+            auto snapshot=registry.snapshot(simulated.utcSeconds,camera);snapshot.simulation=simulated;snapshot.clock.utcSeconds=100.5;snapshot.clock.quality=albert::time::Quality::Holdover;
             snapshot.clock.source="fixture-one, fixture-two";snapshot.clock.uncertaintySeconds=.03;snapshot.clock.generation=2;
             bridge.publish(std::move(snapshot));std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -38,7 +40,21 @@ int main(){try{
         require(time->GetTime(&c,{},&timing).ok(),"Clock RPC failed");
         require(timing.quality()==api::ClockStatus::HOLDOVER&&timing.utc_unix_seconds()==100.5&&!timing.authenticated()&&timing.generation()==2,"Clock quality/provenance lost in RPC");
         grpc::ClientContext cs;api::Scene snapshot;require(scene->GetScene(&cs,{},&snapshot).ok(),"Scene snapshot failed");
-        require(snapshot.has_clock()&&snapshot.clock().utc_unix_seconds()==snapshot.utc_unix_seconds(),"Scene and clock snapshots disagree");}
+        require(snapshot.has_clock()&&snapshot.clock().utc_unix_seconds()==snapshot.utc_unix_seconds()&&snapshot.clock().simulation().live(),"Scene and clock snapshots disagree");
+        // Simulated date: the scene instant follows it, the disciplined clock does not.
+        api::SetTimeRequest request;request.set_utc_unix_seconds(-14182940.);request.set_rate(0);api::Applied changed;
+        {grpc::ClientContext cc;require(time->SetTime(&cc,request,&changed).ok(),"SetTime RPC failed");}
+        api::Scene simulated;const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+        do{grpc::ClientContext cc;require(scene->GetScene(&cc,{},&simulated).ok(),"Scene snapshot failed");}while(simulated.utc_unix_seconds()!=-14182940.&&std::chrono::steady_clock::now()<end);
+        const auto& chosen=simulated.clock().simulation();
+        require(simulated.utc_unix_seconds()==-14182940.&&chosen.utc_unix_seconds()==-14182940.&&!chosen.live()&&chosen.rate()==0&&chosen.generation()==1&&simulated.clock().utc_unix_seconds()==100.5,"Simulated date not reported");
+        {grpc::ClientContext cc;api::SetTimeRequest late;late.set_utc_unix_seconds(5e9);require(time->SetTime(&cc,late,&changed).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Date after 2100 accepted");}
+        {grpc::ClientContext cc;api::SetTimeRequest fast;fast.set_rate(1e9);require(time->SetTime(&cc,fast,&changed).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Excessive rate accepted");}
+        {grpc::ClientContext cc;require(time->SetTime(&cc,{},&changed).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Empty time change accepted");}
+        {grpc::ClientContext cc;api::SetTimeRequest live;live.set_live(true);require(time->SetTime(&cc,live,&changed).ok(),"Return to live time failed");}
+        api::ClockStatus back;const auto liveEnd=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+        do{grpc::ClientContext cc;require(time->GetTime(&cc,{},&back).ok(),"Clock RPC failed");}while(!back.simulation().live()&&std::chrono::steady_clock::now()<liveEnd);
+        require(back.simulation().live()&&back.simulation().utc_unix_seconds()==100.5&&back.simulation().generation()==2,"Live time not restored");}
     api::CreateObjectRequest create;create.set_id("rpc-test");create.set_name("External object");create.set_source("Test fixture");
     auto* g=create.mutable_geometry();g->set_shape(api::Geometry::BOX);g->mutable_size_meters()->set_x(10);g->mutable_size_meters()->set_y(20);g->mutable_size_meters()->set_z(30);
     auto* state=create.mutable_initial_state();state->set_frame(api::GEOCENTRIC_ICRF);state->set_utc_unix_seconds(100);state->mutable_position_meters()->set_x(1e11);state->mutable_attitude()->set_w(1);
