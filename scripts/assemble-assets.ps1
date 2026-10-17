@@ -1,6 +1,13 @@
 param([Parameter(Mandatory=$true)][string]$Manifest,
       [Parameter(Mandatory=$true)][string]$Destination)
 $ErrorActionPreference='Stop'
+# .NET hashing: Get-FileHash lives in a script module that Windows PowerShell 5.1
+# cannot load when started from PowerShell 7 (inherited PSModulePath).
+function Get-Sha256([string]$Path) {
+    $stream=[IO.File]::OpenRead($Path);$sha=[Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant() }
+    finally { $stream.Dispose();$sha.Dispose() }
+}
 $directory=Split-Path -Parent $Manifest
 $base=Get-Content -Raw -LiteralPath $Manifest | ConvertFrom-Json
 $manifests=@($Manifest)
@@ -23,7 +30,7 @@ try {
                 if ([IO.Path]::GetFileName($part.path) -ne $part.path) { throw 'Invalid asset part path' }
                 $partPath=Join-Path (Split-Path -Parent $path) $part.path
                 if ((Get-Item -LiteralPath $partPath).Length -ne $part.bytes) { throw 'Git LFS images missing or incomplete. Run: git lfs install; git lfs pull' }
-                if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $part.sha256) { throw "Asset part integrity mismatch: $($part.path)" }
+                if ((Get-Sha256 $partPath) -ne $part.sha256) { throw "Asset part integrity mismatch: $($part.path)" }
                 $inputStream=[IO.File]::OpenRead($partPath)
                 try { $inputStream.CopyTo($output,1048576) } finally { $inputStream.Dispose() }
             }
