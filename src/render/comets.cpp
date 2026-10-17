@@ -14,6 +14,7 @@ constexpr double AU=149597870700.;
 constexpr std::size_t BETAS=20,AGES=40,ION_STEPS=64;
 constexpr double ION_NEAR=1e6,ION_FAR=5e10; // Metres along the ion tail axis.
 
+float smoothstep(float a,float b,float t){t=std::clamp((t-a)/(b-a),0.f,1.f);return t*t*(3-2*t);}
 float render(double metres){return static_cast<float>(metres/albert::core::earthRadiusMeters);}
 Vector3 graphical(albert::core::Vector v){return {render(v.x),render(v.z),render(-v.y)};}
 double length(albert::core::Vector v){return std::sqrt(v.x*v.x+v.y*v.y+v.z*v.z);}
@@ -91,6 +92,25 @@ std::shared_ptr<ShaderMaterial> ionMaterial(Texture* phase){
     return m;
 }
 
+// End-on view of the ion tail: the ribbon degenerates, so a disc facing the camera at
+// the nucleus carries the column integrated along the axis (radial profile in a texture,
+// squared radius mapping for the narrow core), faded in as the view nears the axis.
+std::shared_ptr<ShaderMaterial> capMaterial(Texture* phase,Texture* profile){
+    auto m=ShaderMaterial::create();m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
+    m->uniforms={{"phase",Uniform(phase)},{"profile",Uniform(profile)},{"intensity",Uniform(2.4f)},{"stretch",Uniform(0.f)},{"reference",Uniform(1e-5f)},
+        {"radius",Uniform(1.f)},{"weight",Uniform(0.f)}};
+    m->vertexShader=R"(uniform float radius;varying vec2 vDisc;
+        void main(){vDisc=position.xy;vec4 centre=modelViewMatrix*vec4(0.0,0.0,0.0,1.0);gl_Position=projectionMatrix*(centre+vec4(position.xy*radius,0.0,0.0));})";
+    m->fragmentShader=std::string(R"(uniform sampler2D profile;uniform float weight;varying vec2 vDisc;)")+phaseFunction+R"(
+        void main(){
+            float rho=length(vDisc);if(rho>1.0)discard;
+            gl_FragColor=vec4(shade(weight*texture2D(profile,vec2(sqrt(rho)*63.0/64.0+0.5/64.0,0.5)).r,IONS),1.0);
+            #include <tonemapping_fragment>
+            #include <encodings_fragment>
+        })";
+    return m;
+}
+
 // Dust sheet: albedo cross-section per area sigma gives I/F = sigma*phase/4 through a
 // thin layer, divided by the cosine of the view to the sheet, limited by its thickness.
 std::shared_ptr<ShaderMaterial> tailMaterial(Texture* phase){
@@ -117,12 +137,13 @@ std::shared_ptr<ShaderMaterial> tailMaterial(Texture* phase){
 
 struct albert::CometVisuals::Comet {
     const core::CometActivity* activity;const core::LocalOrbit* orbit;
-    std::shared_ptr<Mesh> coma,tail,ions;std::shared_ptr<ShaderMaterial> comaShader,tailShader,ionShader;
+    std::shared_ptr<Mesh> coma,tail,ions,cap;std::shared_ptr<ShaderMaterial> comaShader,tailShader,ionShader,capShader;
+    std::shared_ptr<DataTexture> capProfile;std::vector<float> capTexels=std::vector<float>(64*4,0.f);
     double afrho=0,distance=0,computedJd=std::numeric_limits<double>::quiet_NaN();
     core::StateVector computedState; // Heliocentric state of the last grain grid.
     std::chrono::steady_clock::time_point computed{};
     float reference=1,stretch=0,stretchTarget=0;
-    ~Comet(){for(auto* m:{coma.get(),tail.get(),ions.get()})m->geometry()->dispose();comaShader->dispose();tailShader->dispose();ionShader->dispose();}
+    ~Comet(){for(auto* m:{coma.get(),tail.get(),ions.get(),cap.get()})m->geometry()->dispose();for(auto* m:{comaShader.get(),tailShader.get(),ionShader.get(),capShader.get()})m->dispose();capProfile->dispose();}
 };
 
 albert::CometVisuals::CometVisuals(Scene& scene):scene_(scene),phase_(phaseTexture()){
@@ -148,15 +169,18 @@ albert::CometVisuals::CometVisuals(Scene& scene):scene_(scene),phase_(phaseTextu
         std::vector<float> across;for(std::size_t k=0;k<ION_STEPS;++k)across.insert(across.end(),{-4.f,4.f});
         ribbon->setAttribute("across",FloatBufferAttribute::create(std::move(across),1));
         c->ions=Mesh::create(ribbon,c->ionShader);
-        for(auto* mesh:{c->coma.get(),c->tail.get(),c->ions.get()}){mesh->frustumCulled=false;mesh->renderOrder=3;mesh->visible=false;}
-        scene.add(c->coma);scene.add(c->tail);scene.add(c->ions);
+        c->capProfile=DataTexture::create(ImageData(std::vector<float>(64*4,0.f)),64,1);c->capProfile->type=Type::Float;
+        c->capProfile->magFilter=Filter::Linear;c->capProfile->minFilter=Filter::Linear;c->capProfile->generateMipmaps=false;c->capProfile->colorSpace=ColorSpace::NoColorSpace;
+        c->capShader=capMaterial(phase_.get(),c->capProfile.get());c->cap=Mesh::create(PlaneGeometry::create(2,2),c->capShader);
+        for(auto* mesh:{c->coma.get(),c->tail.get(),c->ions.get(),c->cap.get()}){mesh->frustumCulled=false;mesh->renderOrder=3;mesh->visible=false;}
+        scene.add(c->coma);scene.add(c->tail);scene.add(c->ions);scene.add(c->cap);
         // Stretch reference: the coma at a fifth of the apex, at the reference activity.
         const double apex=albert::core::radiationApex(activity,activity.referenceAu);
         c->reference=static_cast<float>(activity.afrhoMetres/(8*.2*apex));
         comets_[std::string(activity.id)]=std::move(c);
     }
 }
-albert::CometVisuals::~CometVisuals(){for(auto& [id,c]:comets_){(void)id;scene_.remove(*c->coma);scene_.remove(*c->tail);scene_.remove(*c->ions);}phase_->dispose();}
+albert::CometVisuals::~CometVisuals(){for(auto& [id,c]:comets_){(void)id;for(auto* m:{c->coma.get(),c->tail.get(),c->ions.get(),c->cap.get()})scene_.remove(*m);}phase_->dispose();}
 double albert::CometVisuals::afrho(const std::string& id) const{return comets_.contains(id)?comets_.at(id)->afrho:0.;}
 double albert::CometVisuals::distanceAu(const std::string& id) const{return comets_.contains(id)?comets_.at(id)->distance:0.;}
 bool albert::CometVisuals::enhanced(const std::string& id) const{return comets_.contains(id)&&comets_.at(id)->stretchTarget>0;}
@@ -166,12 +190,12 @@ void albert::CometVisuals::update(const PerspectiveCamera& camera,const Vector3&
                                   const std::map<std::string,core::StateVector>& heliocentric,double jd,float seconds){
     for(auto& [id,entry]:comets_){
         auto& c=*entry;const auto nucleus=nuclei.find(id);const auto known=heliocentric.find(id);
-        if(known==heliocentric.end()){c.coma->visible=c.tail->visible=c.ions->visible=false;continue;}
+        if(known==heliocentric.end()){c.coma->visible=c.tail->visible=c.ions->visible=c.cap->visible=false;continue;}
         const auto& now=known->second;const double r=length(now.position)/AU;
         const bool inbound=now.position.x*now.velocity.x+now.position.y*now.velocity.y+now.position.z*now.velocity.z<0;
         c.afrho=core::afrho(*c.activity,r,inbound);c.distance=r;
         c.stretch=animateValue(c.stretch,c.stretchTarget,seconds); // Blended in log radiance by the shaders.
-        const bool shown=nucleus!=nuclei.end()&&c.afrho>0;c.coma->visible=c.tail->visible=c.ions->visible=shown;
+        const bool shown=nucleus!=nuclei.end()&&c.afrho>0;c.coma->visible=c.tail->visible=c.ions->visible=c.cap->visible=shown;
         if(!shown){c.computedJd=std::numeric_limits<double>::quiet_NaN();continue;}
         const double apex=albert::core::radiationApex(*c.activity,r),intensity=2.4/(r*r);
         Vector3 solar=sun;solar.sub(nucleus->second).normalize();
@@ -197,13 +221,30 @@ void albert::CometVisuals::update(const PerspectiveCamera& camera,const Vector3&
             if(sine>1e-6f)side.divideScalar(sine);else side.set(0,1,0);
             side.multiplyScalar(render(4*core::ionWidth(x)));
             positions->setXYZ(2*k,point.x-side.x,point.y-side.y,point.z-side.z);positions->setXYZ(2*k+1,point.x+side.x,point.y+side.y,point.z+side.z);
-            // Oblique views cross the cylinder longer; the far end fades out.
+            // Oblique views cross the cylinder longer; the far end fades out; near the axis
+            // the end-on disc takes over.
             const double fade=1-std::pow(static_cast<double>(k)/(ION_STEPS-1),6);
-            const float value=static_cast<float>(core::ionReflectance(core::ionColumn(*c.activity,r,inbound,x))/std::max(.05f,sine)*fade);
+            const float value=static_cast<float>(core::ionReflectance(core::ionColumn(*c.activity,r,inbound,x))/std::max(.05f,sine)*fade)*smoothstep(.15f,.35f,sine);
             axial->setX(2*k,value);axial->setX(2*k+1,value);
          }
-         positions->needsUpdate();axial->needsUpdate();}
-        for(auto* m:{c.comaShader.get(),c.tailShader.get(),c.ionShader.get()}){m->uniforms.at("intensity").setValue(static_cast<float>(intensity));m->uniforms.at("stretch").setValue(c.stretch);m->uniforms.at("reference").setValue(c.reference);}
+         positions->needsUpdate();axial->needsUpdate();
+         // End-on disc: column along the axis, sum over the ribbon samples of
+         // lambda/(2 pi sigma^2) exp(-rho^2/2 sigma^2) dx, at rho = R (j/63)^2.
+         const double outer=4*core::ionWidth(ION_FAR);
+         for(std::size_t j=0;j<64;++j){
+            const double rho=outer*std::pow(j/63.,2);double column=0;
+            for(std::size_t k=0;k+1<ION_STEPS;++k){
+                const double x0=ION_NEAR*std::pow(ION_FAR/ION_NEAR,static_cast<double>(k)/(ION_STEPS-1)),x1=ION_NEAR*std::pow(ION_FAR/ION_NEAR,static_cast<double>(k+1)/(ION_STEPS-1));
+                const double x=std::sqrt(x0*x1),sigma=core::ionWidth(x),line=core::ionColumn(*c.activity,r,inbound,x)*std::sqrt(2*std::numbers::pi)*sigma;
+                column+=line/(2*std::numbers::pi*sigma*sigma)*std::exp(-rho*rho/(2*sigma*sigma))*(x1-x0);
+            }
+            c.capTexels[4*j]=static_cast<float>(core::ionReflectance(column));
+         }
+         c.capProfile->image().setData(c.capTexels);c.capProfile->needsUpdate();
+         Vector3 toCamera=camera.position;toCamera.sub(nucleus->second).normalize();Vector3 across;across.crossVectors(direction,toCamera);
+         c.cap->position.copy(nucleus->second);
+         c.capShader->uniforms.at("radius").setValue(render(outer));c.capShader->uniforms.at("weight").setValue(1-smoothstep(.15f,.35f,across.length()));}
+        for(auto* m:{c.comaShader.get(),c.tailShader.get(),c.ionShader.get(),c.capShader.get()}){m->uniforms.at("intensity").setValue(static_cast<float>(intensity));m->uniforms.at("stretch").setValue(c.stretch);m->uniforms.at("reference").setValue(c.reference);}
         c.tail->position.copy(nucleus->second);
         // Recompute the grains after a simulated minute, or when the state itself moved
         // (a table replacing the elements at the same date), at most ten times a second.

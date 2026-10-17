@@ -381,7 +381,9 @@ a ~260 km/s numa escala de 3×10⁶ km, passando pelos 58 km/s medidos entre 4 e
 numa gaussiana de ~3×10³ km no núcleo a 3,3×10⁴ km, abrindo cerca de 1°. A coluna dá o
 brilho das bandas (2,0)+(3,0) do CO+, 3,06×10⁻¹⁴ erg s⁻¹ por íon a 1 UA (Rousselot et al.
 2024), como I/F equivalente numa banda azul de 100 nm; a fita voltada para a câmera
-recebe a coluna exata de um cilindro gaussiano, dividida pelo seno entre visada e eixo.
+recebe a coluna exata de um cilindro gaussiano, dividida pelo seno entre visada e eixo;
+perto do eixo, um disco voltado para a câmera no núcleo leva a coluna integrada ao longo
+do eixo (a fita ficaria de perfil).
 No Halley de 1986 isso dá alguns 10⁻⁹ em I/F a 10⁶ km, perto da cauda de poeira; na 67P,
 pobre em CO, a cauda de íons fica abaixo até do realce, como foi observado. A largura,
 a escala de aceleração e a soma de bandas são aproximações declaradas; o H₂O+ (vermelho)

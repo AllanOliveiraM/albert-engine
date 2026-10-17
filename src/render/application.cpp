@@ -1199,7 +1199,7 @@ int albert::runRenderer(int argc, char** argv) {
         // arrival: direction from the target to the arriving camera, overriding the default.
         auto setFocus = [&](Focus next, bool resetZoom = false, std::optional<Vector3> arrival = {}, std::optional<float> distance = {}) {
             registry.get(targetId(next));
-            if (focus == next && !transition.active && !resetZoom && !arrival) return;
+            if (focus == next && !transition.active && !resetZoom && !arrival && !distance) return;
             // Local surfaces (moons and small bodies) share the "moons" download containers.
             if(assetDownloads){const auto id=targetId(next);assetDownloads->prioritize(id!=targets::Moon&&albert::core::surfaceBody(id)&&!albert::core::naturalBody(id)?std::string("moons"):id);}
 

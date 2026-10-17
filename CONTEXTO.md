@@ -664,5 +664,15 @@ posições da nova data (`pendingEvent`); eclipses vistos do Sol/da Terra, comet
 realce e distância de 30 ápices ou metade da cauda de 10 dias. Eclipse de 2027
 conferido: sombra sobre Luxor como na carta da NASA.
 
+Revisão do Codex (17/10, `22ad3b8..6491c9a`): dois P2, confirmados e corrigidos. (1) Com o
+cometa já em foco, o evento ignorava a distância de enquadramento (`setFocus` saía cedo):
+agora a distância também força o voo; conferido no programa real (aproximar a 2×10⁶ m e
+escolher a Giotto de novo volta a ~2×10⁹ m), sem teste unitário por ser código do
+aplicativo. (2) Vista exatamente pelo eixo, a fita da cauda de íons ficava de perfil e
+sumia: um disco voltado para a câmera no núcleo leva a coluna integrada ao longo do eixo
+e entra quando a visada se aproxima do eixo (seno 0,35 → 0,15), enquanto a fita sai;
+regressão OpenGL atrás da cauda, que falha sem o disco. Codex conferiu as unidades
+erg/cm/m → I/F e os P2 anteriores como corrigidos.
+
 Próxima ação concreta: mais cenários/gravação (Média 5), luas com tabelas do Horizons
 quando em foco (Média 1) ou validação em Windows nativo (Alta 5, depende do Allan).

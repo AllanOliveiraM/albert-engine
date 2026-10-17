@@ -515,6 +515,12 @@ void graphics() {
             const int x=static_cast<int>(95.5f+96.f*far.x/length*t),y=static_cast<int>(95.5f+96.f*far.y/length*t); // Rows from the bottom.
             if(x<0||y<0||x>=192||y>=192)continue;const auto i=3*(y*192+x);if(pixels[i+2]>pixels[i]+4&&pixels[i+2]>=pixels[i+1])++blue;}
         require(blue>=5,"Ion tail missing along its axis");
+        // Exactly along the axis, behind the tail: the end-on disc keeps the gas visible.
+        view->position.copy(graphical(albert::core::ionTailAxis(state)).multiplyScalar(10000.f));view->lookAt(Vector3());view->updateMatrixWorld();
+        for(int i=0;i<20;++i)comets.update(*view,sun,{{"halley",Vector3()}},{{"halley",state}},jd,1.f);
+        renderer.render(*world,*view);const auto endOn=renderer.readRGBPixels();int core=0;
+        for(int y=86;y<106;++y)for(int x=86;x<106;++x){const auto i=3*(y*192+x);if(endOn[i+2]>endOn[i]+4&&endOn[i+2]>=endOn[i+1])++core;}
+        require(core>=40,"Ion tail vanished when seen along its axis");
     }
     std::cout<<"Graphics OK: incremental upload, terrain occlusion, paths, clouds, objects, artistic rocks, lunar eclipse, comet dust and ions\n";
 }
