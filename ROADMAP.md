@@ -84,6 +84,12 @@ continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
 
+**17/10 — Plutão com mosaico e relevo da New Horizons.** Mosaico global e modelo de
+terreno publicados pela USGS, no sistema IAU, com detalhe por zoom. O sul, em noite
+polar no sobrevoo de 2015, e o relevo fora do hemisfério visto de perto recebem
+preenchimento suave e identificado. Pacote de 227 MB. Validação: 27 testes Linux,
+frame contra CSPICE, OpenGL no Xvfb e no Wine e programa real focando Plutão.
+
 **17/10 — Ceres com mosaico e relevo da Dawn.** Mesmo caminho de Vesta: mosaico e
 modelo de terreno HAMO do DLR, no sistema IAU, com detalhe por zoom; as faculas de
 Occator caem no lugar certo. Áreas polares nunca imageadas recebem a média local das

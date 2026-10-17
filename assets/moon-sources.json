@@ -807,6 +807,25 @@
         ]
       },
       "notice": "Mosaico e relevo medidos pela sonda Dawn (DLR), no sistema IAU. Areas polares nao imageadas preenchidas com cinza medio."
+    },
+    {
+      "id": "pluto",
+      "name": "Plutao",
+      "horizons_id": 999,
+      "radius_m": 1188300,
+      "kind": "external",
+      "credit": "NASA/JHUAPL/SwRI/LPI (New Horizons LORRI and MVIC); USGS Astrogeology mosaics",
+      "product": "https://astrogeology.usgs.gov/search/map/pluto_new_horizons_lorri_mvic_global_mosaic_300m",
+      "limits": "Imagery and relief come from the pluto pack (assets/planetary-sources.json): New Horizons panchromatic mosaic (300 m/pixel at best, far side much coarser) and the stereo DEM of the encounter hemisphere (46% of the grid), both on the 1188.3 km sphere in the IAU system of pck00011. South of about 30-40 S nothing was imaged (polar night in 2015): the mosaic there is the local mean of its surroundings fading to the median grey, and unmeasured relief fades to 0 m. The mosaic keeps the source illumination; not calibrated albedo or colour. No atmosphere or haze is drawn.",
+      "relief": {
+        "bounding_radius_m": 1194791.0,
+        "dimensions_m": [
+          2376360.0,
+          2377838.7,
+          2379237.4
+        ]
+      },
+      "notice": "Mosaico e relevo da New Horizons (2015). O sul, em noite polar no sobrevoo, nao foi imageado: cinza medio. Relevo medido so no hemisferio visto de perto."
     }
   ]
 }

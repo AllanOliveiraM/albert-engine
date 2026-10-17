@@ -75,6 +75,9 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   (DAWN-A-FC2-5-VESTADTMSPG-V1.0, Preusker et al. 2016), e os produtos HAMO
   equivalentes de Ceres (mosaico em filtro claro e DTM estereofotogramétrico), NASA PDS,
   https://sbnarchive.psi.edu/pds3/dawn/fc/.
+- NASA/JHUAPL/SwRI/LPI (New Horizons LORRI e MVIC), publicados pela USGS Astrogeology
+  (domínio público): mosaico global e DEM de Plutão de 300 m (2017), Moore et al.
+  (2016) e Schenk et al. (2018), https://astrogeology.usgs.gov/search/map/pluto_new_horizons_lorri_mvic_global_mosaic_300m.
 - 67P: cor do núcleo de Fornasier et al. (2015), A&A 583, A30,
   https://doi.org/10.1051/0004-6361/201525901.
 - Nereida: albedo, cor e período de rotação de Kiss et al. (2016), MNRAS,

@@ -35,6 +35,9 @@
     },
     {
       "manifest": "ceres/manifest.json"
+    },
+    {
+      "manifest": "pluto/manifest.json"
     }
   ]
 }

@@ -191,7 +191,7 @@ O CI comum de branches/PRs não gera distribuições.
 Cada sistema recebe duas versões. A **completa** contém o executável na raiz,
 os assets e bibliotecas/licenças necessários, sem código, logs, cache ou README,
 e funciona offline. A **leve** (`-light`) é a mesma pasta sem `assets/visuals.pak`
-e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~75 MB) numa
+e com `assets/catalog.json`: ao abrir, baixa os dados essenciais (~77 MB) numa
 tela de carregamento e completa as demais resoluções em segundo plano (ver
 [ASSETS.md](ASSETS.md#download-por-níveis)). `scripts/light-dist.py` deriva a
 pasta leve da completa. Os containers baixados ficam numa release própria
@@ -643,6 +643,9 @@ cruzam o eixo mais de duas vezes) recebe uma única longitude. O exportador DSK 
 aletas de espessura zero (placa e sua inversa) deixadas por decimação.
 `assets/moon-sources.json` cobre todas as superfícies locais (luas e pequenos corpos);
 o nome é histórico. Elas compartilham os containers `moons-<nível>` da versão leve.
+GeoTIFFs cilíndricos da USGS (`format: geotiff-cylindrical`, 0–360° L) giram meia
+largura para −180…180 sem reamostrar (Plutão); no relevo, `fill_gaps` converge para
+0 m, para não criar degraus na borda da cobertura.
 `kind: "external"` marca um corpo cujas imagens e relevo vêm de pacote próprio (Vesta:
 `assets/planetary-sources.json` + `scripts/prepare-body-assets.py`, como Mercúrio); o
 campo `relief` (raio máximo e dimensões medidos no mapa de alturas) dá a distância

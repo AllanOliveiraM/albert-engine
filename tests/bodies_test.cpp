@@ -32,7 +32,7 @@ int main(){try{
     const PlanetFixture moons[]{
 #include "moon_frames_fixture.inc"
     };
-    require(surfaceBodies().size()==35&&naturalBodies().size()==7,"Surface catalogue changed online planet provider scope");
+    require(surfaceBodies().size()==36&&naturalBodies().size()==7,"Surface catalogue changed online planet provider scope");
     for(const auto& fixture:moons){const auto* definition=surfaceBody(fixture.body);require(definition&&!naturalBody(fixture.body)&&category(fixture.body)!=Category::Planet,"Textured local body was reclassified as a planet");
         require(surfaceRadius(fixture.body)==localOrbit(fixture.body)->radius,"Surface and orbital/collision radii disagree");
         const auto frame=bodyFrame(*definition,fixture.jd);const Vector columns[]{frame.prime,frame.east,frame.pole};
@@ -48,6 +48,7 @@ int main(){try{
     require(category("halley")==Category::Comet&&surfaceBody("halley")->shapeRadiusMeters==8909.01&&!surfaceBody("halley")->notice.empty(),"Halley measured extent or illustrative-rotation notice changed");
     require(category("vesta")==Category::Asteroid&&surfaceBody("vesta")->axesMeters==std::array<double,3>{}&&surfaceBody("vesta")->shapeRadiusMeters==293002&&surfaceRadius("vesta")==262700&&!surfaceBody("vesta")->notice.empty(),"Vesta must keep its catalogue datum, DTM extent and no extra ellipsoid scaling");
     require(category("ceres")==Category::Dwarf&&surfaceBody("ceres")->shapeRadiusMeters==487051&&surfaceRadius("ceres")==469700&&surfaceBody("ceres")->axesMeters==std::array<double,3>{},"Ceres must keep its catalogue datum and DTM extent");
+    require(category("pluto")==Category::Dwarf&&surfaceBody("pluto")->shapeRadiusMeters==1194791&&surfaceRadius("pluto")==1188300&&!surfaceBody("pluto")->notice.empty(),"Pluto must keep its DEM datum, measured extent and coverage notice");
     require(surfaceBody("titan")->hazeAltitudeMeters>0&&surfaceBody("titan")->hazeAlbedo[0]>surfaceBody("titan")->hazeAlbedo[2]&&surfaceBody("mimas")->hazeAltitudeMeters==0,"Titan visible haze description missing");
     std::cout<<"Bodies OK: planets and mapped moons against CSPICE at four epochs, radii, ownership and partial coverage\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

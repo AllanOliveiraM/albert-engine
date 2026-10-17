@@ -30,17 +30,18 @@ def pds_layer(root,record,datum):
     info=dict(kind='elevation',sample_type='uint16',height_scale_m=record['height_scale_m'],height_offset_m=record['height_offset_m'],nodata_sample=0) if elevation else dict(kind='reflectance',lighting=record['lighting'],nodata=0)
     return gdal.Open(str(path)),(width,height),info
 
-def fill_gaps(output,factor=16):
+def fill_gaps(output,background=None,factor=16):
     # Unobserved pixels (0) take the local mean of the observations around them
-    # (about 2 deg), fading to the observed median, as the moon maps: computed on a
-    # grid factor x coarser and interpolated into the gaps only; no detail is invented.
+    # (about 2-4 deg), fading to the background (the observed median, or for heights
+    # the datum sample), as the moon maps: computed on a grid factor x coarser and
+    # interpolated into the gaps only; no detail is invented.
     import numpy as np
     blur=module('moon','prepare-moon-assets.py').blur;band=output.GetRasterBand(1);width,height=output.RasterXSize,output.RasterYSize
     coarse=(height//factor,width//factor);total=np.zeros(coarse);count=np.zeros(coarse);median=[]
     for top in range(0,coarse[0]*factor,factor):
         block=band.ReadAsArray(0,top,coarse[1]*factor,factor).astype(np.float64).reshape(factor,coarse[1],factor).transpose(1,0,2).reshape(coarse[1],-1)
         total[top//factor]=block.sum(1);count[top//factor]=(block>0).sum(1);median.append(block[block>0][::97])
-    median=float(np.median(np.concatenate(median)));observed=(count>0).astype(np.float64)
+    median=float(np.median(np.concatenate(median))) if background is None else float(background);observed=(count>0).astype(np.float64)
     radius=max(1,coarse[1]//180*2);weight=blur(observed,radius);local=blur(np.divide(total,np.maximum(count,1))*observed,radius)/np.maximum(weight,1e-6)
     field=np.clip(weight*4,0,1)*local+(1-np.clip(weight*4,0,1))*median
     for top in range(0,height,256):
@@ -50,7 +51,33 @@ def fill_gaps(output,factor=16):
         y0=np.minimum(y.astype(int),coarse[0]-2);fy=(y-y0)[:,None];x0=np.floor(x).astype(int);fx=x-x0
         a,b=field[y0][:,x0%coarse[1]],field[y0][:,(x0+1)%coarse[1]];c,d=field[y0+1][:,x0%coarse[1]],field[y0+1][:,(x0+1)%coarse[1]]
         value=(a*(1-fx)+b*fx)*(1-fy)+(c*(1-fx)+d*fx)*fy
-        band.WriteArray(np.where(block==0,np.clip(np.rint(value),1,255),block).astype(np.uint8),0,top)
+        band.WriteArray(np.where(block==0,np.clip(np.rint(value),1,np.iinfo(block.dtype).max),block).astype(block.dtype),0,top)
+
+def geotiff_layer(root,record,datum):
+    # Simple-cylindrical GeoTIFF (USGS) spanning 0..360 east: columns rotate by half the
+    # width onto -180..180 without resampling; heights keep their metres as uint16 steps
+    # above the datum (0 = no data); optional gap filling as for PDS maps.
+    from osgeo import gdal
+    import numpy as np
+    source=gdal.Open(str(root/'sources'/record['filename']));band=source.GetRasterBand(1);width,height=source.RasterXSize,source.RasterYSize
+    if [width,height]!=record['grid'] or record.get('west_edge_lon')!=0 or width%2:raise RuntimeError('Unexpected source grid: '+record['layer'])
+    elevation=record.get('kind')=='elevation';path=root/'work'/(record['layer']+'.tif');nodata=band.GetNoDataValue()
+    if not path.exists():
+        temporary=path.with_name(path.stem+'.tmp.tif')
+        output=gdal.GetDriverByName('GTiff').Create(str(temporary),width,height,1,gdal.GDT_UInt16 if elevation else gdal.GDT_Byte,['TILED=YES','COMPRESS=DEFLATE','BIGTIFF=YES'])
+        for top in range(0,height,256):
+            rows=min(256,height-top);values=np.roll(band.ReadAsArray(0,top,width,rows),width//2,axis=1).astype(np.float64)
+            missing=values==nodata if nodata is not None else np.zeros(values.shape,bool)
+            if elevation:
+                sample=np.rint((values+record.get('source_reference_m',datum)-datum-record['height_offset_m'])/record['height_scale_m'])
+                if (sample[~missing]<1).any() or (sample[~missing]>65535).any():raise RuntimeError('Heights exceed the uint16 encoding: '+record['layer'])
+                sample=np.where(missing,0,sample).astype(np.uint16)
+            else:sample=np.where(missing,0,values).astype(np.uint8)
+            output.GetRasterBand(1).WriteArray(sample,0,top)
+        if record.get('fill_gaps'):fill_gaps(output,round(-record['height_offset_m']/record['height_scale_m']) if elevation else None)
+        output.FlushCache();output=None;temporary.replace(path)
+    info=dict(kind='elevation',sample_type='uint16',height_scale_m=record['height_scale_m'],height_offset_m=record['height_offset_m'],nodata_sample=0) if elevation else dict(kind='reflectance',lighting=record['lighting'],nodata=0)
+    return gdal.Open(str(path)),(width,height),info
 
 def relief(path,datum,scale,offset):
     # Measured extent of a height map: largest radius and the body-axis dimensions.
@@ -85,8 +112,8 @@ def prepare(name,download=True,selected=None,publish=True):
     layers=[];files=[];radius=body['datum_radius_m'];extent=math.pi*radius
     for record in sources:
         layer=record['layer'];elevation=record.get('kind')=='elevation'
-        if record.get('format')=='pds3-cylindrical':
-            source,actual,encoding=pds_layer(root,record,radius)
+        if record.get('format') in ('pds3-cylindrical','geotiff-cylindrical'):
+            source,actual,encoding=(pds_layer if record['format']=='pds3-cylindrical' else geotiff_layer)(root,record,radius)
             info=dict(body=name,source_ids=[record['id']],resolution_m_equator=2*extent/actual[0],**encoding)
             if elevation:
                 measured=relief(root/'work'/(layer+'.tif'),radius,record['height_scale_m'],record['height_offset_m'])

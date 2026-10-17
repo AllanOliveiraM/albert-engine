@@ -270,6 +270,18 @@ relevo para 30 pixels por grau (~270 m), sobre a esfera do raio de catálogo
 nunca imageadas, sobretudo ao sul de 80° S, recebem a média local das observações
 vizinhas dissolvida no cinza mediano, e o painel avisa.
 
+## Plutão
+
+Plutão usa o mosaico global e o modelo de terreno da New Horizons publicados pela USGS
+(2017, 300 m por pixel no melhor caso), no sistema IAU do pck00011, sobre a esfera de
+1188,3 km. O mosaico é pancromático e mantém a iluminação das imagens; o lado distante
+foi imageado de longe (dezenas de km por pixel) e traz borrões, ondulações e faixas da
+própria fonte. O relevo existe só para o hemisfério visto de perto (46% da grade): a
+Planície Sputnik aparece ~3 km abaixo do entorno, e os montes chegam a ~6,5 km
+(raio máximo de 1194,8 km). Ao sul de ~30–40° S tudo estava em noite polar em 2015:
+o mosaico recebe a média local das áreas observadas, dissolvida no cinza mediano, e o
+relevo não medido converge suavemente para 0 m. A névoa atmosférica não é desenhada.
+
 ## Cometa 67P/Churyumov-Gerasimenko
 
 A 67P usa o modelo de forma da câmera OSIRIS da Rosetta (estereofotoclinometria

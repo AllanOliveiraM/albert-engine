@@ -10,7 +10,8 @@ medida, orientação ilustrativa ancorada em 2005); repasse do Codex sem achados
 medido e aviso). **Etapa das luas concluída**, com repasse do Codex sem achados novos.
 Em andamento: pequenos corpos medidos (Alta 2) — **67P** (forma OSIRIS/Rosetta, cor
 medida), **Halley** (Stooke, rotação ilustrativa) e **Vesta** (mosaico + DTM da Dawn)
-e **Ceres** (idem) entregues; Pallas segue artística (dimensões não verificadas).
+**Ceres** (idem) e **Plutão** (mosaico + DEM da New Horizons/USGS) entregues; Pallas
+segue artística (dimensões não verificadas).
 Coma/caudas adiadas até haver seletor de data (ver abaixo).
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
@@ -562,6 +563,16 @@ acima de 469700 m. Sistema Kait = pck00011 (W0 170,65°, conferido no documento 
 coordenadas da Dawn). Relevo: raio máximo 487.051 m, 970,0 × 967,4 × 901,1 km. Faculas
 de Occator caem em 239° L, 19,8° N (registro conferido). Pacote 167 MB; os mapas SPC
 de 2222×1111 px do PDS4 foram descartados por resolução.
+
+Plutão (entregue): USGS `Pluto_NewHorizons_Global_Mosaic_300m_Jul2017_8bit.tif` (SHA
+592b7fb0…) e `..._DEM_300m_Jul2017_16bit.tif` (SHA 259b3e96…), 24888×12444, 0–360° L
+(central_meridian 180), esfera 1188,3 km = raio de catálogo; `format:
+geotiff-cylindrical` gira meia largura (sem reamostrar). Mosaico: 32% sem dado (sul em
+noite polar) → `fill_gaps`; DEM: 54% sem dado (só o hemisfério do encontro) →
+`fill_gaps` para 0 m (amostra 32768). Relevo: raio máximo 1.194.791 m. Sputnik em ~175°
+L, 20° N (registro IAU conferido). Pacote 227 MB. Artefato visível no zoom: faixas e
+ondulações da fonte no lado distante de baixa resolução (não do processamento;
+conferido com projeção ortográfica do polo norte e sombreamento do DEM).
 
 Próxima ação concreta: conferir o CI dos últimos commits; depois, pela prioridade,
 **seletor de data da simulação** (ROADMAP Média 5, destrava coma/caudas) ou os itens

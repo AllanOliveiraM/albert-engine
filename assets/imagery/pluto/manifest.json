@@ -1,0 +1,13 @@
+{
+  "format": "albert-pack-v1",
+  "bytes": 227419612,
+  "sha256": "0fdc7e25fb93b988155e9f7af9ad2e70a69f5436db3bde5ed7e44ce4401a1a59",
+  "files": 1089,
+  "parts": [
+    {
+      "path": "visuals-000.pakpart",
+      "bytes": 227419612,
+      "sha256": "0fdc7e25fb93b988155e9f7af9ad2e70a69f5436db3bde5ed7e44ce4401a1a59"
+    }
+  ]
+}
