@@ -6,24 +6,44 @@ formam o backlog para entregas incrementais conforme as prioridades acordadas.
 Este documento reúne os pedidos, a proposta de arquitetura
 e os critérios para orientar as próximas implementações.
 
+### Nova direção — decidida em 17/10/2026
+
+O Albert passa a ser um **sandbox e motor físico realista e leve** (escopo inspirado no
+Kerbal Space Program, com fidelidade física máxima por unidade de computação). Caso-alvo:
+**foguete da superfície à órbita**, comandado por software externo (controle de voo) que
+lê sensores simulados e aciona atuadores. Depois do sistema solar minimamente apresentável,
+o foco fica em **Terra, Lua e Marte**. Clima: a Terra **como está agora**, só no modo ao
+vivo (nada estilo Ventusky, sem clima histórico/futuro). Adiados: validação no Windows
+nativo; descartados: eclipses de outras luas. Plano consolidado com pareceres do Codex e
+do Fable (convergentes); "fidelidade máxima" = **orçamento de erro por subsistema**,
+validado contra referências publicadas.
+
+**API gráfica: manter OpenGL/threepp agora.** O valor novo está no núcleo físico, que é
+independente do render; a cena tem poucos draws e os limites atuais (precisão, shaders) não
+dependem da API. Gatilhos para migrar: compute necessário (nuvens volumétricas, LUTs de
+espalhamento, FFT de oceano), alvo macOS ou quadro acima de 16 ms no hardware de
+referência após perfil. Candidata preferida: **WebGPU (wgpu-native ou Dawn)** atrás de uma
+RHI fina (backends Vulkan/Metal/DX12, compute); alternativas avaliadas: bgfx, Filament,
+Vulkan direto (só com gargalo comprovado). Decisão no início da fase 4.
+
 ### Prioridades atuais — o que ainda falta
 
-Esta fila prevalece sobre a ordem histórica do backlog abaixo. Um primeiro
-corte entregue não significa suporte completo a todos os requisitos da feature.
+Esta fila prevalece sobre a ordem histórica do backlog abaixo.
 
-| Prioridade | Próxima entrega | Limite do que existe hoje |
+| Fase | Entrega | Validação mensurável |
 | --- | --- | --- |
-| **Alta — 1** | ~~Completar as luas~~ — concluído em 17/10/2026 | Lua terrestre detalhada; 21 luas adicionais com mapas/IAU (Titã com névoa visível e superfície em 938 nm); Fobos/Deimos/Mimas/Febe/Hipérion/Proteu com formas medidas (Hipérion e Proteu sem mapa; Hipérion com orientação ilustrativa); demais luas ilustrativas; eclipses adicionais pendentes |
-| **Alta — 2** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | 67P (Rosetta), Halley (Giotto/Vega), Vesta e Ceres (Dawn: mosaico + relevo) medidos; Pallas ainda artística; coma e cauda de poeira entregues (17/10/2026); cometas posicionados pelo Horizons na aparição da data, com coma e caudas de poeira e de íons; faltam materiais, formas e detalhe por zoom |
-| **Alta — 3** | ~~Anéis de Júpiter, Urano e Netuno~~ — entregue em 17/10/2026 | Perfis das tabelas do PDS, espalhamento simples com sombra do planeta, realce opcional; faltam arcos de Adams, excentricidades e cor das partículas |
-| **Alta — 4** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
-| **Alta — 5** | Validar GPU física, Windows nativo (inclui a versão leve e seus downloads) e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
-| **Média — 1** | Efemérides/orientações locais mais precisas para luas e pequenos corpos, avaliando SPICE | Catálogo adicional usa propagação aproximada de dois corpos |
-| **Média — 2** | NTS e tratamento completo de leap seconds/smear | NTP com múltiplas fontes já existe, sem autenticação criptográfica |
-| **Média — 3** | Texturas GLB/glTF, animação de peças e controles avançados de câmera pela API | GLB estático/PBR sólido e streaming de posição/atitude já existem |
-| **Média — 4** | Rótulos, polígonos/GeoJSON e camadas raster/clima selecionadas | Camadas atuais: pontos e polilinhas; nuvens GIBS continuam opcionais |
-| **Média — 5** | ~~Data de simulação~~ e primeiros eventos (eclipses, Apollo 11, Giotto, 67P) — entregues em 17/10/2026; faltam gravação/reprodução e mais cenários | 1900–2100, até 1 semana/s; tabelas do JPL acompanham até 6 h/s, acima disso modelos analíticos do ERFA ajustados às últimas tabelas |
-| **Posterior** | Satélites artificiais/OMM e mais provedores (exemplos de assistente de IA cancelados por ora em 17/10/2026, decisão do Allan) | Catálogo extra permanece na API; não reintroduzir importação online na UI |
+| **1 — maior valor** | Núcleo físico headless (`src/physics`): tempo inteiro em ns (TAI), referenciais GCRF/ITRF (ERFA)/ENU/corpo, estado em double, passo fixo determinístico (500 Hz–1 kHz, RK4; DOP853 em coast); gravidade central + J2 → EGM2008 20×20, Sol/Lua como terceiros corpos; USSA76; corpo rígido 6DOF com massa/inércia variáveis, empuxo com correção de pressão, gimbal, arrasto Cd(Mach); API gRPC em lockstep (comandos do tick k, sensores do k+1: IMU por força específica, barômetro, verdade de posição); veículo visível no render atual; cliente de exemplo (gravity turn) | Casos 6DOF da NASA NESC; tabelas USSA76 a 4 algarismos; Kepler analítico < 1 mm em 10 órbitas; taxas seculares J2 (Vallado) < 0,1%; energia relativa < 1e-8; mesma execução = mesmo hash de estado; meio passo altera o lançamento < 1 m |
+| **2** | Terra ao vivo: análise GFS (NOMADS, ventos 3D, T, p, umidade) na física e na tela, com fonte e idade; NRLMSIS 2.0 acima de ~80 km com F10.7/Ap atuais; HWM14 | vs. METAR/radiossondas (viés e RMSE publicados; mediana \|ΔT\| < 2 K); decodificação e interpolação contra os arquivos originais |
+| **3** | Interface de voo de alta taxa: plano de dados em memória compartilhada/UDS (gRPC fica como controle), ruído de IMU por variância de Allan (IEEE 952), latências e política de comando ausente, replay com sementes e versões de dados | lockstep a 1 kHz por 10 min sem perda; Allan medido ±5% do configurado |
+| **4** | Terra fotorrealista nos sítios de lançamento: terreno CDLOD (Copernicus DEM 30 m, geoide EGM2008), espalhamento atmosférico (Bruneton), nuvens dos dados ao vivo, oceano; perfil de desempenho e decisão da API gráfica | metas de quadro (1080p/60, p99 < 25 ms) no hardware de referência |
+| **5** | Lua e Marte: GRGM1200A/LOLA; GMM-3/MOLA e Mars-GRAM ou MCD (licenças pedidas cedo) | órbitas de LRO/MRO vs. SPK do NAIF < 100 m/dia; densidade de Marte vs. entradas Viking < 20% |
+| **6** | Física secundária: pressão de radiação, aquecimento, som (c(T), Doppler, atenuação), contato/atrito no pouso, relatividade quando acima do orçamento de erro | por caso, contra referência publicada |
+| **Manutenção** | Sistema solar congelado como cenário: só correções; Alta 2/4 antigas (formas, materiais, resolução), anéis (arcos de Adams), NTS/leap seconds, API de modelos (GLB texturizado), camadas geográficas, satélites/OMM | — |
+
+Evitar: estado em float; passo atrelado ao FPS; CFD global (aerodinâmica por tabelas de
+coeficientes com limites declarados); motor de corpo rígido genérico como núcleo orbital;
+geopotencial acima de 70×70 na ascensão; apresentar previsão como observação ou verdade
+geométrica como receptor GNSS; bibliotecas/dados sem licença adequada.
 
 ### Download dos assets por níveis — decidido e entregue em 17/10/2026
 

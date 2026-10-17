@@ -1,5 +1,11 @@
 # Albert Engine — contexto para continuidade
 
+**Nova direção (17/10/2026, noite):** o Albert vira sandbox + motor físico realista e leve
+(foguete da superfície à órbita, software de voo externo, Terra/Lua/Marte, clima só ao vivo).
+Plano em fases no topo do `ROADMAP.md`, consolidado com pareceres do Codex e do Fable;
+OpenGL mantido até a fase 4 (candidata WebGPU). Windows nativo adiado; eclipses de outras
+luas descartados. Próxima ação: fase 1 (núcleo físico headless + lançamento validado).
+
 **Estado em 17/10/2026 (manhã), continuação por Claude Opus 5.5.** Entregues nesta
 sessão: correções do Windows no CI, cache de LFS/compilação no CI, **Mimas**
 completo, o **download dos assets por níveis** (versão leve), correções da revisão
