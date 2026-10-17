@@ -51,6 +51,17 @@ void controls() {
         registry.include(*albert::core::localOrbit("hyperion"));registry.include(*albert::core::localOrbit("phoebe"));objects.bind("phoebe",solid);objects.sync(registry,0,{});
         require(registry.get("hyperion").appearance.shape==albert::core::Shape::Builtin&&objects.nodes().contains("hyperion")&&objects.nodes().at("hyperion")!=solid&&objects.nodes().at("phoebe")==solid,"Measured body without assets vanished or replaced its bound solid");
     }
+    {   // Height-mapped relief rises above the catalogue sphere: Vesta's high limb must stay pickable.
+        albert::core::Scene registry;auto world=Scene::create();albert::SceneObjects objects(*world);const float earth=static_cast<float>(albert::core::earthRadiusMeters);
+        auto globe=Mesh::create(SphereGeometry::create(static_cast<float>(albert::core::surfaceRadius("vesta"))/earth,32,16));
+        // Floating origin at Vesta, as in the application: float precision at 2.5 AU would be ~44 km.
+        registry.include(*albert::core::localOrbit("vesta"));objects.bind("vesta",globe);objects.sync(registry,0,registry.evaluate("vesta",0).state.positionMeters);
+        require(globe->position.length()<1e-6f,"Floating origin did not centre the body");
+        Raycaster ray;ray.ray.origin.copy(globe->position).add(Vector3(285000.f/earth,0,10000000.f/earth));ray.ray.direction.set(0,0,-1);
+        require(objects.pick(registry,ray)==std::optional<albert::core::ObjectId>("vesta"),"Relief above the catalogue sphere cannot be picked");
+        ray.ray.origin.copy(globe->position).add(Vector3(300000.f/earth,0,10000000.f/earth));
+        require(!objects.pick(registry,ray),"Picking reached beyond the measured relief");
+    }
     for(const auto id:{"67p","halley","vesta","pallas"}){
         const auto rock=albert::makeArtisticRock(*albert::core::localOrbit(id));const auto& p=rock->geometry()->getAttribute<float>("position")->array();
         double volume=0;float shortest=1e6f,longest=0;

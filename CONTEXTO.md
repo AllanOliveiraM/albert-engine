@@ -116,6 +116,17 @@ escala, limites, fechamento e orientação dos 5.040 triângulos de Proteu, o pa
 luas, `Assets.cmake`, actionlint e `git diff --check`; sem OpenGL, Windows, downloads
 reais ou RAM/VRAM.
 
+Repasse após os pequenos corpos medidos (`f317697..f75e5dd`): um achado, **P2,
+confirmado e corrigido**: a seleção de corpos com mapa de alturas testava a esfera
+nominal (Vesta: 262,7 km), mas o shader desloca a superfície até 293 km, e cliques na
+borda alta falhavam (o Codex reproduziu numericamente). `SceneObjects::pick` usa agora
+o maior raio medido (`shapeRadiusMeters`) quando ele excede a esfera da geometria;
+regressão no `visual_test` (clique a 285 km pega Vesta; a 300 km, não), com origem
+flutuante no corpo (sem ela a precisão de float a 2,5 UA é de ~44 km). Falha no
+`objects.cpp` anterior. O Codex rodou `bodies_test`, `shape_test` (192), CPU do
+`visual_test`, reamostragem PDS em memória, tamanhos/SHA dos pacotes, `Assets.cmake`,
+actionlint e `git diff --check`.
+
 ### Download por níveis (entregue em 17/10/2026)
 
 Decisão do Allan: versão leve baixa tudo, por **níveis de resolução**, com tela de

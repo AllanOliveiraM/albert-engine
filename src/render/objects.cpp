@@ -22,12 +22,16 @@ std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Sce
             if(const auto hit=picker->second->raycast(localRay))distance=hit->point.clone().applyMatrix4(*node->matrixWorld).distanceTo(ray.ray.origin);
         }else if(object.appearance.shape==core::Shape::Builtin||core::surfaceBody(id)){
             // Built-in globes are ellipsoids. Test in local space to retain
-            // oblateness without walking every terrain triangle on hover.
+            // oblateness without walking every terrain triangle on hover. Height maps
+            // displace the surface in the shader (Vesta: up to 293 km over 262.7 km),
+            // so the measured largest radius bounds the test when it is larger.
             node->updateWorldMatrix(true,false);
             if(!node->geometry()->boundingSphere)node->geometry()->computeBoundingSphere();
             Matrix4 inverse;inverse.copy(*node->matrixWorld).invert();
             auto localRay=ray.ray.clone().applyMatrix4(inverse);
-            Vector3 hit;localRay.intersectSphere(*node->geometry()->boundingSphere,hit);
+            auto bounds=*node->geometry()->boundingSphere;
+            if(const auto* surface=core::surfaceBody(id);surface&&surface->shapeRadiusMeters>0)bounds.radius=std::max(bounds.radius,static_cast<float>(surface->shapeRadiusMeters/core::earthRadiusMeters));
+            Vector3 hit;localRay.intersectSphere(bounds,hit);
             if(!hit.isNan())distance=hit.applyMatrix4(*node->matrixWorld).distanceTo(ray.ray.origin);
         }else{
             const auto hits=ray.intersectObject(*node,object.appearance.shape==core::Shape::Model);
