@@ -1,4 +1,9 @@
 #include "download.hpp"
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
 
 #include <curl/curl.h>
 

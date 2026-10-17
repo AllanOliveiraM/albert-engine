@@ -64,7 +64,8 @@ jobs:
       # Compiled objects are reused; ccache verifies sources and flags itself.
       - name: Restore Linux compiler cache
         if: runner.os == 'Linux'
-        uses: actions/cache@v4
+        id: ccache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.ccache
           key: ccache-linux-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/Grpc.cmake') }}-${{ github.sha }}
@@ -80,24 +81,35 @@ jobs:
         run: |
           ccache --zero-stats
           cmake --preset ${{ matrix.preset }}
-      - name: Runner image
+      - name: Windows dependency cache key
         if: runner.os == 'Windows'
         id: image
         shell: bash
-        run: echo "version=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "prefix=deps-windows-${ImageOS}-${ImageVersion}-" >> "$GITHUB_OUTPUT"
+          echo "key=deps-windows-${ImageOS}-${ImageVersion}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/Grpc.cmake', 'CMakePresets.json') }}" >> "$GITHUB_OUTPUT"
       # MSBuild skips dependency projects whose restored outputs and tracking
       # logs are current; changed sources or flags are rebuilt normally.
       - name: Restore Windows dependency build
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        id: deps
+        uses: actions/cache/restore@v4
         with:
           path: build/windows/_deps
-          key: deps-windows-${{ steps.image.outputs.version }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/Grpc.cmake', 'CMakePresets.json') }}
-          restore-keys: deps-windows-${{ steps.image.outputs.version }}-
+          key: ${{ steps.image.outputs.key }}
+          restore-keys: ${{ steps.image.outputs.prefix }}
       - name: Build Windows with bootstrap wrapper
         if: runner.os == 'Windows'
         shell: cmd
         run: make.cmd render-build
+      # Dependencies build independently of the project sources: keep them even
+      # when a later project fails, so the next attempt does not rebuild gRPC.
+      - name: Save Windows dependency build
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.deps.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: build/windows/_deps
+          key: ${{ steps.image.outputs.key }}
       - name: Build Linux
         if: runner.os == 'Linux'
         env:
@@ -105,6 +117,12 @@ jobs:
         run: |
           cmake --build --preset ${{ matrix.preset }}
           ccache --show-stats
+      - name: Save Linux compiler cache
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
       - name: Tests
         run: ctest --preset ${{ matrix.preset }}
       - name: HTTP errors, retry and cancellation (Linux)

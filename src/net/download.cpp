@@ -1,5 +1,10 @@
 #include "download.hpp"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX // curl.h pulls windows.h; keep std::numeric_limits<...>::max usable.
+#endif
+#endif
 #include <curl/curl.h>
 
 #include <array>
