@@ -557,21 +557,23 @@
     },
     {
       "id": "charon",
-      "filename": "charon.glb",
-      "url": "https://science.nasa.gov/wp-content/uploads/2023/09/Charon_1_2.glb",
-      "bytes": 473760,
-      "sha256": "3677525ff10e15f3d9cd0f0152801ed27ac3c277f8aad15056fe01cba20b2dbe",
-      "product": "https://science.nasa.gov/resource/charon-3d-model/",
       "name": "Caronte",
       "horizons_id": 901,
       "radius_m": 606000,
-      "grid": [
-        1264,
-        632
-      ],
+      "kind": "external",
       "partial_map": true,
-      "credit": "NASA Visualization Technology Applications and Development (VTAD)",
-      "limits": "Static NASA visual reference of this body; not calibrated reflectance, current surface activity or a measured DEM. Detail/coverage/color processing vary. Texture longitude registration has not been independently validated against IAU landmarks. Partial imagery: uniform or blurred areas are unobserved/low-detail source coverage, not measured smooth terrain."
+      "credit": "NASA/JHUAPL/SwRI/LPI (New Horizons LORRI and MVIC); USGS Astrogeology mosaics",
+      "product": "https://astrogeology.usgs.gov/search/map/charon_new_horizons_lorri_mvic_global_mosaic_300m",
+      "limits": "Imagery and relief come from the charon pack (assets/planetary-sources.json): New Horizons panchromatic mosaic (300 m/pixel at best, far side much coarser) and the stereo DEM of the encounter hemisphere (46% of the grid), both on the 606 km sphere in the IAU system of pck00011. South of about 30 S nothing was imaged (polar night in 2015): the mosaic there is the local mean of its surroundings fading to the median grey, and unmeasured relief fades to 0 m. Replaces the earlier NASA VTAD texture (1264 x 632, registration not validated). Not calibrated albedo or colour.",
+      "relief": {
+        "bounding_radius_m": 612911.0,
+        "dimensions_m": [
+          1211975.7,
+          1212996.1,
+          1213330.3
+        ]
+      },
+      "notice": "Mosaico e relevo da New Horizons (2015). O sul, em noite polar no sobrevoo, nao foi imageado: cinza medio. Relevo medido so no hemisferio visto de perto."
     },
     {
       "id": "phobos",

@@ -38,6 +38,9 @@
     },
     {
       "manifest": "pluto/manifest.json"
+    },
+    {
+      "manifest": "charon/manifest.json"
     }
   ]
 }

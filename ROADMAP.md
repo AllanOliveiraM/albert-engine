@@ -84,6 +84,10 @@ continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
 
+**17/10 — Caronte com mosaico e relevo da New Horizons.** Os produtos da USGS (300 m
+por pixel no melhor caso) substituem o mapa VTAD parcial, com o relevo do hemisfério do
+encontro e o mesmo tratamento do sul não imageado de Plutão. Pacote de 49 MB.
+
 **17/10 — anéis de Júpiter, Urano e Netuno.** Raios, larguras e profundidades ópticas
 das tabelas do PDS Ring-Moon Systems Node, num perfil que preserva a largura equivalente
 dos anéis estreitos, com espalhamento de camada fina (partículas escuras e poeira de

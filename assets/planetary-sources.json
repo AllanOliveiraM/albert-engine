@@ -233,6 +233,66 @@
           "bytes": 619512743
         }
       ]
+    },
+    {
+      "id": "charon",
+      "datum_radius_m": 606000,
+      "orientation": "IAU 2015, NASA/NAIF pck00011 BODY901 (east longitudes, planetocentric)",
+      "credit": "NASA/JHUAPL/SwRI/LPI (New Horizons LORRI and MVIC); mosaics by the New Horizons team, published by USGS Astrogeology",
+      "license": "USGS-published public-domain products of NASA mission data. Cite the New Horizons team, Moore et al. (2016) and Schenk et al. (2018). No endorsement implied.",
+      "relief": {
+        "bounding_radius_m": 612911.0,
+        "dimensions_m": [
+          1211975.7,
+          1212996.1,
+          1213330.3
+        ]
+      },
+      "sources": [
+        {
+          "id": "new-horizons-charon-global-mosaic-300m-2017",
+          "layer": "charon-day",
+          "format": "geotiff-cylindrical",
+          "west_edge_lon": -180,
+          "url": "https://planetarymaps.usgs.gov/mosaic/Charon_NewHorizons_Global_Mosaic_300m_Jul2017_8bit.tif",
+          "filename": "Charon_NewHorizons_Global_Mosaic_300m_Jul2017_8bit.tif",
+          "product": "https://astrogeology.usgs.gov/search/map/charon_new_horizons_lorri_mvic_global_mosaic_300m",
+          "grid": [
+            12693,
+            6347
+          ],
+          "tile_size": 1440,
+          "fill_gaps": true,
+          "longitude": "east-positive -180 to 180 (central meridian 0), used as published; latitude on the 606 km sphere",
+          "lighting": "LORRI and MVIC panchromatic mosaic, 300 m/pixel at best on the encounter hemisphere and much coarser on the far side, with the source illumination; not calibrated albedo. South of about 30 S (polar night in 2015) nothing was imaged: filled with the local mean of the observed surroundings, fading to the median grey.",
+          "epoch": "New Horizons flyby, 14 July 2015; USGS release July 2017",
+          "sha256": "4a874809e0a33a851cd026b8e4647f5875ed15807e677d413812367509564b00",
+          "bytes": 80613890
+        },
+        {
+          "id": "new-horizons-charon-global-dem-300m-2017",
+          "layer": "charon-height",
+          "kind": "elevation",
+          "format": "geotiff-cylindrical",
+          "west_edge_lon": -180,
+          "url": "https://planetarymaps.usgs.gov/mosaic/Charon_NewHorizons_Global_DEM_300m_Jul2017_16bit.tif",
+          "filename": "Charon_NewHorizons_Global_DEM_300m_Jul2017_16bit.tif",
+          "product": "https://astrogeology.usgs.gov/search/map/charon_new_horizons_lorri_mvic_global_dem_300m",
+          "grid": [
+            12693,
+            6347
+          ],
+          "tile_size": 720,
+          "fill_gaps": true,
+          "longitude": "east-positive -180 to 180 (central meridian 0), used as published",
+          "epoch": "Stereo DEM of the hemisphere seen at closest approach (Schenk et al. 2018); 46% of the grid",
+          "encoding": "Int16 metres above the 606 km sphere (no data -32768); stored as uint16 = metres + 32768; unmeasured areas filled towards 0 m",
+          "height_scale_m": 1,
+          "height_offset_m": -32768,
+          "sha256": "4496de98a9b682fd3440da616ef7f5adfbc315b438e4d18833ae3a843eb41bcc",
+          "bytes": 161176369
+        }
+      ]
     }
   ]
 }

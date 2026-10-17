@@ -54,19 +54,21 @@ def fill_gaps(output,background=None,factor=16):
         band.WriteArray(np.where(block==0,np.clip(np.rint(value),1,np.iinfo(block.dtype).max),block).astype(block.dtype),0,top)
 
 def geotiff_layer(root,record,datum):
-    # Simple-cylindrical GeoTIFF (USGS) spanning 0..360 east: columns rotate by half the
-    # width onto -180..180 without resampling; heights keep their metres as uint16 steps
-    # above the datum (0 = no data); optional gap filling as for PDS maps.
+    # Simple-cylindrical GeoTIFF (USGS) whose west edge is 0 or -180 deg east: a 0..360
+    # grid rotates by half its width onto -180..180 without resampling; heights keep their
+    # metres as uint16 steps above the datum (0 = no data); optional gap filling as for PDS maps.
     from osgeo import gdal
     import numpy as np
     source=gdal.Open(str(root/'sources'/record['filename']));band=source.GetRasterBand(1);width,height=source.RasterXSize,source.RasterYSize
-    if [width,height]!=record['grid'] or record.get('west_edge_lon')!=0 or width%2:raise RuntimeError('Unexpected source grid: '+record['layer'])
+    edge=record.get('west_edge_lon')
+    if [width,height]!=record['grid'] or edge not in (0,-180) or (edge==0 and width%2):raise RuntimeError('Unexpected source grid: '+record['layer'])
+    shift=width//2 if edge==0 else 0
     elevation=record.get('kind')=='elevation';path=root/'work'/(record['layer']+'.tif');nodata=band.GetNoDataValue()
     if not path.exists():
         temporary=path.with_name(path.stem+'.tmp.tif')
         output=gdal.GetDriverByName('GTiff').Create(str(temporary),width,height,1,gdal.GDT_UInt16 if elevation else gdal.GDT_Byte,['TILED=YES','COMPRESS=DEFLATE','BIGTIFF=YES'])
         for top in range(0,height,256):
-            rows=min(256,height-top);values=np.roll(band.ReadAsArray(0,top,width,rows),width//2,axis=1).astype(np.float64)
+            rows=min(256,height-top);values=np.roll(band.ReadAsArray(0,top,width,rows),shift,axis=1).astype(np.float64)
             missing=values==nodata if nodata is not None else np.zeros(values.shape,bool)
             if elevation:
                 sample=np.rint((values+record.get('source_reference_m',datum)-datum-record['height_offset_m'])/record['height_scale_m'])

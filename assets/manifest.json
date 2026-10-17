@@ -46,8 +46,8 @@
     },
     {
       "path": "imagery/manifest.json",
-      "bytes": 992,
-      "sha256": "0e0e68c99c80c4382a9a40c8710ab936f0dfbb933a455f76ce2b38628058c314",
+      "bytes": 1046,
+      "sha256": "efb9c1cfb30c12efae0866f962cf786162d1e32272dfca21f3fb5360b3d31605",
       "source": "Generated from the source plan in highres-sources.json",
       "license": "Imagery retains the credits in the packed SOURCES.json",
       "processing": "Ordered Git LFS parts; lossless assembly into visuals.pak"
@@ -68,8 +68,8 @@
     },
     {
       "path": "planetary-sources.json",
-      "bytes": 11245,
-      "sha256": "46768e94595ffe8a912c79a2ab7fba4fd2e0cdd6257a80c071e27a7f7929e630",
+      "bytes": 14392,
+      "sha256": "e04d272ba1bb8b6406d78e17d283417288fac7cd24c83b794fc352bef213c0ff",
       "source": "NASA/PDS and USGS product inventory",
       "license": "Provenance and terms in the source plan",
       "processing": "Declared source grids, datum, credits and physical encoding"
@@ -111,7 +111,7 @@
       "license": "Credits in the packed source records",
       "processing": "SHA-256 verified Git LFS parts; one distribution container",
       "bytes": 325,
-      "sha256": "dd9b0402d9f817dc654838ce16ea50b8bb547860ce7cefa7c7917f1d86a0fc12"
+      "sha256": "998b7027fb6c2ff69de1c987665d576516e89bdd9c115347df3196ca6150d5da"
     },
     {
       "path": "imagery/vesta/manifest.json",
@@ -138,9 +138,17 @@
       "sha256": "0d0a6a64a157757c74ba41cdbcc9b45a7d67735b0955eab79ad26961a138e347"
     },
     {
+      "path": "imagery/charon/manifest.json",
+      "source": "Generated imagery archive manifest",
+      "license": "Credits in the packed source records",
+      "processing": "SHA-256 verified Git LFS parts; one distribution container",
+      "bytes": 325,
+      "sha256": "76714e98412570cb9dc4b6761b238924ea9e141a0200ecd1d41749c5a3e5e9aa"
+    },
+    {
       "path": "moon-sources.json",
-      "bytes": 45825,
-      "sha256": "80c8c7e5096c5e51a72bc5fa7345000e025509afc88687bec191bd7339197f46",
+      "bytes": 46181,
+      "sha256": "242b8bc0c3b018f97d9d5d5a40b4c3182c37cec08a9e7ddd72fb33f9ebad1b59",
       "source": "NASA/JPL/USGS visual resources",
       "license": "Credits and limits in source inventory"
     }

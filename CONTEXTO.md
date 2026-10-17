@@ -10,7 +10,7 @@ medida, orientação ilustrativa ancorada em 2005); repasse do Codex sem achados
 medido e aviso). **Etapa das luas concluída**, com repasse do Codex sem achados novos.
 Em andamento: pequenos corpos medidos (Alta 2) — **67P** (forma OSIRIS/Rosetta, cor
 medida), **Halley** (Stooke, rotação ilustrativa) e **Vesta** (mosaico + DTM da Dawn)
-**Ceres** (idem) e **Plutão** (mosaico + DEM da New Horizons/USGS) entregues; Pallas
+**Ceres** (idem), **Plutão** e **Caronte** (mosaico + DEM da New Horizons/USGS) entregues; Pallas
 segue artística (dimensões não verificadas).
 Coma/caudas adiadas até haver seletor de data (ver abaixo).
 
@@ -593,7 +593,15 @@ invisível); "Realçar anéis tênues" no painel aplica `ringStretch` (I/F de re
 OpenGL, físico ≤ 2/255, realce visível e poeira mais brilhante contra o Sol (Linux e
 Wine). Sem arcos de Adams, excentricidade/inclinação e cor das partículas.
 
+Caronte (entregue): USGS `Charon_NewHorizons_Global_Mosaic_300m_Jul2017_8bit.tif` (SHA
+4a874809…) e `..._DEM_300m_Jul2017_16bit.tif` (SHA 4496de98…), 12693×6347 já em
+−180…180 (central_meridian 0; `west_edge_lon: -180`, sem rotação), esfera 606 km.
+Mosaico 34% sem dado, DEM 54%; `fill_gaps` como em Plutão. Raio máximo 612.911 m.
+Substitui o VTAD (`kind: external`; o pacote das luas perdeu as 8 entradas `charon-day`).
+Pacote 49 MB.
+
 Próxima ação concreta: conferir o CI dos últimos commits; depois **seletor de data da
-simulação** (ROADMAP Média 5, destrava coma/caudas) e a validação em Windows nativo (Alta 5) (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
+simulação** (ROADMAP Média 5, destrava coma/caudas; decisões de produto pendentes com o
+Allan) e a validação em Windows nativo (Alta 5) (Dawn: forma Gaskell/PDS e mosaico FC da USGS, registrar com
 `register-moon-map.py`). Depois coma/caudas com atividade coerente com a distância
 heliocêntrica (Halley perto do afélio em 2026 não deve ter coma).

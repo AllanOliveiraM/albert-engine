@@ -282,6 +282,11 @@ Planície Sputnik aparece ~3 km abaixo do entorno, e os montes chegam a ~6,5 km
 o mosaico recebe a média local das áreas observadas, dissolvida no cinza mediano, e o
 relevo não medido converge suavemente para 0 m. A névoa atmosférica não é desenhada.
 
+Caronte usa os produtos equivalentes da New Horizons (USGS, 2017) sobre a esfera de
+606 km, no lugar do mapa VTAD parcial de 1264 × 632 px usado antes: mosaico de 300 m
+por pixel no melhor caso e relevo do hemisfério do encontro (alturas de −14 a +7 km;
+raio máximo de 612,9 km), com o mesmo preenchimento do sul não imageado.
+
 ## Cometa 67P/Churyumov-Gerasimenko
 
 A 67P usa o modelo de forma da câmera OSIRIS da Rosetta (estereofotoclinometria
