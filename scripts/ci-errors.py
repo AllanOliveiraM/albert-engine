@@ -10,6 +10,7 @@ import os,re,sys
 COMPILE=re.compile(r'^\s*(?:\d+>)?(?P<file>[^\s(][^(]*?)\((?P<line>\d+)(?:,(?P<column>\d+))?\)\s*:\s*(?:fatal )?error (?P<code>[A-Z]+\d+)\s*:\s*(?P<message>.*?)(?:\s+\[[^\]]+\])?\s*$')
 LINK=re.compile(r'^\s*(?:\d+>)?(?P<file>[^:]*?)\s*:\s*(?:fatal )?error (?P<code>LNK\d+)\s*:\s*(?P<message>.*?)(?:\s+\[[^\]]+\])?\s*$')
 GCC=re.compile(r'^(?P<file>[^\s:][^:]*):(?P<line>\d+):(?:\d+:)?\s*(?:fatal )?error:\s*(?P<message>.*)$')
+SCRIPT=re.compile(r'^\s*(?P<file>\S+\.ps1)\s*:\s*(?P<message>.+)$')
 CMAKE=re.compile(r'^\s*CMake Error(?: at (?P<file>[^:]+):(?P<line>\d+))?.*$')
 
 def errors(lines):
@@ -20,6 +21,8 @@ def errors(lines):
             item=match.groupdict();item.setdefault('line',None)
         elif GCC.match(raw):
             item=dict(GCC.match(raw).groupdict(),code='error')
+        elif SCRIPT.match(raw):
+            item=dict(SCRIPT.match(raw).groupdict(),code='PowerShell',line=None)
         elif CMAKE.match(raw):
             item=dict(CMAKE.match(raw).groupdict(),code='CMake',message=raw.strip())
         else:continue
