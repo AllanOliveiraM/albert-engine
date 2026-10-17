@@ -47,7 +47,8 @@ with tempfile.TemporaryDirectory(prefix='albert-release-') as directory:
  else:raise AssertionError('Light folder silently overwritten')
 spec=importlib.util.spec_from_file_location('asset_release',ROOT/'scripts/asset-release.py');assets=importlib.util.module_from_spec(spec);spec.loader.exec_module(assets)
 need=[dict(name=c['file'],size=c['bytes']) for c in catalog['containers']]+[dict(name='catalog.json',size=1)]
-assert assets.missing(catalog,dict(assets=need))==[],'Complete asset release reported incomplete'
-assert assets.missing(catalog,dict(assets=need[1:]))==[need[0]['name']],'Missing container not reported'
-assert assets.missing(catalog,dict(assets=[dict(need[0],size=1)]+need[1:]))==[need[0]['name']],'Truncated container not reported'
+assert assets.missing(catalog,dict(assets=need,isDraft=False))==[],'Complete asset release reported incomplete'
+assert assets.missing(catalog,dict(assets=need,isDraft=True))==['(release is a draft)'],'Draft asset release accepted'
+assert assets.missing(catalog,dict(assets=need[1:],isDraft=False))==[need[0]['name']],'Missing container not reported'
+assert assets.missing(catalog,dict(assets=[dict(need[0],size=1)]+need[1:],isDraft=False))==[need[0]['name']],'Truncated container not reported'
 print('Release OK: single/split ZIP, root entrypoint, exact files, CRC, modes, SHA-256 and light folder')

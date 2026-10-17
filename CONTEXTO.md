@@ -83,6 +83,16 @@ Regressões: cópia corrompida rebaixada sem rebaixar as íntegras (servidor con
 holder recusando container sem registro, refresh após troca de foco, completude
 da release de assets; mutação (confiar só no tamanho) faz o teste falhar.
 
+Repasse do Codex de 17/10/2026 (sessão retomada, `build/revisao-codex.txt`): os três
+achados acima reavaliados como corrigidos; um novo, **confirmado e corrigido**:
+P1 — release `assets-<id>` em rascunho passava como completa (anexos de rascunho não
+são públicos). `scripts/asset-release.py` exige `isDraft: false` (ausente conta como
+rascunho) e o job de publicação publica um rascunho existente, sem marcá-lo como
+latest, antes de verificar. Regressão em `tests/release_fixture.py`. O Codex rodou
+`bodies_test`, `shape_test`, CPU do `visual_test` e actionlint; não CTest completo.
+A sessão do Codex fica bloqueada ("active writer") se a conversa estiver aberta na
+extensão do VS Code; nesse caso pedir ao Allan para liberá-la, não abrir sessão nova.
+
 ### Download por níveis (entregue em 17/10/2026)
 
 Decisão do Allan: versão leve baixa tudo, por **níveis de resolução**, com tela de

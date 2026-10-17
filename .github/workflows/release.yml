@@ -53,7 +53,7 @@ jobs:
           assets=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['release'])" "$catalog")
           # Containers do not depend on the system: build them once, unless that
           # asset release already exists with every container at its exact size.
-          if gh release view "$assets" --json assets > asset-release.json 2>/dev/null \
+          if gh release view "$assets" --json assets,isDraft > asset-release.json 2>/dev/null \
             && python3 scripts/asset-release.py "$catalog" asset-release.json; then
             echo "Asset release $assets already complete"
           else
@@ -170,7 +170,11 @@ jobs:
             fi
             gh release upload "$assets" release-assets/* --clobber
           fi
-          gh release view "$assets" --json assets > asset-release.json
+          # A draft (from an interrupted run) is not public: publish it, never latest.
+          if [[ "$(gh release view "$assets" --json isDraft --jq .isDraft)" == true ]]; then
+            gh release edit "$assets" --draft=false --latest=false
+          fi
+          gh release view "$assets" --json assets,isDraft > asset-release.json
           python3 scripts/asset-release.py "$catalog" asset-release.json
           cat > release-notes.md <<'NOTES'
           Versões portáteis para Linux x64 (glibc 2.36+) e Windows x64.
