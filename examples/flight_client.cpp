@@ -50,7 +50,16 @@ int main(int argc,char** argv){try{
             std::printf("%7.2f s  %-17s h %7.1f km  v solo %6.0f m/s  q %6.0f Pa  Mach %5.2f  %6.0f kg  perigeu %7.1f km\n",s.elapsed_seconds(),names[static_cast<int>(phase)],h/1e3,v,
                 s.dynamic_pressure_pascals(),s.mach(),s.mass_kilograms(),ex::GravityTurn::perigee(vec(s.position_meters()),vec(s.velocity_meters_per_second()))/1e3);
         }
-        if(guidance.phase()==ex::GravityTurn::Phase::orbit){std::printf("Órbita: perigeu %.1f km, %.0f kg de propelante restante\n",ex::GravityTurn::perigee(vec(s.position_meters()),vec(s.velocity_meters_per_second()))/1e3,s.propellant_kilograms());return 0;}
+        if(guidance.phase()==ex::GravityTurn::Phase::orbit){
+            std::printf("Órbita: perigeu %.1f km, %.0f kg de propelante restante\n",ex::GravityTurn::perigee(vec(s.position_meters()),vec(s.velocity_meters_per_second()))/1e3,s.propellant_kilograms());
+            // One revolution in nine calls: ballistic above the atmosphere, Albert takes 1 s steps.
+            const auto t0=std::chrono::steady_clock::now();
+            for(int i=0;i<9;++i){api::StepRequest coast;coast.set_ticks(600000);auto* q=coast.add_commands()->mutable_torque_newton_meters();q->set_x(0);q->set_y(0);q->set_z(0);
+                grpc::ClientContext ctx;check(flight->Step(&ctx,coast,&s));}
+            std::printf("Uma volta (90 min) calculada em %.2f s: altura %.1f km, perigeu %.1f km\n",std::chrono::duration<double>(std::chrono::steady_clock::now()-t0).count(),
+                s.geodetic().height_meters()/1e3,ex::GravityTurn::perigee(vec(s.position_meters()),vec(s.velocity_meters_per_second()))/1e3);
+            return 0;
+        }
         if(s.landed())throw std::runtime_error("O veículo voltou ao solo");
         if(s.elapsed_seconds()>900)throw std::runtime_error("Órbita não alcançada em 15 minutos");
         if(!fast)std::this_thread::sleep_until(wall+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(s.elapsed_seconds())));

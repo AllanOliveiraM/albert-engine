@@ -1,6 +1,7 @@
 #include "physics/vehicles.hpp"
 #include "gravity_turn.hpp"
 #include <erfa.h>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -154,7 +155,7 @@ int main(){try{
         Sample x=f.sample();near(x.specificForce.x,9.79,.02,"Specific force on the pad");
         near(x.geodetic.height,v.stages[0].length-v.stages[0].cgFull,1e-6,"Base of the stack on the ground");near(norm(x.fixedVelocity),0,1e-9,"Pad at rest");
         f.advance(second);require(f.state().clamped&&norm(f.sample().fixedVelocity)<1e-9,"Held without thrust");
-        f.ignite();for(int i=0;i<10000;++i)f.advance(second/1000);
+        f.ignite();require(f.advance(second/1000)==0&&!f.state().clamped,"Release ends the call");for(Tt t=0;t<10*second;)t+=f.advance(second/1000);
         x=f.sample();require(!f.state().clamped&&!f.state().landed,"Released at ignition");
         std::printf("generic launcher after 10 s: %.1f m, %.2f m/s, %.0f kg, specific force %.2f m/s²\n",x.geodetic.height,-x.nedVelocity.z,x.mass,x.specificForce.x);
         near(x.geodetic.height-(v.stages[0].length-v.stages[0].cgFull),250,60,"Liftoff altitude");near(x.specificForce.x,x.thrust/x.mass+x.aeroForce.x/x.mass,1e-9,"Accelerometer");
@@ -177,6 +178,17 @@ int main(){try{
         near(norm(a.state().velocity),1e3*std::log(2.),2,"Rocket equation, one RK4 step"); // Simpson error 1.3 m/s; thrust lost in k4 would cost ~140.near(norm(b.state().velocity),1e3*std::log(2.),1e-7,"Rocket equation");
         const Flight c=run(second/1000,.1);const double h0=2000*.1,i1=1000,expected=h0*std::pow(i1/2000.,10*16./100); // ṁ l²/|İ| = 1.6
         near(i1*c.state().rate.y,expected,1e-9*h0,"Jet damping and inertia loss");
+    }
+    // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
+    // against 10 ms steps.
+    {
+        Environment e;const double r=6678137.,v=std::sqrt(earth.gm/r);State s;s.time=ttFromUtc(1792238400.);s.position={r,0,0};s.velocity={0,v*.6,v*.8};s.propellant=0;
+        const Vehicle l=genericLauncher();Flight fine(l,e,s),coarse(l,e,s);fine.steps(second/100);coarse.steps(second/1000,second);
+        auto run=[](Flight& f,Tt span){std::size_t n=0;for(Tt t=0;t<span;++n)t+=f.advance(span-t);return n;};
+        const auto t0=std::chrono::steady_clock::now();run(fine,5400*second);const auto t1=std::chrono::steady_clock::now();run(coarse,5400*second);const auto t2=std::chrono::steady_clock::now();
+        const double gap=norm(fine.state().position-coarse.state().position);
+        std::printf("coast: 1 s steps differ %.4f m from 10 ms after one orbit, %.0fx faster\n",gap,std::chrono::duration<double>(t1-t0).count()/std::chrono::duration<double>(t2-t1).count());
+        near(gap,0,.01,"Coast steps");
     }
     // The example flight computer (examples/gravity_turn.hpp) flies the generic launcher to orbit at 50 Hz.
     {

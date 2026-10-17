@@ -71,9 +71,11 @@ public:
     // Free state from geodetic position, NED velocity relative to Earth and NED Euler angles;
     // body rates relative to Earth (rad/s).
     static State free(const Environment& e,const Vehicle& v,Tt time,Geodetic g,V3 nedVelocity,V3 euler,V3 earthRelativeRate={});
-    // Fixed-step RK4 over dt; stops right after propellant depletion or touchdown and
-    // returns the time advanced.
+    // RK4 over dt: one step, or steps of at most `fixed` once steps() is set, lengthened up
+    // to `coast` while ballistic above the atmosphere. Stops right after release from the
+    // pad, propellant depletion or touchdown and returns the time advanced (0 at release).
     Tt advance(Tt dt);
+    void steps(Tt fixed,Tt coast=0){step_=fixed;coast_=coast;}
     void ignite();void cutoff();void separate();void release();
     void throttle(double t);void gimbal(double pitch,double yaw);void torque(V3 t);
     const State& state()const{return s_;}
@@ -88,7 +90,7 @@ private:
     void integrate(Tt h);
     void hold(State& s)const; // Clamped pose rides the rotating Earth.
     V3 tidal(const State& s)const;
-    Vehicle vehicle_;Environment env_;State s_;
+    Vehicle vehicle_;Environment env_;State s_;Tt step_=0,coast_=0;
     V3 padPosition_;Q padAttitude_; // ECEF and body→ECEF while clamped/landed.
     mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable Perturbers p0_{},p1_{};
 };

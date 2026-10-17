@@ -14,7 +14,8 @@ em 421 s, também testado headless em `physics_test`). Revisão do Codex do marc
 do passo, recriação do cilindro no estagiamento só após confirmação, base do conjunto no
 solo no pad e `Step` cancelável e atômico; ramo padrão İω + jet damping testado em forma
 fechada; taxas seculares J2 testadas. Pendente: EGM2008 20×20 (download de 109 MB da NGA
-aguardando autorização do Allan; alternativa EGM96) e passo maior em coast. Pré-visualização: `build/flight-preview.py`
+aguardando autorização do Allan; alternativa EGM96). Passo de coast (até 1 s acima de
+86 km sem empuxo) entregue: uma volta em 0,1 s pela API, <1 mm do passo de 10 ms. Pré-visualização: `build/flight-preview.py`
 (Xvfb; `FAST=1` voa até a órbita).
 
 **Estado em 17/10/2026 (manhã), continuação por Claude Opus 5.5.** Entregues nesta

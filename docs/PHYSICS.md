@@ -20,7 +20,11 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Solo | pad com a base do conjunto no solo, preso girando com a Terra até empuxo > peso; toque a uma altura elipsoidal fixa, detectado no CG | sem terreno, contato nem atrito |
 
 Integração RK4 com passo fixo (1 ms por padrão); `advance` divide o passo no instante
-exato do fim do propelente e para ali, para que estagiamentos programados sejam exatos.
+exato do fim do propelente e para ali (e também na liberação do pad e no toque), para que
+estagiamentos programados sejam exatos. Em voo balístico acima da atmosfera (sem empuxo,
+fora do pad, com margem de altura para o passo) o passo cresce até 1 s, limitado a 0,05 rad
+de rotação por passo: uma volta em órbita fica a <1 mm do resultado com 10 ms e roda dezenas
+de vezes mais rápido.
 A mesma sequência de passos reproduz o estado bit a bit (`Flight::hash`); igualdade
 entre plataformas e compiladores não é prometida.
 
@@ -49,6 +53,7 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
   amortecimento por jato e perda de inércia contra a solução fechada `Iω = H0 (I/I0)^(ṁ l²/|İ|)`.
 - Pad (base no solo), liberação no empuxo, acelerômetro e pouso.
 - O guiamento de exemplo leva o lançador genérico a uma órbita ~182 × 212 km.
+- Coast de uma volta com passos de 1 s contra 10 ms: diferença <1 mm.
 
 ## API
 

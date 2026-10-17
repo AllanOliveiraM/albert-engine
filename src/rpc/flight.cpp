@@ -82,12 +82,14 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext*,const api::Create
         }
         const auto& site=r->site();const double pitch=r->has_pitch_degrees()?r->pitch_degrees():90.,seconds=r->has_step_seconds()?r->step_seconds():.001;
         if(!(std::abs(site.latitude_degrees())<=90&&std::abs(site.longitude_degrees())<=360&&site.height_meters()>=-500&&site.height_meters()<=1e4))throw std::invalid_argument("Invalid launch site");
-        if(!finite(r->heading_degrees())||!(std::abs(pitch)<=90)||!(seconds>=1e-5&&seconds<=.1))throw std::invalid_argument("Invalid heading, pitch or step");
+        const double coast=r->has_coast_step_seconds()?r->coast_step_seconds():1.;
+        if(!finite(r->heading_degrees())||!(std::abs(pitch)<=90)||!(seconds>=1e-5&&seconds<=.1)||!(coast>=0&&coast<=10))throw std::invalid_argument("Invalid heading, pitch, step or coast step");
         const auto shown=impl_->bridge.snapshot();const double utc=r->has_utc_unix_seconds()?r->utc_unix_seconds():shown?shown->simulation.utcSeconds:time::simulation().read().utcSeconds;
         if(!(utc>=time::Simulation::earliestUtc&&utc<=time::Simulation::latestUtc))throw std::invalid_argument("Instant outside 1900-2100");
         t=ph::ttFromUtc(utc);step=static_cast<ph::Tt>(std::llround(seconds*1e9));
         ph::Environment env;env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(utc-946728000.));env.ground=site.height_meters();
         made.emplace(vehicle,env,ph::Flight::pad(env,vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r->heading_degrees()*deg,pitch*deg));
+        made->steps(step,static_cast<ph::Tt>(std::llround(coast*1e9)));
     }catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     std::lock_guard lock(impl_->mutex);auto& m=*impl_;
     m.flight=std::move(made);m.step=step;m.start=t;m.tick=0;m.events.clear();
@@ -118,16 +120,15 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     bool changed=std::any_of(r->commands().begin(),r->commands().end(),[](const auto& c){return c.command_case()<=api::FlightCommand::kRelease;});
     const std::size_t pending=m.events.size();std::uint64_t tick=m.tick;
     auto event=[&](api::FlightEvent::Kind kind,const ph::Flight& f){api::FlightEvent e;e.set_kind(kind);e.set_elapsed_seconds(ph::secondsSinceJ2000(f.state().time-m.start));e.set_stage(static_cast<unsigned>(f.state().stage));m.events.push_back(std::move(e));changed=true;};
-    for(std::uint32_t i=0;i<r->ticks();++i){
-        if(i%4096==4095&&context->IsCancelled()){m.events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
-        for(ph::Tt left=m.step;left>0;){
-            const auto before=next.state();left-=next.advance(left);const auto& after=next.state();
-            if(before.clamped&&!after.clamped)event(api::FlightEvent::LIFTOFF,next);
-            if(before.burning&&!after.burning&&after.propellant<=0)event(api::FlightEvent::DEPLETED,next);
-            if(!before.landed&&after.landed)event(api::FlightEvent::TOUCHDOWN,next);
-        }
-        ++tick;
+    const ph::Tt total=m.step*static_cast<ph::Tt>(r->ticks()),chunk=m.step*4096;
+    for(ph::Tt left=total;left>0;){
+        if(context->IsCancelled()){m.events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
+        const auto before=next.state();left-=next.advance(std::min(left,chunk));const auto& after=next.state();
+        if(before.clamped&&!after.clamped)event(api::FlightEvent::LIFTOFF,next);
+        if(before.burning&&!after.burning&&after.propellant<=0)event(api::FlightEvent::DEPLETED,next);
+        if(!before.landed&&after.landed)event(api::FlightEvent::TOUCHDOWN,next);
     }
+    tick+=r->ticks();
     *m.flight=std::move(next);m.tick=tick;
     if(r->ticks())m.publish(changed||m.flight->state().stage!=m.shown);
     m.fill(out);return grpc::Status::OK;

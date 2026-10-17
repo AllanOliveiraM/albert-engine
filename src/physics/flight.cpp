@@ -129,9 +129,18 @@ Tt Flight::advance(Tt dt){
         if(s_.clamped&&s_.burning){
             const Sample x=sample();const M3 b=matrix(s_.attitude),back=transpose(env_.rotation.at(s_.time).fixed);
             const V3 up=back*(transpose(nedFromFixed(x.geodetic.latitude,x.geodetic.longitude))*V3{0,0,-1});
-            if(dot(b*(x.thrustForce+x.aeroForce),up)>x.mass*dot(x.acceleration-x.gravity,up))s_.clamped=false;
+            if(dot(b*(x.thrustForce+x.aeroForce),up)>x.mass*dot(x.acceleration-x.gravity,up)){s_.clamped=false;return dt-left;}
         }
         Tt h=left;bool depleted=false;const double flow=massFlow();
+        if(step_>0){
+            Tt limit=step_;
+            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed){ // Ballistic above the atmosphere: smooth, longer steps.
+                const double speed=norm(s_.velocity),spin=norm(s_.rate),c=secondsSinceJ2000(coast_);
+                if(geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height>standardTop+speed*c)
+                    limit=std::max(step_,std::min(coast_,spin>0?static_cast<Tt>(.05/spin*1e9):coast_)); // ≤0.05 rad per step.
+            }
+            h=std::min(h,limit);
+        }
         if(flow>0){const double t=s_.propellant/flow*1e9;if(t<=static_cast<double>(h)+1){h=std::clamp<Tt>(static_cast<Tt>(t),1,h);depleted=true;}} // Within 1 ns.
         integrate(h);left-=h;
         if(depleted){s_.propellant=0;s_.burning=false;return dt-left;}

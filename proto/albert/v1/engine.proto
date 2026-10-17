@@ -182,6 +182,7 @@ message CreateFlightRequest {
   optional double utc_unix_seconds=6;   // Default: the current simulated instant.
   optional double step_seconds=7;       // Default 0.001; 1e-5 to 0.1.
   bool focus_camera=8;
+  optional double coast_step_seconds=9; // Longest step while ballistic above 86 km; default 1, 0 disables, up to 10.
 }
 message Gimbal { double pitch_radians=1; double yaw_radians=2; } // + pitch: nose up; + yaw: nose right.
 message FlightCommand {

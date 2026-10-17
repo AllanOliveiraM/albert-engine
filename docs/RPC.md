@@ -255,7 +255,9 @@ personalizados e camadas raster ainda são próximas entregas.
 física do Albert ([PHYSICS.md](PHYSICS.md)); o software externo faz o papel do
 computador de voo. `CreateFlight` põe o veículo preso no pad, com a base no solo, (`GENERIC_LAUNCHER`,
 `NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
-instante exibido), com passo fixo de 1 ms (de 10 µs a 100 ms). Cada `Step` aplica os
+instante exibido), com passo fixo de 1 ms (de 10 µs a 100 ms). Em voo balístico acima
+de 86 km o Albert usa passos internos de até `coast_step_seconds` (padrão 1 s; 0 desliga),
+então chamadas longas propagam órbitas rapidamente; os ticks continuam exatos. Cada `Step` aplica os
 comandos — todos ou nenhum — e avança `ticks` passos (até 600 mil; uma chamada cancelada ou
 vencida não altera o voo); a resposta traz a
 amostra do novo tick. Assim, comandos do tick *k* produzem os sensores do tick *k+1*,
@@ -284,7 +286,8 @@ segui-lo. `EndFlight` remove o veículo.
 O exemplo [flight_client.cpp](../examples/flight_client.cpp) leva o lançador genérico
 de Kennedy (LC-39A) à órbita com a lógica de [gravity_turn.hpp](../examples/gravity_turn.hpp):
 subida vertical, pitch kick, gravity turn sem incidência, controle da taxa vertical no
-segundo estágio e corte quando o perigeu passa de 180 km (órbita ~180 × 212 km em 421 s).
+segundo estágio e corte quando o perigeu passa de 180 km (órbita ~182 × 212 km em 421 s);
+depois propaga uma volta inteira em nove chamadas (~0,1 s de cálculo).
 
 ```sh
 ./build/linux/bin/AlbertEngine --rpc
