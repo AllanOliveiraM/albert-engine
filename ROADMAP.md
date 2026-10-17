@@ -13,13 +13,12 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 
 | Prioridade | Próxima entrega | Limite do que existe hoje |
 | --- | --- | --- |
-| **Alta — 1** | Concluir Mimas (em andamento) | Mosaico Cassini PIA18437 e malha medida de Gaskell escolhidos; corrigir o registro de ~4° do mosaico antes de integrar |
-| **Alta — 2** | Download dos assets por níveis no primeiro uso | Hoje toda a biblioteca de 4,87 GB acompanha o programa; ver seção abaixo |
-| **Alta — 3** | Completar Titã, Hipérion, Febe, Proteu e Nereida | Lua terrestre detalhada; 18 luas adicionais com mapas/IAU; Fobos/Deimos com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
-| **Alta — 4** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion/Febe já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
-| **Alta — 5** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
-| **Alta — 6** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
-| **Alta — 7** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
+| **Alta — 1** | Download dos assets por níveis no primeiro uso | Hoje toda a biblioteca de 4,89 GB acompanha o programa; ver seção abaixo |
+| **Alta — 2** | Completar Titã, Hipérion, Febe, Proteu e Nereida | Lua terrestre detalhada; 19 luas adicionais com mapas/IAU; Fobos/Deimos/Mimas com formas medidas; demais luas ilustrativas; eclipses adicionais pendentes |
+| **Alta — 3** | Lapidar cometas, asteroides e luas irregulares; eliminar esferas genéricas onde a forma pede irregularidade | Halley/67P/Vesta/Pallas/Hipérion/Febe já têm malhas artísticas individuais; melhorar materiais, formas e detalhe por zoom; coma/caudas ainda faltam |
+| **Alta — 4** | Anéis de Júpiter, Urano e Netuno, incluindo orientação, perfis e oclusão | Somente Saturno tem anéis; não reaproveitar seu perfil nos outros planetas |
+| **Alta — 5** | Mais qualidade em planetas/anões e modelos observados dos pequenos corpos | Resolução varia muito; rochas procedurais são arte, não reconstruções reais |
+| **Alta — 6** | Validar GPU física, Windows nativo e orçamentos de RAM/VRAM em viagens extensas | MinGW/Wine e OpenGL por software não substituem esses ambientes |
 | **Média — 1** | Efemérides/orientações locais mais precisas para luas e pequenos corpos, avaliando SPICE | Catálogo adicional usa propagação aproximada de dois corpos |
 | **Média — 2** | NTS e tratamento completo de leap seconds/smear | NTP com múltiplas fontes já existe, sem autenticação criptográfica |
 | **Média — 3** | Texturas GLB/glTF, animação de peças e controles avançados de câmera pela API | GLB estático/PBR sólido e streaming de posição/atitude já existem |
@@ -30,8 +29,8 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 ### Download dos assets por níveis — decidido em 17/10/2026
 
 O Allan aprovou trocar a biblioteca embutida por um download no primeiro uso,
-organizado por nível de resolução. Ordem combinada: concluir Mimas, implementar
-este download e então retomar as luas restantes.
+organizado por nível de resolução. Ordem combinada: concluir Mimas (entregue em
+17/10/2026), implementar este download e então retomar as luas restantes.
 
 - **Hospedagem:** anexos de uma release própria de assets no GitHub, publicada
   somente quando os assets mudam. Anexos de release não têm limite de banda;
@@ -69,23 +68,43 @@ o critério é a forma do corpo, não deformar todos os objetos indistintamente.
 
 ### Ordem das luas pendentes
 
-Das 25 luas do catálogo, 19 têm mapas próprios, incluindo a Lua terrestre.
+Das 25 luas do catálogo, 20 têm mapas próprios, incluindo a Lua terrestre.
 Isso não significa geometria, relevo, cor ou cobertura completos.
 
 Fobos e Deimos já têm modelos medidos DSK; registro dos mosaicos Viking sobre
 as malhas ainda requer conferência cartográfica. A próxima fila é:
 
-1. **Mimas:** reprojetar o atlas próprio, depois melhorar a forma/relevo.
+1. ~~**Mimas**~~ — entregue em 17/10/2026: forma medida e mosaico registrado.
 2. **Titã:** aparência atmosférica própria; distinguir visão visível de mapas da superfície.
 3. **Hipérion e Febe:** modelos irregulares e imagens próprios, substituindo o procedural.
 4. **Proteu:** modelo e cobertura de imagens disponíveis, explicitando lacunas.
 5. **Nereida:** representação limitada aos dados disponíveis, sem inventar detalhes observados.
 
-Os seis corpos ainda sem mapas/modelos próprios embarcados são Mimas, Titã,
+Os cinco corpos ainda sem mapas/modelos próprios embarcados são Titã,
 Hipérion, Febe, Proteu e Nereida. A forma artística e a esfera de referência
 continuam identificadas como aproximações até cada substituição.
 
 ### Andamento
+
+**17/10 — Mimas com forma medida e mosaico registrado.** Modelo de Gaskell
+(PDS, Cassini ISS e Voyager 1), Q=256: 393.218 vértices e 786.432 triângulos em
+metros, sem renormalizar ou recentrar. Mosaico Cassini PIA18437 (NASA/JPL/SSI/LPI)
+de 6356×3178 em cores realçadas IR–verde–UV, identificado como tal na interface.
+O mosaico publicado estava deslocado −3,85° em longitude e usa latitude
+planetográfica (tan φ' = (207,8/190,6)² tan φ); o gerador o reamostra sobre a forma.
+A correlação com o sombreamento da malha em 84 regiões subiu de 0,04 para 0,51;
+21 crateras do Gazetteer confirmam a malha (mediana +0,40°/−0,34°).
+`scripts/register-moon-map.py` reproduz a análise. Aviso por fonte (`notice`)
+passou a vir do inventário. Polos medidos a poucos metros do eixo agora recebem
+tratamento de polo nas UVs. Validação: 25 testes Linux, 72 interseções
+independentes (CSPICE e float64), OpenGL no Xvfb e programa real focando Mimas.
+Pacote das luas: 65,47 MB; biblioteca reunida: 4,89 GB. Sem novas distribuições.
+
+**17/10 — CI do Windows e cache.** A montagem PowerShell falhava com o pacote de
+2,86 GB (sobrecarga `Int32` de `Math.Min`); a versão corrigida produz bytes
+idênticos aos do Linux. O CI passa a reutilizar os objetos LFS (que contam na cota
+de banda da conta), ccache no Linux e a árvore de dependências no Windows, e um
+push novo cancela o build anterior da mesma branch.
 
 **Modelos medidos de Fobos e Deimos.** Fobos usa DLR/NAIF 2014 (274.874
 triângulos) e Deimos, Thomas/ESA v0.2 (5.040 triângulos). Coordenadas originais

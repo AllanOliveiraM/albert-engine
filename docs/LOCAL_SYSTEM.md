@@ -33,7 +33,7 @@ São elipses de dois corpos, propagadas localmente. Luas são relativas a seus
 planetas; os demais são heliocêntricos. Perturbações, precessão e forças não
 gravitacionais não são integradas. Não são efemérides precisas em tempo real;
 o erro cresce com a distância temporal à época de referência. A interface
-identifica a aproximação ao focar esses corpos. Dezoito luas adicionais
+identifica a aproximação ao focar esses corpos. Dezenove luas adicionais
 têm mapas próprios NASA, orientação IAU e detalhes regionais por zoom.
 Os demais usam esferas de referência ou formas rochosas artísticas descritas
 abaixo, sem reutilizar fotografias de outros objetos. Mais mapas/modelos observados
@@ -107,11 +107,42 @@ albedo calibrado: ele contém iluminação herdada, lacunas e o registro entre
 imagem e marcos IAU da malha ainda não foi validado. Os elipsoides de referência
 IAU permanecem como fallback para bibliotecas antigas sem as malhas.
 
+Mimas usa o mosaico global Cassini [PIA18437](https://science.nasa.gov/photojournal/color-maps-of-mimas-2014)
+(NASA/JPL-Caltech/SSI/LPI, montagem de Paul Schenk), 6356×3178, cerca de 200 m/pixel
+no equador, em **cores realçadas IR–verde–UV**: não é cor natural nem albedo calibrado.
+A forma é o modelo medido de [Gaskell](https://sbn.psi.edu/pds/resource/mimasshape.html)
+(PDS, imagens Cassini ISS e Voyager 1), versão Q=256: 393.218 vértices, 786.432
+triângulos, arestas de 1,0–1,7 km e raio máximo de 210,781 km. Só os vértices
+duplicados das arestas do cubo ICQ, sem uso por nenhuma placa, são descartados;
+coordenadas e origem originais são mantidas, sem renormalizar a escala.
+
+O mosaico publicado não estava registrado sobre a forma. A correlação entre o
+mosaico e o sombreamento sintético da malha, em 84 regiões, mostrou longitude
+deslocada em −3,85° e latitude planetográfica: tan(lat publicada) =
+(207,8/190,6)² · tan(lat planetocêntrica). A correlação média subiu de 0,04 para
+0,52 com a correção, melhorando 83 das 84 regiões. O gerador reamostra o mosaico
+com interpolação cúbica para latitude planetocêntrica e longitude leste −180…180.
+A mesma malha coincide com 21 crateras do Gazetteer da IAU (mediana de +0,40° em
+latitude e −0,34° em longitude), e essas crateras caem sobre o mosaico corrigido.
+A causa do deslocamento original não foi estabelecida. Para reproduzir a análise
+com as fontes já baixadas (Docker de autoria):
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
+  --entrypoint python3 albert-assets-builder scripts/register-moon-map.py mimas
+```
+
+O referencial da malha usa W0 = 337,46°, e o Albert orienta Mimas pelo pck00011
+(333,46°). As longitudes da superfície coincidem com as do Gazetteer, mas a fase
+de rotação inercial pode diferir em cerca de 4°. As regiões polares do mosaico são
+borradas e a resolução da fonte varia de ~0,2 a 1,6 km/pixel; a interface avisa ao
+focar a lua. Não há DEM separado: o relevo vem da própria malha medida.
+
 O build comum já reúne `assets/imagery/moons/` à biblioteca única. Não baixa mapas
 dessas luas em runtime. Cada base usa até 1024 pixels de largura; o recorte de
 maior resolução entra suavemente ao aproximar e é liberado após três segundos
 longe ou fora de foco. Não se mantém uma cópia integral em alta resolução de
-todas as luas na RAM. O pacote adicional ocupa **43.832.843 bytes**.
+todas as luas na RAM. O pacote adicional ocupa **65.474.691 bytes**.
 
 Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 `.\make.cmd assets-moons` no Windows. Para usar originais já baixados:
@@ -119,10 +150,10 @@ Para regenerar (opcional, exige Docker): `make assets-moons` no Linux ou
 ficam fora do Git em `asset-packs/moons/`; o pacote otimizado e os hashes são
 versionados. O processo preserva os pacotes de Terra/Lua/Sol e planetas.
 
-Mimas ainda exige reprojetar seu atlas de dois hemisférios; o globo atmosférico
-de Titã requer um tratamento próprio. Hyperion e Phoebe continuam artísticos.
-Fobos/Deimos já têm mapas, modelos medidos e orientação IAU; faltam validar o
-registro das imagens e melhorar as órbitas. Nereida e Proteus permanecem
+O globo atmosférico de Titã requer um tratamento próprio. Hyperion e Phoebe
+continuam artísticos. Fobos/Deimos já têm mapas, modelos medidos e orientação IAU;
+faltam validar o registro das imagens Viking, como já feito para Mimas, e melhorar
+as órbitas. Nereida e Proteus permanecem
 sem mapas próprios embarcados.
 
 ## Formas artísticas dos pequenos corpos

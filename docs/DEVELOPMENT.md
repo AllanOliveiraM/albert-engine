@@ -574,7 +574,7 @@ fixtures de CSPICE são independentes. Não há DEM artificial derivado de image
 
 `surfaceBodies()/surfaceBody()` descrevem superfícies e orientações separadamente
 de `naturalBodies()`, que permanece sendo o conjunto de planetas dos provedores
-online. As 18 luas adicionais com mapas usam `moon_frames.inc` (IAU pck00011), mapas NASA
+online. As 19 luas adicionais com mapas usam `moon_frames.inc` (IAU pck00011), mapas NASA
 fixados em `assets/moon-sources.json` e `scripts/prepare-moon-assets.py`.
 O pacote `imagery/moons/` é unido automaticamente à biblioteca; não cria consultas
 Horizons extras nem objetos duplicados. LOD, uploads incrementais, fades, iluminação
@@ -582,7 +582,7 @@ auxiliar e descarte de recortes são os mesmos de `SolidBodies`. Globos usam
 interseção elipsoidal; formas medidas usam BVH das placas, sem varrer todos os
 triângulos a cada hover. Detalhes e limitações
 em [LOCAL_SYSTEM.md](LOCAL_SYSTEM.md#mapas-das-luas).
-O fixture opcional `python3 tests/moon_assets_fixture.py` usa Pillow, sem rede;
+O fixture opcional `python3 tests/moon_assets_fixture.py` usa Pillow/NumPy, sem rede;
 `natural_bodies` testa orientação contra CSPICE e `visual_test --graphics` exercita
 renderização, clique, escala, upload e descarte para cada lua com mapas.
 O gerador de orientação lê IDs/raios do mesmo inventário de fontes e seleciona
@@ -593,19 +593,28 @@ os semieixos físicos IAU em x/y/z; no render, escala x/z/y aplicada igualmente
 à base e aos recortes. A API informa os três diâmetros físicos e mantém o raio
 nominal como datum do LOD. A câmera limita aproximação pelo maior semieixo; picking
 inverte a escala antes da interseção. Fobos/Deimos usam posições originais de
-modelos DSK medidos, sem aplicar novamente esses semieixos. `shapeRadiusMeters`
+modelos medidos (DSK e Gaskell), sem aplicar novamente esses semieixos. `shapeRadiusMeters`
 limita a câmera; `shapeDimensionsMeters` informa as dimensões físicas da malha.
 O gerador suporta imagens 2:1 além de GLB e argumentos periódicos de grau 2 em Marte.
+Um campo `projection` no inventário descreve mapas publicados fora da convenção do
+Albert: borda oeste da imagem, deslocamento de longitude e latitude planetográfica
+(`tan_latitude_scale`). O gerador reamostra esses mapas com interpolação cúbica
+separável para latitude planetocêntrica e longitude leste −180…180. O campo
+`notice` do inventário vira o aviso exibido pela interface para aquela fonte.
 
-`scripts/moon_shapes.py` exporta DSK type 2 para `shape.bin`: cabeçalho
+`scripts/moon_shapes.py` exporta DSK type 2 e tabelas vértice-faceta de Gaskell
+(PDS) para `shape.bin`: cabeçalho
 `ALBMSH1\0`, contagens uint32, posições float32 em metros IAU e índices uint32,
-tudo little-endian. Verifica hash, corpo, frame, contagens e limites. O Docker
-de autoria fixa SpicePy 8.3.0; o executável não depende de SPICE. `decodeShape`
+tudo little-endian. Verifica hash, corpo, frame, contagens e limites. Nas tabelas
+de Gaskell, descarta apenas vértices duplicados do cubo ICQ que nenhuma placa usa.
+O Docker de autoria fixa SpicePy 8.3.0, necessário só para DSK; o executável não
+depende de SPICE. `decodeShape`
 valida tamanho/índices/coordenadas, converte eixos para o render, preserva placas,
 gera normais/UVs sem emenda e constrói BVH no worker. Não recentra nem redimensiona.
 Os recortes desses corpos têm `textureOnly`, sem malha esférica ou máscara extra.
 
-`measured_shapes` lê o pacote real e compara 48 interseções contra CSPICE DSKX02,
+`measured_shapes` lê o pacote real e compara 72 interseções independentes (CSPICE
+DSKX02 nos DSKs; float64 sobre a tabela original de Gaskell em Mimas),
 contagens, raio, normais, emendas e rejeição de entradas malformadas. Para regenerar
 o fixture, com as fontes originais já disponíveis:
 
@@ -615,8 +624,10 @@ docker run --rm --user "$(id -u):$(id -g)" --entrypoint python3 \
 ```
 
 O teste OpenGL verifica seleção da malha, detalhe com fade, geometria preservada
-e descarte de texturas. Mosaicos Viking ainda não têm registro cartográfico
-validado sobre os modelos; os testes de geometria não certificam esse alinhamento.
+e descarte de texturas. Os testes de geometria não certificam o alinhamento entre
+imagem e malha: em Mimas ele foi medido por `scripts/register-moon-map.py`
+(sombreamento sintético da malha contra o mosaico e crateras do Gazetteer);
+os mosaicos Viking de Fobos/Deimos ainda não têm essa verificação.
 
 `providers/small_bodies` consulta SBDB API 1.3, valida respostas e resolve designações
 em SPK/diâmetro. `catalog::Manager::search` atende à UI assíncrona e a `SearchObjects`.

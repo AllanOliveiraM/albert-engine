@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Reproduce the local moon surface pack from pinned NASA GLBs/images.
 
-Python 3 + Pillow; measured shapes also require NumPy/SpicePy.
+Python 3 + Pillow + NumPy; measured DSK shapes also require SpicePy.
 These authoring dependencies are declared in scripts/Dockerfile.assets.
 Originals/intermediates remain in ignored asset-packs/moons/.
 """
 import argparse,hashlib,importlib.util,io,json,pathlib,shutil,struct,urllib.request
 from solar_imagery import file_digest,image_tiles
 from PIL import Image
+import numpy as np
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 def source_file(record,sources,offline):
  path=sources/record['filename']
@@ -42,6 +43,27 @@ def visual(raw,grid):
   if list(image.size)!=grid or grid[0]!=2*grid[1]:raise ValueError('Unexpected moon source grid')
   return image.convert('RGB')
 
+def cubic(values,coords,axis,wrap):
+ # Keys cubic (a=-0.5) along one axis; exact at integer coordinates.
+ base=np.floor(coords).astype(np.int64);t=(coords-base).astype(np.float32);shape=[1]*values.ndim;shape[axis]=-1
+ weights=[((-.5*t+1)*t-.5)*t,(1.5*t-2.5)*t*t+1,((-1.5*t+2)*t+.5)*t,(.5*t-.5)*t*t];out=0
+ for tap,weight in enumerate(weights):
+  index=base+tap-1;index=index%values.shape[axis] if wrap else np.clip(index,0,values.shape[axis]-1)
+  out=out+np.take(values,index,axis=axis)*weight.reshape(shape)
+ return out
+
+def registered(image,projection):
+ """Resample a published map to planetocentric latitude and east longitude -180..180.
+ A feature at (lat, lon) appears in the source at tan(lat')=k*tan(lat), lon+offset;
+ source columns start at west_edge_lon (east longitude, degrees)."""
+ k=projection.get('tan_latitude_scale',1.);offset=projection.get('longitude_offset_deg',0.);edge=projection.get('west_edge_lon',-180.)
+ width,height=image.size
+ latitude=np.radians(90-(np.arange(height)+.5)*180/height)
+ rows=(90-np.degrees(np.arctan(k*np.tan(latitude))))*height/180-.5
+ cols=((-180+(np.arange(width)+.5)*360/width+offset-edge)%360)*width/360-.5
+ channels=[cubic(cubic(np.asarray(band,dtype=np.float32),rows,0,False),cols,1,True) for band in image.split()]
+ return Image.merge(image.mode,[Image.fromarray(np.clip(np.rint(c),0,255).astype(np.uint8)) for c in channels])
+
 def prepare(offline=False):
  plan_path=ROOT/'assets/moon-sources.json';plan=json.loads(plan_path.read_text())
  root=ROOT/'asset-packs/moons';sources=root/'sources';public=root/'public'
@@ -55,6 +77,7 @@ def prepare(offline=False):
    with Image.open(path) as source:
     if list(source.size)!=body['grid'] or source.width!=2*source.height:raise ValueError('Unexpected source image grid')
     image=source.convert('RGB')
+   if 'projection' in body:image=registered(image,body['projection'])
   else:image=visual(path.read_bytes(),body['grid'])
   record=image_tiles(public,body['id']+'-day',image);image.close()
   record['layer']['lighting']='Static '+body['credit']+' reference; not calibrated reflectance or elevation'

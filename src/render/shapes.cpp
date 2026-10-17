@@ -30,7 +30,8 @@ albert::ShapeMesh albert::decodeShape(std::string_view bytes){
     for(size_t i=0;i<indices.size();i+=3){float lo=1,hi=0;
         for(int j=0;j<3;++j){lo=std::min(lo,uv[2*indices[i+j]]);hi=std::max(hi,uv[2*indices[i+j]]);}
         for(int j=0;j<3;++j){const unsigned original=indices[i+j];const bool shift=hi-lo>.5f&&uv[2*original]<.5f;
-            const bool pole=std::abs(positions[3*original+1])>0&&std::hypot(positions[3*original],positions[3*original+2])<1e-10;
+            // Measured poles may sit metres off the axis (Gaskell ICQ face centres); their longitude is arbitrary.
+            const bool pole=std::abs(positions[3*original+1])>0&&std::hypot(positions[3*original],positions[3*original+2])<1e-4f*std::abs(positions[3*original+1]);
             if(!shift&&!pole)continue;
             if(shift&&!pole&&shifted.contains(original)){indices[i+j]=shifted.at(original);continue;}
             const auto next=static_cast<unsigned>(positions.size()/3);for(int k=0;k<3;++k){const float p=positions[3*original+k],n=normals[3*original+k];positions.push_back(p);normals.push_back(n);}

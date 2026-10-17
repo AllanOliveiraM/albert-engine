@@ -71,6 +71,59 @@
       "radius_m": 2410300
     },
     {
+      "id": "mimas",
+      "name": "Mimas",
+      "horizons_id": 601,
+      "radius_m": 198366.666667,
+      "kind": "image",
+      "shape": "iau-triaxial",
+      "filename": "PIA18437.tif",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia18/pia18437/PIA18437.tif",
+      "bytes": 60623752,
+      "sha256": "d83bbd210d4636709c1d125f50c2da4030f552fd518bade6ad71bbd80ac5dd64",
+      "grid": [
+        6356,
+        3178
+      ],
+      "partial_map": true,
+      "projection": {
+        "west_edge_lon": 0,
+        "tan_latitude_scale": 1.188626186263294,
+        "longitude_offset_deg": -3.85
+      },
+      "credit": "NASA/JPL-Caltech/Space Science Institute/Lunar and Planetary Institute; mosaic by Paul Schenk (LPI)",
+      "product": "https://science.nasa.gov/photojournal/color-maps-of-mimas-2014",
+      "limits": "Static Cassini ISS global mosaic (PIA18437, 2014) in enhanced IR-green-UV colour, not natural colour or calibrated albedo; baked illumination, smeared polar regions and source resolution varying from about 0.2 to 1.6 km/pixel. Published simple cylindrical grid: west longitude 360-0 left to right. Registration is resampled to planetocentric latitude and the measured shape's longitudes: tan(published latitude) = (207.8/190.6)^2 tan(planetocentric latitude) and published longitude = longitude - 3.85 deg.",
+      "registration": "Determined on 2026-10-17 by correlating the published map with synthetic shading of the Gaskell shape in 84 regions: mean correlation 0.04 as published, 0.52 after correction (83/84 regions improved); best fit k=1.190, offset -3.85 deg. The same shape matches 21 IAU gazetteer craters within a median +0.40 deg latitude and -0.34 deg longitude. The cause of the published offset is not established.",
+      "notice": "Forma medida (Gaskell/Cassini) e mosaico Cassini em cores realcadas IR-verde-UV, nao cor natural. Mosaico reprojetado sobre a forma; polos com baixa definicao.",
+      "shape_source": {
+        "format": "gaskell-vertex-facet",
+        "filename": "mimas_ver256q.tab",
+        "url": "https://sbnarchive.psi.edu/pds4/non_mission/gaskell.mimas.shape-model/data/mimas_ver256q.tab",
+        "bytes": 67415496,
+        "sha256": "b3c4493e560700a89233a560ea4dca526600295f4e633b323087184af7d40d37",
+        "body": 601,
+        "frame": "Gaskell Mimas body-fixed frame (cartographic longitudes; source W0 337.46 deg)",
+        "vertices": 393218,
+        "plates": 786432,
+        "bounds_m": [
+          [
+            -209568.95,
+            -199864.83,
+            -192027.18
+          ],
+          [
+            209155.36,
+            198777.87,
+            191595.34
+          ]
+        ],
+        "bounding_radius_m": 210780.8934981672,
+        "credit": "Gaskell, R.W. (2020). Gaskell Mimas Shape Model V1.0, urn:nasa:pds:gaskell.mimas.shape-model::1.0, NASA Planetary Data System, doi:10.26033/22n9-v553; Cassini ISS and Voyager 1 images",
+        "limits": "Q=256 vertex-facet version of the ICQ model (684 landmarks, RMS 144 m/dof per source); plate edges about 1.0-1.7 km. Original coordinates converted from km to metres without rescaling or recentring; only ICQ duplicate vertices unused by any plate are dropped. The source frame uses W0 337.46 deg while Albert orients Mimas with pck00011 (333.46 deg): surface longitudes agree with IAU gazetteer craters, but the inertial rotation phase may differ by about 4 deg."
+      }
+    },
+    {
       "id": "enceladus",
       "filename": "enceladus.glb",
       "url": "https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/e/Enceladus_1_504.glb",

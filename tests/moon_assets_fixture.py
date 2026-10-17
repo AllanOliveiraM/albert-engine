@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise GLB material selection/grid validation without network or real assets."""
+"""Exercise GLB texture selection, grid validation and map registration without network or real assets."""
 import importlib.util,io,json,pathlib,struct,sys
 from PIL import Image
 ROOT=pathlib.Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'scripts'))
@@ -16,4 +16,16 @@ for raw,grid in [(glb()[:-1],[64,32]),(glb(),[128,64]),(glb((64,64)),[64,64]),(g
  try:module.visual(raw,grid)
  except ValueError:continue
  raise AssertionError('Invalid source accepted')
-print('Moon assets: material texture selection, source grid, GLB chunks and unsupported UV transforms OK')
+import numpy as np
+rng=np.random.default_rng(601);source=Image.fromarray(rng.integers(0,256,(32,64,3),dtype=np.uint8))
+assert np.array_equal(np.asarray(module.registered(source,{})),np.asarray(source)),'Identity registration changed pixels'
+shifted=np.asarray(module.registered(source,dict(west_edge_lon=0)))
+assert np.array_equal(shifted,np.roll(np.asarray(source),32,axis=1)),'0-360 source was not recentred on 0 deg'
+# Linear ramps are reproduced by the cubic kernel, so sampled positions can be checked exactly.
+height,width,k=90,180,(207.8/190.6)**2;ramp=Image.fromarray(np.repeat((np.arange(height)*2).astype(np.uint8)[:,None],width,1)).convert('RGB')
+out=np.asarray(module.registered(ramp,dict(tan_latitude_scale=k)))[:,0,0].astype(float)
+latitude=np.radians(90-(np.arange(height)+.5)*180/height);expected=((90-np.degrees(np.arctan(k*np.tan(latitude))))*height/180-.5)*2
+assert np.abs(out-expected)[3:-3].max()<=.5,'Latitude registration sampled the wrong source rows'
+cols=np.asarray(module.registered(Image.fromarray(np.repeat((np.arange(width)).astype(np.uint8)[None],height,0)).convert('RGB'),dict(longitude_offset_deg=-4)))[0,:,0].astype(float)
+assert np.abs(cols-(np.arange(width)-2))[3:-3].max()<=.5,'Longitude offset moved the map the wrong way'
+print('Moon assets: material texture selection, source grid, GLB chunks, unsupported UV transforms and map registration OK')

@@ -42,6 +42,17 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   nos fontes e `licenses/Inter/OFL.txt` na distribuição.
 - NASA GIBS: paleta pública de fração de nuvens MODIS, convertida para JSON,
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml.
+- Planetas e luas (créditos e limites por corpo em `assets/planetary-sources.json`,
+  `assets/solar-sources.json` e `assets/moon-sources.json`, também gravados no pacote):
+  NASA/JHUAPL/CIW/USGS MESSENGER (Mercúrio); NASA Visualization Technology
+  Applications and Development (VTAD), modelos 3D de planetas e luas; NASA GSFC/SVS
+  (Júpiter); NASA/JPL/Caltech/USGS Viking (Marte, Fobos e Deimos).
+- Formas medidas: DLR, Willner, Shi e Oberst (2014), conversão NAIF (Fobos);
+  P. Thomas / ESA SPICE v0.2 (Deimos); Gaskell, R.W. (2020), Gaskell Mimas Shape
+  Model V1.0, NASA PDS, https://doi.org/10.26033/22n9-v553 (Mimas).
+- NASA/JPL-Caltech/Space Science Institute/Lunar and Planetary Institute, mosaico
+  de Paul Schenk: mapa global de Mimas PIA18437 em cores realçadas,
+  https://science.nasa.gov/photojournal/color-maps-of-mimas-2014.
 
 Dados dinâmicos:
 

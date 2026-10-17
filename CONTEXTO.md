@@ -1,61 +1,43 @@
 # Albert Engine — contexto para continuidade
 
-**Ponto de parada solicitado pelo Allan (17/10/2026):** tokens acabando; encerrar
-em estado seguro para outro modelo. Última entrega: correção LF/CRLF do Windows,
-badge e workflow de releases. Não iniciar outra feature antes de ler este estado.
-Primeiro conferir o Actions do commit mais recente; depois retomar **Mimas**.
+**Estado em 17/10/2026 (madrugada), continuação por Claude Opus 5.5.** Entregues
+nesta sessão: correção do build Windows no CI, cache de LFS/compilação no CI e
+**Mimas** completo. Próxima feature decidida pelo Allan: **download dos assets por
+níveis no primeiro uso** (seção própria em `ROADMAP.md`); depois as luas restantes.
+Ordem combinada: Mimas → downloader → Titã, Hipérion/Febe, Proteu, Nereida.
 
 Registro das decisões da conversa, estado entregue e próximos passos. Leia junto
 com `ROADMAP.md`, `docs/DEVELOPMENT.md`, `docs/LOCAL_SYSTEM.md` e `docs/RPC.md`.
-Este registro acompanha a entrega das formas medidas de Fobos e Deimos.
-**A etapa de fidelidade das luas ainda tem seis corpos pendentes.** Atualizar este
+**A etapa de fidelidade das luas ainda tem cinco corpos pendentes.** Atualizar este
 arquivo ao concluir essa etapa, conforme pedido do Allan, e a cada entrega relevante.
 
-### Atualização — CI e releases (17/10/2026)
+### CI, releases e cache (17/10/2026)
 
-O Allan reportou falha Windows/MSVC no Actions: hash de `countries.geojson`.
-`core.autocrlf` alterava LF para CRLF; `.gitattributes` agora usa `assets/** -text`
-para preservar bytes. Não mudar hashes para aceitar a corrupção. Regressão de
-checkout Windows em `tests/asset_checkout_fixture.py`, executada antes de configurar.
-Badge **Build and tests** incluído no README, com a URL pedida pelo usuário.
+O Windows/MSVC falhava primeiro por CRLF em `countries.geojson` (corrigido com
+`assets/** -text`, regressão em `tests/asset_checkout_fixture.py`) e depois porque
+`scripts/assemble-assets.ps1` chamava `Math.Min(Int32, Int64)`: o PowerShell escolhia
+a sobrecarga `Int32` e estourava com o pacote base de 2.855.439.799 bytes. Corrigido
+em `3384f53`; reproduzido e validado com `mcr.microsoft.com/powershell:7.4-debian-12`
+montando a biblioteca real, **bytes idênticos** ao montador Linux. Não mudar hashes.
 
-O usuário também autorizou geração automática de distribuições no Actions:
-`.github/workflows/release.yml`, tags `v[0-9]*` publicam após os dois builds/testes;
-execução manual produz somente artefatos. Linux Debian 12/glibc 2.36+, Windows
-MSVC x64. CI normal de branches/PRs permanece sem geração de dist.
-ZIPs usam volumes até 1900 MiB, pois cada anexo GitHub deve ter menos de 2 GiB.
-`scripts/package-release.py` escreve volumes por streaming, preserva modo Linux,
-ZIP64 e gera SHA-256; nenhuma cópia integral do ZIP na RAM. Usuário baixa todas
-as partes e extrai `.zip.001` com 7-Zip. Documentado em `docs/DEVELOPMENT.md`.
-Testes adicionais: `asset_checkout` e `release_archive`; total Linux agora 25.
-Releases públicas/tags não foram criadas manualmente nesta sessão.
+**Banda LFS:** downloads LFS do Actions contam na cota da conta (10 GiB/mês no
+plano Free, bloqueio ao estourar). Cada run sem cache baixava ~4,9 GB por job.
+`build.yml` agora: checkout sem LFS, chave pelos OIDs LFS, um cache compartilhado
+Linux/Windows (`enableCrossOsArchive`, ~4,82 GB, confirmado na API de caches),
+`git lfs pull` só do que falta, e apaga `.git/lfs/objects` após copiar (libera disco).
+ccache no Linux; `build/windows/_deps` em cache no Windows (MSBuild incremental,
+chave por versão da imagem + `cmake/Dependencies.cmake`/`Grpc.cmake`/presets).
+`concurrency` cancela runs antigos da mesma branch. O limite de cache do repositório
+é 10 GB (LRU). `release.yml` continua compilando do zero (sem cache) e ainda baixa
+LFS completo. Releases/tags não foram criadas. Não fazer merge/tag automaticamente.
 
-Mimas: pesquisa começou, sem alterar inventário/pacote ainda. Originais obtidos
-em `asset-packs/moons/sources/` (ignorados): `mimas_ver128q.tab` Gaskell/PDS,
-99.846 vértices (98.306 usados), 196.608 placas, coordenadas km; e
-`mimas-cassini-lpi.jpg` 6356×3178, Schenk/LPI/Cassini. LPI declara mapas como
-propriedade pública com créditos em https://www.lpi.usra.edu/icy_moons/.
-Essa imagem tem cores realçadas; não declarar cor natural. Registro/projeção
-precisam ser conferidos antes da integração. `mimas-pia14926-fig1.jpg` baixado
-é HTML redirecionado, **não é uma imagem válida**. Há atlas NASA GLB alternativo.
-Retomar Mimas após fechar os ajustes de CI/releases.
+Primeiro run com cache (`1df71ec`): LFS salvo no cache; ver no Actions se os runs
+seguintes restauram sem baixar e quanto o build Windows com `_deps` em cache economiza.
+**Até o último registro desta sessão o build MSVC completo ainda não tinha terminado;**
+não declarar Windows verde sem consultar o resultado remoto.
 
-Validação do corte de CI/releases: build incremental Linux e **25 CTests passaram**;
-workflows passaram no actionlint 1.7.12. Testes pequenos verificam CRC, conteúdo,
-modo executável, volumes e hashes. Teste adicional com payload esparso acima de
-2 GiB gerou dois volumes ZIP64 e passou no `7z t` (7-Zip 26.02), sem criar uma
-distribuição real. Fixture de releases também passou no Python 3.11 do container.
-O container antigo `albert-toolchains` não tem Git: a regressão de checkout não
-roda nele até instalar Git ou reconstruir a imagem. **Dockerfile.build agora
-declara Git**, necessário para esse teste; o teste passou no host com Git.
-
-**Ainda não validado:** execução integral do novo workflow em GitHub-hosted
-Linux/Windows, build MSVC após a correção e publicação/upload de releases reais.
-Não declarar Actions verde sem consultar o resultado remoto. Nenhuma tag ou
-release pública foi criada, nenhum empacotamento real local foi gerado.
-A publicação ocorre apenas em tags; a execução manual só cria artefatos.
-Como estamos numa feature branch, o workflow manual precisa chegar à branch
-padrão para aparecer na lista do GitHub. Não fazer merge/tag automaticamente.
+`gh` não está instalado. A API pública lista runs/jobs/caches sem token; logs
+brutos exigem login (a sessão anterior usou o navegador do Allan para lê-los).
 
 ## Como trabalhar com o Allan
 
@@ -78,6 +60,12 @@ padrão para aparecer na lista do GitHub. Não fazer merge/tag automaticamente.
 - O usuário pediu exportação do contexto na raiz após terminar as luas. Este
   checkpoint já permite continuidade; atualizar contagens, entregas, testes e
   pendências ao concluir a fila restante, sem afirmar conclusão antecipada.
+- **Perguntas e decisões pendentes vão na mensagem final do turno**, completas e
+  estruturadas. O Allan acompanha de outro dispositivo e perde texto intermediário.
+- RAM: o `cpptools` do VS Code chegou a 6,1 GB de RSS nesta máquina (o
+  `C_Cpp.maxMemory` não limita o processo principal). O Allan liberou ao agir no
+  VS Code; ele não usa a extensão C++ e pode desinstalá-la. Conferir `free -m`
+  antes de builds/análises pesadas.
 
 ## Produto e requisitos preservados
 
@@ -104,7 +92,7 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
 
 ## Estado entregue
 
-- 43 corpos selecionáveis: Sol, oito planetas, 25 luas, cinco planetas anões,
+- 43 corpos selecionáveis: Sol, oito planetas, 25 luas (20 com imagens próprias), cinco planetas anões,
   Vesta/Pallas e Halley/67P.
 - Seletor por categorias, busca aproximada com acentos/transposições e desempate
   por distância heliocêntrica. Clique em corpos/labels de luas, cursor pointer,
@@ -141,12 +129,12 @@ estatísticas identificadas, sem catalogar cada partícula como objeto real.
 
 ## Luas — qualidade real e lacunas
 
-19 das 25 luas têm imagens próprias, incluindo a Lua terrestre. As 18 adicionais:
+20 das 25 luas têm imagens próprias, incluindo a Lua terrestre. As 19 adicionais:
 
 | Grupo | Corpos / fonte atual |
 | --- | --- |
 | Júpiter | Io/Europa 4096×2048; Ganimedes/Calisto 2048×1024, NASA VTAD |
-| Saturno | Encélado/Tétis/Dione/Reia/Jápeto 4096×2048, NASA VTAD |
+| Saturno | Mimas 6356×3178 Cassini PIA18437 + forma Gaskell; Encélado/Tétis/Dione/Reia/Jápeto 4096×2048, NASA VTAD |
 | Urano | Ariel/Titânia/Oberon 2048×1024; Umbriel/Miranda 1024×512, cobertura parcial |
 | Outros | Tritão 4096×2048 e Caronte 1264×632, cobertura parcial |
 | Marte | Fobos/Deimos, mosaicos Viking 1440×720 e modelos DSK medidos |
@@ -165,6 +153,20 @@ Manter origem e escala medidas; raio nominal continua datum, sem renormalizar
 essas malhas ao raio médio. Câmera usa raio máximo ×1,05. BVH seleciona placas
 reais; LOD troca textura sem sobrepor malha esférica ao modelo.
 
+Mimas: forma Gaskell/PDS Q=256 (`mimas_ver256q.tab`), 393.218 vértices usados
+e 786.432 placas, raio máximo 210.780,893 m; descartados só vértices duplicados do
+cubo ICQ sem uso. Mosaico PIA18437 (NASA/JPL/SSI/LPI, Schenk), cores realçadas
+IR–verde–UV (não é cor natural). **O mosaico publicado não estava registrado:**
+longitude −3,85° e latitude planetográfica, tan φ' = (207,8/190,6)² tan φ. O campo
+`projection` do inventário faz o gerador reamostrar (cúbica separável). Medido pela
+correlação com sombreamento sintético da malha em 84 regiões (0,04 → 0,51, 83/84
+melhores) e conferido em 21 crateras do Gazetteer; `scripts/register-moon-map.py
+mimas` reproduz. A malha usa W0 337,46° e o Albert usa pck00011 (333,46°): longitudes
+da superfície batem com o Gazetteer; a fase inercial pode diferir ~4° (documentado).
+Polos de Gaskell ficam a 3–5 m do eixo; `decodeShape` agora trata vértices a menos
+de 1e-4 rad do eixo como polos (sem isso, dois triângulos cruzavam a emenda).
+A mesma técnica pode validar os mosaicos Viking de Fobos/Deimos (ainda não feito).
+
 Orientações IAU `pck00011` e termos periódicos/quadráticos foram testados contra
 CSPICE. Isso **não torna as órbitas adicionais efemérides precisas**: 33 corpos
 adicionais usam elementos Horizons embarcados de 16/10/2026 00:00 TDB e propagação
@@ -172,8 +174,11 @@ aproximada de dois corpos. Planetas e Lua preservam os provedores existentes.
 
 ## Próxima fila, por valor/viabilidade
 
-1. **Mimas:** reprojetar atlas próprio de hemisférios; conferir longitude, polos,
-   cobertura, orientação e possíveis modelos/relevo observados.
+1. **Download dos assets por níveis** (decidido em 17/10/2026, desenho no
+   ROADMAP): release própria de assets (anexos sem limite de banda; nunca LFS),
+   loading dedicado só para ~80 MB de níveis globais, demais níveis em segundo
+   plano com indicador minimalista no canto, retentativa/retomada, zoom limitado
+   ao nível já baixado (nunca imagem inventada), containers por corpo e nível.
 2. **Titã:** atmosfera e aparência visível próprias; não usar mapa infravermelho
    da superfície como fotografia em luz visível sem identificação.
 3. **Hipérion/Febe:** imagens e formas observadas; substituir o procedural onde
@@ -211,8 +216,13 @@ GPU física, Windows real, viagens extensas e limites de RAM/VRAM.
   reproduzível com fontes fixadas por hash. SpicePy 8.3.0 somente na autoria,
   sem dependência SPICE no executável. `shape.bin` indexado little-endian:
   `ALBMSH1\0`, contagens uint32, xyz float32 em metros IAU, índices uint32.
-- `scripts/reference-moon-shapes.py`: 48 raios independentes CSPICE/DSKX02 sobre
-  originais; fixture em `tests/measured_shape_fixture.inc`.
+- `scripts/reference-moon-shapes.py`: 72 raios independentes (CSPICE/DSKX02 nos
+  DSKs, float64 com parser próprio na tabela Gaskell); `tests/measured_shape_fixture.inc`.
+- `scripts/moon_shapes.py` exporta DSK (SpicePy) e Gaskell vértice-faceta (só NumPy).
+  Inventário aceita `projection` (registro de mapas publicados) e `notice` (aviso
+  da UI gerado em `NaturalBody::notice`). `scripts/register-moon-map.py` mede registro.
+- `tests/moon_frames_fixture.inc` não tem gerador versionado: entradas novas vêm de
+  SpicePy `pxform('IAU_<CORPO>','J2000',(jd-2451545)*86400)` com pck00011.
 
 ## Assets e distribuição
 
@@ -223,8 +233,9 @@ estáticas em runtime. Esse empacotamento dificulta abertura casual; não é DRM
 Originais e intermediários ficam em `asset-packs/`, ignorados. Não espalhar cópias
 de imagens pelo projeto; documentação/capas ficam em `docs/images/`.
 
-Pacote adicional das 18 luas: **43.832.843 bytes**. Biblioteca reunida neste build:
-**4.868.533.894 bytes** (~4,87 GB decimal). Não confundir disco com RAM/VRAM:
+Pacote adicional das 19 luas: **65.474.691 bytes**. Biblioteca reunida neste build:
+**4.890.175.742 bytes** (~4,89 GB decimal). Ao regenerar, as 432 entradas anteriores
+saíram idênticas; só `SOURCES.json` mudou e entraram 130 entradas de Mimas. Não confundir disco com RAM/VRAM:
 recortes são limitados e descartáveis; as duas malhas/BVH permanecem residentes.
 Após mudar o inventário, regenerar pacote/hashes coerentes. Nunca versionar
 originais enormes nem saltar a verificação de integridade para acelerar.
@@ -279,19 +290,21 @@ CPU/RAM continuam envolvidos em leitura, descompactação, preparação de geome
 
 ## Última validação efetiva
 
-- 23 testes CTest Linux passaram, incluindo `measured_shapes`.
-- Geometria: contagens/escala/normais/UVs, entradas malformadas e 48 interseções
-  contra CSPICE independentes, tolerância de 5 cm.
-- OpenGL Linux e Windows/Wine passaram: upload incremental, fade, picking pela
-  malha, ausência de esfera sobre modelo medido, liberação de texturas e regressões
-  existentes de terreno/órbitas/nuvens/eclipses/objetos.
-- Build Linux e cross MinGW completos; teste científico Windows/Wine passou.
-- Programa real no Xvfb: foco/zoom/detalhes de Fobos e Deimos, clamp de câmera e
-  retorno à Terra. Pico de RSS 1.055.444 kB (~1,01 GiB) em 600×480 com llvmpipe.
-  Não é orçamento máximo nem medição de VRAM ou performance de GPU física.
-- Evidências locais em `build/measured-shapes-*.log` e imagens correspondentes,
-  ignoradas pelo Git. Nenhuma distribuição gerada nesta entrega.
+- Build Linux incremental (JOBS=1) e **25 CTests passaram**, incluindo
+  `measured_shapes` com Mimas (72 interseções; tolerância 5 cm em Fobos/Deimos e
+  0,5 m em Mimas, coerente com float32 a 210 km) e `natural_bodies` com Mimas.
+- `tests/moon_assets_fixture.py` cobre a reprojeção (identidade, borda 0–360,
+  latitude planetográfica e sinal do deslocamento de longitude).
+- OpenGL no Xvfb (`visual_test --graphics`) passou com Mimas na malha medida:
+  render, picking BVH, upload com fade, geometria preservada e descarte.
+- Programa real no Xvfb, 800×600, llvmpipe: foco/zoom/detalhe de Mimas, câmera
+  fora da malha (raio máximo ×1,05) e aviso da fonte no painel. Pico de RSS
+  1,29 GB; não é medição de VRAM nem de GPU física. Capturas em
+  `build/mimas-preview-*.png` e registro em `build/mimas-registration-*.png`.
+- Cross-build MinGW (`render`, `visual_test`, `bodies_test`, `shape_test`) e Wine:
+  geometria (72 interseções), orientação contra CSPICE e OpenGL passaram.
+- Nenhuma distribuição gerada nesta entrega.
 
-Próxima ação concreta: conferir árvore/commit, depois iniciar **Mimas**, mantendo
-o inventário, pacote, descritores, testes e documentação sincronizados. Ao encerrar
-a etapa das seis luas restantes, atualizar este arquivo antes de passar o trabalho.
+Próxima ação concreta: conferir Actions do último commit (Windows MSVC completo e
+cache), depois iniciar o **download de assets por níveis**, mantendo pacote,
+inventário, testes e documentação sincronizados.

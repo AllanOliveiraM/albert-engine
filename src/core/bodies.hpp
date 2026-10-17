@@ -15,6 +15,7 @@ struct NaturalBody {
     std::array<double,3> axesMeters{}; // Optional IAU x/y/z reference semiaxes.
     double shapeRadiusMeters=0; // Measured mesh extent from the original IAU origin.
     std::array<double,3> shapeDimensionsMeters{};
+    std::string_view notice{}; // Source-specific UI note from the asset inventory.
 };
 // Additional solid bodies. Existing Earth/Moon/Sun keep their specialized models.
 std::span<const NaturalBody> naturalBodies();
