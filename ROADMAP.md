@@ -23,7 +23,7 @@ corte entregue não significa suporte completo a todos os requisitos da feature.
 | **Média — 3** | Texturas GLB/glTF, animação de peças e controles avançados de câmera pela API | GLB estático/PBR sólido e streaming de posição/atitude já existem |
 | **Média — 4** | Rótulos, polígonos/GeoJSON e camadas raster/clima selecionadas | Camadas atuais: pontos e polilinhas; nuvens GIBS continuam opcionais |
 | **Média — 5** | ~~Data de simulação~~ — entregue em 17/10/2026; faltam gravação/reprodução e cenários de eventos/eclipses | 1900–2100, até 1 semana/s; tabelas do JPL acompanham até 6 h/s, acima disso modelos analíticos do ERFA ajustados às últimas tabelas |
-| **Posterior** | Satélites artificiais/OMM, mais provedores e exemplos de assistente de IA | Catálogo extra permanece na API; não reintroduzir importação online na UI |
+| **Posterior** | Satélites artificiais/OMM e mais provedores (exemplos de assistente de IA cancelados por ora em 17/10/2026, decisão do Allan) | Catálogo extra permanece na API; não reintroduzir importação online na UI |
 
 ### Download dos assets por níveis — decidido e entregue em 17/10/2026
 
@@ -729,7 +729,7 @@ não substituir a informação por outro popup automático redundante.
 ```mermaid
 flowchart TD
     UI[Interface gráfica] --> APP[Serviços internos do Albert]
-    CLIENT[Clientes externos e assistentes de IA] --> RPC[gRPC C++ no programa]
+    CLIENT[Clientes externos] --> RPC[gRPC C++ no programa]
     RPC --> APP
     APP --> SCENE[Registro de objetos, camadas e relógio]
     APP --> CONTENT[Catálogo e provedores de dados]
@@ -910,7 +910,6 @@ uma opção explícita, com autenticação e TLS quando habilitado.
 Limitar conexões, mensagens, importações e memória. Referências de assets devem
 usar IDs ou importação controlada; não expor execução de comandos, leitura
 arbitrária do disco ou download irrestrito por URL como recurso da API.
-Clientes de IA usam as mesmas operações documentadas dos demais integradores.
 
 ## 7. Assets e conteúdo visual por objeto
 
@@ -1047,7 +1046,9 @@ interno mais amplo seria outra etapa, com requisitos próprios.
 
 ### Assistente de IA guiando uma explicação
 
-O integrador descobre capacidades, consulta o catálogo interno, pede importação
+**Cancelado por ora** (17/10/2026, decisão do Allan): fora do planejamento até nova
+decisão; a API continua genérica para qualquer integrador. Registro do cenário:
+o integrador descobre capacidades, consulta o catálogo interno, pede importação
 de objetos, aguarda operações e solicita foco/camadas. Recebe estados e eventos
 para explicar fonte, instante e limitações. Voz, geração de texto e conexão com
 um modelo de IA podem permanecer no integrador; o Albert fornece operações
@@ -1102,7 +1103,7 @@ Dentro de cada faixa, a ordem indicada é a recomendada, respeitando as dependê
 | F17 | Satélites artificiais por provedor interno | Alto para acompanhamento de objetos próximos | Média | Médio–grande | F09/F14; propagação e conversões de referencial, validade e atualização dos elementos |
 | F18 | Camadas raster e clima de poucas fontes selecionadas | Alto para exploração da Terra | Média | Grande, dividido | F13/F14; reutilizar WMS/GIBS e adicionar variáveis/grades apenas com caso concreto |
 | F19 | Eventos de missão, gravação e reprodução determinística | Alto para cenários complexos | Média | Grande | F09/F10; registrar dados/eventos e controlar relógio, lacunas e descontinuidades |
-| F20 | Exemplo de cliente para assistente de IA | Médio–alto: demonstra uso educativo | Alta após API documentada | Pequeno–médio | Reutilizar F08/F09/F14; sem exigir modelo de IA embutido no Albert |
+| F20 | ~~Exemplo de cliente para assistente de IA~~ — cancelado por ora (17/10/2026) | Médio–alto: demonstra uso educativo | Alta após API documentada | Pequeno–médio | Reutilizar F08/F09/F14; sem exigir modelo de IA embutido no Albert |
 | F21 | Completar cobertura do catálogo de luas e conteúdo embarcado | Alto para a visão completa | Variável por corpo | Grande | F16, inventário e orçamento; dados limitados não podem virar fotorealismo inventado |
 | F22 | Catálogo amplo de provedores e novas classes de camadas | Valor variável por caso de uso | Média–baixa no conjunto | Grande | Expandir F14/F18 após validar demanda, termos, limites e manutenção de cada fonte |
 
@@ -1125,7 +1126,7 @@ F14 pode preceder F12 se importar objetos existentes tiver mais valor imediato.
 | M4 — uma integração interna completa | Primeiro corte de F14 | Um provedor conhecido; busca/importação/acompanhamento; sem catálogo enorme | UI e gRPC importam pelo mesmo serviço, com fonte, instante, validade, cache e limites |
 | M5 — conteúdo externo visual | Cortes independentes de F12/F13/F18 | Um modelo, uma camada vetorial e uma raster, entregues separadamente | Dados aparecem com escala, referencial, oclusão e créditos corretos, sem bloquear navegação |
 | M6 — sistemas planetários progressivos | F15/F16/F21 | Lotes por planeta/sistema; luas detalhadas e cobertura completa não são um único bloqueio | Cada lote declara objetos incluídos, cobertura real, tamanho e custo de recursos |
-| M7 — cenários e ecossistema | F17/F19/F20 e expansão de F22 | Satélites, replay e exemplo de IA são entregas independentes | Exemplos reproduzíveis e documentados, com contratos e tratamento de falhas já exercitados |
+| M7 — cenários e ecossistema | F17/F19 e expansão de F22 (F20 cancelado por ora) | Satélites e replay são entregas independentes | Exemplos reproduzíveis e documentados, com contratos e tratamento de falhas já exercitados |
 
 Os marcos M3–M7 não precisam terminar todos em ordem linear: depois de M2B,
 escolher a próxima entrega de acordo com uso concreto, dependências e dados disponíveis.
@@ -1173,7 +1174,7 @@ refatoração aberta nem uma tentativa de integrar todas as fontes ao mesmo temp
 - Fotorealismo igualmente detalhado para todas as luas, independentemente da
   existência de imagens; preservar a meta de catálogo completo com limitações explícitas.
 - Telemetria real de Starship como requisito para provar streaming e acompanhamento.
-- Modelo de IA, voz ou agente autônomo embutido; primeiro oferecer API e exemplo externo.
+- Modelo de IA, voz ou agente autônomo embutido, e exemplos de assistente de IA (cancelados por ora).
 - Plugins binários, ECS completo, serviços separados ou reescrita total do render.
 - Servidor remoto público, arbitragem sofisticada entre muitos clientes e modo
   headless completo; manter fronteiras arquiteturais que permitam evoluí-los depois.

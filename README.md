@@ -252,8 +252,8 @@ O servidor é ativado com `--rpc` e aceita conexões em `127.0.0.1`.
 O [guia gRPC](docs/RPC.md) traz os comandos Windows, contrato, coordenadas,
 limites, streaming e remoção do exemplo.
 
-Essa base permite construir integradores de simulação, ferramentas educativas
-e clientes para assistentes de IA. O primeiro catálogo interno já reutiliza o Horizons. O suporte inicial a GLB estático também está disponível. Pontos e linhas geográficas também podem ser adicionados por gRPC.
+Essa base permite construir integradores de simulação e ferramentas educativas.
+O primeiro catálogo interno já reutiliza o Horizons. O suporte inicial a GLB estático também está disponível. Pontos e linhas geográficas também podem ser adicionados por gRPC.
 Texturas/animação de modelos, polígonos, rótulos, camadas raster e novas fontes
 públicas são próximas entregas.
 

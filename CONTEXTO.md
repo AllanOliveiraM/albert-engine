@@ -194,7 +194,8 @@ programas externos: criar/remover/focar objetos, câmera, geometria, assets,
 órbitas, posição/velocidade/atitude e atualizações por streaming. O render cuida
 de interpolação, matemática e animação. Exemplo desejado: cliente externo
 simula lançamento do Starship e transmite estado/modelo; o usuário continua
-livre para orbitar o foguete ancorado. Assistentes de IA poderão usar a mesma API.
+livre para orbitar o foguete ancorado. Exemplos de assistente de IA: **cancelados
+por ora** (17/10/2026, decisão do Allan), fora do roadmap até nova decisão.
 Catálogos/provedores públicos e camadas geográficas/climáticas são extensões
 futuras: verificar disponibilidade, termos e limites de cada fonte. Google/Earth
 e Ventusky foram ideias, não integrações entregues nem licenças concedidas.
