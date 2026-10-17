@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch supersedes the running build.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -21,24 +26,85 @@ jobs:
             preset: windows
     runs-on: ${{ matrix.os }}
     steps:
+      # LFS downloads count against the account bandwidth quota. Both systems
+      # share one cache keyed by the LFS object IDs; only new objects are fetched.
       - uses: actions/checkout@v4
+      - name: Git LFS cache key
+        id: lfs
+        shell: bash
+        run: echo "key=lfs-v1-$(git lfs ls-files --long | sort | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
+      - name: Restore Git LFS objects
+        id: lfs-cache
+        uses: actions/cache/restore@v4
         with:
-          lfs: true
+          path: .git/lfs/objects
+          key: ${{ steps.lfs.outputs.key }}
+          restore-keys: lfs-v1-
+          enableCrossOsArchive: true
+      - name: Fetch missing Git LFS objects
+        run: git lfs pull
+      - name: Save Git LFS objects
+        if: steps.lfs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .git/lfs/objects
+          key: ${{ steps.lfs.outputs.key }}
+          enableCrossOsArchive: true
+      - name: Release the LFS object store
+        shell: bash
+        run: rm -rf .git/lfs/objects
       - name: Verify asset bytes after Windows-style checkout
         run: python tests/asset_checkout_fixture.py
       - name: Linux system dependencies
         if: runner.os == 'Linux'
-        run: bash scripts/setup-linux.sh
+        run: |
+          bash scripts/setup-linux.sh
+          sudo apt-get install -y --no-install-recommends ccache
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+      # Compiled objects are reused; ccache verifies sources and flags itself.
+      - name: Restore Linux compiler cache
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-linux-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/Grpc.cmake') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/Grpc.cmake') }}-
+            ccache-linux-
       - name: Configure Linux
         if: runner.os == 'Linux'
-        run: cmake --preset ${{ matrix.preset }}
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CCACHE_MAXSIZE: 1500M
+        run: |
+          ccache --zero-stats
+          cmake --preset ${{ matrix.preset }}
+      - name: Runner image
+        if: runner.os == 'Windows'
+        id: image
+        shell: bash
+        run: echo "version=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+      # MSBuild skips dependency projects whose restored outputs and tracking
+      # logs are current; changed sources or flags are rebuilt normally.
+      - name: Restore Windows dependency build
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: build/windows/_deps
+          key: deps-windows-${{ steps.image.outputs.version }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/Grpc.cmake', 'CMakePresets.json') }}
+          restore-keys: deps-windows-${{ steps.image.outputs.version }}-
       - name: Build Windows with bootstrap wrapper
         if: runner.os == 'Windows'
         shell: cmd
         run: make.cmd render-build
       - name: Build Linux
         if: runner.os == 'Linux'
-        run: cmake --build --preset ${{ matrix.preset }}
+        env:
+          CCACHE_MAXSIZE: 1500M
+        run: |
+          cmake --build --preset ${{ matrix.preset }}
+          ccache --show-stats
       - name: Tests
         run: ctest --preset ${{ matrix.preset }}
       - name: HTTP errors, retry and cancellation (Linux)
