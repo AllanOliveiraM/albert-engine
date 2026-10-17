@@ -128,6 +128,15 @@ flutuante no corpo (sem ela a precisão de float a 2,5 UA é de ~44 km). Falha n
 `visual_test`, reamostragem PDS em memória, tamanhos/SHA dos pacotes, `Assets.cmake`,
 actionlint e `git diff --check`.
 
+Repasse após Plutão e os anéis (`f75e5dd..924cfad`): um achado, **P2, confirmado e
+corrigido**: os anéis tênues usavam composição aditiva e não atenuavam o fundo; no ε
+de Urano (τ ≈ 1) estrelas e luas atrás deveriam cair a e^(−τ/μ) (~13,5% a μ = 0,5).
+Agora a composição é pré-multiplicada (One, OneMinusSrcAlpha) com α = 1 − e^(−τ/μ); o
+realce estica só a luz espalhada, a transmissão continua física. Regressão no OpenGL:
+um fundo branco visto através do ε cai a menos de 60% (falha na versão aditiva; passa
+no Linux e no Wine). Limite conhecido: para anéis menores que um texel, e^(−τ médio/μ)
+superestima um pouco a atenuação em relação à média de e^(−τ/μ).
+
 ### Download por níveis (entregue em 17/10/2026)
 
 Decisão do Allan: versão leve baixa tudo, por **níveis de resolução**, com tela de

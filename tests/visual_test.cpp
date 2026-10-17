@@ -357,6 +357,23 @@ void graphics() {
         require(physical<=2&&back>physical+5&&forward>back+20,"Faint ring brightness, enhancement or forward scattering is wrong");
         ringed.enhanceRings("jupiter",false);
     }
+    {   // Uranus' epsilon ring (optical depth ~1) dims a bright background seen through it.
+        auto ringScene=Scene::create();ringScene->background=Color(0x000000);
+        std::vector<albert::SurfaceAssets> ringAssets;ringAssets.push_back({"uranus",rgba(120),height(0)});
+        albert::SolidBodies ringed(*ringScene,std::move(ringAssets));
+        const float earth=static_cast<float>(albert::core::earthRadiusMeters),r=static_cast<float>(albert::core::surfaceRadius("uranus"))/earth;
+        auto view=PerspectiveCamera::create(20,1,r*.001f,r*1000);
+        ringed.update(renderer,*view,Vector3(0,0,20000),2451545.,"uranus",false,1.f);auto node=ringed.nodes().at("uranus");node->updateMatrixWorld();
+        Vector3 normal(0,1,0);normal.transformDirection(*node->matrixWorld);Vector3 point(51149000.f/earth,0,0);point.applyMatrix4(*node->matrixWorld);
+        view->position.copy(point).add(normal.clone().multiplyScalar(r*.2f));view->lookAt(point);view->updateMatrixWorld();
+        auto backdrop=Mesh::create(PlaneGeometry::create(r,r),MeshBasicMaterial::create());backdrop->position.copy(point).sub(normal.clone().multiplyScalar(r*.1f));backdrop->lookAt(view->position);ringScene->add(backdrop);
+        auto centre=[&](bool ring){for(auto& child:node->children)child->visible=ring;
+            for(int i=0;i<3;++i)ringed.update(renderer,*view,point.clone().add(normal.clone().multiplyScalar(20000.f)),2451545.,"uranus",false,1.f);
+            renderer.render(*ringScene,*view);return int(renderer.readRGBPixels()[3*(96*192+96)]);};
+        const int clear=centre(false),dimmed=centre(true);
+        require(clear>100&&dimmed<clear*.6,"Dense ring did not attenuate the background");
+        backdrop->geometry()->dispose();backdrop->material()->dispose();
+    }
     albert::RegionalImages solidRegion;solidRegion.body="mercury";solidRegion.day=rgba(230);solidRegion.height=height(1000);
     albert::prepareRegionalImages(solidRegion);solids.stage(std::move(solidRegion));
     for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);

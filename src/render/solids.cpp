@@ -113,9 +113,12 @@ std::shared_ptr<ShaderMaterial> hazeShell(){
 // Faint ring systems (Jupiter, Uranus, Neptune): an optically thin slab in single
 // scattering, seen from the lit or the unlit side, with dark macroscopic particles
 // (Lambert-sphere phase) and forward-scattering dust (Henyey-Greenstein), the planet's
-// shadow, and additive light. Profile texels hold band-averaged normal optical depths.
+// shadow, and premultiplied composition: scattered light plus the background times the
+// direct transmission exp(-tau/mu) (Uranus' epsilon ring dims what lies behind it).
+// Profile texels hold band-averaged normal optical depths.
 std::shared_ptr<ShaderMaterial> thinRings(Texture* profile,float inner,float outer,float radius,const albert::RingSystem& system){
-    auto m=ShaderMaterial::create();m->side=Side::Double;m->transparent=true;m->depthWrite=false;m->blending=Blending::Additive;
+    auto m=ShaderMaterial::create();m->side=Side::Double;m->transparent=true;m->depthWrite=false;
+    m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::OneMinusSrcAlpha;
     m->uniforms={{"profile",Uniform(profile)},{"inner",Uniform(inner)},{"outer",Uniform(outer)},{"radius",Uniform(radius)},{"localSun",Uniform(Vector3(1,0,0))},
         {"localCamera",Uniform(Vector3(0,1,0))},{"irradiance",Uniform(1.f)},{"incidence",Uniform(1.f)},{"gain",Uniform(1.f)},
         {"particleAlbedo",Uniform(system.particleAlbedo)},{"dustAlbedo",Uniform(system.dustAlbedo)},{"dustG",Uniform(system.dustAsymmetry)}};
@@ -143,6 +146,8 @@ std::shared_ptr<ShaderMaterial> thinRings(Texture* profile,float inner,float out
         gl_FragColor=vec4(vec3(reflectance*shadow*gain*irradiance/PI),1.0);
         #include <tonemapping_fragment>
         #include <encodings_fragment>
+        // The display stretch scales scattered light only; transmission stays physical.
+        gl_FragColor.a=1.0-exp(-(tau.r+tau.g)/mu);
       })";
     return m;
 }
