@@ -2,6 +2,7 @@
 #include "platform.hpp"
 #include "sha256.hpp"
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <cstdlib>
 #include <map>
@@ -18,6 +19,11 @@ int main(int argc,char** argv){try{
     require(albert::sha256("")=="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"&&albert::sha256("abc")=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","SHA-256 reference vectors");
     std::string block(1000,'q');albert::Sha256 split;for(size_t i=0;i<block.size();i+=37)split.update(std::string_view(block).substr(i,37));
     require(split.hex()==albert::sha256(block),"Incremental SHA-256 differs from one-shot");
+    // Review finding: switching focus then receiving the new body's first finer
+    // level must refresh, while the switch itself must not.
+    albert::DetailRefresh refresh;
+    require(!refresh.observe("earth",1)&&!refresh.observe("earth",1)&&refresh.observe("earth",2),"Same body gaining a level must refresh");
+    require(!refresh.observe("mercury",0)&&refresh.observe("mercury",1)&&!refresh.observe("moon",3),"First finer level after a focus change was ignored");
     bool missing=false;try{albert::visualAssetPack();}catch(const std::exception&){missing=true;}
     require(missing,"Library opened before the essential container arrived");
     const auto catalog=albert::readAssetCatalog(albert::assetDirectory()/"catalog.json");
@@ -45,6 +51,7 @@ int main(int argc,char** argv){try{
     // Fresh asset folder for the remaining checks: on Windows an installed
     // container stays open, so deleting it would only mark it pending.
     const auto second=albert::assetDirectory().parent_path()/"second";
+    const auto first=albert::assetContainerDirectories().front();
 #ifdef _WIN32
     _wputenv_s(L"ALBERT_ASSET_DIR",second.c_str());
 #else
@@ -62,5 +69,21 @@ int main(int argc,char** argv){try{
      stopped=std::chrono::steady_clock::now();}
     require(std::chrono::steady_clock::now()-stopped<3s,"Cancellation did not stop the transfer promptly");
     require(fs::exists(packs/"earth-1.pak.part")&&!fs::exists(packs/"earth-1.pak"),"Cancelled transfer was not kept resumable");
+    // Containers on disk are trusted by their verification record, not their size:
+    // copies (new timestamps) are hashed again, a corrupted one is fetched again.
+    const auto third=second.parent_path()/"third";fs::create_directories(third/"packs");
+    for(const auto& container:catalog.containers)fs::copy_file(first/container.file,third/"packs"/container.file);
+    const auto& moons=*std::find_if(catalog.containers.begin(),catalog.containers.end(),[](const auto& c){return c.file=="moons-2.pak";});
+    {std::fstream damage(third/"packs/moons-2.pak",std::ios::in|std::ios::out|std::ios::binary);damage.seekp(40);damage.put('#');}
+    require(!albert::trustedContainer(third/"packs/moons-2.pak",moons)&&albert::fileSha256(third/"packs/moons-2.pak")!=moons.sha256,"Corrupted container looked trusted");
+#ifdef _WIN32
+    _wputenv_s(L"ALBERT_ASSET_DIR",third.c_str());
+#else
+    setenv("ALBERT_ASSET_DIR",third.c_str(),1);
+#endif
+    {albert::AssetDownloads downloads(catalog,options);downloads.start();
+     require(waitFor([&]{return downloads.status().complete;},30s),"Corrupted container was not replaced");}
+    for(const auto& container:catalog.containers)require(albert::trustedContainer(third/"packs"/container.file,container),"Verified container has no valid record");
+    require(albert::fileSha256(third/"packs/moons-2.pak")==moons.sha256,"Replacement container is not the catalogued one");
     std::cout<<"Asset downloads: essential first, focus preemption, verified install, disk reserve and cancellation OK\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

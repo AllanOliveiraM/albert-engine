@@ -60,6 +60,9 @@ with tempfile.TemporaryDirectory(prefix='albert-download-') as directory:
  assert requests('mercury-1.pak')[:2]==[(None,200),(None,200)],'Corrupt download was not discarded and fetched again'
  assert requests('essential.pak')[:2]==[(None,503),(None,200)]
  assert requests('moons-2.pak')[0][1]==302
+ # Corruption phase: only the damaged container is fetched again (one more redirect).
+ assert [s for _,s in requests('moons-2.pak')].count(302)==2,'Corrupted container was not fetched again'
+ assert len(requests('mercury-1.pak'))==2,'Intact containers were downloaded again'
  assert not list((assets/'packs').glob('*.part')),'Completed downloads left partial files'
  # Only the transfer cancelled on purpose remains, resumable.
  assert [p.name for p in (root/'second/packs').glob('*.part')]==['earth-1.pak.part']

@@ -39,6 +39,11 @@ struct AssetCatalog {
 AssetCatalog readAssetCatalog(const std::filesystem::path& path);
 // assets/packs beside the executable, or data/packs when assets is not writable.
 std::vector<std::filesystem::path> assetContainerDirectories();
+// A container is trusted without re-hashing only when its <file>.verified record,
+// written after a SHA-256 check, still matches its size and modification time.
+bool trustedContainer(const std::filesystem::path& path,const AssetCatalog::Container& container);
+void recordVerifiedContainer(const std::filesystem::path& path,const AssetCatalog::Container& container);
+std::string fileSha256(const std::filesystem::path& path,const DownloadProgress* progress=nullptr);
 
 // Current library: complete visuals.pak when present, otherwise the installed
 // containers listed by assets/catalog.json. Installing a verified container

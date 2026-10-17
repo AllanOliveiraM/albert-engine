@@ -1083,7 +1083,7 @@ int albert::runRenderer(int argc, char** argv) {
         camera->lookAt(controls.target);
         int appliedQuality = -1;
         Focus lastRegionalFocus=focus;bool lastDetailQuality=visualSettings.quality;
-        std::uint64_t assetGeneration=albert::visualAssetGeneration();std::string levelBody;int levelSeen=-1;
+        std::uint64_t assetGeneration=albert::visualAssetGeneration();albert::DetailRefresh detailRefresh;
         float assetIndicatorAlpha=0.f,assetCompleteAge=0.f;
 
         drawInterface = [&] {
@@ -2029,10 +2029,9 @@ int albert::runRenderer(int argc, char** argv) {
             if(released)regional.retry();
             memory.update(released);
             // A finer level of the focused body arrived: reload its regional detail once.
-            if(const auto generation=albert::visualAssetGeneration();generation!=assetGeneration){
-                assetGeneration=generation;const std::string body=targetId(focus);const int level=albert::visualAssetPack()->availableLevel(body+"-day");
-                if(body==levelBody&&level>levelSeen)regional.retry();
-                levelBody=body;levelSeen=level;
+            if(const auto generation=albert::visualAssetGeneration();generation!=assetGeneration||targetId(focus)!=detailRefresh.body()){
+                assetGeneration=generation;const std::string body=targetId(focus);
+                if(detailRefresh.observe(body,albert::visualAssetPack()->availableLevel(body+"-day")))regional.retry();
             }
             if((focus!=lastRegionalFocus&&(solids.contains(focus)||solids.contains(lastRegionalFocus)))||(lastDetailQuality!=static_cast<bool>(visualSettings.quality)&&solids.contains(focus)))regional.retry();
             lastRegionalFocus=focus;lastDetailQuality=visualSettings.quality;

@@ -5,6 +5,17 @@
 #include <thread>
 
 namespace albert {
+// Decides when a downloaded level should refresh the regional detail: only when
+// the same body gains a finer level. A focus change records the new body's level
+// at once, so its first improvement is not mistaken for the switch itself.
+class DetailRefresh {
+public:
+    bool observe(const std::string& body,int level){const bool finer=body==body_&&level>level_;body_=body;level_=level;return finer;}
+    const std::string& body() const{return body_;}
+private:
+    std::string body_;int level_=-1;
+};
+
 // Background download of the catalogued containers: essential first, then the
 // catalogue order, with the focused body's next level ahead of the rest. Each
 // container resumes from its .part file, is verified (size and SHA-256) and

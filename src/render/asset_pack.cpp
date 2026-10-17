@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cmath>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -289,6 +290,35 @@ std::vector<fs::path> albert::assetContainerDirectories() {
 }
 
 namespace {
+std::string verificationRecord(const fs::path& path,const albert::AssetCatalog::Container& container){
+    std::error_code error;const auto size=fs::file_size(path,error);const auto time=fs::last_write_time(path,error);
+    if(error)return {};
+    return container.sha256+" "+std::to_string(size)+" "+std::to_string(time.time_since_epoch().count())+"\n";
+}
+}
+
+std::string albert::fileSha256(const fs::path& path,const DownloadProgress* progress){
+    std::ifstream stream(path,std::ios::binary);if(!stream)throw std::runtime_error("Nao foi possivel ler "+path.filename().string());
+    Sha256 hash;std::string buffer(1<<20,'\0');
+    while(stream){stream.read(buffer.data(),static_cast<std::streamsize>(buffer.size()));hash.update(std::string_view(buffer.data(),static_cast<size_t>(stream.gcount())));if(progress)progress->checkCancelled();}
+    return hash.hex();
+}
+
+bool albert::trustedContainer(const fs::path& path,const AssetCatalog::Container& container){
+    std::error_code error;if(!fs::is_regular_file(path,error)||fs::file_size(path,error)!=container.bytes)return false;
+    std::ifstream stream(fs::path(path)+=".verified",std::ios::binary);std::string recorded((std::istreambuf_iterator<char>(stream)),{});
+    const auto current=verificationRecord(path,container);
+    return !current.empty()&&recorded==current;
+}
+
+void albert::recordVerifiedContainer(const fs::path& path,const AssetCatalog::Container& container){
+    const auto record=verificationRecord(path,container);if(record.empty())throw std::runtime_error("Nao foi possivel registrar "+path.filename().string());
+    const auto target=fs::path(path)+=".verified",temporary=fs::path(path)+=".verified.tmp";
+    {std::ofstream output(temporary,std::ios::binary|std::ios::trunc);output<<record;if(!output.flush())throw std::runtime_error("Nao foi possivel registrar "+path.filename().string());}
+    std::error_code error;fs::rename(temporary,target,error);if(error){fs::remove(target,error);fs::rename(temporary,target);}
+}
+
+namespace {
 struct Library {
     std::mutex mutex,install;std::shared_ptr<const albert::AssetPack> pack;std::vector<fs::path> paths;
     std::optional<albert::AssetCatalog> catalog;bool ready=false,complete=false;
@@ -319,7 +349,8 @@ void initialize(Library& state){
     else for(const auto& container:state.catalog->containers)
         for(const auto& directory:albert::assetContainerDirectories()){
             std::error_code error;const auto candidate=directory/container.file;
-            if(fs::is_regular_file(candidate,error)&&fs::file_size(candidate,error)==container.bytes){paths.push_back(candidate);break;}
+            // Unrecorded or modified files wait for the downloader to hash them.
+            if(albert::trustedContainer(candidate,container)){paths.push_back(candidate);break;}
         }
     if(state.catalog&&(paths.empty()||paths.front().filename()!=state.catalog->containers.front().file))
         throw std::runtime_error("Dados visuais essenciais ainda nao baixados");

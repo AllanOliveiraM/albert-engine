@@ -9,15 +9,6 @@ namespace fs = std::filesystem;
 #define ALBERT_ASSET_BASE_URL "https://github.com/AllanOliveiraM/albert-engine/releases/download"
 #endif
 
-namespace {
-std::string fileSha256(const fs::path& path,const albert::DownloadProgress& progress){
-    std::ifstream stream(path,std::ios::binary);if(!stream)throw std::runtime_error("Nao foi possivel ler "+path.filename().string());
-    albert::Sha256 hash;std::string buffer(1<<20,'\0');
-    while(stream){stream.read(buffer.data(),static_cast<std::streamsize>(buffer.size()));hash.update(std::string_view(buffer.data(),static_cast<size_t>(stream.gcount())));progress.checkCancelled();}
-    return hash.hex();
-}
-}
-
 std::string albert::AssetDownloads::defaultBaseUrl(){
     if(const auto value=environmentPath("ALBERT_ASSET_BASE_URL");!value.empty())return value.string();
     return ALBERT_ASSET_BASE_URL;
@@ -69,13 +60,25 @@ fs::path albert::AssetDownloads::destination() const{
 }
 
 void albert::AssetDownloads::run(){
-    // Containers already verified on disk join the library without a new download.
+    // Containers on disk join the library without a new download once their
+    // SHA-256 is known good; a size match alone is not enough.
     for(size_t i=0;i<items_.size();++i)
         for(const auto& directory:assetContainerDirectories()){
-            std::error_code error;const auto path=directory/items_[i].file;
+            std::error_code error;const auto path=directory/items_[i].file;const auto& expected=catalog_.containers[i];
             if(!fs::is_regular_file(path,error)||fs::file_size(path,error)!=items_[i].bytes)continue;
-            try{installVisualAssetContainer(path);std::lock_guard lock(mutex_);items_[i].done=true;items_[i].received=items_[i].bytes;items_[i].finished=finished_++;}
-            catch(const std::exception&){fs::remove(path,error);}
+            try{
+                if(!trustedContainer(path,expected)){
+                    const auto check=std::make_shared<DownloadProgress>();{std::lock_guard lock(mutex_);if(stop_)return;current_=check;} // Cancellable.
+                    const bool good=fileSha256(path,check.get())==expected.sha256;
+                    {std::lock_guard lock(mutex_);current_.reset();}
+                    if(!good)throw std::runtime_error("SHA-256 divergente");
+                    recordVerifiedContainer(path,expected);
+                }
+                installVisualAssetContainer(path);std::lock_guard lock(mutex_);items_[i].done=true;items_[i].received=items_[i].bytes;items_[i].finished=finished_++;
+            }catch(const std::exception&){
+                {std::lock_guard lock(mutex_);current_.reset();if(stop_)return;}
+                fs::remove(path,error);fs::remove(fs::path(path)+=".verified",error); // Fetched again below.
+            }
             break;
         }
     while(true){
@@ -98,8 +101,9 @@ void albert::AssetDownloads::run(){
             httpDownloadFile(options_.baseUrl+"/"+catalog_.release+"/"+item.file,partial,item.bytes,progress.get(),options_.stallSeconds);
             const auto& expected=catalog_.containers[index];
             if(fs::file_size(partial)!=expected.bytes)throw std::runtime_error("Download incompleto: "+item.file);
-            if(fileSha256(partial,*progress)!=expected.sha256){fs::remove(partial,error);throw std::runtime_error("SHA-256 divergente: "+item.file);}
-            fs::remove(final,error);fs::rename(partial,final);
+            if(fileSha256(partial,progress.get())!=expected.sha256){fs::remove(partial,error);throw std::runtime_error("SHA-256 divergente: "+item.file);}
+            fs::remove(fs::path(final)+=".verified",error);fs::remove(final,error);fs::rename(partial,final);
+            recordVerifiedContainer(final,expected);
             installVisualAssetContainer(final);
             std::lock_guard lock(mutex_);items_[index].done=true;items_[index].active=false;items_[index].received=item.bytes;items_[index].finished=finished_++;
             active_=-1;current_.reset();failures_=0;error_.clear();

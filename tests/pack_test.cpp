@@ -31,7 +31,12 @@ int main(int argc,char** argv) {
             auto rejects=[](std::vector<fs::path> files){try{albert::AssetPack value(files);}catch(const std::exception&){return true;}return false;};
             require(rejects({essential,essential}),"Duplicate container accepted");
             require(rejects({essential,directory/"divergent.pak"}),"Divergent layer description accepted");
-            // Library holder: installs publish new snapshots; a rejected container changes nothing.
+            // Library holder: a container on disk without a verification record is not
+            // trusted (size alone hides corruption); once verified it opens the library.
+            bool unverified=false;try{albert::visualAssetPack();}catch(const std::exception&){unverified=true;}
+            require(unverified,"Unverified container entered the library");
+            albert::recordVerifiedContainer(albert::assetContainerDirectories().front()/catalog.containers.front().file,catalog.containers.front());
+            // Installs publish new snapshots; a rejected container changes nothing.
             require(!albert::visualAssetsComplete()&&albert::visualAssetPack()->availableLevel("earth-day")==0,"Holder ignored the catalogued containers");
             const auto generation=albert::visualAssetGeneration();const auto held=albert::visualAssetPack();
             albert::installVisualAssetContainer(directory/"earth-1.pak");

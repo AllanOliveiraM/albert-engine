@@ -48,11 +48,18 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           python3 scripts/light-dist.py dist/linux dist/linux-light
-          assets=$(python3 -c "import json;print(json.load(open('dist/linux-light/assets/catalog.json'))['release'])")
-          # Containers do not depend on the system: build them once, and only
-          # while that asset release does not exist yet.
-          if gh release view "$assets" >/dev/null 2>&1; then echo "Asset release $assets already published"
-          else python3 scripts/split-asset-pack.py dist/linux/assets/visuals.pak release-assets; fi
+          catalog=dist/linux-light/assets/catalog.json
+          echo "CATALOG_PATH=$PWD/$catalog" >> "$GITHUB_ENV"
+          assets=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['release'])" "$catalog")
+          # Containers do not depend on the system: build them once, unless that
+          # asset release already exists with every container at its exact size.
+          if gh release view "$assets" --json assets > asset-release.json 2>/dev/null \
+            && python3 scripts/asset-release.py "$catalog" asset-release.json; then
+            echo "Asset release $assets already complete"
+          else
+            python3 scripts/split-asset-pack.py dist/linux/assets/visuals.pak release-assets
+            cmp "$catalog" release-assets/catalog.json
+          fi
       - name: Build and test portable Windows (MSVC x64)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -67,6 +74,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows release build or tests failed' }
           & python scripts/light-dist.py dist/windows dist/windows-light
           if ($LASTEXITCODE -ne 0) { throw 'Windows light folder failed' }
+          "CATALOG_PATH=$workspace\dist\windows-light\assets\catalog.json" >> $env:GITHUB_ENV
           "RELEASE_WORKSPACE=$workspace" >> $env:GITHUB_ENV
       - name: Archive portable distribution
         shell: bash
@@ -98,6 +106,13 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 3
+      - name: Upload light catalogue
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-catalog-${{ matrix.platform }}
+          path: ${{ env.CATALOG_PATH }}
+          if-no-files-found: error
+          retention-days: 3
       - name: Upload asset containers
         if: runner.os == 'Linux' && hashFiles('release-assets/catalog.json') != ''
         uses: actions/upload-artifact@v4
@@ -123,7 +138,12 @@ jobs:
           path: release
           merge-multiple: true
       - uses: actions/download-artifact@v4
-        # Absent when the asset release of this library already exists.
+        with:
+          pattern: asset-catalog-*
+          path: catalogs
+      - uses: actions/download-artifact@v4
+        # Absent when the asset release already holds every container; the
+        # publish step verifies that release before the versioned one.
         continue-on-error: true
         with:
           name: asset-containers
@@ -136,22 +156,29 @@ jobs:
         shell: bash
         run: |
           for sums in release/*.sha256; do (cd release && sha256sum --check "$(basename "$sums")"); done
-          # Asset release first: a light download never points at missing containers.
+          # Asset release first: a light package must never point at missing or
+          # partial containers. Both systems must expect the same catalogue.
+          catalog=catalogs/asset-catalog-linux/catalog.json
+          cmp "$catalog" catalogs/asset-catalog-windows/catalog.json
+          assets=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['release'])" "$catalog")
           if [[ -f release-assets/catalog.json ]]; then
-            assets=$(python3 -c "import json;print(json.load(open('release-assets/catalog.json'))['release'])")
+            cmp "$catalog" release-assets/catalog.json
             if ! gh release view "$assets" >/dev/null 2>&1; then
-              gh release create "$assets" release-assets/* --latest=false \
+              gh release create "$assets" --latest=false \
                 --title "Albert Engine - dados visuais ${assets#assets-}" \
                 --notes "Containers de imagens baixados automaticamente pelas versões leves. Não é preciso baixá-los manualmente."
             fi
+            gh release upload "$assets" release-assets/* --clobber
           fi
+          gh release view "$assets" --json assets > asset-release.json
+          python3 scripts/asset-release.py "$catalog" asset-release.json
           cat > release-notes.md <<'NOTES'
           Versões portáteis para Linux x64 (glibc 2.36+) e Windows x64.
           Versão leve (`-light`): pacote pequeno; ao abrir, baixa os dados visuais essenciais
           (~63 MB) e completa o restante em segundo plano. Versão completa: tudo incluído, offline.
           Baixe todos os volumes `.zip.001`, `.zip.002`, etc. do seu sistema na mesma pasta.
           Abra `.zip.001` com 7-Zip e extraia. Abra AlbertEngine / AlbertEngine.exe na pasta extraída.
-          Se houver apenas um `.zip`, extraia normalmente. O pacote já inclui todos os assets.
+          Se houver apenas um `.zip`, extraia normalmente. A versão completa já inclui todos os assets.
           Driver OpenGL 3.3+ necessário. Nenhuma instalação do Albert é exigida.
           Os arquivos `.sha256` permitem conferir a integridade dos downloads.
           NOTES
