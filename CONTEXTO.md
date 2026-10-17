@@ -24,7 +24,8 @@ sem `Get-FileHash` quando iniciado a partir do PowerShell 7 (`make.cmd` limpa
 `PSModulePath`; montagem usa SHA-256 do .NET — afeta também usuários no Windows
 Terminal); bit de execução do `AlbertEngine` perdido ao empacotar no Windows.
 No run de `da906d2` o MSVC **compilou e linkou tudo em 8 min** (cache de `_deps`) e
-passou 25/26 testes; o restante (`release_archive`) foi corrigido em `dd196a3`.
+passou 25/26 testes. **Primeiro CI totalmente verde, Linux e Windows/MSVC:** `0bcd4fa`
+(run 39019567564; Linux 5 min, Windows 12 min com build e todos os testes).
 Montagem PowerShell validada em Docker com bytes idênticos ao Linux. Não mudar hashes.
 
 **Banda LFS:** downloads LFS do Actions contam na cota da conta (10 GiB/mês no
