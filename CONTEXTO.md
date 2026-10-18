@@ -9,8 +9,20 @@ UTC=1792234800 build/air-preview.py nome:drag:0:-500` (pad-probe aceita lat/lon 
 Lua: `PlanetaryRelief` em blocos (multipart, 1,7 s por bloco), terreno com `scale`, exposição lunar
 perto da Lua; sítio Apollo 11 com `BODY=moon LAT=0.67416 LON=23.47314 UTC=1792497600` (Sol a 48,5°).
 Lição: o "chão preto" perto do módulo era a exposição da Terra, não o terreno (sem terreno a esfera
-base fica igual). Próximo: Marte, imagem regional nos nós, morph entre níveis. Codex com cota só
-depois das 10:43 (horário local) de 18/10.
+base fica igual). Marte: terreno MOLA (nível 7+) sob o módulo em Jezero (`BODY=mars LAT=18.4447
+LON=77.4508 UTC=1792541700`); voo republicado por Remove+Create quando a origem muda (thread
+`keep`, Append recusava o mesmo instante e Replace é só de provedor). Lições: (1) plano próximo de
+15 km com a câmera a 7 km do chão (órbita longa arrastada ao horizonte) cortava tudo: agora respeita
+`Terrain::ground`; (2) perto de Marte `airApply` dava NaN (diferença de pontos a 1e8 km em f32):
+o segmento vem do mundo relativo à câmera. Revisão Fable do diff: P2 (o `keep` republicava quando o
+relógio andava, pela deriva Horizons−ERFA, e puxava o relógio de volta) e 4 P3 (origem gravada antes
+do Create, thread antes do servidor de dados, segmento nulo perto do solo, nó marciano cruzando 88°
+sempre provisório), corrigidos com testes que falham no código antigo. Pendência: com o olho abaixo
+do elipsoide (o chão do Cabo fica ~27 m abaixo) a perspectiva aérea sai salpicada em faixas; os
+testes de compute e de cena não reproduziram, então na Terra a câmera do voo fica acima do elipsoide
+(como antes) e o certo é baixar o chão do modelo de ar ao relevo local. Próximo: imagem regional nos
+nós, morph entre níveis.
+Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`
 (tabelas em compute, incrementais por quadro), `air` em `src/gpu/programs.cpp` (céu como fundo,

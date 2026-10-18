@@ -8,6 +8,7 @@
 #include "providers/gfs.hpp"
 #include "providers/space_weather.hpp"
 #include "providers/terrain.hpp"
+#include <cstdio>
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -62,6 +63,22 @@ struct FlightServices::Impl {
     core::Bridge& bridge;AirSources sources;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
     ph::Tt step=ph::second/1000,start=0;std::uint64_t tick=0;int shown=0;std::vector<api::FlightEvent> events;
     std::chrono::steady_clock::time_point published{};
+    // The keeper republishes a flight that is not stepping (paused, before real time) when the scene's
+    // state of its central body changes, e.g. once Horizons data replaces ERFA's (Mars: ~1000 km).
+    ph::V3 publishedOrigin{};double publishedUtc=-1e300;std::thread keeper;std::mutex keeperLock;std::condition_variable keeperWake;bool keeperStop=false;
+    void keep(){
+        std::unique_lock l(keeperLock);
+        while(!keeperWake.wait_for(l,std::chrono::milliseconds(500),[this]{return keeperStop;})){
+            l.unlock();
+            {std::lock_guard g(mutex);if(flight&&!pacing&&center!=ph::Center::earth&&atInstant()&&ph::norm(origin(flight->state().time).position-publishedOrigin)>1)publish(true);}
+            l.lock();
+        }
+    }
+    // The scene shows the flight's instant. Elsewhere (a live or scrubbed clock) the slow drift of the
+    // Horizons correction with the scene's time (~0.1 m/s for Mars) must not republish: that re-frames
+    // the camera and holds the clock at the flight's instant.
+    bool atInstant()const{const auto snap=bridge.snapshot();return snap&&std::abs(snap->utcSeconds-ph::utcFromTt(flight->state().time))<1;}
+    void stopKeeper(){{std::lock_guard l(keeperLock);keeperStop=true;}keeperWake.notify_all();if(keeper.joinable())keeper.join();}
     Impl(core::Bridge& b,AirSources s):bridge(b),sources(std::move(s)){
         if(!sources.weather)sources.weather=[](double lat,double lon,double utc){auto d=providers::gfs().fetch(lat,lon,utc);return LiveAir{d.model,std::move(d.grib)};};
         if(!sources.upper)sources.upper=[](double utc){UpperAir a;try{a.model=providers::spaceWeather().msis(utc,&a.days);}catch(const std::exception&){a={};}return a;};
@@ -139,13 +156,16 @@ struct FlightServices::Impl {
     void publish(bool force){
         const auto now=std::chrono::steady_clock::now();
         if(!force&&now-published<std::chrono::milliseconds(33))return;
-        published=now;const core::Sample s=scene();
-        if(flight->state().stage!=shown){ // The stack got shorter: replace the cylinder, keeping the camera on it.
+        published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
+        // The stack got shorter, or the same instant again (the keeper; appending would be refused as
+        // out of order): replace the cylinder, keeping the camera on it.
+        if(flight->state().stage!=shown||s.utcSeconds<=publishedUtc){
             const auto snap=bridge.snapshot();const bool followed=snap&&snap->camera.target==objectId;
             (void)bridge.submit(core::Remove{objectId});
-            if(wait(bridge.submit(core::Create{object()})).code!=core::Code::Ok)return; // Retried on the next publication.
+            if(wait(bridge.submit(core::Create{object()})).code!=core::Code::Ok){shown=-1;return;} // Retried on the next publication.
             shown=flight->state().stage;if(followed)(void)bridge.submit(core::Focus{objectId,false});
         }else (void)bridge.submit(core::Append{objectId,{s}});
+        publishedUtc=s.utcSeconds;publishedOrigin=at;
         (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),{},false,true});
         (void)bridge.submit(telemetry());
     }
@@ -230,8 +250,9 @@ FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(st
         r.status=s.ok()?wire::ok:s.error_code()==grpc::StatusCode::INVALID_ARGUMENT?wire::invalid:wire::precondition;
         return true;
     });
+    impl_->keeper=std::thread([i=impl_.get()]{i->keep();}); // After the data plane, whose constructor may throw.
 }
-FlightServices::~FlightServices(){impl_->stopPacing();impl_->data.reset();}
+FlightServices::~FlightServices(){impl_->stopPacing();impl_->stopKeeper();impl_->data.reset();}
 grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
     std::vector<std::string> grib,std::vector<ph::SpaceWeatherDay> days,providers::GravityModel gravity,const std::function<bool()>& cancelled,api::FlightSample* out){
     const auto& site=r.site();const ph::Tt t=ph::ttFromUtc(p.utc),stepNs=static_cast<ph::Tt>(std::llround(p.seconds*1e9));
@@ -255,6 +276,7 @@ grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,cons
     for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}
     shown=0;(void)wait(bridge.submit(core::Remove{objectId}));
     if(auto s=failed(wait(bridge.submit(core::Create{object()})));!s.ok())return s;
+    publishedOrigin=origin(flight->state().time).position;publishedUtc=ph::utcFromTt(flight->state().time); // The keeper's reference.
     if(auto s=failed(wait(bridge.submit(core::SetTime{ph::utcFromTt(t),0.,false})));!s.ok())return s;
     if(r.focus_camera())(void)wait(bridge.submit(core::Focus{objectId,true}));
     published=std::chrono::steady_clock::now();fill(out);return grpc::Status::OK;

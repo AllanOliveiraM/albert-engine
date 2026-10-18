@@ -4,6 +4,7 @@
 #include "regional.hpp"
 #include "uploads.hpp"
 #include "shapes.hpp"
+#include "terrain.hpp"
 #include "threepp/threepp.hpp"
 #include "threepp/materials/ShaderMaterial.hpp"
 #include <map>
@@ -24,10 +25,12 @@ public:
     bool ringsEnhanced(const std::string& id) const;
     void enhanceRings(const std::string& id,bool enhanced); // Exposure stretch, off by default.
     std::shared_ptr<const threepp::BVH> picker(const std::string& id) const;
+    const Terrain* terrain(const std::string& id) const; // Mars's relief; null elsewhere.
     bool takeEviction(){return std::exchange(evicted_,false);}
     bool uploading() const{return uploads_.active();}
     void stage(RegionalImages images);
-    void update(threepp::GLRenderer*,threepp::PerspectiveCamera&,const threepp::Vector3& sun,double jdTDB,const std::string& focus,bool details,float seconds,const AuxiliaryLights& auxiliary={});
+    // terrain: Mars's quadtree relief within three radii of the camera (MOLA).
+    void update(threepp::GLRenderer*,threepp::PerspectiveCamera&,const threepp::Vector3& sun,double jdTDB,const std::string& focus,bool details,float seconds,const AuxiliaryLights& auxiliary={},bool terrain=true);
 private:
     struct Surface;
     std::map<std::string,std::shared_ptr<threepp::Mesh>> nodes_;

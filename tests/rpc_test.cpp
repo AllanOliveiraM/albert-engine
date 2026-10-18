@@ -3,6 +3,7 @@
 #include "providers/gfs.hpp"
 #include "providers/space_weather.hpp"
 #include "physics/weather.hpp"
+#include "physics/earth.hpp"
 #include <erfa.h>
 #include <filesystem>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include "albert/v1/engine.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -20,11 +22,11 @@
 namespace api=albert::v1;using namespace albert::core;
 void require(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
 int main(int argc,char** argv){try{
-    Scene registry;Bridge bridge;double monotonic=0;albert::time::Simulation simulation([]{return 100.5;},[&]{return monotonic;});
+    Scene registry;Bridge bridge;double monotonic=0;std::atomic<int> flightCreates{0};albert::time::Simulation simulation([]{return 100.5;},[&]{return monotonic;});
     std::jthread owner([&](std::stop_token stop){CameraState camera;
         while(!stop.stop_requested()){
             bridge.drain([&](Command& command){std::visit([&](auto& value){using T=std::decay_t<decltype(value)>;
-                if constexpr(std::is_same_v<T,Create>)registry.create(std::move(value.object));
+                if constexpr(std::is_same_v<T,Create>){if(value.object.id=="flight")++flightCreates;registry.create(std::move(value.object));}
                 else if constexpr(std::is_same_v<T,Remove>){registry.remove(value.id);if(camera.target==value.id)camera.target="earth";}
                 else if constexpr(std::is_same_v<T,CreateLayer>)registry.createLayer(std::move(value.layer));
                 else if constexpr(std::is_same_v<T,RemoveLayer>)registry.removeLayer(value.id);
@@ -260,6 +262,23 @@ int main(int argc,char** argv){try{
             api::CreateFlightRequest mars=moon;mars.set_body(api::CreateFlightRequest::MARS);mars.mutable_site()->set_latitude_degrees(18.4);mars.mutable_site()->set_longitude_degrees(77.5);mars.mutable_site()->set_height_meters(-2500);
             {grpc::ClientContext c;require(flight->CreateFlight(&c,mars,&s).ok(),"Martian flight");}
             require(std::abs(s.specific_force_meters_per_second2().x()-3.71)<.03&&std::abs(s.static_pressure_pascals()-albert::physics::marsAtmosphere(s.geodetic().height_meters()).pressure)<1e-6&&s.atmosphere()=="NASA Glenn Mars mean atmosphere","Martian pad");
+            { // The keeper: a paused Martian flight follows the scene's Mars when its state changes at the
+              // flight's instant (Horizons replacing ERFA, ~1000 km), but not when the clock moves away
+              // (review: the correction's drift with the scene's time republished, re-framing the camera
+              // and moving the clock back to the flight's instant).
+                namespace ph=albert::physics;const double t0=mars.utc_unix_seconds();const int before=flightCreates.load();
+                Object m;m.id="mars";m.name="Marte";m.radiusMeters=3396190;
+                for(int k=-2;k<=2;++k){const double t=t0+k*3600.;const auto e=ph::geocentric(ph::Center::mars,ph::ttFromUtc(t));
+                    m.samples.emplace_back(t,Vector{e.position.x+1e6+3*(t-t0),e.position.y,e.position.z},Vector{e.velocity.x+3,e.velocity.y,e.velocity.z},std::nullopt,true);}
+                require(bridge.submit(Create{m}).result.get().code==Code::Ok,"Scene Mars");
+                auto fromMars=[&]{const auto snap=bridge.snapshot();Vector f,c;for(const auto& o:snap->objects){if(o.id=="flight")f=o.samples.front().positionMeters;if(o.id=="mars")c=o.samples.front().positionMeters;}
+                    return ph::norm(ph::V3{f.x-c.x,f.y-c.y,f.z-c.z});};
+                std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+                require(flightCreates.load()==before+1&&fromMars()>3.37e6&&fromMars()<3.41e6,"Keeper moved the flight onto the scene's Mars");
+                (void)bridge.submit(SetTime{t0+3600.,{},false,false}).result.get();std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+                require(flightCreates.load()==before+1&&std::abs(bridge.snapshot()->utcSeconds-(t0+3600.))<1,"Keeper left the scrubbed clock and the flight alone");
+                (void)bridge.submit(SetTime{t0,{},false,false}).result.get();(void)bridge.submit(Remove{"mars"}).result.get();
+            }
         }
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));

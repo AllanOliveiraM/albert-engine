@@ -1,4 +1,6 @@
 #include "solids.hpp"
+#include "terrain.hpp"
+#include "providers/terrain.hpp"
 #include "animation.hpp"
 #include "objects.hpp"
 #include "ring_systems.hpp"
@@ -181,6 +183,7 @@ struct albert::SolidBodies::Surface {
     std::shared_ptr<Texture> day,height,mask;
     std::array<std::shared_ptr<Texture>,5> region;
     std::shared_ptr<BVH> picker;
+    std::shared_ptr<MeshStandardMaterial> terrainMaterial;std::unique_ptr<Terrain> terrain; // Mars: relief near the camera.
     float blend=0,inactive=0,fill=0;
     std::chrono::steady_clock::time_point updated=std::chrono::steady_clock::now();
     void release(){
@@ -189,7 +192,7 @@ struct albert::SolidBodies::Surface {
         if(patch){mesh->remove(*patch);patch->geometry()->dispose();patchMaterial->dispose();patch.reset();patchMaterial.reset();}
         for(auto& t:region)if(t){t->dispose();t.reset();}
     }
-    ~Surface(){if(ring){ring->geometry()->dispose();ringMaterial->dispose();ringTexture->dispose();}if(shell){shell->geometry()->dispose();shellMaterial->dispose();}release();day->dispose();height->dispose();mask->dispose();material->dispose();mesh->geometry()->dispose();}
+    ~Surface(){terrain.reset();if(ring){ring->geometry()->dispose();ringMaterial->dispose();ringTexture->dispose();}if(shell){shell->geometry()->dispose();shellMaterial->dispose();}release();day->dispose();height->dispose();mask->dispose();material->dispose();mesh->geometry()->dispose();}
 };
 albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets){
     for(auto& asset:assets){
@@ -203,6 +206,13 @@ albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets)
         if(s->picker){} // DSK positions already carry physical dimensions.
         else if(definition->axesMeters[0]>0){const auto& axes=definition->axesMeters;const double r=definition->radiusMeters;s->mesh->scale.set(static_cast<float>(axes[0]/r),static_cast<float>(axes[2]/r),static_cast<float>(axes[1]/r));}
         else if(definition->polarRadiusMeters>0)s->mesh->scale.y=static_cast<float>(definition->polarRadiusMeters/definition->radiusMeters);
+        if(asset.body=="mars"&&!s->picker){ // The pack's grid and MOLA blocks, lit like the surface program (the scene sun is the Earth's).
+            s->terrainMaterial=MeshStandardMaterial::create();s->terrainMaterial->map=s->day;s->terrainMaterial->roughness=1;s->terrainMaterial->metalness=0;
+            TerrainBody body;body.radius=definition->radiusMeters;body.scale=core::surfaceRadius(asset.body)/core::earthRadiusMeters;
+            body.flattening=definition->polarRadiusMeters/definition->radiusMeters;body.maxLevel=8;body.relief=25e3;body.heights=marsTerrainHeights(s->height->image());
+            body.generation=[]{return providers::planetaryRelief().generation();};
+            s->terrain=std::make_unique<Terrain>(*s->mesh,s->terrainMaterial,body);
+        }
         if(asset.ring){
             s->ringTexture=colorTexture(std::move(*asset.ring));const float r=static_cast<float>(definition->radiusMeters/core::earthRadiusMeters);
             s->ringMaterial=rings(s->ringTexture.get(),r);auto geometry=RingGeometry::create(r*1.23f,r*2.3309f,256);
@@ -236,6 +246,7 @@ bool albert::SolidBodies::hazy(const std::string& id) const{return surfaces_.con
 bool albert::SolidBodies::surfaceView(const std::string& id) const{return hazy(id)&&surfaces_.at(id)->hazeTarget<.5f;}
 void albert::SolidBodies::showSurface(const std::string& id,bool surface){if(hazy(id))surfaces_.at(id)->hazeTarget=surface?0.f:1.f;}
 std::shared_ptr<const BVH> albert::SolidBodies::picker(const std::string& id) const{return surfaces_.at(id)->picker;}
+const albert::Terrain* albert::SolidBodies::terrain(const std::string& id) const{const auto it=surfaces_.find(id);return it==surfaces_.end()?nullptr:it->second->terrain.get();}
 void albert::SolidBodies::stage(RegionalImages images){
     if(uploads_.active()||!surfaces_.contains(images.body)||!images.day)return;
     const bool shape=measuredShape(images.body);
@@ -244,7 +255,7 @@ void albert::SolidBodies::stage(RegionalImages images){
     for(const auto& t:images.gpu)if(t)uploads_.add(t);
     pending_=std::move(images);
 }
-void albert::SolidBodies::update(GLRenderer* renderer,PerspectiveCamera& camera,const Vector3& sun,double jd,const std::string& focus,bool details,float dt,const AuxiliaryLights& auxiliary){
+void albert::SolidBodies::update(GLRenderer* renderer,PerspectiveCamera& camera,const Vector3& sun,double jd,const std::string& focus,bool details,float dt,const AuxiliaryLights& auxiliary,bool terrain){
     uploads_.tick(renderer);
     if(pending_&&!uploads_.active()){
         auto images=std::move(*pending_);pending_.reset();auto& s=*surfaces_.at(images.body);s.release();s.inactive=0;s.region=std::move(images.gpu);
@@ -272,6 +283,13 @@ void albert::SolidBodies::update(GLRenderer* renderer,PerspectiveCamera& camera,
         }
         light.transformDirection(camera.matrixWorldInverse);
         const float intensity=static_cast<float>(2.4*std::pow(149597870700./distance,2)),angular=static_cast<float>(std::asin(std::min(1.,695700000./distance)));
+        if(s.terrain){ // Within three radii the terrain replaces the surface program's sphere and patch.
+            s.mesh->updateMatrixWorld();Vector3 local=camera.position;s.mesh->worldToLocal(local);const float radius=static_cast<float>(core::surfaceRadius(id)/core::earthRadiusMeters);
+            Matrix4 m;m.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);m.multiply(*s.mesh->matrixWorld);Frustum view;view.setFromProjectionMatrix(m);
+            const bool covers=terrain&&local.length()<3*radius&&s.terrain->update(local,&view);if(!covers)s.terrain->hide();
+            s.material->visible=!covers;if(s.patch)s.patch->visible=!covers;
+            s.terrainMaterial->color.setScalar(intensity/2.4f); // The sun's irradiance there, relative to the scene's light.
+        }
         const auto aid=auxiliary.find(id);s.fill=animateValue(s.fill,aid!=auxiliary.end()&&aid->second.enabled?std::clamp(aid->second.intensity,0.f,1.5f):0.f,dt);
         if(s.shell){
             s.haze=animateValue(s.haze,s.hazeTarget,dt);s.shell->visible=s.haze>.001f;

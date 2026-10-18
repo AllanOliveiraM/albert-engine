@@ -327,11 +327,17 @@ nunca bloquear a construção; mais o geoide EGM2008 numa grade de 2°. "Relevo 
 liga e desliga. Na Lua (até 3 raios) o mesmo terreno usa a grade global do pacote e blocos LOLA
 LDEM_128 de 128×128 postes (~237 m) a partir do nível 6, cada bloco numa única requisição com uma
 faixa por linha (`PlanetaryRelief::cachedHeight`/`fetchMissing`, multipart/byteranges, cache em
-disco). Perto da Lua a exposição fotográfica é a dela (2,1). Com o terreno ativo os remendos
-regionais ficam ocultos (a imagem regional nos nós é o próximo passo).
+disco). Em Marte (até 3 raios) a grade MOLA do pacote e blocos MEGDR de 128 postes por grau a
+partir do nível 7 (raio MOLA menos o elipsoide IAU; acima de 88° de latitude só a grade). A
+exposição fotográfica é a do corpo perto da câmera (Lua 2,1; demais pela distância ao Sol). Com o
+terreno ativo os remendos regionais ficam ocultos (a imagem regional nos nós é o próximo passo).
+`Terrain::ground` dá o raio do relevo desenhado sob um ponto (nó mais fino construído, bilinear
+entre postes): a câmera fica acima dele perto de um veículo (na Terra também acima do elipsoide, o
+chão do modelo de ar) e o plano próximo respeita a altura sobre ele (uma órbita longa arrastada até
+o horizonte de um módulo cortava o chão inteiro).
 `ALBERT_TERRAIN_DEBUG=1` imprime nós, fila e custo da seleção e do render.
 `terrain_lod_test` confere a cobertura exata da esfera (4π), o refinamento, o corte por horizonte,
-as alturas e a reconstrução dos nós provisórios.
+as alturas, a reconstrução dos nós provisórios e `ground` contra um relevo analítico nas seis faces.
 
 **Atmosfera (WebGPU).** Espalhamento pré-computado de Bruneton (implementação de referência de
 2017, BSD-3) portado para WGSL em `src/gpu/atmosphere.*`: transmitância, irradiância do céu e
@@ -346,10 +352,16 @@ cada material opaco aplica a perspectiva aérea até o seu ponto (`airApply`), e
 objetos recebem a luz do Sol filtrada e a luz do céu (`airLight`); nuvens, luzes noturnas, Sol e
 estrelas atravessam o ar (estrelas somem quando o céu as ofusca). Solo abaixo da esfera do modelo
 (as cordas da malha do globo afundam até ~1 km) é levado à esfera, e o que a malha mostra além do
-horizonte da esfera usa o ponto do horizonte. Abaixo de 30 km a exposição fotográfica sobe até um
+horizonte da esfera usa o ponto do horizonte. O segmento câmera→ponto vem das coordenadas do
+mundo relativas à câmera, não da diferença de dois pontos no referencial da Terra: perto de Marte
+(~1e8 km) o f32 tem passos de ~8 km e a diferença zerava (direção NaN, chão preto); um segmento
+menor que um passo (~0,5 m no solo) não tem ar. Limite conhecido: raios quase horizontais até o solo
+usam a razão de duas transmitâncias pequenas da tabela, e 250 m de solo saem com T ≈ 0,92 (≈ 0,97
+integrando). Abaixo de 30 km a exposição fotográfica sobe até um
 ponto (como numa câmera no solo); a iluminação física não muda. `atmosphere_test` confere a
-transmitância zenital e o espalhamento simples vertical com formas fechadas e desenha uma cena com
-céu, objeto à frente do céu e solo.
+transmitância zenital e o espalhamento simples vertical com formas fechadas, segmentos curtos perto
+da Lua e de Marte (`airBetween` e `airSky` com o referencial da Terra a 1,4e8 km) e desenha uma cena
+com céu, objeto à frente do céu e solo.
 
 Terra elipsoidal WGS84, base global até 4K e blocos regionais de um mosaico 86400×43200, filtragem
 anisotrópica/mipmaps, antialiasing MSAA 4x, iluminação solar, reflexos oceânicos,

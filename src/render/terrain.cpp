@@ -173,4 +173,19 @@ std::size_t Terrain::drawn()const{return impl_->selected.size();}
 std::size_t Terrain::pending()const{std::lock_guard l(impl_->lock);return impl_->queued.size()+impl_->done.size();}
 int Terrain::finestLevel()const{return impl_->finest;}
 double Terrain::coveredSolidAngle()const{return impl_->solidAngle;}
+std::optional<double> Terrain::ground(const Vector3& local)const{
+    const auto& g=*impl_;const Vec d{local.x,local.y,local.z};const double length=d.length();if(g.selected.empty()||!(length>0))return std::nullopt;
+    const Vec u=d*(1/length);std::size_t face=0;for(std::size_t f=1;f<6;++f)if(u.dot(faces[f][0])>u.dot(faces[face][0]))face=f;
+    const auto& f=faces[face];const double n=u.dot(f[0]),a=std::atan(u.dot(f[1])/n)*4/pi,b=std::atan(u.dot(f[2])/n)*4/pi; // direction() inverted.
+    const Impl::Node* found=nullptr;Key key;
+    for(int level=0;level<=g.body.maxLevel;++level){ // Down to the finest built node there.
+        const std::uint32_t cells=1u<<level;auto cell=[cells](double c){return std::min(cells-1,static_cast<std::uint32_t>(std::max(0.,(c+1)/2*cells)));};
+        const Key k{static_cast<int>(face),level,cell(a),cell(b)};const auto it=g.nodes.find(pack(k));if(it==g.nodes.end())break;found=&it->second;key=k;}
+    if(!found)return std::nullopt;
+    const auto e=extent(key);const double step=e.size/(posts-1),x=std::clamp((a-e.a0)/step,0.,posts-1.),y=std::clamp((b-e.b0)/step,0.,posts-1.);
+    const int i=std::min(static_cast<int>(x),posts-2),j=std::min(static_cast<int>(y),posts-2);const double s=x-i,t=y-j;
+    const auto* p=found->mesh->geometry()->getAttribute<float>("position");const auto& at=found->mesh->position;
+    auto radius=[&](int ii,int jj){const int v=jj*posts+ii;return Vec{double(p->getX(v))+at.x,double(p->getY(v))+at.y,double(p->getZ(v))+at.z}.length();};
+    return (radius(i,j)*(1-s)+radius(i+1,j)*s)*(1-t)+(radius(i,j+1)*(1-s)+radius(i+1,j+1)*s)*t;
+}
 }

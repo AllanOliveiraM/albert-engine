@@ -2349,17 +2349,21 @@ int albert::runRenderer(int argc, char** argv) {
                 camera->lookAt(controls.target);
             }
             // An external target near a solid surface: keep the eye above the ground under it (the
-            // orbit offset can point below a pad) and above the drawn surface.
+            // orbit offset can point below a pad).
             if(!transition.active&&focus.front()!='@'&&objects.nodes().contains(focus)&&!registry.get(focus).builtin){
                 const float base=static_cast<float>(registry.get(focus).radiusMeters/albert::core::earthRadiusMeters),margin=static_cast<float>(10./albert::core::earthRadiusMeters);
-                auto keepAbove=[&](Object3D& body,float radius){
+                // Over the drawn relief under the eye (else the reference sphere); on the Earth also over the
+                // ellipsoid, the air model's ground: an eye below it (the Cape's ground is ~27 m under it)
+                // speckles the aerial perspective.
+                auto keepAbove=[&](Object3D& body,float radius,const albert::Terrain* terrain,bool air=false){
                     body.updateMatrixWorld();Vector3 eye=camera->position,aim=controls.target;body.worldToLocal(eye);body.worldToLocal(aim);
-                    const float floor=std::max(radius,aim.length()-base)+margin;
+                    const auto ground=terrain?terrain->ground(eye):std::nullopt;
+                    const float floor=std::max({ground?static_cast<float>(*ground):radius,air?radius:0.f,aim.length()-base})+margin;
                     if(aim.length()>radius*1.05f||eye.length()>=floor)return;
                     eye.multiplyScalar(floor/std::max(eye.length(),1e-12f));body.localToWorld(eye);camera->position.copy(eye);camera->lookAt(controls.target);
                 };
-                keepAbove(*earth,1.f);keepAbove(*moon,static_cast<float>(1737.4/6378.137));
-                for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id))keepAbove(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters));
+                keepAbove(*earth,1.f,planets.earthTerrain(),true);keepAbove(*moon,static_cast<float>(1737.4/6378.137),planets.moonTerrain());
+                for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id))keepAbove(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters),solids.terrain(id));
             }
 
             stars->position.copy(camera->position);
@@ -2370,7 +2374,17 @@ int albert::runRenderer(int argc, char** argv) {
             camera->farPlane=std::max({100000.f,distance*4.f,distanceFor(targets::Overview)*2.f});
             debris.update(sunPosition,camera->position,showDebris,elapsed);
             const float bodyRadius = radiusFor(focus);
-            const float clearance = std::max(1e-8f, distance - bodyRadius);
+            // Clear of the focus and of the ground under the eye: the drawn relief, else the reference
+            // sphere when above it (a far orbit dragged down to a lander's horizon must not clip the ground).
+            float ground=std::numeric_limits<float>::max();
+            auto over=[&](Object3D& body,float radius,const albert::Terrain* terrain){
+                body.updateMatrixWorld();Vector3 eye=camera->position;body.worldToLocal(eye);
+                if(const auto g=terrain?terrain->ground(eye):std::nullopt)ground=std::min(ground,eye.length()-static_cast<float>(*g));
+                else if(eye.length()>radius)ground=std::min(ground,eye.length()-radius);
+            };
+            over(*earth,1.f,planets.earthTerrain());over(*moon,static_cast<float>(1737.4/6378.137),planets.moonTerrain());
+            for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id))over(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters),solids.terrain(id));
+            const float clearance = std::max(1e-8f, std::min(distance - bodyRadius, ground));
             camera->nearPlane = std::clamp(std::min(distance * .02f, clearance * .25f), 1e-9f, 100.f);
             camera->updateProjectionMatrix();
             const auto display=ImGui::GetIO().DisplaySize;
@@ -2454,12 +2468,14 @@ int albert::runRenderer(int argc, char** argv) {
             // Under Earth's air (below ~30 km) the view is mostly sky and lit ground, not a lit planet on
             // black: one stop more, as a camera on the ground would take.
             const float airAltitude=(camera->position.distanceTo(planets.earth->position)-1.f)*6378.137f;
-            // Within three lunar radii (a lander's camera too) the Moon's exposure: its maps are dark.
-            const bool lunarView=focus==targets::Moon||camera->position.distanceTo(planets.moon->position)<3.f*static_cast<float>(1737.4/6378.137);
-            const float photographicExposure=(lunarView?2.1f:solids.contains(focus)?std::clamp(1.05f*std::pow(sunPosition.distanceTo(solids.nodes().at(focus)->position)*6378137.f/149597870700.f,2.f),.25f,1200.f):1.05f)
+            // The exposure of the focus, or of a surface within three radii of the camera (a lander's view).
+            std::string exposed=focus;
+            if(camera->position.distanceTo(planets.moon->position)<3.f*static_cast<float>(1737.4/6378.137))exposed=targets::Moon;
+            for(const auto& [id,node]:solids.nodes())if(camera->position.distanceTo(node->position)<3.f*static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters))exposed=id;
+            const float photographicExposure=(exposed==targets::Moon?2.1f:solids.contains(exposed)?std::clamp(1.05f*std::pow(sunPosition.distanceTo(solids.nodes().at(exposed)->position)*6378137.f/149597870700.f,2.f),.25f,1200.f):1.05f)
                 *(1.f+planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f)));
             graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
-            solids.update(graphics.gl(),*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary);
+            solids.update(graphics.gl(),*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary,visualSettings.terrain);
             {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
              comets.update(*camera,sunPosition,nuclei,cometStates,tdb,dt);}
             objects.updateLighting(*camera,sunPosition,visualSettings.auxiliary,dt);

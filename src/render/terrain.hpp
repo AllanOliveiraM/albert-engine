@@ -5,7 +5,9 @@
 #include "threepp/math/Frustum.hpp"
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
+namespace threepp {class Image;}
 namespace albert {
 // Heights in metres over the body's reference surface at geodetic latitudes and longitudes
 // (radians), for one node at `level`, on the terrain's worker; must not wait for the network.
@@ -20,6 +22,10 @@ struct TerrainBody {
     TerrainHeights heights;
     std::function<std::uint64_t()> generation; // Data arrivals so far (provisional nodes rebuild after one).
 };
+// The bodies' height sources (terrain_heights.cpp), from the visual pack's global height images.
+TerrainHeights earthTerrainHeights(const threepp::Image& global); // GEBCO, Copernicus GLO-30 from level 9, EGM2008 geoid.
+TerrainHeights moonTerrainHeights(const threepp::Image& global);  // LOLA LDEM_128 from level 6.
+TerrainHeights marsTerrainHeights(const threepp::Image& global);  // MOLA MEGDR from level 7.
 // Level-of-detail terrain on a cube-sphere quadtree: nodes of 65×65 posts with skirts, built on a
 // worker and drawn with the body's material as children of its mesh, refined by distance to the
 // camera (CDLOD-style ranges); a parent stays until its four children are built. Positions are
@@ -39,6 +45,9 @@ public:
     [[nodiscard]] std::size_t pending()const; // Nodes queued or building.
     [[nodiscard]] int finestLevel()const;     // Of the last selection.
     [[nodiscard]] double coveredSolidAngle()const; // Of the last selection, steradians (4π without culling).
+    // Radius of the drawn relief toward a point in the parent's local frame (its finest built node,
+    // bilinear between posts), in that frame's units; none while nothing is drawn.
+    [[nodiscard]] std::optional<double> ground(const threepp::Vector3& local)const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

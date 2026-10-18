@@ -117,11 +117,14 @@ fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {
     return AirLight(mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, muS), frame.air.w), sky * frame.air.w);
 }
 fn skyHitsGround(c: vec3f, ray: vec3f) -> bool { let e = airEntry(c, ray); return e.hit && intersectsGround(e.r, e.rmu / e.r); }
-fn airBetween(c: vec3f, point: vec3f, sun: vec3f) -> Sky { // The air between c and a point (planet frame, km).
-    var p = point; let r = length(p);
+// The air between c and c + segment (planet frame, km). The segment comes from camera-relative world
+// coordinates: far from the planet (Mars: ~1e8 km, f32 steps of ~8 km) point - c would collapse.
+fn airBetween(c: vec3f, segment: vec3f, sun: vec3f) -> Sky {
+    var p = c + segment; let r = length(p); let d = length(segment);
     if (r > topRadius()) { // Beyond the air: the whole ray, if the air lies between.
-        let ray = normalize(p - c); let e = airEntry(c, ray);
-        if (!e.hit || (length(c) > topRadius() && length(e.camera - c) >= length(p - c))) { return Sky(vec3f(0.0), vec3f(1.0)); }
+        if (!(d > 0.0)) { return Sky(vec3f(0.0), vec3f(1.0)); }
+        let ray = segment / d; let e = airEntry(c, ray);
+        if (!e.hit || (length(c) > topRadius() && length(e.camera - c) >= d)) { return Sky(vec3f(0.0), vec3f(1.0)); }
         // Below the model's horizon from inside the air (the globe mesh's is lower): the horizon's air.
         if (length(c) <= topRadius() && skyHitsGround(c, ray)) { return skyRadianceToPoint(c, horizonPoint(c, ray), sun, true); }
         return skyRadiance(c, ray, sun);
@@ -135,9 +138,10 @@ fn airBetween(c: vec3f, point: vec3f, sun: vec3f) -> Sky { // The air between c 
         let b0 = bottomRadius(); p = p * (b0 / min(r, b0)); let rc = max(length(c), b0 + 0.001);
         if (length(p - c) > sqrt((rc - b0) * (rc + b0))) { p = horizonPoint(c, p - c); }
     }
+    if (!(length(p - c) > 0.0)) { return Sky(vec3f(0.0), vec3f(1.0)); } // Within an f32 step of the camera (~0.5 m at the ground).
     return skyRadianceToPoint(c, p, sun, onGround);
 }
-fn airSky(world: vec3f) -> Sky { return airBetween(frame.air.xyz, airPoint(world), frame.airSun.xyz); } // Camera to a world point.
+fn airSky(world: vec3f) -> Sky { return airBetween(frame.air.xyz, (frame.planet * vec4f(world - frame.camera.xyz, 0.0)).xyz, frame.airSun.xyz); } // Camera to a world point.
 fn airApply(world: vec3f, colour: vec3f) -> vec3f { // Aerial perspective: an opaque surface seen through the air.
     if (frame.air.w <= 0.0) { return colour; }
     let sky = airSky(world); return mix(colour, colour * sky.transmittance + sky.radiance * frame.sunColor.rgb, frame.air.w);

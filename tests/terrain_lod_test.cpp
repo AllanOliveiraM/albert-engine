@@ -4,6 +4,7 @@
 #include "threepp/core/Object3D.hpp"
 #include "threepp/materials/MeshBasicMaterial.hpp"
 #include "threepp/objects/Mesh.hpp"
+#include "threepp/textures/Image.hpp"
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -56,6 +57,24 @@ int main(){
         settle(provisional,Vector3(0,0,10),false);const double before=heightOf();generation=1;settle(provisional,Vector3(0,0,10),false);const double after=heightOf();
         std::printf("provisional %.1f m, rebuilt %.1f m\n",before,after);
         check(std::abs(before-500)<1&&std::abs(after-2000)<1,"Provisional nodes rebuilt when finer data arrives");
+    }
+    { // The ground under the camera and elsewhere: the drawn relief's radius, on every face.
+        Object3D other;albert::TerrainBody b=body;b.maxLevel=6;b.scale=.25;
+        auto relief=[](double lat,double lon){return 1500+1200*std::sin(2*lat)*std::cos(3*lon);};
+        b.heights=[&relief](const std::vector<double>& lat,const std::vector<double>& lon,int,std::vector<float>& out){for(std::size_t i=0;i<lat.size();++i)out[i]=static_cast<float>(relief(lat[i],lon[i]));return true;};
+        albert::Terrain varied(other,material,b);check(!varied.ground(Vector3(0,0,1)),"No ground before anything is drawn");
+        const Vector3 eye(.1f,.05f,.25f*static_cast<float>(1+300/radius));settle(varied,eye,false);double worst=0;
+        for(const Vector3 d:{Vector3(.1f,.05f,1),Vector3(1,.3f,-.2f),Vector3(-.7f,-.6f,.2f),Vector3(.2f,1,.4f),Vector3(-.3f,-1,-.5f),Vector3(.4f,.1f,-1),Vector3(0,0,1)}){
+            const Vector3 u=d.clone().normalize();const double lat=std::asin(u.y),lon=std::remainder(std::atan2(u.z,-u.x)-std::numbers::pi,2*std::numbers::pi);
+            const auto g=varied.ground(d);if(!g){worst=1e9;break;}worst=std::max(worst,std::abs(*g/.25-(1+relief(lat,lon)/radius))*radius);}
+        std::printf("ground error %.3f m (finest level %d)\n",worst,varied.finestLevel());
+        check(worst<2,"Ground lookup follows the drawn relief on every face");
+    }
+    { // Mars nodes straddling 88°: MOLA stops there and the grid alone completes them (review: only the
+      // first point was checked, so such nodes stayed provisional and were rebuilt on every download).
+        constexpr double deg=std::numbers::pi/180;const auto heights=albert::marsTerrainHeights(Image(ImageData(std::vector<float>(4*64*32,-1000.f)),64,32));
+        std::vector<double> lat{87*deg,89*deg},lon{0,0};std::vector<float> out(2);const bool complete=heights(lat,lon,7,out);
+        std::printf("polar node: complete %d, %.3f %.3f m\n",complete,out[0],out[1]);check(complete&&std::abs(out[0]+1000)<.01&&std::abs(out[1]+1000)<.01,"Mars node across 88 degrees: grid heights, complete");
     }
     std::printf(failures?"%d failure(s)\n":"terrain lod ok\n",failures);return failures?1:0;
 }
