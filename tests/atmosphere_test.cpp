@@ -104,6 +104,15 @@ int main(){
         let toward = moon + normalize(u + vec3f(1e-3)) * (1.0 + 49.0 * fract(f32(i) * 0.618034));
         let t = airBetween(moon, toward - moon, sun).transmittance.g; if (t < 0.999999) { wrong += 1.0; worst = min(worst, t); }
     }
+    probe[12] = vec4f(wrong, worst, 0.0, 0.0); probe[13] = vec4f(0.0);
+}
+)";
+            // Far from the Earth and near its ground, in a module of their own (D3D12's compiler garbled the
+            // first probes of one shader holding every loop): the frame binds the planet ~1.4e8 km away.
+            const std::string farCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(1) fn main() {
+    let b = bottomRadius(); let sun = vec3f(cos(0.9599), 0.0, sin(0.9599));
     // Near Mars (~1.5e8 km from the Earth): segments from 1 m to 50 km keep a direction (no NaN, no air).
     let mars = vec3f(1.21e8, 3.4e7, -6.3e7); var marsWrong = 0.0;
     for (var i = 0u; i < 4096u; i++) {
@@ -126,45 +135,49 @@ int main(){
         let s = airBetween(ground, normalize(u + vec3f(1e-3)) * pow(10.0, -5.0 + 4.5 * fract(f32(i) * 0.618034)), sun);
         if (!(s.transmittance.g > 0.85 && s.transmittance.g <= 1.0 && s.radiance.g >= 0.0 && s.radiance.g < 1.0)) { lowWrong += 1.0; } // Ground ratios: ~0.92 at 250 m.
     }
-    probe[12] = vec4f(wrong, worst, marsWrong, skyWrong); probe[13] = vec4f(lowWrong, 0.0, 0.0, 0.0);
+    probe[0] = vec4f(marsWrong, skyWrong, lowWrong, 0.0);
 }
 )";
-            WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code={code.data(),code.size()};WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;
-            WGPUShaderModule module=wgpuDeviceCreateShaderModule(gpu->device(),&md);
-            WGPUComputePipelineDescriptor pd{};pd.compute.module=module;pd.compute.entryPoint={"main",4};WGPUComputePipeline pipe=wgpuDeviceCreateComputePipeline(gpu->device(),&pd);
-            WGPUBufferDescriptor bd{};bd.size=256;bd.usage=WGPUBufferUsage_Storage|WGPUBufferUsage_CopySrc;WGPUBuffer out=wgpuDeviceCreateBuffer(gpu->device(),&bd);
-            bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;WGPUBuffer back=wgpuDeviceCreateBuffer(gpu->device(),&bd);
             WGPUSamplerDescriptor sd{};sd.addressModeU=sd.addressModeV=sd.addressModeW=WGPUAddressMode_ClampToEdge;sd.magFilter=sd.minFilter=WGPUFilterMode_Linear;sd.lodMaxClamp=1;sd.maxAnisotropy=1;
             WGPUSampler sampler=wgpuDeviceCreateSampler(gpu->device(),&sd);
-            // The frame: camera at the world origin, the planet frame's origin (the Earth) ~1.4e8 km away (Mars).
+            // The frame (far module only): camera at the world origin, the planet frame's origin ~1.4e8 km away.
             float frame[128]{};frame[76]=frame[81]=frame[86]=frame[91]=1;frame[88]=frame[92]=1.21e8f;frame[89]=frame[93]=3.4e7f;frame[90]=frame[94]=-6.3e7f;frame[95]=1;frame[96]=.57f;frame[98]=.82f;frame[35]=1;
-            bd.size=sizeof frame;bd.usage=WGPUBufferUsage_Uniform|WGPUBufferUsage_CopyDst;WGPUBuffer frameBuffer=wgpuDeviceCreateBuffer(gpu->device(),&bd);wgpuQueueWriteBuffer(gpu->queue(),frameBuffer,0,frame,sizeof frame);
-            WGPUBindGroupEntry e0[6]{};e0[0].binding=3;e0[0].buffer=air.parameters();e0[0].size=Atmosphere::parameterBytes; // skyRadiance: no irradiance table.
-            const WGPUTextureView views[3]{air.transmittance(),air.scattering(),air.mie()};for(std::uint32_t i=0;i<3;++i){e0[1+i].binding=4+i;e0[1+i].textureView=views[i];}
-            e0[4].binding=8;e0[4].sampler=sampler;e0[5].binding=0;e0[5].buffer=frameBuffer;e0[5].size=sizeof frame;
-            WGPUBindGroupLayout l0=wgpuComputePipelineGetBindGroupLayout(pipe,0),l2=wgpuComputePipelineGetBindGroupLayout(pipe,2);
-            WGPUBindGroupDescriptor g0{};g0.layout=l0;g0.entryCount=6;g0.entries=e0;WGPUBindGroup group0=wgpuDeviceCreateBindGroup(gpu->device(),&g0);
-            WGPUBindGroupEntry e2{};e2.binding=0;e2.buffer=out;e2.size=256;WGPUBindGroupDescriptor g2{};g2.layout=l2;g2.entryCount=1;g2.entries=&e2;WGPUBindGroup group2=wgpuDeviceCreateBindGroup(gpu->device(),&g2);
-            WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);WGPUComputePassEncoder cp=wgpuCommandEncoderBeginComputePass(en,nullptr);
-            wgpuComputePassEncoderSetPipeline(cp,pipe);wgpuComputePassEncoderSetBindGroup(cp,0,group0,0,nullptr);wgpuComputePassEncoderSetBindGroup(cp,2,group2,0,nullptr);
-            wgpuComputePassEncoderDispatchWorkgroups(cp,1,1,1);wgpuComputePassEncoderEnd(cp);wgpuCommandEncoderCopyBufferToBuffer(en,out,0,back,0,256);
-            WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);
-            bool done=false;WGPUBufferMapCallbackInfo mc{};mc.mode=WGPUCallbackMode_AllowProcessEvents;mc.userdata1=&done;mc.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
-            wgpuBufferMapAsync(back,WGPUMapMode_Read,0,256,mc);while(!done)wgpuInstanceProcessEvents(gpu->instance());
-            const auto* v=static_cast<const float*>(wgpuBufferGetConstMappedRange(back,0,256));const char* names[]{"zenith","25 deg","2 deg","-2 deg"};
+            WGPUBufferDescriptor fd{};fd.size=sizeof frame;fd.usage=WGPUBufferUsage_Uniform|WGPUBufferUsage_CopyDst;WGPUBuffer frameBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),frameBuffer,0,frame,sizeof frame);
+            auto run=[&](const std::string& source,bool withFrame){ // One dispatch; the 64 floats of its probes.
+                WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code={source.data(),source.size()};WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;
+                WGPUShaderModule module=wgpuDeviceCreateShaderModule(gpu->device(),&md);
+                WGPUComputePipelineDescriptor pd{};pd.compute.module=module;pd.compute.entryPoint={"main",4};WGPUComputePipeline pipe=wgpuDeviceCreateComputePipeline(gpu->device(),&pd);
+                WGPUBufferDescriptor bd{};bd.size=256;bd.usage=WGPUBufferUsage_Storage|WGPUBufferUsage_CopySrc;WGPUBuffer out=wgpuDeviceCreateBuffer(gpu->device(),&bd);
+                bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;WGPUBuffer back=wgpuDeviceCreateBuffer(gpu->device(),&bd);
+                WGPUBindGroupEntry e0[6]{};e0[0].binding=3;e0[0].buffer=air.parameters();e0[0].size=Atmosphere::parameterBytes; // skyRadiance: no irradiance table.
+                const WGPUTextureView views[3]{air.transmittance(),air.scattering(),air.mie()};for(std::uint32_t i=0;i<3;++i){e0[1+i].binding=4+i;e0[1+i].textureView=views[i];}
+                e0[4].binding=8;e0[4].sampler=sampler;e0[5].binding=0;e0[5].buffer=frameBuffer;e0[5].size=sizeof frame;
+                WGPUBindGroupLayout l0=wgpuComputePipelineGetBindGroupLayout(pipe,0),l2=wgpuComputePipelineGetBindGroupLayout(pipe,2);
+                WGPUBindGroupDescriptor g0{};g0.layout=l0;g0.entryCount=withFrame?6:5;g0.entries=e0;WGPUBindGroup group0=wgpuDeviceCreateBindGroup(gpu->device(),&g0);
+                WGPUBindGroupEntry e2{};e2.binding=0;e2.buffer=out;e2.size=256;WGPUBindGroupDescriptor g2{};g2.layout=l2;g2.entryCount=1;g2.entries=&e2;WGPUBindGroup group2=wgpuDeviceCreateBindGroup(gpu->device(),&g2);
+                WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);WGPUComputePassEncoder cp=wgpuCommandEncoderBeginComputePass(en,nullptr);
+                wgpuComputePassEncoderSetPipeline(cp,pipe);wgpuComputePassEncoderSetBindGroup(cp,0,group0,0,nullptr);wgpuComputePassEncoderSetBindGroup(cp,2,group2,0,nullptr);
+                wgpuComputePassEncoderDispatchWorkgroups(cp,1,1,1);wgpuComputePassEncoderEnd(cp);wgpuCommandEncoderCopyBufferToBuffer(en,out,0,back,0,256);
+                WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);
+                bool done=false;WGPUBufferMapCallbackInfo mc{};mc.mode=WGPUCallbackMode_AllowProcessEvents;mc.userdata1=&done;mc.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
+                wgpuBufferMapAsync(back,WGPUMapMode_Read,0,256,mc);while(!done)wgpuInstanceProcessEvents(gpu->instance());
+                const auto* f=static_cast<const float*>(wgpuBufferGetConstMappedRange(back,0,256));std::vector<float> values(f,f+64);wgpuBufferUnmap(back);
+                for(auto g:{group0,group2})wgpuBindGroupRelease(g);for(auto l:{l0,l2})wgpuBindGroupLayoutRelease(l);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);wgpuComputePassEncoderRelease(cp);
+                for(auto x:{out,back})wgpuBufferRelease(x);wgpuComputePipelineRelease(pipe);wgpuShaderModuleRelease(module);
+                return values;};
+            const auto values=run(code,false),farValues=run(farCode,true);const float* v=values.data();const char* names[]{"zenith","25 deg","2 deg","-2 deg"};
             for(int i=0;i<4;++i)std::printf("sky %-7s radiance %.4f %.4f %.4f  transmittance %.3f %.3f %.3f\n",names[i],v[8*i],v[8*i+1],v[8*i+2],v[8*i+4],v[8*i+5],v[8*i+6]);
             std::printf("craft before the air: radiance %.4f transmittance %.3f; body below the horizon at sunset: transmittance %.3g %.3g %.3g\n",v[33],v[37],v[44],v[45],v[46]);
             near("No air between a camera in space and a craft in front of the air",v[37]+v[33],1,1e-6);
             std::printf("near the Moon: %.0f of 4096 short segments saw the Earth's air (lowest transmittance %.3g)\n",v[48],v[49]);
             near("No Earth air between points near the Moon (f32 cancellation)",v[48],0,.5);
-            std::printf("near Mars: %.0f of 4096 segments (1 m to 50 km) not clear\n",v[50]);
-            near("Short segments near Mars keep their direction (no NaN, no air)",v[50],0,.5);
-            std::printf("airSky near Mars: %.0f of 4096 world points not clear\n",v[51]);
-            near("Aerial perspective near Mars: no NaN from the far planet frame (f32 collapse)",v[51],0,.5);
-            std::printf("near the ground: %.0f of 1024 short segments not finite\n",v[52]);
-            near("Segments shorter than an f32 step at the ground stay finite",v[52],0,.5);
+            std::printf("near Mars: %.0f of 4096 segments (1 m to 50 km) not clear\n",farValues[0]);
+            near("Short segments near Mars keep their direction (no NaN, no air)",farValues[0],0,.5);
+            std::printf("airSky near Mars: %.0f of 4096 world points not clear\n",farValues[1]);
+            near("Aerial perspective near Mars: no NaN from the far planet frame (f32 collapse)",farValues[1],0,.5);
+            std::printf("near the ground: %.0f of 1024 short segments not finite\n",farValues[2]);
+            near("Segments shorter than an f32 step at the ground stay finite",farValues[2],0,.5);
             if(!(v[44]>0&&std::isfinite(v[44])&&std::isfinite(v[40]))){std::printf("FAIL body below the model horizon is black or not finite\n");++failures;}else std::printf("ok   body below the model horizon sees the horizon's air\n");
-            wgpuBufferUnmap(back);
             // The scene renderer with this air: a camera 10 m above a grey globe of radius 1 (6378.137 km)
             // facing the horizon, the sun 30 degrees up behind it, a red box in front of the sky.
             using namespace threepp;
