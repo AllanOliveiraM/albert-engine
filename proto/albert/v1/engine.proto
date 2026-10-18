@@ -182,14 +182,21 @@ message CreateFlightRequest {
   optional double utc_unix_seconds=6;   // Default: the current simulated instant.
   optional double step_seconds=7;       // Default 0.001; 1e-5 to 0.1.
   bool focus_camera=8;
-  optional double coast_step_seconds=9; // Longest step while ballistic above 86 km; default 1, 0 disables, up to 10.
-  optional uint32 gravity_degree=10;     // EGM2008 degree and order, 2 to 70; default 20.
+  optional double coast_step_seconds=9; // Longest step while ballistic above the atmosphere (86 km Earth, 150 km Mars); default 1, 0 disables, up to 10.
+  // Degree and order: EGM2008 2-70 (default 20); GRAIL GRGM1200A 2-600 and MRO GMM-3 2-120 (default 50), downloaded once.
+  optional uint32 gravity_degree=10;
   // AUTOMATIC: live NOAA GFS when Albert follows the real clock and the instant is within
-  // 2 h of now, else (or if GFS is unreachable) the 1976 standard atmosphere.
+  // 2 h of now, else (or if GFS is unreachable) the 1976 standard atmosphere. Elsewhere only
+  // AUTOMATIC or STANDARD_ATMOSPHERE: the Mars mean atmosphere, or vacuum on the Moon.
   enum Weather { WEATHER_AUTOMATIC=0; STANDARD_ATMOSPHERE=1; LIVE_GFS=2; }
   Weather weather=11;
   ImuSettings imu=12;
-  bool terrain_height=13; // Site height from Copernicus DEM 30 m + EGM2008 geoid (ellipsoidal), resolved at creation.
+  bool terrain_height=13; // Earth: site height from Copernicus DEM 30 m + EGM2008 geoid (ellipsoidal), resolved at creation.
+  // Central body. Coordinates (sites and samples): Earth WGS 84; Moon mean-Earth frame over the
+  // 1737.4 km sphere; Mars IAU 2015 frame, east longitude and ellipsoid-normal (planetographic)
+  // latitude over the 3396.19 x 3376.20 km ellipsoid. Site heights -10 to 25 km off Earth.
+  enum Body { EARTH=0; MOON=1; MARS=2; }
+  Body body=14;
 }
 // Inertial measurement unit and barometer errors (IEEE 952 terms, representative grades);
 // the seed makes the noise reproducible.
@@ -239,6 +246,7 @@ message SpaceWeatherDay { double day=1; double f107=2; double f107a=3; double ap
 message FlightLog {
   string engine=1; CreateFlightRequest request=2; repeated bytes gfs=3; repeated SpaceWeatherDay space_weather=4;
   bytes steps=5; uint64 state_hash=6; uint64 tick=7; string atmosphere=8;
+  bytes gravity=9; // Moon or Mars: the PDS table excerpt up to the flight's degree.
 }
 message FlightLogChunk { bytes data=1; } // A serialised FlightLog in pieces of up to 1 MiB.
 // Real time: Albert advances the flight on the wall clock (rate × real time) and pushes one

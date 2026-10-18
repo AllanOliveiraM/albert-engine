@@ -46,11 +46,16 @@ int main(int argc,char** argv){try{
         const Planet moon=planet(Center::moon,moonField.get(),8),mars=planet(Center::mars,marsField.get(),8);
         near(norm(gravitation(moon,{1737.4e3,0,0})),1.6243,.004,"Lunar surface gravity");
         near(norm(gravitation(mars,{3396.19e3,0,0})),3.724,.008,"Martian equatorial gravity");
+        { // The field is evaluated on the principal axes and returned in mean-Earth axes.
+            const V3 r{1.8e6,-3e5,4e5},f=moon.fieldFrame*r,g=gravitation(moon,r),h=moonField->acceleration(8,f);
+            near(norm(moon.fieldFrame*g-h),0,1e-15,"Lunar field axes");require(norm(g-h)>1e-7,"Principal axes applied");
+        }
         const V3 far{2e8,1e8,-5e7};near(norm(gravitation(moon,far))/(moon.gm/dot(far,far)),1,1e-7,"Lunar field far away");
         bool threw=false;try{planet(Center::mars,marsField.get(),9);}catch(const std::invalid_argument&){threw=true;}require(threw,"Planet degree above the field");
     }
-    // Rotation: Mars against CSPICE pxform(IAU_MARS,J2000) with pck00011; the Moon 103.9" (the
-    // NAIF DE440 principal-axis offset) from the IAU mean-Earth frame; ω against the rotation's derivative.
+    // Rotation: Mars against CSPICE pxform(IAU_MARS,J2000) with pck00011; the Moon in the IAU
+    // mean-Earth frame with its field 103.9" away on the NAIF DE440 principal axes; ω against
+    // the rotation's derivative.
     {
         const Rotation mars=Rotation::body(Center::mars),moon=Rotation::body(Center::moon);
         int checked=0;
@@ -69,7 +74,9 @@ int main(int argc,char** argv){try{
         const double ra=269.9949-3.8787*S(125.045)-.1204*S(250.089)+.07*S(260.008)-.0172*S(176.625)+.0072*S(311.589)-.0052*S(15.134)+.0043*S(25.053),
             dec=66.5392+1.5419*C(125.045)+.0239*C(250.089)-.0278*C(260.008)+.0068*C(176.625)-.0029*C(311.589)+.0009*C(134.963)+.0008*C(15.134)-.0009*C(25.053),
             w=38.3213+3.5610*S(125.045)+.1208*S(250.089)-.0642*S(260.008)+.0158*S(176.625)+.0252*S(357.529)-.0066*S(311.589)-.0047*S(134.963)-.0046*S(276.617)+.0028*S(34.226)+.0052*S(15.134)+.0040*S(119.743)+.0019*S(239.961)-.0044*S(25.053);
-        const M3 me=R3(w*deg)*R1((90-dec)*deg)*R3((90+ra)*deg),offset=moon.at(0).fixed*transpose(me);
+        const M3 me=R3(w*deg)*R1((90-dec)*deg)*R3((90+ra)*deg),fixed=moon.at(0).fixed;
+        for(int r=0;r<3;++r)for(int c=0;c<3;++c)near(fixed.m[r][c],me.m[r][c],1e-14,"Lunar mean-Earth frame");
+        const M3 offset=planet(Center::moon,moonField.get(),8).fieldFrame;
         near(std::acos((offset.m[0][0]+offset.m[1][1]+offset.m[2][2]-1)/2)/deg*3600,103.913,.01,"Lunar principal-axis offset");
         const double y=78.6944/3600*deg,z=67.8526/3600*deg;near(offset.m[2][0],std::sin(y),1e-12,"Offset about y");near(offset.m[1][0],-std::sin(z)*std::cos(y),1e-12,"Offset about z");
         // The Moon keeps one face to the Earth: the sub-Earth point stays within the optical librations over a month.

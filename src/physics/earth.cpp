@@ -74,7 +74,7 @@ double geoidHeight(double lat,double lon){
     const double s2=std::sin(lat)*std::sin(lat);return t/(9.7803253359*(1+.00193185265241*s2)/std::sqrt(1-earth.e2()*s2));
 }
 V3 gravitation(const Planet& pl,V3 r){
-    if(pl.field)return pl.field->acceleration(pl.degree,r);
+    if(pl.field)return transpose(pl.fieldFrame)*pl.field->acceleration(pl.degree,pl.fieldFrame*r);
     if(pl.egm2008)return harmonics(pl.degree,r);
     const double rn=norm(r),u=r.z/rn,k=pl.gm/(rn*rn);const V3 h=r/rn;
     V3 a=-k*h;
@@ -110,7 +110,7 @@ template<std::size_t N>void add(Series& s,const Angle* a,double d,const Term(&te
         if(cosine){s.v+=k.c*cs;s.r-=k.c*sn*de;}else{s.v+=k.c*sn;s.r+=k.c*cs*de;}}
 }
 Orientation wgccre(Center c,Tt t){
-    constexpr double deg=3.14159265358979323846/180,arcsec=deg/3600;const double d=secondsSinceJ2000(t)/86400.;Series ra,dec,w;
+    constexpr double deg=3.14159265358979323846/180;const double d=secondsSinceJ2000(t)/86400.;Series ra,dec,w;
     if(c==Center::moon){
         ra={269.9949+.0031*d/century,.0031/century};dec={66.5392+.0130*d/century,.0130/century};w={38.3213+13.17635815*d-1.4e-12*d*d,13.17635815-2.8e-12*d};
         add(ra,moonAngles,d,moonRa,false);add(dec,moonAngles,d,moonDec,true);add(w,moonAngles,d,moonW,false);
@@ -118,9 +118,7 @@ Orientation wgccre(Center c,Tt t){
         ra={317.269202-.10927547*d/century,-.10927547/century};dec={54.432516-.05827105*d/century,-.05827105/century};w={176.049863+350.891982443297*d,350.891982443297};
         add(ra,marsAngles,d,marsRa,false);add(dec,marsAngles,d,marsDec,true);add(w,marsAngles,d,marsW,false);
     }
-    const double a=ra.v*deg,b=dec.v*deg;M3 m=rotationZ(std::fmod(w.v,360.)*deg)*rotationX(90*deg-b)*rotationZ(90*deg+a);
-    // Mean Earth to principal axes: NAIF MOON_ME_DE440_ME421, V_PA = [67.8526"]3 [78.6944"]2 [0.2785"]1 V_ME.
-    if(c==Center::moon)m=rotationZ(67.8526*arcsec)*rotationY(78.6944*arcsec)*rotationX(.2785*arcsec)*m;
+    const double a=ra.v*deg,b=dec.v*deg;const M3 m=rotationZ(std::fmod(w.v,360.)*deg)*rotationX(90*deg-b)*rotationZ(90*deg+a);
     const V3 pole{std::cos(b)*std::cos(a),std::cos(b)*std::sin(a),std::sin(b)},node{-std::sin(a),std::cos(a),0};
     return{m,(V3{0,0,ra.r}-dec.r*node+w.r*pole)*(deg/86400.)}; // α̇ about z, then -δ̇ about the node, Ẇ about the pole.
 }
@@ -148,11 +146,21 @@ Planet planet(Center c,const Gravity* field,int degree){
     constexpr double day=86400.,deg=3.14159265358979323846/180;
     Planet p=c==Center::moon?Planet{moonGM,1737400.,0.,13.17635815*deg/day,1737400.}:Planet{marsGM,3396190.,(3396190.-3376200.)/3396190.,350.89198226*deg/day,3396190.};
     if(field){p.gm=field->field().gm;p.gravityRadius=field->field().radius;p.degree=degree;p.field=field;}
+    // GRAIL fields use the DE440 principal axes: NAIF MOON_ME_DE440_ME421, V_PA = [67.8526"]3 [78.6944"]2 [0.2785"]1 V_ME.
+    constexpr double arcsec=deg/3600;
+    if(c==Center::moon)p.fieldFrame=rotationZ(67.8526*arcsec)*rotationY(78.6944*arcsec)*rotationX(.2785*arcsec);
     return p;
 }
 V3 marsHeliocentric(Tt t){
     double pv[2][3];if(eraPlan94(2451545.0,secondsSinceJ2000(t)/86400.,4,pv)<0)throw std::runtime_error("Mars ephemeris failed");
     constexpr double au=149597870700.;return{pv[0][0]*au,pv[0][1]*au,pv[0][2]*au};
+}
+PositionVelocity geocentric(Center c,Tt t){
+    if(c==Center::earth)return{};
+    const double days=secondsSinceJ2000(t)/86400.;constexpr double au=149597870700.,speed=au/86400.;double pv[2][3];
+    if(c==Center::moon)eraMoon98(2451545.0,days,pv);
+    else{double h[2][3],b[2][3];if(eraPlan94(2451545.0,days,4,pv)<0)throw std::runtime_error("Mars ephemeris failed");eraEpv00(2451545.0,days,h,b);for(int i=0;i<2;++i)for(int k=0;k<3;++k)pv[i][k]-=h[i][k];}
+    return{{pv[0][0]*au,pv[0][1]*au,pv[0][2]*au},{pv[1][0]*speed,pv[1][1]*speed,pv[1][2]*speed}};
 }
 int thirdBodies(Center c,Tt t,ThirdBody out[2]){
     if(c==Center::mars){out[0]={-marsHeliocentric(t),sunGM};return 1;}

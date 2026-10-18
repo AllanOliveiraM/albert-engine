@@ -269,6 +269,16 @@ no veículo, e o painel **Voo** no canto inferior direito mostra estado, vento e
 `terrain_height` põe a base no relevo medido: a altura do sítio vira Copernicus DEM 30 m mais o
 geoide EGM2008 (altura elipsoidal), resolvida na criação e gravada no log de replay.
 
+`body` escolhe o corpo central: `EARTH` (padrão), `MOON` ou `MARS`. Na Lua e em Marte a gravidade
+é GRAIL GRGM1200A (grau 2 a 600) ou MRO GMM-3 (2 a 120), padrão 50, lida do PDS só até o grau
+pedido (≈160 kB no grau 50) na primeira vez e guardada; o log de replay leva o trecho usado. O
+sítio está no referencial médio da Terra da Lua (esfera de 1737,4 km) ou no IAU 2015 de Marte
+(longitude leste, latitude normal ao elipsoide de 3396,19 × 3376,20 km), altura de −10 a 25 km.
+Marte tem a atmosfera média da NASA Glenn; a Lua, vácuo. `terrain_height` e `LIVE_GFS` só
+existem na Terra. Posições e velocidades da amostra (inercial e fixo) são relativas ao corpo
+central; na cena o veículo é desenhado sobre a Lua ou Marte da cena (Horizons, levado ao instante
+pelo movimento do ERFA).
+
 `imu` escolhe os erros do IMU e do barômetro (`IDEAL`, `TACTICAL`, `INDUSTRIAL`) e a semente do
 ruído. A amostra traz, além dos valores ideais, os medidos sobre o último `Step`: força específica
 e taxa médias, incrementos de velocidade e ângulo e pressão estática; com `IDEAL` coincidem com os

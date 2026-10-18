@@ -56,7 +56,7 @@ target_link_libraries(scene_test PRIVATE albert_core)
 add_test(NAME scene_commands COMMAND scene_test)
 if(ALBERT_RPC)
     add_executable(rpc_test rpc_test.cpp)
-    target_link_libraries(rpc_test PRIVATE albert_rpc nlohmann_json::nlohmann_json)
+    target_link_libraries(rpc_test PRIVATE albert_rpc albert_erfa nlohmann_json::nlohmann_json)
     # This pinned zlib registers its examples as tests unconditionally.
     # Build them with the test suite, keeping them out of render-run.
     foreach(zlib_test IN ITEMS example example64)

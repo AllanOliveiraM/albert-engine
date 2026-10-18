@@ -3,6 +3,8 @@
 #include "providers/gfs.hpp"
 #include "providers/space_weather.hpp"
 #include "physics/weather.hpp"
+#include <erfa.h>
+#include <filesystem>
 #include <cmath>
 #include <fstream>
 #include "model_fixture.hpp"
@@ -49,7 +51,9 @@ int main(int argc,char** argv){try{
     std::vector<albert::physics::SpaceWeatherDay> days;for(int d=0;d<10;++d){albert::physics::SpaceWeatherDay x;x.day=std::floor(1796083200./86400.)-5+d;x.f107=120+d;x.f107a=110;x.apAverage=6;x.ap.fill(4+d);x.hasAp=true;x.type="OBS";days.push_back(x);}
     albert::rpc::Server server(bridge,0,nullptr,{[&](double lat,double,double)->albert::rpc::LiveAir{if(lat<0)throw std::runtime_error("offline");if(lat==1)std::this_thread::sleep_for(std::chrono::milliseconds(300));
             if(lat==27.5)return{std::make_shared<albert::physics::Weather>(albert::providers::gfsGrid({albert::providers::decodeGrib2(grib)},"NOAA GFS fixture")),{grib}};return{std::make_shared<Breeze>(),{}};},
-        [&](double utc){albert::rpc::UpperAir a;if(std::abs(utc-1796083200.)<86400){a.model=albert::providers::msisFrom(days,utc);a.days=days;}return a;}}); // No network in tests.
+        [&](double utc){albert::rpc::UpperAir a;if(std::abs(utc-1796083200.)<86400){a.model=albert::providers::msisFrom(days,utc);a.days=days;}return a;},
+        [&](albert::physics::Center body,int degree){std::ifstream in{std::filesystem::path(argc>1?argv[1]:"").parent_path()/(body==albert::physics::Center::moon?"moon_gravity_degree8.tab":"mars_gravity_degree8.tab"),std::ios::binary};
+            return albert::providers::gravityModel(body,{std::istreambuf_iterator<char>(in),{}},degree);}}); // No network in tests.
     auto channel=grpc::CreateChannel("127.0.0.1:"+std::to_string(server.port()),grpc::InsecureChannelCredentials());
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto scene=api::SceneService::NewStub(channel);auto camera=api::CameraService::NewStub(channel);api::Applied applied;
@@ -219,6 +223,27 @@ int main(int argc,char** argv){try{
             api::CreateFlightRequest breeze=create;breeze.set_weather(api::CreateFlightRequest::LIVE_GFS);
             {grpc::ClientContext c;require(flight->CreateFlight(&c,breeze,&s).ok(),"Breeze flight");}
             api::FlightSample third;require(replay(exported(),third).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Replay without the air data accepted");
+        }
+        { // Moon and Mars: pad weight from the GRAIL and MRO fields, Martian air, a lunar vacuum, the
+          // vehicle drawn at the body (ERFA here: the fixture scene has no lunar state), self-contained logs.
+            auto exported=[&]{grpc::ClientContext c;auto reader=flight->ExportFlight(&c,{});api::FlightLogChunk k;std::vector<api::FlightLogChunk> v;while(reader->Read(&k))v.push_back(k);require(reader->Finish().ok(),"ExportFlight");return v;};
+            api::CreateFlightRequest moon=create;moon.set_body(api::CreateFlightRequest::MOON);moon.mutable_site()->set_latitude_degrees(-85.4);moon.mutable_site()->set_longitude_degrees(31.2);moon.mutable_site()->set_height_meters(-3000);
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,moon,&s).error_code()==grpc::StatusCode::UNAVAILABLE,"Lunar degree above the fixture accepted");}
+            moon.set_gravity_degree(8);
+            using Edit=void(*)(api::CreateFlightRequest&);for(Edit refused:{+[](api::CreateFlightRequest& r){r.set_terrain_height(true);},+[](api::CreateFlightRequest& r){r.set_weather(api::CreateFlightRequest::LIVE_GFS);},+[](api::CreateFlightRequest& r){r.set_gravity_degree(601);},+[](api::CreateFlightRequest& r){r.set_body(static_cast<api::CreateFlightRequest::Body>(7));}}){
+                api::CreateFlightRequest bad=moon;refused(bad);grpc::ClientContext c;require(flight->CreateFlight(&c,bad,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Invalid lunar flight accepted");}
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,moon,&s).ok(),"Lunar flight");}
+            require(std::abs(s.specific_force_meters_per_second2().x()-1.63)<.02&&s.static_pressure_pascals()==0&&s.atmosphere()=="Vacuum (no lunar atmosphere)"&&s.geodetic().height_meters()>-3000&&s.geodetic().height_meters()<-2950,"Lunar pad"); // The CG, above the base.
+            {grpc::ClientContext c;api::StepRequest r;r.set_ticks(4000);r.add_commands()->set_ignite(true);require(flight->Step(&c,r,&s).ok()&&s.events_size()==1&&s.geodetic().height_meters()>-2900,"Lunar liftoff");}
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            {const auto snap=bridge.snapshot();const auto o=std::find_if(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";});require(o!=snap->objects.end(),"Lunar vehicle in the scene");
+                double pv[2][3];eraMoon98(2451545.0,(albert::physics::secondsSinceJ2000(albert::physics::ttFromUtc(o->samples.front().utcSeconds)))/86400.,pv);constexpr double au=149597870700.;
+                const auto& p=o->samples.front().positionMeters;require(std::abs(albert::physics::norm(albert::physics::V3{p.x-pv[0][0]*au,p.y-pv[0][1]*au,p.z-pv[0][2]*au})-(1737400.+s.geodetic().height_meters()))<100,"Vehicle drawn at the Moon");}
+            const std::uint64_t hash=s.state_hash();const auto log=exported();
+            {api::FlightSample again;grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&again);for(const auto& k:log)writer->Write(k);writer->WritesDone();require(writer->Finish().ok()&&again.state_hash()==hash,"Lunar replay from the embedded field");}
+            api::CreateFlightRequest mars=moon;mars.set_body(api::CreateFlightRequest::MARS);mars.mutable_site()->set_latitude_degrees(18.4);mars.mutable_site()->set_longitude_degrees(77.5);mars.mutable_site()->set_height_meters(-2500);
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,mars,&s).ok(),"Martian flight");}
+            require(std::abs(s.specific_force_meters_per_second2().x()-3.71)<.03&&std::abs(s.static_pressure_pascals()-699*std::exp(-.00009*s.geodetic().height_meters()))<1e-6&&s.atmosphere()=="NASA Glenn Mars mean atmosphere","Martian pad");
         }
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));

@@ -17,6 +17,7 @@ struct Planet {
     int degree=0;                     // 0 point mass; 2..4 zonal; with egm2008, 2..70 (degree and order).
     bool egm2008=false;               // EGM2008 tide-free spherical harmonics (its own GM and radius).
     const class Gravity* field=nullptr; // Any spherical-harmonic field (Moon, Mars); its own GM and radius.
+    M3 fieldFrame;                    // Body-fixed to field axes (the Moon's principal axes).
     double e2()const{return flattening*(2-flattening);}
 };
 // Central bodies of flights; the inertial frame is centred on them with ICRF axes.
@@ -25,7 +26,7 @@ enum class Center {earth,moon,mars};
 // Earth ignores it and uses EGM2008.
 Planet planet(Center c,const Gravity* field=nullptr,int degree=0);
 // WGS 84 ellipsoid and rotation; EGM2008 tide-free GM, 20×20 field (J2..J4 kept for zonal use).
-constexpr Planet earth{3.986004415e14,6378137.,1/298.257223563,7.292115e-5,6378136.3,{0,0,1.0826261738522e-3,-2.532410518567e-6,-1.619897599917e-6},20,true};
+constexpr Planet earth{3.986004415e14,6378137.,1/298.257223563,7.292115e-5,6378136.3,{0,0,1.0826261738522e-3,-2.532410518567e-6,-1.619897599917e-6},20,true,nullptr,{}};
 constexpr int egm2008Maximum=70;
 
 struct Geodetic {double latitude,longitude,height;}; // rad, rad, m above the ellipsoid.
@@ -41,8 +42,8 @@ double geoidHeight(double latitude,double longitude); // EGM2008 (degree 70) ove
 // angle; polar motion neglected (≤15 m).
 struct Orientation {M3 fixed;V3 omega;}; // ECI→ECEF matrix; Earth angular velocity in ECI.
 // Moon: IAU mean-Earth frame with its libration series (within ~155 m of the DE ephemeris at
-// the surface), turned into the DE440 principal axes of the GRAIL fields. Mars: IAU 2015 (the
-// frame the renderer draws). Both as in NAIF pck00011, with analytic angular velocity.
+// the surface; maps and the renderer use it). Mars: IAU 2015. Both as in NAIF pck00011, with
+// analytic angular velocity.
 class Rotation {
 public:
     static Rotation uniform(double rate,double angle=0,Tt epoch=0){Rotation r;r.rate_=rate;r.angle_=angle;r.epoch_=epoch;return r;}
@@ -62,5 +63,8 @@ constexpr double sunGM=1.32712440018e20,moonGM=4.902800066e12,earthGM=3.98600441
 struct ThirdBody {V3 position;double gm;};
 int thirdBodies(Center c,Tt t,ThirdBody out[2]); // Earth: Sun, Moon; Moon: Earth, Sun; Mars: Sun.
 V3 marsHeliocentric(Tt t); // ERFA plan94.
+// Geocentric position and velocity of a centre (m, m/s, ICRF axes; ERFA moon98, plan94 − epv00).
+struct PositionVelocity {V3 position,velocity;};
+PositionVelocity geocentric(Center c,Tt t);
 inline V3 tidal(V3 r,V3 body,double gm){const V3 d=body-r;const double dn=norm(d),bn=norm(body);return gm*(d/(dn*dn*dn)-body/(bn*bn*bn));}
 }
