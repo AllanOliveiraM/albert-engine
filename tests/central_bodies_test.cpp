@@ -94,7 +94,14 @@ int main(int argc,char** argv){try{
     // Mars climatology: Glenn surface values, continuous at the isothermal top, falling to vacuum.
     {
         const Air s=marsAtmosphere(0);near(s.pressure,699,1e-9,"Mars surface pressure");near(s.temperature,242.1,1e-9,"Mars surface temperature");near(s.density,.015030,1e-5,"Mars surface density");
-        const double top=(133.1-23.4)/.00222;near(marsAtmosphere(top+1e-3).pressure/marsAtmosphere(top-1e-3).pressure,1,5e-7,"Isothermal layer joins");
+        constexpr double radius=3389500.;const double h1=radius*7000/(radius+7000),h2=h1+(242.1-.000998*h1-140)/.00222,top=radius*h2/(radius-h2);
+        near(marsAtmosphere(top+1e-3).pressure/marsAtmosphere(top-1e-3).pressure,1,5e-7,"Isothermal layer joins");near(marsAtmosphere(top+1e-3).temperature,140,1e-6,"Isothermal layer");
+        // Viking 1 and 2 entry profiles (Seiff and Kirk 1977, PDS Atmospheres Node): mean density
+        // error of the single mean profile (VL2 entered a colder atmosphere).
+        constexpr double vl1[][2]{{120.19,1.5756e-08},{106.48,8.0234e-08},{93.165,4.6493e-07},{80.242,2.5208e-06},{67.743,1.2103e-05},{55.765,6.2077e-05},{44.765,2.4343e-04},{35.934,6.35e-04},{30.262,1.119e-03},{27.268,1.4759e-03},{5.04,1.0621e-02}};
+        constexpr double vl2[][2]{{110.286,4.09393e-08},{99.005,1.58286e-07},{88.004,5.7977e-07},{77.289,3.12555e-06},{66.884,1.22687e-05},{56.857,4.8088e-05},{47.419,1.28938e-04},{39.066,3.54177e-04},{32.595,7.44543e-04},{28.468,1.16377e-03}};
+        auto mean=[](const auto& levels){double e=0;for(const auto& l:levels)e+=std::abs(marsAtmosphere(l[0]*1e3).density/l[1]-1);return e/static_cast<double>(std::size(levels));};
+        std::printf("bodies: Mars density against Viking 1 %.0f%%, Viking 2 %.0f%% (mean)\n",100*mean(vl1),100*mean(vl2));require(mean(vl1)<.3&&mean(vl2)<.6,"Viking entry profiles");
         double last=s.density;for(double h=1000;h<marsTop;h+=1000){const double r=marsAtmosphere(h).density;require(r>0&&r<last,"Martian density falls");last=r;}
         const double d100=marsAtmosphere(1e5).density;require(d100>1e-8&&d100<1e-6,"Martian density at 100 km");require(marsAtmosphere(marsTop).density==0,"Vacuum above 150 km");
     }

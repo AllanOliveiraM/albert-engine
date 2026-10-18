@@ -62,12 +62,26 @@ double Flight::massFlow()const{
     const Stage& st=vehicle_.stages[s_.stage];
     return s_.burning&&s_.propellant>0&&st.thrust>0?s_.throttle*st.thrust/st.exhaust:0.;
 }
-V3 Flight::tidal(const State& s)const{
-    constexpr Tt bucket=60*second;const Tt k=floorDiv(s.time,bucket);
+double Flight::bodies(Tt t)const{ // Third bodies at 60 s nodes, linear between them; returns the weight.
+    constexpr Tt bucket=60*second;const Tt k=floorDiv(t,bucket);
     if(k!=perturbed_){bodies_=thirdBodies(env_.center,k*bucket,p0_);thirdBodies(env_.center,(k+1)*bucket,p1_);perturbed_=k;}
-    const double w=secondsSinceJ2000(s.time-k*bucket)/60.;V3 a;
+    return secondsSinceJ2000(t-k*bucket)/60.;
+}
+V3 Flight::tidal(const State& s)const{
+    const double w=bodies(s.time);V3 a;
     for(int i=0;i<bodies_;++i)a+=physics::tidal(s.position,p0_[i].position+(p1_[i].position-p0_[i].position)*w,p0_[i].gm);
     return a;
+}
+V3 Flight::sun(Tt t)const{const double w=bodies(t);const int i=env_.center==Center::moon?1:0;return p0_[i].position+(p1_[i].position-p0_[i].position)*w;}
+double sunlight(V3 r,V3 sun,double bodyRadius){
+    constexpr double sunRadius=6.957e8;const V3 d=sun-r;const double dn=norm(d),rn=norm(r);
+    if(!(rn>bodyRadius))return 1; // At or below the surface: the ground handles it.
+    const double a=std::asin(std::min(1.,sunRadius/dn)),b=std::asin(bodyRadius/rn),c=std::acos(std::clamp(-dot(r,d)/(rn*dn),-1.,1.));
+    if(c>=a+b)return 1;
+    if(c<=b-a)return 0;
+    if(c<=a-b)return 1-b*b/(a*a);
+    const double x=(c*c+a*a-b*b)/(2*c),y=std::sqrt(std::max(0.,a*a-x*x));
+    return 1-(a*a*std::acos(std::clamp(x/a,-1.,1.))+b*b*std::acos(std::clamp((c-x)/b,-1.,1.))-c*y)/(3.14159265358979323846*a*a);
 }
 Flight::Rate Flight::rate(const State& s,Sample* out)const{
     const Stage& st=vehicle_.stages[s.stage];const Mass ms=mass(st,s.propellant);
@@ -95,8 +109,14 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         const double cp=std::cos(s.gimbalPitch),sp=std::sin(s.gimbalPitch),cy=std::cos(s.gimbalYaw),sy=std::sin(s.gimbalYaw);
         ft=thrust*V3{cp*cy,-sy,sp*cy};mt=cross(V3{ms.cg-st.nozzle,0,0},ft);
     }
+    V3 fs; // Solar radiation pressure, 1361 W/m² at 1 au, shadowed by the central body.
+    if(vehicle_.sunArea>0&&env_.sunMoon){
+        constexpr double au=149597870700.,pressure=1361./299792458.;const V3 d=sun(s.time)-s.position;const double dn=norm(d);
+        const double nu=sunlight(s.position,d+s.position,env_.planet.radius);
+        if(nu>0)fs=bt*(d*(-nu*pressure*au*au/(dn*dn*dn)*vehicle_.reflectivity*vehicle_.sunArea));
+    }
     const double lim=vehicle_.torque;
-    const V3 force=fa+ft,moment=ma+mt+V3{std::clamp(s.torque.x,-lim,lim),std::clamp(s.torque.y,-lim,lim),std::clamp(s.torque.z,-lim,lim)};
+    const V3 force=fa+ft+fs,moment=ma+mt+V3{std::clamp(s.torque.x,-lim,lim),std::clamp(s.torque.y,-lim,lim),std::clamp(s.torque.z,-lim,lim)};
     // d(Iω)/dt with the propellant's inertia loss; the exhaust carries transverse angular
     // momentum ṁ l² ω through the nozzle (jet damping).
     const V3 iw{ms.inertia.x*s.rate.x,ms.inertia.y*s.rate.y,ms.inertia.z*s.rate.z};V3 rhs=moment-cross(s.rate,iw);

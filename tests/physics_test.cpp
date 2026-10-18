@@ -273,6 +273,20 @@ int main(){try{
         run(spinFine,10*second);run(spinCoarse,10*second);
         require(spinFine.hash()==spinCoarse.hash(),"Commanded torque keeps the fixed step");
     }
+    // Solar radiation pressure: full sun, umbra and a monotonic penumbra past the Earth; in
+    // sunlight the accelerometer reads P (1 au/d)² Cr A/m away from the Sun.
+    {
+        const V3 sun{1.496e11,0,0};
+        require(sunlight({7e6,0,0},sun,6378137.)==1&&sunlight({-7e6,0,0},sun,6378137.)==0,"Sunlit and umbra");
+        double last=0;for(double y=6.30e6;y<6.46e6;y+=1e4){const double nu=sunlight({-7e6,y,0},sun,6378137.);require(nu>=last&&nu>=0&&nu<=1,"Penumbra");last=nu;}
+        require(last==1&&sunlight({-7e6,6.37e6,0},sun,6378137.)>0&&sunlight({-7e6,6.37e6,0},sun,6378137.)<1,"Penumbra limits");
+        Environment e;const Tt t=ttFromUtc(1792238400.);const V3 s=perturbers(t).sun,side=cross(s,V3{0,0,1});
+        State st;st.time=t;st.position=side*(4.2e7/norm(side));st.velocity={};st.propellant=0;
+        Vehicle v=nescSphere();v.sunArea=10;v.reflectivity=1.5;const Flight f(v,e,st);const Sample x=f.sample();const V3 d=s-st.position;
+        const double expected=1361./299792458.*std::pow(149597870700./norm(d),2)*1.5*10/x.mass;
+        near(norm(x.specificForce)/expected,1,1e-9,"Radiation pressure magnitude");
+        near(dot(matrix(f.state().attitude)*x.specificForce,d)/(norm(x.specificForce)*norm(d)),-1,1e-12,"Radiation pressure points away from the Sun");
+    }
     // IMU noise: overlapping Allan variance of a still gyro (10 Hz, 20000 s) fitted with
     // σ²(τ) = N²/τ + K²τ/3 returns the configured angle random walk and rate random walk
     // within 5%; the Gauss-Markov bias has its configured spread and correlation time.

@@ -18,7 +18,8 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Propulsão | `F = F_vac·throttle − p_a·A_e`; `ṁ = F_vac·throttle/v_e`; cardã em arfagem e guinada | sem transiente de ignição |
 | Massa | propriedades do conjunto lineares no propelente restante; estagiamento move o CG | inércia principal (sem produtos) |
 | Rotação | `I ω̇ = M − ω×Iω − İω − ṁ l² ω⊥` (perda de inércia do propelente e amortecimento por jato) | — |
-| Lua e Marte | `Environment environment(Center, campo, grau)`: centro inercial no corpo com eixos ICRF; GRAIL GRGM1200A (Lua, eixos principais DE440) e MRO GMM-3 (Marte) baixados até o grau pedido (≤1200 e ≤120); rotação IAU de `pck00011` com ω analítico (Lua: referencial médio da Terra com librações, o dos mapas; o campo é avaliado nos eixos principais DE440, 67,8526″/78,6944″/0,2785″ adiante; Marte: IAU 2015); terceiros corpos Terra+Sol (Lua) e Sol por `plan94` (Marte); Marte com a atmosfera média da NASA Glenn até ~49 km, isotérmica a 140 K acima e vácuo acima de 150 km; Lua sem ar | série IAU da Lua a ≤155 m da libração do DE na superfície; Marte sem estações, poeira nem vento; alturas sobre elipsoide (esfera de 1737,4 km na Lua; 3396,19 × 3376,20 km em Marte), não sobre o areoide |
+| Lua e Marte | `Environment environment(Center, campo, grau)`: centro inercial no corpo com eixos ICRF; GRAIL GRGM1200A (Lua, eixos principais DE440) e MRO GMM-3 (Marte) baixados até o grau pedido (≤1200 e ≤120); rotação IAU de `pck00011` com ω analítico (Lua: referencial médio da Terra com librações, o dos mapas; o campo é avaliado nos eixos principais DE440, 67,8526″/78,6944″/0,2785″ adiante; Marte: IAU 2015); terceiros corpos Terra+Sol (Lua) e Sol por `plan94` (Marte); Marte com atmosfera média hidrostática sobre as temperaturas da NASA Glenn até 140 K perto de 50 km, isotérmica acima e vácuo acima de 150 km; Lua sem ar | série IAU da Lua a ≤155 m da libração do DE na superfície; Marte sem estações, poeira nem vento; alturas sobre elipsoide (esfera de 1737,4 km na Lua; 3396,19 × 3376,20 km em Marte), não sobre o areoide |
+| Radiação solar | pressão de esfera (`Vehicle::sunArea`, `reflectivity`; 1361 W/m² a 1 au) com umbra e penumbra cônicas do corpo central | desligada por padrão; sem albedo nem infravermelho do planeta; atitude ignorada |
 | Solo | pad com a base do conjunto no solo, preso girando com a Terra até empuxo > peso; toque a uma altura elipsoidal fixa, detectado no CG | sem terreno, contato nem atrito |
 
 Integração RK4 com passo fixo (1 ms por padrão); `advance` divide o passo no instante
@@ -91,7 +92,11 @@ Lua e Marte (`tests/central_bodies_test.cpp`, com os excertos de grau 8 das tabe
   com as componentes da NAIF; ω contra a derivada numérica da matriz (<1e-7).
 - Libração: o ponto subterrestre fica a ≤6,1° de longitude e ≤6,6° de latitude em um mês.
 - Atmosfera marciana: 699 Pa, 242,1 K e 0,0150 kg/m³ na superfície, contínua na camada
-  isotérmica, densidade decrescente até o vácuo.
+  isotérmica, densidade decrescente até o vácuo. Contra as entradas das Viking 1 e 2 (Seiff e
+  Kirk 1977, PDS Atmospheres Node), erro médio de densidade de 23% e 51% em todos os níveis de
+  120 km à superfície (pior 41% e 89%); a Viking 2 entrou numa atmosfera mais fria, e um perfil
+  médio único não chega aos 20% do critério da fase 5 — isso pede estação e latitude
+  (Mars-GRAM ou MCD). O ajuste da NASA Glenn usado antes errava 73% e 115%.
 - Órbitas circulares de 100 km na Lua e 300 km em Marte: uma volta com passos de 1 s a <1 µm
   de 0,1 s.
 
@@ -100,9 +105,13 @@ propagação de 6 h com passos de 1 s, sem arrasto nem radiação solar):
 
 - LRO, 2026-03-10 00–06 TDB, 83–100 km de altitude, 3 voltas: 3,7 m do Horizons com
   GRGM1200A no grau 300, 8,3 m no 100, 202 m no 50 e 894 m no 20; sem a Terra e o Sol, 368 m.
-- MRO, 2026-09-10 00–06 TDB, 238–288 km: 37 m com GMM-3 no grau 120 (48 m no 50), quase todo
-  ao longo da trajetória e crescendo com o tempo — o efeito esperado da pressão de radiação
-  solar (~7e-8 m/s² para a MRO) que o modelo ainda não tem.
+- LRO em 24 h (2026-03-10, grau 150): 35 m, dentro do critério de 100 m/dia da fase 5.
+- MRO, 2026-09-10, 238–291 km: 37 m em 6 h e 458 m em 24 h com GMM-3 no grau 120, quase todo
+  ao longo da trajetória e em degraus a cada volta. A pressão de radiação solar com sombra
+  (Cr·A/m de 0,02 a 0,06 m²/kg) muda o resultado em menos de 1 m; o degrau por volta é arrasto
+  no periapsis (~255 km), na termosfera que o modelo não tem acima de 150 km.
+- Radiação solar: sol pleno, umbra e penumbra monotônica atrás da Terra; no sol, o
+  acelerômetro lê P (1 au/d)² Cr A/m oposto ao Sol (<1e-9).
 
 ## API
 

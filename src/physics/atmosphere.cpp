@@ -19,10 +19,14 @@ constexpr std::array<double,13> ratio{1.,.999996,.999989,.999971,.999941,.999909
 }
 Air marsAtmosphere(double z){
     if(!(z<marsTop))return{};
-    constexpr double gas=192.1,gamma=1.3,cold=140,radius=3389500.,g0=3.7276,top=(23.4-273.1+cold)/-.00222; // J/(kg K); K; m; m/s²; m.
-    double t,p;
-    if(z<top){t=273.1+(z>7000?-23.4-.00222*z:-31-.000998*z);p=699*std::exp(-.00009*z);}
-    else{auto geo=[](double h){return radius*h/(radius+h);};t=cold;p=699*std::exp(-.00009*top)*std::exp(-(geo(z)-geo(top))*g0/(gas*cold));}
+    constexpr double gas=192.1,gamma=1.3,radius=3389500.,g0=3.7276,cold=140; // J/(kg K); m; m/s²; K.
+    struct Layer {double h,t,lapse,p;}; // Geopotential base (m), temperature (K), K/m, pressure (Pa).
+    auto down=[](const Layer& l,double dh){const double t=l.t+l.lapse*dh;return l.lapse!=0?l.p*std::pow(t/l.t,-g0/(gas*l.lapse)):l.p*std::exp(-g0*dh/(gas*l.t));};
+    static const std::array<Layer,3> layers=[&]{ // Glenn temperatures, 699 Pa at the datum.
+        std::array<Layer,3> l{{{0,242.1,-.000998,699},{radius*7000/(radius+7000),0,-.00222,0},{0,cold,0,0}}};
+        l[1].t=242.1-.000998*l[1].h;l[1].p=down(l[0],l[1].h);l[2].h=l[1].h+(l[1].t-cold)/.00222;l[2].p=down(l[1],l[2].h-l[1].h);return l;}();
+    const double h=radius*z/(radius+z);const Layer& l=h<layers[1].h?layers[0]:h<layers[2].h?layers[1]:layers[2];
+    const double t=l.t+l.lapse*(h-l.h),p=down(l,h-l.h);
     return{t,p,p/(gas*t),std::sqrt(gamma*gas*t),{}};
 }
 Air standardAtmosphere(double z){
