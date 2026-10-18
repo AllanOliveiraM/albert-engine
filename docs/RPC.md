@@ -257,7 +257,8 @@ computador de voo. `CreateFlight` põe o veículo preso no pad, com a base no so
 `NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
 instante exibido), com passo fixo de 1 ms (de 10 µs a 100 ms). Em voo balístico acima
 de 86 km o Albert usa passos internos de até `coast_step_seconds` (padrão 1 s; 0 desliga),
-então chamadas longas propagam órbitas rapidamente; os ticks continuam exatos. Cada `Step` aplica os
+então chamadas longas propagam órbitas rapidamente; os ticks continuam exatos. A gravidade usa o
+EGM2008 até `gravity_degree` (padrão 20; de 2 a 70). Cada `Step` aplica os
 comandos — todos ou nenhum — e avança `ticks` passos (até 600 mil; uma chamada cancelada ou
 vencida não altera o voo); a resposta traz a
 amostra do novo tick. Assim, comandos do tick *k* produzem os sensores do tick *k+1*,

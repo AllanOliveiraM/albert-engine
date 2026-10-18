@@ -13,8 +13,8 @@ com `hold`), `examples/gravity_turn.hpp` + `albert_flight_client` (KSC → órbi
 em 421 s, também testado headless em `physics_test`). Revisão do Codex do marco (4 P2) corrigida com regressões: esgotamento no fim exato
 do passo, recriação do cilindro no estagiamento só após confirmação, base do conjunto no
 solo no pad e `Step` cancelável e atômico; ramo padrão İω + jet damping testado em forma
-fechada; taxas seculares J2 testadas. Pendente: EGM2008 20×20 (download de 109 MB da NGA
-aguardando autorização do Allan; alternativa EGM96). Passo de coast (até 1 s acima de
+fechada; taxas seculares J2 testadas. EGM2008 entregue (tabela até grau 70 extraída do
+início do zip da NGA, que não aceita retomada; 20×20 por padrão, `gravity_degree` na API). Passo de coast (até 1 s acima de
 86 km sem empuxo) entregue: uma volta em 0,1 s pela API, <1 mm do passo de 10 ms. Pré-visualização: `build/flight-preview.py`
 (Xvfb; `FAST=1` voa até a órbita).
 

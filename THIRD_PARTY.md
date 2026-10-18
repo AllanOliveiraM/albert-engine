@@ -47,6 +47,9 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   https://nescacademy.nasa.gov/flightsim/2015; valores de referência em
   `tests/nesc_fixture.inc` e modelos DAVE-ML da esfera e do foguete de dois estágios
   convertidos em `src/physics/vehicles.cpp`. Obra do governo dos EUA.
+- National Geospatial-Intelligence Agency (NGA): coeficientes do modelo gravitacional
+  EGM2008 tide-free até o grau 70 em `src/physics/egm2008.inc`, extraídos de
+  `EGM2008_to2190_TideFree` (https://earth-info.nga.mil). Distribuição sem restrições.
 - NASA GIBS: paleta pública de fração de nuvens MODIS, convertida para JSON,
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml.
 - Planetas e luas (créditos e limites por corpo em `assets/planetary-sources.json`,

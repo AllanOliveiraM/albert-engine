@@ -10,7 +10,7 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | --- | --- | --- |
 | Tempo | TT em nanossegundos inteiros desde J2000; UTC por `eraDat` | antes de 1960 TAI−UTC = 0 |
 | Referenciais | GCRF inercial; ITRF por IAU 2006/2000A (CIO) + ERA, matriz C2I a cada 60 s interpolada | movimento do polo ignorado (≤15 m); TT−UT1 fixo por voo |
-| Gravidade | WGS 84; GM e J2–J4 do EGM2008 (tide-free) | sem harmônicos tesserais (EGM2008 20×20 vem depois) |
+| Gravidade | EGM2008 tide-free em harmônicos esféricos (recursão de Cunningham), 20×20 por padrão, até 70×70; elipsoide WGS 84 | maré permanente não aplicada; graus acima de 70 omitidos |
 | Terceiros corpos | Sol (epv00) e Lua (moon98), aceleração de maré, 60 s interpolados | sem planetas; sem relatividade |
 | Atmosfera | US Standard Atmosphere 1976 até 86 km geométricos, co-rotativa, sem vento | vácuo acima de 86 km até a fase 2 (NRLMSIS) |
 | Aerodinâmica | tabelas bilineares (Mach, ângulo); arrasto oposto ao ar relativo, sustentação no plano x-z, força lateral em y; amortecimento opcional | fora da tabela o valor é mantido |
@@ -34,6 +34,9 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
 
 ## Validação (`tests/physics_test.cpp`)
 
+- EGM2008 contra o gradiente do potencial somado com funções de Legendre normalizadas diretas
+  (graus 20 e 70, <2e-7 m/s²) e alturas geoidais por Bruns: 28,9 m em Timbuktu (exemplo
+  do GeographicLib, 28,7 m) e −105,1 m no mínimo do Oceano Índico (≈ −106 m).
 - Geodésia fechada de Vermeille contra a transformação direta (20 mil pontos, <1 µm);
   gravidade zonal contra o gradiente numérico do potencial.
 - USSA76 contra a tabela publicada (5 algarismos) e contra os valores das simulações NESC.

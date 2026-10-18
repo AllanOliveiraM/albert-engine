@@ -8,9 +8,11 @@
 #include <iostream>
 #include <random>
 #include <stdexcept>
+#include <vector>
 using namespace albert::physics;
 namespace {
 #include "nesc_fixture.inc"
+#include "physics/egm2008.inc"
 constexpr double ft=.3048,pi=3.14159265358979323846,deg=pi/180;
 void require(bool ok,const char* m){if(!ok)throw std::runtime_error(m);}
 void near(double a,double b,double tol,const char* m){if(!(std::abs(a-b)<=tol)){std::fprintf(stderr,"%s: %.12g vs %.12g (tolerance %.3g)\n",m,a,b,tol);throw std::runtime_error(m);}}
@@ -46,13 +48,48 @@ int main(){try{
         if(std::abs(g.latitude)<pi/2-1e-9)near(std::remainder(r.longitude-g.longitude,2*pi),0,1e-13,"Longitude");
     }
     // Zonal attraction against the numerical gradient of its potential.
+    Planet zonal=earth;zonal.egm2008=false;zonal.degree=4;
     for(V3 r:{V3{6.5e6,1e6,2e6},V3{1e5,-3e5,6.4e6},V3{-4e6,4e6,-3e6}}){
         auto potential=[&](V3 p){const double rn=norm(p),s=p.z/rn;double sum=0,p0=1,p1=s;
             for(int n=2;n<=4;++n){const double p2=((2*n-1)*s*p1-(n-1)*p0)/n;sum+=earth.zonal[n]*std::pow(earth.gravityRadius/rn,n)*p2;p0=p1;p1=p2;}
             return earth.gm/rn*(1-sum);};
-        const V3 a=gravitation(earth,r);const double h=1;
+        const V3 a=gravitation(zonal,r);const double h=1;
         const V3 n{(potential(r+V3{h,0,0})-potential(r-V3{h,0,0}))/(2*h),(potential(r+V3{0,h,0})-potential(r-V3{0,h,0}))/(2*h),(potential(r+V3{0,0,h})-potential(r-V3{0,0,h}))/(2*h)};
         near(norm(a-n),0,1e-8,"Zonal gradient");
+    }
+    // EGM2008: Cunningham recursion against the gradient of the potential summed with
+    // directly normalised Legendre functions; geoid heights through Bruns (T/γ) against
+    // published EGM2008/EGM96 values, with the WGS 84 normal field (degrees 71+ omitted).
+    {
+        auto potential=[](V3 r,int degree,bool disturbing){
+            const double rn=norm(r),s=r.z/rn,c=std::sqrt(r.x*r.x+r.y*r.y)/rn,lon=std::atan2(r.y,r.x),q=6378136.3/rn;
+            std::vector<double> p(static_cast<std::size_t>((degree+1)*(degree+2)/2));auto at=[&](int n,int m)->double&{return p[static_cast<std::size_t>(n*(n+1)/2+m)];};
+            at(0,0)=1;
+            for(int m=0;m<=degree;++m){
+                if(m)at(m,m)=(m==1?std::sqrt(3.):std::sqrt((2*m+1)/(2.*m)))*c*at(m-1,m-1);
+                if(m<degree)at(m+1,m)=std::sqrt(2*m+3.)*s*at(m,m);
+                for(int n=m+2;n<=degree;++n)at(n,m)=std::sqrt((2*n-1.)*(2*n+1)/((n-m)*(n+m)))*s*at(n-1,m)-std::sqrt((2*n+1.)*(n+m-1)*(n-m-1)/((n-m)*(n+m)*(2*n-3.)))*at(n-2,m);
+            }
+            double sum=disturbing?0:1,qn=q;
+            for(int n=2;n<=degree;++n){qn*=q;for(int m=0;m<=n;++m)sum+=qn*at(n,m)*(egm2008[n*(n+1)/2+m][0]*std::cos(m*lon)+egm2008[n*(n+1)/2+m][1]*std::sin(m*lon));}
+            if(!disturbing)return 3.986004415e14/rn*sum;
+            // Minus the WGS 84 normal potential (even zonals, its GM and radius).
+            constexpr double normal[]{-.484166774985e-3,.790303733511e-6,-.168724961151e-8,.346052468394e-11,-.265002225747e-14};
+            double u=3.986004415e14/rn*(1+sum)-3.986004418e14/rn,qw=6378137./rn,qk=qw;
+            for(int k=0;k<5;++k){const int n=2*k+2;qk=std::pow(qw,n);u-=3.986004418e14/rn*qk*normal[k]*at(n,0);}
+            return u;
+        };
+        for(int degree:{20,70})for(V3 r:{V3{6.4e6,1.2e6,1.9e6},V3{-2e6,-1e5,6.5e6},V3{4.4e6,-4.4e6,-2.5e6}}){
+            const double h=2;const V3 a=harmonics(degree,r);
+            const V3 n{(potential(r+V3{h,0,0},degree,false)-potential(r-V3{h,0,0},degree,false))/(2*h),(potential(r+V3{0,h,0},degree,false)-potential(r-V3{0,h,0},degree,false))/(2*h),(potential(r+V3{0,0,h},degree,false)-potential(r-V3{0,0,h},degree,false))/(2*h)};
+            near(norm(a-n),0,2e-7,"EGM2008 gradient");
+        }
+        struct Geoid {double lat,lon,height,tolerance;};
+        for(const Geoid& g:{Geoid{16.7758,-3.0094,28.7,5},Geoid{4.7,78.8,-106,8}}){ // Timbuktu (GeographicLib example); Indian Ocean low.
+            const double phi=g.lat*deg,s2=std::sin(phi)*std::sin(phi),gamma=9.7803253359*(1+.00193185265241*s2)/std::sqrt(1-earth.e2()*s2);
+            const double n=potential(fixedPosition(earth,{phi,g.lon*deg,0}),70,true)/gamma;
+            std::printf("EGM2008 geoid at %.2f, %.2f: %.2f m (reference %.1f)\n",g.lat,g.lon,n,g.height);near(n,g.height,g.tolerance,"Geoid height");
+        }
     }
     // U.S. Standard Atmosphere 1976 (published tables, 5 digits) and the NESC values.
     struct Ref {double z,t,p,rho;};
@@ -82,7 +119,7 @@ int main(){try{
     // J2 secular nodal rate (Vallado, mean elements to first order) from one-orbit averages
     // of the osculating elements, 13 orbits apart; ISS-like and sun-synchronous inclinations.
     for(const double inclination:{51.6*deg,98*deg}){
-        Environment e;e.planet=earth;e.planet.degree=2;e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;
+        Environment e;e.planet=earth;e.planet.egm2008=false;e.planet.degree=2;e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;
         const double mu=e.planet.gm,a0=7e6,ecc=.001,vp=std::sqrt(mu/a0*(1+ecc)/(1-ecc)),period=2*pi*std::sqrt(a0*a0*a0/mu);
         State s;s.position={a0*(1-ecc),0,0};s.velocity={0,vp*std::cos(inclination),vp*std::sin(inclination)};
         Flight f(nescSphere(),e,s);constexpr int per=600;const Tt dt=static_cast<Tt>(period/per*1e9);

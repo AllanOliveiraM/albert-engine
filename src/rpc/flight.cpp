@@ -87,7 +87,9 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext*,const api::Create
         const auto shown=impl_->bridge.snapshot();const double utc=r->has_utc_unix_seconds()?r->utc_unix_seconds():shown?shown->simulation.utcSeconds:time::simulation().read().utcSeconds;
         if(!(utc>=time::Simulation::earliestUtc&&utc<=time::Simulation::latestUtc))throw std::invalid_argument("Instant outside 1900-2100");
         t=ph::ttFromUtc(utc);step=static_cast<ph::Tt>(std::llround(seconds*1e9));
-        ph::Environment env;env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(utc-946728000.));env.ground=site.height_meters();
+        const unsigned degree=r->has_gravity_degree()?r->gravity_degree():20u;
+        if(degree<2||degree>static_cast<unsigned>(ph::egm2008Maximum))throw std::invalid_argument("Gravity degree must be 2-70");
+        ph::Environment env;env.planet.degree=static_cast<int>(degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(utc-946728000.));env.ground=site.height_meters();
         made.emplace(vehicle,env,ph::Flight::pad(env,vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r->heading_degrees()*deg,pitch*deg));
         made->steps(step,static_cast<ph::Tt>(std::llround(coast*1e9)));
     }catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
