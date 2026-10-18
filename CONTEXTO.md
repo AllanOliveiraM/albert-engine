@@ -22,7 +22,10 @@ do elipsoide (o chão do Cabo fica ~27 m abaixo) a perspectiva aérea sai salpic
 testes de compute e de cena não reproduziram, então na Terra a câmera do voo fica acima do elipsoide
 (como antes) e o certo é baixar o chão do modelo de ar ao relevo local. Imagem regional nos nós do
 terreno (`Terrain::detail`) e o detalhe do sítio não é mais liberado em laço com um veículo em foco.
-Próximo: morph entre níveis, chão do ar no relevo local.
+Morph entre níveis na CPU (filhos sobem da superfície do pai em 0,4 s). Pista do salpicado do Cabo:
+não são buracos (fundo magenta não aparece); fica nas áreas de água (rugosidade lisa da máscara de
+oceano), provável aliasing especular rasante com alturas ruidosas do DEM sobre água. Próximo: chão do
+ar no relevo local, AA especular na água, nuvens ao vivo no ar.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

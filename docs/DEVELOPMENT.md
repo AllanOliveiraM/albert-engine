@@ -320,7 +320,9 @@ esfera-cubo (`src/render/terrain.*`) substitui a malha do globo: nós de 65×65 
 construídos numa thread e desenhados com o material do globo (sem o bump, pois o relevo é
 geometria), refinados pela distância à câmera até ~38 m (nível 12) e limitados ao frustum e ao
 horizonte; um pai fica até os quatro filhos visíveis existirem, e os ancestrais dos nós visíveis
-nunca são despejados. Alturas: grade global (GEBCO) nos níveis grossos e Copernicus GLO-30 a partir
+nunca são despejados. Filhos que substituem um pai desenhado nascem sobre a superfície dele (postes
+pares iguais aos do pai, os ímpares no meio da aresta ou da diagonal dos triângulos) e sobem às suas
+alturas em 0,4 s (`morphSeconds`, na CPU, só nos nós em transição): sem o salto de nível. Alturas: grade global (GEBCO) nos níveis grossos e Copernicus GLO-30 a partir
 do nível 9, só do cache: o que falta é anotado e baixado por uma thread própria (`fetchMissing`),
 e o nó fica provisório até os dados chegarem (a geração do provedor avança e ele é refeito), sem
 nunca bloquear a construção; mais o geoide EGM2008 numa grade de 2°. "Relevo detalhado" no menu
@@ -342,7 +344,8 @@ o horizonte de um módulo cortava o chão inteiro).
 `ALBERT_TERRAIN_DEBUG=1` imprime nós, fila e custo da seleção e do render.
 `terrain_lod_test` confere a cobertura exata da esfera (4π), o refinamento, o corte por horizonte,
 as alturas, a reconstrução dos nós provisórios, `ground` contra um relevo analítico nas seis faces e
-a imagem regional só nos nós dentro dela (e a restauração ao limpar).
+a imagem regional só nos nós dentro dela (e a restauração ao limpar) e o morph dos filhos a partir
+da superfície do pai.
 
 **Atmosfera (WebGPU).** Espalhamento pré-computado de Bruneton (implementação de referência de
 2017, BSD-3) portado para WGSL em `src/gpu/atmosphere.*`: transmitância, irradiância do céu e

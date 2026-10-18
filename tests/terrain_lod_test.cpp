@@ -5,6 +5,7 @@
 #include "threepp/materials/MeshBasicMaterial.hpp"
 #include "threepp/objects/Mesh.hpp"
 #include "threepp/textures/Image.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -24,7 +25,7 @@ void settle(albert::Terrain& t,const Vector3& camera,bool cull){
 int main(){
     constexpr double radius=6378137,height=1000;
     Object3D parent;auto material=MeshBasicMaterial::create();
-    albert::TerrainBody body;body.radius=radius;body.maxLevel=9;
+    albert::TerrainBody body;body.radius=radius;body.maxLevel=9;body.morphSeconds=0; // Final shapes at once (the morph has its own check).
     body.heights=[](const std::vector<double>& lat,const std::vector<double>&,int,std::vector<float>& out){for(std::size_t i=0;i<lat.size();++i)out[i]=static_cast<float>(height);return true;};
     albert::Terrain terrain(parent,material,body);
     const double sphere=4*std::numbers::pi;
@@ -87,6 +88,25 @@ int main(){
         check(inside>0&&inside==t.detailed()&&inside<t.drawn()&&wrong==0,"Regional imagery on the nodes inside its bounds, over its coordinates");
         t.detail(nullptr,std::nullopt);t.update(eye,nullptr,false);const auto [left,stale]=audit(false);
         check(left==0&&stale==0&&t.detailed()==0,"Clearing the region restores the body's material and coordinates");
+    }
+    { // Morph: children replacing a drawn parent start on its surface (their even posts are the parent's)
+      // and rise to their own heights (here 500 m per level) once the morph has run.
+        Object3D other;albert::TerrainBody b=body;b.maxLevel=1;b.morphSeconds=.2;
+        b.heights=[](const std::vector<double>& lat,const std::vector<double>&,int level,std::vector<float>& out){for(std::size_t i=0;i<lat.size();++i)out[i]=static_cast<float>(level*500);return true;};
+        albert::Terrain t(other,material,b);settle(t,Vector3(0,0,10),false);
+        auto heights=[&]{std::vector<double> h; // Per drawn node: the height of its even posts (-1 if they differ).
+            for(const auto& child:other.children){auto* m=dynamic_cast<Mesh*>(child);if(!m||!m->visible)continue;const auto* p=m->geometry()->getAttribute<float>("position");double lo=1e9,hi=-1e9;
+                for(int j=0;j<albert::Terrain::posts;j+=2)for(int i=0;i<albert::Terrain::posts;i+=2){const int v=j*albert::Terrain::posts+i;
+                    const double r=std::sqrt(std::pow(double(p->getX(v))+m->position.x,2)+std::pow(double(p->getY(v))+m->position.y,2)+std::pow(double(p->getZ(v))+m->position.z,2));lo=std::min(lo,(r-1)*radius);hi=std::max(hi,(r-1)*radius);}
+                h.push_back(hi-lo<2?(hi+lo)/2:-1);}
+            return h;};
+        for(int i=0;i<20000&&t.finestLevel()==0;++i){t.update(Vector3(0,0,1.3f),nullptr,false);std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+        const auto first=heights();std::this_thread::sleep_for(std::chrono::milliseconds(300));t.update(Vector3(0,0,1.3f),nullptr,false);const auto last=heights();
+        const bool started=t.finestLevel()==1&&std::all_of(first.begin(),first.end(),[](double h){return std::abs(h)<1;});
+        const auto risen=std::count_if(last.begin(),last.end(),[](double h){return std::abs(h-500)<1;});
+        const bool done=risen>=4&&std::all_of(last.begin(),last.end(),[](double h){return std::abs(h)<1||std::abs(h-500)<1;});
+        std::printf("morph: %zu nodes on the parents' surface when shown, %ld risen to their own after it\n",first.size(),static_cast<long>(risen));
+        check(started&&done,"Split children morph from the parent's surface to their own heights");
     }
     { // Mars nodes straddling 88°: MOLA stops there and the grid alone completes them (review: only the
       // first point was checked, so such nodes stayed provisional and were rebuilt on every download).

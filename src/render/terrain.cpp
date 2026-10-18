@@ -46,13 +46,39 @@ Shape shapeOf(const Key& k){
 }
 struct Terrain::Impl {
     // Provisional: from coarser data, at that generation. Detail: the region's imagery applied for that version.
-    struct Node {std::shared_ptr<Mesh> mesh;unsigned lastUsed=0;bool provisional=false;std::uint64_t generation=0;unsigned detailVersion=0;bool detailed=false;};
+    struct Morph {std::vector<float> start,end;double t=0;}; // Vertex positions on the parent's surface and the node's own.
+    struct Node {std::shared_ptr<Mesh> mesh;unsigned lastUsed=0;bool provisional=false;std::uint64_t generation=0;unsigned detailVersion=0;bool detailed=false;std::unique_ptr<Morph> morph;};
     Object3D& parent;std::shared_ptr<Material> material;TerrainBody body;
     std::unordered_map<std::uint64_t,Node> nodes;std::unordered_map<std::uint64_t,Shape> shapes;std::unordered_set<std::uint64_t> queued;
     std::vector<std::pair<double,Key>> queue; // (priority, key): lower first.
     std::vector<Built> done;mutable std::mutex lock;std::condition_variable wake;bool stop=false;std::thread worker;
     std::vector<Key> selected;unsigned frame=0;int finest=0;double solidAngle=0;
     std::shared_ptr<Material> detailMaterial;std::optional<Vector4> detailBounds;unsigned detailVersion=1;
+    std::chrono::steady_clock::time_point lastUpdate=std::chrono::steady_clock::now();
+    // A node replacing its drawn parent starts on the parent's surface: its posts are every other parent
+    // post or between two (a quad's centre on the diagonal its triangles share), skirts keep their drop.
+    void beginMorph(const Key& k,Node& n){
+        const Node* p=k.level?node({k.face,k.level-1,k.x/2,k.y/2}):nullptr;if(!p||!(body.morphSeconds>0))return;
+        auto* positions=n.mesh->geometry()->getAttribute<float>("position");const auto* parent=p->mesh->geometry()->getAttribute<float>("position");
+        const Vector3 offset=Vector3().subVectors(p->mesh->position,n.mesh->position);
+        auto at=[&](int i,int j){const int v=j*posts+i;return Vector3(parent->getX(v),parent->getY(v),parent->getZ(v)).add(offset);};
+        const int ox=(k.x&1)*posts/2*2,oy=(k.y&1)*posts/2*2; // In half parent posts: 0 or 64.
+        auto m=std::make_unique<Morph>();const auto& own=positions->array();m->end.assign(own.begin(),own.end());m->start=m->end;
+        for(int j=0;j<posts;++j)for(int i=0;i<posts;++i){const int x=ox+i,y=oy+j,px=x/2,py=y/2;Vector3 s=at(px,py);
+            if(x&1&&y&1)s.add(at(px+1,py+1)).multiplyScalar(.5f);else if(x&1)s.add(at(px+1,py)).multiplyScalar(.5f);else if(y&1)s.add(at(px,py+1)).multiplyScalar(.5f);
+            const auto v=static_cast<std::size_t>(3*(j*posts+i));m->start[v]=s.x;m->start[v+1]=s.y;m->start[v+2]=s.z;}
+        const std::array<std::array<int,4>,4> edges{{{0,0,1,0},{posts-1,0,0,1},{posts-1,posts-1,-1,0},{0,posts-1,0,-1}}}; // As build's skirts.
+        for(std::size_t e=0;e<4;++e)for(int q=0;q<posts;++q){const auto& [i0,j0,di,dj]=edges[e];
+            const auto v=3*(static_cast<std::size_t>(posts*posts)+e*posts+static_cast<std::size_t>(q)),top=static_cast<std::size_t>(3*((j0+dj*q)*posts+i0+di*q));
+            for(std::size_t c=0;c<3;++c)m->start[v+c]=m->start[top+c]+(m->end[v+c]-m->end[top+c]);}
+        std::copy(m->start.begin(),m->start.end(),positions->array().begin());positions->needsUpdate();n.morph=std::move(m);
+    }
+    void stepMorph(Node& n,double seconds){ // Smoothstep from the parent's surface; done: the node's own.
+        auto& m=*n.morph;m.t=std::min(1.,m.t+seconds/body.morphSeconds);const float w=static_cast<float>(m.t*m.t*(3-2*m.t));
+        auto& out=n.mesh->geometry()->getAttribute<float>("position")->array();
+        if(m.t>=1)std::copy(m.end.begin(),m.end.end(),out.begin());else for(std::size_t i=0;i<out.size();++i)out[i]=m.start[i]+(m.end[i]-m.start[i])*w;
+        n.mesh->geometry()->getAttribute<float>("position")->needsUpdate();if(m.t>=1)n.morph.reset();
+    }
     // The region's material and coordinates on a node wholly inside it (the date line: its u unwrapped
     // by whole turns), else the body's; uv2 holds the global coordinates.
     void applyDetail(Node& n){
@@ -126,7 +152,7 @@ struct Terrain::Impl {
             mesh->castShadow=false;mesh->receiveShadow=true;mesh->renderOrder=0;
             auto& node=nodes[pack(b.key)];
             if(node.mesh){mesh->visible=node.mesh->visible;parent.remove(*node.mesh);node.mesh->geometry()->dispose();}else mesh->visible=false;
-            parent.add(mesh);node.mesh=mesh;node.lastUsed=frame;node.provisional=!b.complete;node.generation=b.generation;node.detailVersion=0;node.detailed=false;
+            parent.add(mesh);node.mesh=mesh;node.lastUsed=frame;node.provisional=!b.complete;node.generation=b.generation;node.detailVersion=0;node.detailed=false;node.morph.reset();
         }
     }
     const Shape& shape(const Key& k){const auto key=pack(k);if(const auto it=shapes.find(key);it!=shapes.end())return it->second;return shapes.emplace(key,shapeOf(k)).first->second;}
@@ -163,15 +189,18 @@ Terrain::Terrain(Object3D& parent,std::shared_ptr<Material> material,TerrainBody
 Terrain::~Terrain()=default;
 bool Terrain::update(const Vector3& camera,const Frustum* frustum,bool horizonCulling){
     const auto started=std::chrono::steady_clock::now();
-    auto& g=*impl_;++g.frame;g.adopt();
-    for(const auto& k:g.selected)if(auto* n=g.node(k))n->mesh->visible=false;
-    g.selected.clear();const Vec c=Vec{camera.x,camera.y,camera.z}*(1/g.body.scale);const double distance=c.length(); // In reference radii.
+    auto& g=*impl_;++g.frame;g.adopt();const double seconds=std::chrono::duration<double>(started-g.lastUpdate).count();g.lastUpdate=started;
+    std::unordered_set<std::uint64_t> shown;for(const auto& k:g.selected)if(auto* n=g.node(k)){n->mesh->visible=false;shown.insert(pack(k));}
+    const auto previous=std::move(g.selected);g.selected.clear();const Vec c=Vec{camera.x,camera.y,camera.z}*(1/g.body.scale);const double distance=c.length(); // In reference radii.
     bool covered=true;
     for(int f=0;f<6;++f){const Key root{f,0,0,0};if(!g.node(root)){g.request(root,0);covered=false;}}
     if(covered)for(int f=0;f<6;++f)g.visit({f,0,0,0},c,distance,horizonCulling,horizonCulling?frustum:nullptr);
     g.finest=0;g.solidAngle=0;
     const std::uint64_t generation=g.body.generation?g.body.generation():0;
+    std::unordered_set<std::uint64_t> now;for(const auto& k:g.selected)now.insert(pack(k));
+    for(const auto& k:previous)if(auto* n=g.node(k);n&&n->morph&&!now.count(pack(k))){n->morph->t=1;g.stepMorph(*n,0);} // Hidden mid-way: its own shape.
     for(const auto& k:g.selected){auto& n=*g.node(k);n.mesh->visible=true;g.finest=std::max(g.finest,k.level);if(n.detailVersion!=g.detailVersion)g.applyDetail(n);
+        if(n.morph)g.stepMorph(n,seconds);else if(!shown.count(pack(k))&&k.level&&shown.count(pack({k.face,k.level-1,k.x/2,k.y/2})))g.beginMorph(k,n);
         for(Key a=k;;){if(auto* up=g.node(a))up->lastUsed=g.frame;if(!a.level)break;a={a.face,a.level-1,a.x/2,a.y/2};} // Ancestors too: the selection descends through them.
         if(n.provisional&&n.generation<generation)g.request(k,k.level*1e3,true); // Finer data arrived.
         const auto& s=g.shape(k);g.solidAngle+=triangle(s.corners[0],s.corners[1],s.corners[2])+triangle(s.corners[0],s.corners[2],s.corners[3]);}

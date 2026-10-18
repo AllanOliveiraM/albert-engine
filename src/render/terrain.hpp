@@ -22,6 +22,7 @@ struct TerrainBody {
     double relief=10e3;   // Highest relief (m), for culling behind the horizon.
     TerrainHeights heights;
     std::function<std::uint64_t()> generation; // Data arrivals so far (provisional nodes rebuild after one).
+    double morphSeconds=.4; // Children replacing a drawn parent rise from its surface to theirs (no popping).
 };
 // The bodies' height sources (terrain_heights.cpp), from the visual pack's global height images.
 TerrainHeights earthTerrainHeights(const threepp::Image& global); // GEBCO, Copernicus GLO-30 from level 9, EGM2008 geoid.
@@ -29,7 +30,8 @@ TerrainHeights moonTerrainHeights(const threepp::Image& global);  // LOLA LDEM_1
 TerrainHeights marsTerrainHeights(const threepp::Image& global);  // MOLA MEGDR from level 7.
 // Level-of-detail terrain on a cube-sphere quadtree: nodes of 65×65 posts with skirts, built on a
 // worker and drawn with the body's material as children of its mesh, refined by distance to the
-// camera (CDLOD-style ranges); a parent stays until its four children are built. Positions are
+// camera (CDLOD-style ranges); a parent stays until its four children are built, which then morph
+// from its surface to their own. Positions are
 // radial in the mesh's local frame, as the globe's relief: scale × (1 + h / radius) × the direction.
 class Terrain {
 public:
