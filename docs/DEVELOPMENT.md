@@ -1,6 +1,6 @@
 # Desenvolvimento do Albert Engine
 
-Simulador astronômico em C++20, com threepp/OpenGL, Dear ImGui, JPL Horizons e ERFA.
+Simulador astronômico em C++20, com threepp (cena), WebGPU (wgpu-native), Dear ImGui, JPL Horizons e ERFA.
 
 O ponto de entrada fica em `src/main.cpp`. O módulo `src/render/` contém a janela,
 cena, interface e carregamento dos dados, expostos pela interface `application.hpp`.
@@ -141,8 +141,8 @@ necessárias na máquina de desenvolvimento.
 No Windows, as bibliotecas do projeto e o runtime C/C++ são vinculados estaticamente:
 o programa usa TLS/CA nativos do Windows e não exige Visual C++ Redistributable.
 No Linux, a pasta inclui as bibliotecas redistribuíveis detectadas, incluindo
-OpenSSL e o runtime C++. A glibc, certificados CA, servidor gráfico e driver OpenGL
->= 3.3 são fornecidos pela máquina de destino. Um build Linux exige glibc da mesma
+OpenSSL e o runtime C++. A glibc, certificados CA, servidor gráfico e driver Vulkan
+(ou lavapipe) são fornecidos pela máquina de destino. Um build Linux exige glibc da mesma
 versão ou mais recente que a usada para compilar; para distribuir amplamente,
 compile na distribuição mais antiga que pretende suportar. O CI usa Ubuntu 24.04
 como base; um build feito em Ubuntu 26.04 não promete funcionar em versões anteriores.
@@ -301,11 +301,12 @@ não grava arquivos de log.
 
 ## Visualização e precisão
 
-**Renderizador.** O Albert desenha a cena com WebGPU (wgpu-native v29: Vulkan no Linux, D3D12 ou
-Vulkan no Windows) por `src/gpu`, ou com o OpenGL do threepp (`--renderer=opengl`); se não houver
-adaptador WebGPU, cai sozinho para OpenGL. `ALBERT_GPU=high|low|software` escolhe o adaptador
-(padrão: alto desempenho; `software` é o llvmpipe). Os shaders GLSL dos materiais têm equivalentes
-WGSL em `src/render/webgpu_programs.cpp`, achados pelo nome do material (`albert:…`); os materiais
+**Renderizador.** O Albert desenha a cena só com WebGPU (wgpu-native v29: Vulkan no Linux, D3D12 ou
+Vulkan no Windows) por `src/gpu`; o caminho OpenGL do threepp foi removido em 18/10/2026. Sem
+nenhum adaptador (nem por software: WARP, lavapipe) o aplicativo explica e sai.
+`ALBERT_GPU=high|low|software` escolhe o adaptador (padrão: alto desempenho; `software` é o
+lavapipe/llvmpipe). Os materiais `ShaderMaterial` só nomeiam o programa WGSL em
+`src/render/webgpu_programs.cpp` (`albert:…`); os materiais
 embutidos (Basic, Phong, Standard) seguem a iluminação física do threepp (sem o π legado), com bump
 interpolado em f32, mapa de rugosidade, light map e sombra PCF do Sol. Profundidade em Z reverso
 (`depth32float`, infinito na perspectiva). Texturas grandes sobem em fatias de ~8 MB por quadro e os
@@ -398,7 +399,7 @@ com céu, objeto à frente do céu e solo.
 
 Terra elipsoidal WGS84, base global até 4K e blocos regionais de um mosaico 86400×43200, filtragem
 anisotrópica/mipmaps, antialiasing MSAA 4x, iluminação solar, reflexos oceânicos,
-luzes noturnas, camada de nuvens e, no caminho OpenGL, atmosfera por espalhamento simples Rayleigh/Mie
+luzes noturnas, camada de nuvens e, até a troca para WebGPU, atmosfera por espalhamento simples Rayleigh/Mie
 (8 amostras no raio da câmera; profundidade óptica solar consultada em uma
 tabela 256×128 calculada uma única vez com 128 amostras por raio; alturas de
 escala de 8/1,2 km). A tabela evita integrar um segundo raio a cada pixel.
@@ -468,14 +469,14 @@ No Windows, use `python tests/http_fixture.py build/windows/tests/Release/downlo
 Python 3 também reúne as partes dos assets no build Linux e executa o teste do
 pacote visual. No build Windows, a montagem usa PowerShell; Python habilita os
 testes opcionais e já está presente nos runners de CI.
-O `--smoke-test` consulta dados reais, cria uma janela OpenGL, renderiza
+O `--smoke-test` consulta dados reais, cria uma janela WebGPU, renderiza
 cinco quadros e encerra; precisa de internet e de uma sessão gráfica (ou Xvfb no
 Linux). Falha se as efemérides não puderem ser usadas. `--help` não precisa de rede.
 O workflow `.github/workflows/build.yml` compila e testa Linux e Windows.
 A biblioteca grande entra por Git LFS, inclusive no checkout do CI. CI não substitui teste visual em uma
 máquina Windows real.
 
-Com uma sessão OpenGL disponível, `build/linux/tests/visual_test --graphics`
+Com um adaptador WebGPU (o CI usa WARP e lavapipe), `build/linux/tests/visual_test webgpu`
 verifica órbitas atrás/à frente dos recortes da Terra e Lua, cobertura de tracejado
 subpixel, fronteiras sobre relevo de 6 km e oclusão no hemisfério oposto.
 No Windows, o executável correspondente fica em `build/windows/tests/Release/visual_test.exe`.
@@ -606,7 +607,7 @@ blocos de até 1 MiB, com teto de 8 MiB e orçamento suave de 2 ms por quadro.
 Alocação e geração de mipmaps recebem quadros separados. A malha/textura antiga
 continua sendo exibida até o novo conjunto estar pronto; câmera e UI permanecem
 operantes. O detalhe solar também usa essa fila. O orçamento não constitui um
-limite absoluto para o driver OpenGL; desempenho deve ser medido em GPU física.
+limite absoluto para o driver; desempenho deve ser medido em GPU física.
 
 Nuvens começam desligadas, sem consultas automáticas. Quando ativadas, recortes
 novos se misturam ao anterior com transição temporal, além da margem espacial.
@@ -672,7 +673,7 @@ durante a transição de remoção, evitando referências a texturas já substit
 `vector_layers` verifica WGS84, linha de data, precisão SI, validação atômica,
 visibilidade, limites e remoção de referências. `rpc_commands` testa o serviço
 real e distingue a visibilidade de objetos da visibilidade de camadas. O teste
-OpenGL verifica marcadores atrás/à frente de uma caixa, transição, precisão a
+visual verifica marcadores atrás/à frente de uma caixa, transição, precisão a
 1e11 m e linhas sobre relevo de 6 km, incluindo oclusão do lado oposto da Terra.
 
 
@@ -773,7 +774,7 @@ docker run --rm --user "$(id -u):$(id -g)" --entrypoint python3 \
   -v "$PWD:/work" -w /work albert-assets-builder scripts/reference-moon-shapes.py
 ```
 
-O teste OpenGL verifica seleção da malha, detalhe com fade, geometria preservada
+O teste visual verifica seleção da malha, detalhe com fade, geometria preservada
 e descarte de texturas. Os testes de geometria não certificam o alinhamento entre
 imagem e malha: em Mimas ele foi medido por `scripts/register-moon-map.py`
 (sombreamento sintético da malha contra o mosaico e crateras do Gazetteer);

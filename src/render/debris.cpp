@@ -17,13 +17,7 @@ albert::DebrisFields::DebrisFields(Scene& scene){
             positions.insert(positions.end(),{x*au,(z*.39777716f+y*.91748206f)*au,-(z*.91748206f-y*.39777716f)*au});
         }
         auto geometry=BufferGeometry::create();geometry->setAttribute("position",FloatBufferAttribute::create(std::move(positions),3));
-        auto material=ShaderMaterial::create();material->name="albert:debris";material->vertexShader=R"(
-            uniform float opacity;varying float alpha;
-            void main(){vec4 p=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*p;gl_PointSize=2.0;alpha=opacity;}
-        )";material->fragmentShader=R"(
-            varying float alpha;uniform vec3 ink;
-            void main(){float d=length(gl_PointCoord-vec2(.5));float coverage=1.0-smoothstep(.12,.5,d);if(coverage<.01)discard;gl_FragColor=vec4(ink,alpha*coverage);}
-        )";material->uniforms.emplace("opacity",Uniform(0.f));material->uniforms.emplace("ink",Uniform(layer==0?Vector3(.55f,.48f,.37f):Vector3(.34f,.45f,.54f)));
+        auto material=ShaderMaterial::create();material->name="albert:debris";material->uniforms.emplace("opacity",Uniform(0.f));material->uniforms.emplace("ink",Uniform(layer==0?Vector3(.55f,.48f,.37f):Vector3(.34f,.45f,.54f)));
         material->transparent=true;material->depthWrite=false;material->toneMapped=false;
         materials_[layer]=material;nodes_[layer]=Points::create(geometry,material);nodes_[layer]->frustumCulled=false;scene.add(nodes_[layer]);
     }

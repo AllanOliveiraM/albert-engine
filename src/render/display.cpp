@@ -7,7 +7,8 @@
 #include "gpu/window.hpp"
 #include "threepp/threepp.hpp"
 #include "threepp/canvas/Monitor.hpp"
-#include "threepp/extras/imgui/ImguiContext.hpp"
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <chrono>
@@ -17,10 +18,7 @@
 #include <imgui_impl_wgpu.h>
 using namespace threepp;
 struct albert::Display::Impl {
-    Backend backend;std::function<void()> draw;
-    // OpenGL.
-    std::unique_ptr<Canvas> canvas;std::unique_ptr<GLRenderer> renderer;std::unique_ptr<ImguiFunctionalContext> imgui;
-    // WebGPU.
+    std::function<void()> draw;
     std::unique_ptr<gpu::Window> window;std::unique_ptr<gpu::Context> context;std::unique_ptr<gpu::SceneRenderer> scene;std::unique_ptr<gpu::Atmosphere> earthAir,marsAir;
     WGPUCommandEncoder encoder=nullptr;WGPUTextureView target=nullptr;bool drawnTarget=false,styled=false;float dpi=1;
     void framebuffer(unsigned& w,unsigned& h)const{int x=0,y=0;glfwGetFramebufferSize(window->handle(),&x,&y);w=static_cast<unsigned>(std::max(x,1));h=static_cast<unsigned>(std::max(y,1));}
@@ -31,18 +29,8 @@ struct albert::Display::Impl {
         wgpuRenderPassEncoderEnd(p);wgpuRenderPassEncoderRelease(p);drawnTarget=true;
     }
 };
-albert::Display::Display(Backend backend,const std::string& title,WindowSize size,const std::filesystem::path& icon,std::function<void()> draw):impl_(std::make_unique<Impl>()){
-    auto& d=*impl_;d.backend=backend;d.draw=std::move(draw);
-    if(backend==Backend::opengl){
-        Canvas::Parameters p;p.title(title).antialiasing(4).size(size).favicon(icon);
-        d.canvas=std::make_unique<Canvas>(p);d.canvas->exitOnKeyEscape(false);d.renderer=std::make_unique<GLRenderer>(*d.canvas);
-        setWindowIcon(d.canvas->windowPtr(),icon);
-        d.renderer->toneMapping=ToneMapping::ACESFilmic;d.renderer->toneMappingExposure=1.05f;d.renderer->setPixelRatio(std::min(2.f,d.renderer->getTargetPixelRatio()));
-        d.renderer->shadowMap().enabled=true;d.renderer->shadowMap().type=ShadowMap::PFC;d.renderer->shadowMap().autoUpdate=false;
-        d.imgui=std::make_unique<ImguiFunctionalContext>(*d.canvas,[this]{if(impl_->draw)impl_->draw();});
-        d.canvas->onWindowResize([this](WindowSize s){impl_->renderer->setSize(s);});
-        return;
-    }
+albert::Display::Display(const std::string& title,WindowSize size,const std::filesystem::path& icon,std::function<void()> draw):impl_(std::make_unique<Impl>()){
+    auto& d=*impl_;d.draw=std::move(draw);
     d.window=std::make_unique<gpu::Window>(title,size.width(),size.height());setWindowIcon(d.window->handle(),icon);
     defineWebGpuPrograms();
     d.context=std::make_unique<gpu::Context>(d.window->handle());d.scene=std::make_unique<gpu::SceneRenderer>(*d.context);d.scene->exposure=1.05f;
@@ -53,26 +41,23 @@ albert::Display::Display(Backend backend,const std::string& title,WindowSize siz
     d.dpi=monitor::contentScale().first;
 }
 albert::Display::~Display(){
-    auto& d=*impl_;
-    if(d.backend==Backend::webgpu){ImGui_ImplWGPU_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();d.scene.reset();d.earthAir.reset();d.marsAir.reset();d.context.reset();d.window.reset();}
+    auto& d=*impl_;ImGui_ImplWGPU_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();d.scene.reset();d.earthAir.reset();d.marsAir.reset();d.context.reset();d.window.reset();
 }
-albert::Display::Backend albert::Display::backend()const{return impl_->backend;}
-PeripheralsEventSource& albert::Display::events(){return impl_->canvas?static_cast<PeripheralsEventSource&>(*impl_->canvas):*impl_->window;}
-GLRenderer* albert::Display::gl(){return impl_->renderer.get();}
-bool albert::Display::isOpen()const{return impl_->canvas?impl_->canvas->isOpen():impl_->window->isOpen();}
-void albert::Display::close(){if(impl_->canvas)impl_->canvas->close();else impl_->window->close();}
-float albert::Display::aspect()const{return impl_->canvas?impl_->canvas->aspect():impl_->window->aspect();}
-void albert::Display::onResize(std::function<void(WindowSize)> f){if(impl_->canvas)impl_->canvas->onWindowResize(std::move(f));else impl_->window->onResize(std::move(f));}
-void albert::Display::setShadows(bool enabled){if(impl_->renderer)impl_->renderer->shadowMap().enabled=enabled;else impl_->scene->shadows=enabled;}
-void albert::Display::setExposure(float value){if(impl_->renderer)impl_->renderer->toneMappingExposure=value;else impl_->scene->exposure=value;}
+PeripheralsEventSource& albert::Display::events(){return *impl_->window;}
+bool albert::Display::isOpen()const{return impl_->window->isOpen();}
+void albert::Display::close(){impl_->window->close();}
+float albert::Display::aspect()const{return impl_->window->aspect();}
+void albert::Display::onResize(std::function<void(WindowSize)> f){impl_->window->onResize(std::move(f));}
+void albert::Display::setShadows(bool enabled){impl_->scene->shadows=enabled;}
+void albert::Display::setExposure(float value){impl_->scene->exposure=value;}
 void albert::Display::setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio){
-    auto& d=*impl_;if(!d.scene)return;auto& a=d.scene->air;a.clouds=clouds;a.cloudKm=cloudKm;a.cloudShadow=clouds?cloudOpacity:0.f;a.surfaceWind=surfaceWind;a.polarRatio=polarRatio;}
+    auto& d=*impl_;auto& a=d.scene->air;a.clouds=clouds;a.cloudKm=cloudKm;a.cloudShadow=clouds?cloudOpacity:0.f;a.surfaceWind=surfaceWind;a.polarRatio=polarRatio;}
 void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength,float groundKm,bool mars){
-    auto& d=*impl_;if(!d.scene)return;auto& air=mars?d.marsAir:d.earthAir; // Each precomputed once, when first needed.
+    auto& d=*impl_;auto& air=mars?d.marsAir:d.earthAir; // Each precomputed once, when first needed.
     if(!air&&body&&strength>0){air=std::make_unique<gpu::Atmosphere>(*d.context,mars?gpu::marsAtmosphere():gpu::earthAtmosphere());d.scene->airSteps=d.context->software()?1:4;}
     auto weather=d.scene->air;d.scene->air={air.get(),body,kmPerUnit,strength,groundKm,weather.clouds,weather.cloudKm,weather.cloudShadow,weather.surfaceWind,weather.polarRatio};
 }
-float albert::Display::exposure()const{return impl_->renderer?impl_->renderer->toneMappingExposure:impl_->scene->exposure;}
+float albert::Display::exposure()const{return impl_->scene->exposure;}
 namespace {
 // ALBERT_FRAME_STATS=1: mean, p99 and worst frame time every 300 frames (stdout).
 double workMs=0,presentMs=0,gpuMs=-1; // Per-frame parts on WebGPU: app work and recording; acquire, submit and present; scene pass on the GPU.
@@ -88,7 +73,6 @@ void frameStats(){
 }
 bool albert::Display::frame(const std::function<void()>& work){
     auto& d=*impl_;frameStats();
-    if(d.canvas)return d.canvas->animateOnce(work);
     if(!d.window->isOpen())return false;
     d.window->poll();
     const auto t0=std::chrono::steady_clock::now();
@@ -104,17 +88,15 @@ bool albert::Display::frame(const std::function<void()>& work){
     workMs=std::chrono::duration<double,std::milli>(t2-t1).count();presentMs=std::chrono::duration<double,std::milli>((t1-t0)+(t3-t2)).count();
     return d.window->isOpen();
 }
-void albert::Display::clear(){auto& d=*impl_;if(d.renderer)d.renderer->clear();else if(d.encoder)d.pass(WGPULoadOp_Clear);}
+void albert::Display::clear(){auto& d=*impl_;if(d.encoder)d.pass(WGPULoadOp_Clear);}
 void albert::Display::render(Scene& scene,Camera& camera){
-    auto& d=*impl_;if(d.renderer){d.renderer->render(scene,camera);return;}
-    if(!d.encoder)return;
+    auto& d=*impl_;if(!d.encoder)return;
     unsigned w,h;d.framebuffer(w,h);const auto t0=std::chrono::steady_clock::now();d.scene->render(scene,camera,d.target,w,h,d.encoder);d.drawnTarget=true;
     static const bool debug=std::getenv("ALBERT_TERRAIN_DEBUG")!=nullptr;
     if(debug){static int n=0;static double sum=0;sum+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();if(++n%60==0){std::fprintf(stderr,"scene render cpu %.2f ms, %u draws\n",sum/60,d.scene->drawn());sum=0;}}
 }
 void albert::Display::ui(){
-    auto& d=*impl_;if(d.imgui){d.imgui->render();return;}
-    if(!d.encoder)return;
+    auto& d=*impl_;if(!d.encoder)return;
     if(!d.styled){ImGuiStyle& style=ImGui::GetStyle();style=ImGuiStyle();style.FontScaleDpi=d.dpi;style.ScaleAllSizes(d.dpi);d.styled=true;} // As threepp's ImGui context.
     ImGui_ImplWGPU_NewFrame();ImGui_ImplGlfw_NewFrame();ImGui::NewFrame();if(d.draw)d.draw();ImGui::Render();
     if(!d.drawnTarget)d.pass(WGPULoadOp_Clear);

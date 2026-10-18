@@ -5,20 +5,16 @@
 #include <functional>
 #include <memory>
 #include <string>
-namespace threepp {class Scene;class Camera;class GLRenderer;class Object3D;class Texture;}
+namespace threepp {class Scene;class Camera;class Object3D;class Texture;}
 namespace albert {
-// Window, scene renderer and ImGui for one graphics backend: WebGPU (src/gpu, the default) or
-// threepp's OpenGL renderer (--renderer=opengl, and the fallback without a WebGPU adapter). `draw` draws the
-// ImGui windows each frame.
+// Window, WebGPU scene renderer (src/gpu) and ImGui. `draw` draws the ImGui windows each frame.
+// Throws when no WebGPU adapter exists, not even a software one.
 class Display {
 public:
-    enum class Backend {opengl,webgpu};
-    Display(Backend backend,const std::string& title,threepp::WindowSize size,const std::filesystem::path& icon,std::function<void()> draw);
+    Display(const std::string& title,threepp::WindowSize size,const std::filesystem::path& icon,std::function<void()> draw);
     ~Display();
     Display(const Display&)=delete;Display& operator=(const Display&)=delete;
-    [[nodiscard]] Backend backend()const;
     threepp::PeripheralsEventSource& events();
-    threepp::GLRenderer* gl(); // OpenGL only (texture uploads, shadow maps); null on WebGPU.
     [[nodiscard]] bool isOpen()const;
     void close();
     [[nodiscard]] float aspect()const;
@@ -28,14 +24,13 @@ public:
     void render(threepp::Scene& scene,threepp::Camera& camera); // In work.
     void ui();                                     // In work, after the scene.
     void setExposure(float value);
-    void setShadows(bool enabled); // Sun shadow map (OpenGL: the renderer's; WebGPU: every frame).
+    void setShadows(bool enabled); // Sun shadow map, every frame.
     [[nodiscard]] float exposure()const;
-    // WebGPU: Earth's air around `body` (local frame in units of kmPerUnit km) at strength 0-1 —
-    // sky, aerial perspective, sunlight and sky light; its tables build over the first frames.
-    // OpenGL: no effect (the atmosphere shell's own shader).
-    // The air this frame (WebGPU): the Earth's, or Mars's when `mars`; groundKm as SceneRenderer::Air.
+    // The air this frame around `body` (local frame in units of kmPerUnit km) at strength 0-1 — sky,
+    // aerial perspective, sunlight and sky light: the Earth's, or Mars's when `mars`; its tables
+    // build over the first frames; groundKm as SceneRenderer::Air.
     void setAir(const threepp::Object3D* body,float kmPerUnit,float strength,float groundKm=0,bool mars=false);
-    // The weather the air shows (WebGPU; SceneRenderer::Air): cloud shadows, the sea's wind roughness.
+    // The weather the air shows (SceneRenderer::Air): cloud shadows, the sea's wind roughness.
     void setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio=1);
 private:
     struct Impl;std::unique_ptr<Impl> impl_;

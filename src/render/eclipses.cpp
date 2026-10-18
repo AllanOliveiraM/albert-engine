@@ -18,19 +18,6 @@ double albert::solarVisibility(core::Vector point,core::Vector sun,double sunRad
     const double area=a*a*std::acos(u)+b*b*std::acos(v)-.5*std::sqrt(std::max(0.,(-d+a+b)*(d+a-b)*(d-a+b)*(d+a+b)));
     return std::clamp(1.-area/(std::numbers::pi*a*a),0.,1.);
 }
-const char* albert::eclipseShader(){return R"(
-  float visibleSun(vec3 point,vec3 sun,float sunRadius,vec3 blocker,float radius){
-    vec3 s=sun-point,o=blocker-point;float ds=length(s),dO=length(o);
-    if(ds<=sunRadius||dO<=radius||dO>=ds)return 1.;
-    float a=asin(clamp(sunRadius/ds,0.,1.)),b=asin(clamp(radius/dO,0.,1.));
-    float d=atan(length(cross(s/ds,o/dO)),dot(s/ds,o/dO));
-    if(d>=a+b)return 1.;
-    if(d<=abs(a-b))return clamp(1.-min(a*a,b*b)/(a*a),0.,1.);
-    float u=clamp((d*d+a*a-b*b)/(2.*d*a),-1.,1.),v=clamp((d*d+b*b-a*a)/(2.*d*b),-1.,1.);
-    float area=a*a*acos(u)+b*b*acos(v)-.5*sqrt(max(0.,(-d+a+b)*(d+a-b)*(d-a+b)*(d+a+b)));
-    return clamp(1.-area/(3.14159265359*a*a),0.,1.);
-  }
-)";}
 namespace {
 albert::core::Vector vector(const Vector3& v){return {v.x,v.y,v.z};}
 std::shared_ptr<ShaderMaterial> material(bool lunar){
@@ -39,29 +26,6 @@ std::shared_ptr<ShaderMaterial> material(bool lunar){
     m->uniforms={{"sunPosition",Uniform(Vector3())},{"blockerPosition",Uniform(Vector3())},{"blockerRadius",Uniform(lunar?1.f:float(1737.4/6378.137))},
         {"lunar",Uniform(lunar?1.f:0.f)},{"alphaMap",Uniform(static_cast<Texture*>(nullptr))},{"surfaceMap",Uniform(static_cast<Texture*>(nullptr))},
         {"hasAlpha",Uniform(0.f)},{"hasSurface",Uniform(0.f)},{"cutoff",Uniform(.5f)}};
-    m->vertexShader=R"(varying vec3 eclipsePoint;varying vec2 eclipseUv;void main(){eclipsePoint=(modelMatrix*vec4(position,1.)).xyz;eclipseUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);})";
-    m->fragmentShader=std::string(albert::eclipseShader())+R"(
-      varying vec3 eclipsePoint;varying vec2 eclipseUv;uniform vec3 sunPosition,blockerPosition;
-      uniform float blockerRadius,lunar,hasAlpha,hasSurface,cutoff;uniform sampler2D alphaMap,surfaceMap;
-      void main(){
-        float alpha=1.;if(hasAlpha>.5)alpha*=texture2D(alphaMap,eclipseUv).g;if(hasSurface>.5)alpha*=texture2D(surfaceMap,eclipseUv).a;
-        if(alpha<cutoff)discard;
-        float light=visibleSun(eclipsePoint,sunPosition,695700./6378.137,blockerPosition,blockerRadius);
-        vec3 transmission=vec3(max(light,.0002));
-        if(lunar>.5){
-          vec3 s=normalize(sunPosition-eclipsePoint),o=normalize(blockerPosition-eclipsePoint);
-          float separation=atan(length(cross(s,o)),dot(s,o));
-          float sunAngle=asin(min(1.,(695700./6378.137)/length(sunPosition-eclipsePoint)));
-          float earthAngle=asin(min(1.,blockerRadius/length(blockerPosition-eclipsePoint)));
-          float depth=clamp((earthAngle-sunAngle-separation)/max(earthAngle-sunAngle,.000001),0.,1.);
-          // A display model of filtered/refracted terrestrial sunlight, not a
-          // prediction of dust, aerosol content or Danjon brightness.
-          transmission+=vec3(.035,.0035,.0007)*(.25+.75*(1.-depth))*pow(1.-light,8.);
-        }
-        // Multiply the encoded framebuffer by an encoded transmission ratio.
-        gl_FragColor=vec4(pow(clamp(transmission,0.,1.),vec3(1./2.2)),1.);
-      }
-    )";
     return m;
 }
 }

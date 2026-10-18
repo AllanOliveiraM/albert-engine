@@ -96,81 +96,10 @@ void geodeticEarthUV(Mesh& body) {
     uv->needsUpdate();
 }
 
-// Optical depth of the exponential atmosphere. A small table replaces the
-// nested solar ray march in every fragment; generated once, no network/asset.
-std::shared_ptr<Texture> opticalDepthTexture() {
-    constexpr unsigned width = 256, height = 128, steps = 128;
-    constexpr double radius = 6378137., top = radius + 80000.;
-    std::vector<float> pixels(width * height * 4, 0.f);
-    for (unsigned y = 0; y < height; ++y) {
-        const double altitude = std::pow(static_cast<double>(y) / (height-1), 2) * 80000.;
-        const double r = radius + altitude;
-        for (unsigned x = 0; x < width; ++x) {
-            const double mu = 2. * x / (width-1) - 1.;
-            double end = -r*mu + std::sqrt(r*r*mu*mu + top*top - r*r);
-            const double ground = r*r*mu*mu + radius*radius - r*r;
-            if (mu < 0 && ground >= 0) end = std::min(end, -r*mu - std::sqrt(ground));
-            double rayleigh = 0, mie = 0;
-            const double step = end / steps;
-            for (unsigned i = 0; i < steps; ++i) {
-                const double t = (i+.5) * step;
-                const double h = std::max(0., std::sqrt(r*r+t*t+2.*r*t*mu) - radius);
-                rayleigh += std::exp(-h/8000.) * step;
-                mie += std::exp(-h/1200.) * step;
-            }
-            const auto index = 4 * (y * width + x);
-            pixels[index] = static_cast<float>(rayleigh);
-            pixels[index+1] = static_cast<float>(mie);
-        }
-    }
-    auto result = DataTexture::create(ImageData(std::move(pixels)), width, height);
-    result->type = Type::Float;
-    result->minFilter = result->magFilter = Filter::Linear;
-    result->colorSpace = ColorSpace::NoColorSpace;
-    return result;
-}
 
-constexpr auto surfaceVertex = R"(
-    varying vec2 vUv;
-    varying vec3 vLocalPosition;
-    varying vec3 vLocalNormal;
-    varying vec3 vWorldNormal;
-    varying vec3 vWorldPosition;
-    void main() {
-        vUv = uv;
-        vLocalPosition = position;
-        vLocalNormal = normal;
-        vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-        vWorldNormal = normalize(mat3(modelMatrix) * normal);
-        gl_Position = projectionMatrix * viewMatrix * vec4(vWorldPosition, 1.0);
-    }
-)";
 
-// A regional mask replaces, rather than stacks on, the global clouds.
-// Unknown pixels and the tile boundary retain the last valid global image.
-constexpr auto cloudSampling = R"(
-    uniform sampler2D cloudMap, detailMap, previousDetailMap;
-    uniform vec4 detailBounds, previousDetailBounds;
-    uniform float detailEnabled, previousDetailEnabled, detailBlend;
-    float cloudCrop(sampler2D image,vec4 bounds,float enabled,vec2 uv,float global) {
-        vec2 local = vec2(fract(uv.x-bounds.x), uv.y-bounds.y) / bounds.zw;
-        if (enabled < 0.5 || any(lessThan(local,vec2(0.0))) || any(greaterThan(local,vec2(1.0)))) return global;
-        vec4 detail = texture2D(image,local);
-        vec2 edge = min(local,1.0-local);
-        float weight = smoothstep(0.0,0.04,min(edge.x,edge.y))*detail.a;
-        return mix(global,detail.g,weight);
-    }
-    float cloudDensity(vec2 uv) {
-        float global=texture2D(cloudMap,uv).g;
-        return mix(cloudCrop(previousDetailMap,previousDetailBounds,previousDetailEnabled,uv,global),
-            cloudCrop(detailMap,detailBounds,detailEnabled,uv,global),detailBlend);
-    }
-)";
-
-std::shared_ptr<ShaderMaterial> overlay(const char* fragment) {
+std::shared_ptr<ShaderMaterial> overlay() {
     auto material = ShaderMaterial::create();
-    material->vertexShader = surfaceVertex;
-    material->fragmentShader = fragment;
     material->uniforms.emplace("solarDirection", Uniform(Vector3(1, 0, 0)));
     material->transparent = true;
     material->depthWrite = false;
@@ -250,63 +179,16 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     moonTerrainMaterial_->specular=Color(0x050505);moonTerrainMaterial_->shininess=3;moonTerrainMaterial_->alphaTest=.5f;
 
     sunMaterial_ = ShaderMaterial::create();sunMaterial_->name="albert:sun";
-    sunMaterial_->vertexShader = surfaceVertex;
     sunMaterial_->uniforms.emplace("sunMap", Uniform(static_cast<Texture*>(nullptr)));
-    sunMaterial_->fragmentShader = R"(
-        uniform sampler2D sunMap;
-        varying vec3 vLocalNormal;
-        varying vec3 vWorldNormal;
-        varying vec3 vWorldPosition;
-        void main() {
-            vec3 n = normalize(vLocalNormal);
-            // Orthographic HMI continuum snapshot, limb darkening removed by HMIIF.
-            // Only one hemisphere was observed. The far side is neutral quiet Sun.
-            vec2 photoUv = vec2(0.5) + n.xy * 0.4625;
-            vec3 photo = texture2D(sunMap, photoUv).rgb;
-            float intensity = clamp(dot(photo, vec3(0.2126, 0.7152, 0.0722)) / 0.74, 0.05, 1.1);
-            intensity = mix(1.0, intensity, smoothstep(0.0, 0.65, n.z));
-            float mu = max(0.0, dot(normalize(vWorldNormal), normalize(cameraPosition - vWorldPosition)));
-            // Visible continuum, approximately 5772 K; display exposure is visual.
-            vec3 surface = vec3(1.0, 0.96, 0.88) * intensity * (0.4 + 0.6 * mu);
-            gl_FragColor = vec4(surface, 1.0);
-            #include <encodings_fragment>
-        }
-    )";
     sunMaterial_->toneMapped = false;
     sun = Mesh::create(SphereGeometry::create(static_cast<float>(695700.0 / 6378.137), 256, 128), sunMaterial_);
     scene.add(sun);
-    auto coronaMaterial = overlay(R"(
-        varying vec3 vWorldNormal;
-        varying vec3 vWorldPosition;
-        void main() {
-            float mu = abs(dot(normalize(vWorldNormal), normalize(cameraPosition - vWorldPosition)));
-            float impact = sqrt(max(0.0, 1.0 - mu*mu)) * 1.15;
-            float glow = exp(-max(0.0, impact - 1.0) * 24.0) * (1.0 - smoothstep(1.04, 1.15, impact));
-            gl_FragColor = vec4(vec3(1.0, 0.94, 0.83), glow * 0.10);
-            #include <encodings_fragment>
-        }
-    )");
+    auto coronaMaterial = overlay();
     coronaMaterial->side = Side::Back;coronaMaterial->name="albert:corona";
     coronaMaterial->toneMapped = false;
     sun->add(Mesh::create(SphereGeometry::create(static_cast<float>(695700.0 / 6378.137 * 1.15), 96, 48), coronaMaterial));
 
     cloudMaterial_ = ShaderMaterial::create();cloudMaterial_->name="albert:clouds";
-    cloudMaterial_->vertexShader = surfaceVertex;
-    cloudMaterial_->fragmentShader = std::string(cloudSampling) + eclipseShader() + R"(
-        uniform vec3 solarDirection, moonPosition, eclipseSunPosition;
-        uniform float eclipseEnabled, visibility;
-        varying vec2 vUv;
-        varying vec3 vWorldNormal, vWorldPosition;
-        void main() {
-            float density = cloudDensity(vUv);
-            vec3 normal = normalize(vWorldNormal);
-            float light = max(0.0,dot(normal,solarDirection));
-            float transmission=mix(1.,visibleSun(vWorldPosition,eclipseSunPosition,695700./6378.137,moonPosition,1737.4/6378.137),eclipseEnabled);
-            gl_FragColor = vec4(vec3(1.0,0.98,0.95)*(0.003+2.4*light*transmission),density*0.88*visibility);
-            #include <tonemapping_fragment>
-            #include <encodings_fragment>
-        }
-    )";
     cloudMaterial_->uniforms.emplace("solarDirection",Uniform(Vector3(1,0,0)));
     cloudMaterial_->uniforms.emplace("moonPosition",Uniform(Vector3(0,0,60)));
     cloudMaterial_->uniforms.emplace("eclipseSunPosition",Uniform(Vector3(0,0,23455)));
@@ -319,34 +201,8 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     clouds_->renderOrder = 3;
     earth->add(clouds_);
 
-    nightMaterial_ = overlay(R"(
-        uniform sampler2D nightMap, nightDetailMap;
-        uniform vec4 nightDetailBounds;
-        uniform float nightDetailEnabled;
-        uniform float cloudOpacity, visibility;
-        uniform vec3 solarDirection;
-        varying vec2 vUv;
-        varying vec3 vWorldNormal;
-        void main() {
-            float night = 1.0 - smoothstep(-0.12, 0.015, dot(normalize(vWorldNormal), solarDirection));
-            float emission = max(0.0, texture2D(nightMap, vUv).r - 0.008);
-            vec2 regionalUv=vec2(fract(vUv.x-nightDetailBounds.x),vUv.y-nightDetailBounds.y)/nightDetailBounds.zw;
-            if(nightDetailEnabled>0.5 && all(greaterThanEqual(regionalUv,vec2(0.0))) && all(lessThanEqual(regionalUv,vec2(1.0)))) {
-                vec4 sample=texture2D(nightDetailMap,regionalUv);
-                // Suppress blue ocean/background; keep the observed city signal.
-                float detailed=max(0.0,min(sample.r,sample.g)-sample.b*0.65-0.008)*1.6;
-                vec2 edge=min(regionalUv,1.0-regionalUv);
-                emission=mix(emission,detailed,smoothstep(0.0,0.04,min(edge.x,edge.y))*sample.a);
-            }
-            // Black Marble contains lights on black, no blue ocean emission.
-            vec3 lights = vec3(1.0, 0.69, 0.32) * pow(emission, 1.3);
-            float transmission = exp(-4.5 * cloudDensity(vUv) * cloudOpacity);
-            gl_FragColor = vec4(lights * night * transmission * 1.8, visibility);
-            #include <tonemapping_fragment>
-            #include <encodings_fragment>
-        }
-    )");
-    nightMaterial_->fragmentShader = std::string(cloudSampling) + nightMaterial_->fragmentShader;nightMaterial_->name="albert:night";
+    nightMaterial_ = overlay();
+    nightMaterial_->name="albert:night";
     nightMaterial_->uniforms.emplace("nightDetailMap",Uniform(static_cast<Texture*>(nullptr)));
     nightMaterial_->uniforms.emplace("nightDetailBounds",Uniform(Vector4(0,0,1,1)));
     nightMaterial_->uniforms.emplace("nightDetailEnabled",Uniform(0.f));
@@ -368,69 +224,8 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     night_->renderOrder = 2;
     earth->add(night_);
 
-    atmosphereMaterial_ = overlay(R"(
-        uniform vec3 localCamera;
-        uniform float visibility;
-        uniform vec3 localSun;
-        uniform sampler2D opticalDepthMap;
-        varying vec3 vLocalPosition;
-        const float outerRadius = 1.012543;
-        const float metres = 6378137.0;
-        const vec3 betaR = vec3(5.802e-6, 13.558e-6, 33.100e-6);
-        const vec3 betaM = vec3(21.0e-6);
-        vec2 sphere(vec3 origin, vec3 ray, float radius) {
-            float b = dot(origin, ray);
-            float d = b*b - dot(origin, origin) + radius*radius;
-            if (d < 0.0) return vec2(1e20, -1e20);
-            float root = sqrt(d);
-            return vec2(-b-root, -b+root);
-        }
-        vec2 density(vec3 p) {
-            float h = max(0.0, (length(p) - 1.0) * metres);
-            return exp(-h / vec2(8000.0, 1200.0));
-        }
-        void main() {
-            vec3 ray = normalize(vLocalPosition - localCamera);
-            vec2 air = sphere(localCamera, ray, outerRadius);
-            float begin = max(air.x, 0.0), end = air.y;
-            vec2 ground = sphere(localCamera, ray, 1.0);
-            if (ground.x > 0.0 && ground.x < end) end = ground.x;
-            if (end <= begin) discard;
-            float stepLength = (end-begin) / 8.0;
-            vec2 optical = vec2(0.0);
-            vec3 sumR = vec3(0.0), sumM = vec3(0.0);
-            for (int i = 0; i < 8; ++i) {
-                vec3 p = localCamera + ray * (begin + (float(i)+0.5) * stepLength);
-                vec2 segment = density(p) * stepLength * metres;
-                optical += segment * 0.5;
-                vec2 blocked = sphere(p, localSun, 1.0);
-                if (blocked.x <= 0.0 || blocked.y <= 0.0) {
-                    float muSun = dot(normalize(p), localSun);
-                    float altitude = max(0.0, (length(p)-1.0)*metres);
-                    vec2 lookup = vec2(muSun*0.5+0.5, sqrt(clamp(altitude/80000.0,0.0,1.0)));
-                    // Map endpoints to texel centres, preserving the horizon.
-                    lookup = (lookup * vec2(255.0,127.0) + 0.5) / vec2(256.0,128.0);
-                    vec2 sunlight = texture2D(opticalDepthMap, lookup).rg;
-                    vec2 depth = optical + sunlight;
-                    vec3 attenuation = exp(-betaR*depth.x - betaM*1.1*depth.y);
-                    sumR += attenuation * segment.x;
-                    sumM += attenuation * segment.y;
-                }
-                optical += segment * 0.5;
-            }
-            float mu = dot(ray, localSun);
-            float phaseR = 0.0596831 * (1.0 + mu*mu);
-            const float g = 0.76;
-            float phaseM = 0.0795775 * (1.0-g*g) / pow(max(0.01, 1.0+g*g-2.0*g*mu), 1.5);
-            // Single scattering, finite solar disc/multiple scattering omitted.
-            vec3 radiance = 2.5 * (betaR * phaseR * sumR + betaM * phaseM * sumM);
-            gl_FragColor = vec4(radiance, visibility);
-            #include <tonemapping_fragment>
-            #include <encodings_fragment>
-        }
-    )");
-    opticalDepthTexture_ = opticalDepthTexture();atmosphereMaterial_->name="albert:atmosphere";
-    atmosphereMaterial_->uniforms.emplace("opticalDepthMap", Uniform(opticalDepthTexture_.get()));
+    atmosphereMaterial_ = overlay();
+    atmosphereMaterial_->name="albert:atmosphere";
     atmosphereMaterial_->uniforms.emplace("localCamera", Uniform(Vector3()));
     atmosphereMaterial_->uniforms.emplace("localSun", Uniform(Vector3(1,0,0)));
     atmosphereMaterial_->uniforms.emplace("visibility",Uniform(1.f));
@@ -480,7 +275,8 @@ void albert::PlanetVisuals::replaceAssets(DecodedAssets assets) {
         while(!stop.stop_requested())try {
             if(!albert::providers::copernicusDem().fetchMissing(demProgress_)&&!albert::providers::planetaryRelief().fetchMissing(demProgress_))std::this_thread::sleep_for(std::chrono::milliseconds(200));
         } catch(const std::exception& e) {
-            if(demProgress_.cancelled)return;std::cerr<<"Relevo Copernicus: "<<e.what()<<std::endl;
+            if(demProgress_.cancelled)return;
+            std::cerr<<"Relevo (Copernicus/PDS): "<<e.what()<<std::endl;
             for(int i=0;i<150&&!stop.stop_requested();++i)std::this_thread::sleep_for(std::chrono::milliseconds(200)); // 30 s before the next try.
         }
     });
@@ -547,8 +343,8 @@ void albert::PlanetVisuals::stageRegionalImages(RegionalImages images) {
     for(const auto& item:images.gpu) if(item) uploads_.add(item);
     uploadingRegion_=std::move(images);
 }
-void albert::PlanetVisuals::updateUploads(GLRenderer* renderer) {
-    uploads_.tick(renderer);
+void albert::PlanetVisuals::updateUploads() {
+    uploads_.tick();
     if(!uploads_.active() && uploadingRegion_) {
         auto images=std::move(*uploadingRegion_);uploadingRegion_.reset();setRegionalImages(std::move(images));
     }
@@ -833,27 +629,6 @@ std::shared_ptr<Points> albert::makeStarField(const std::filesystem::path& catal
     material->depthWrite = false;
     material->toneMapped = false;
     material->uniforms.emplace("years", Uniform(0.f));
-    material->vertexShader = R"(
-        attribute float pointSize;
-        attribute vec3 motion;
-        uniform float years;
-        varying vec3 vColor;
-        void main() {
-            vColor = color;
-            gl_PointSize = pointSize;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(normalize(position + motion * years) * 80000.0, 1.0);
-        }
-    )";
-    material->fragmentShader = R"(
-        varying vec3 vColor;
-        void main() {
-            float r = length(gl_PointCoord - 0.5) * 2.0;
-            float alpha = 1.0 - smoothstep(0.2, 1.0, r);
-            if (alpha < 0.01) discard;
-            gl_FragColor = vec4(vColor, alpha);
-            #include <encodings_fragment>
-        }
-    )";
     auto points = Points::create(geometry, material);
     points->frustumCulled = false;
     setStarEpoch(*points, jdTDB);

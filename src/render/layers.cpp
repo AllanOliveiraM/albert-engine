@@ -3,23 +3,8 @@
 #include "animation.hpp"
 using namespace threepp;
 namespace {
-std::shared_ptr<ShaderMaterial> style(bool points,bool surface){
-    auto m=albert::borderMaterial();
-    if(!surface){auto& shader=m->vertexShader;const auto start=shader.find("        vec3 surface(");const auto end=shader.find("        void main()",start);shader.replace(start,end-start,"        vec3 surface(vec3 point){return point;}\n");}
-    if(points){m->name="albert:marker";
-        auto& shader=m->vertexShader;shader="attribute vec2 markerCorner; noperspective varying vec2 vMarker;\n"+shader;shader.resize(shader.find("        void main()"));shader+=R"(
-        void main(){vMarker=markerCorner;vec4 p=modelViewMatrix*vec4(surface(position),1.0);gl_Position=projectionMatrix*p;
-            gl_Position.xy+=markerCorner*widthPixels/viewport*gl_Position.w;
-            if(p.z>-nearClip)gl_Position=vec4(2,2,2,1);
-        })";
-        m->fragmentShader=R"(
-        uniform vec3 lineColor;uniform float visibility;noperspective varying vec2 vMarker;
-        void main(){float radius=length(vMarker);float edge=max(fwidth(radius),0.01);float coverage=1.0-smoothstep(1.0-edge,1.0,radius);if(coverage<=0.0)discard;
-            gl_FragColor=vec4(lineColor,coverage*visibility);
-            #include <encodings_fragment>
-        })";
-    }
-    return m;
+std::shared_ptr<ShaderMaterial> style(bool points){ // Borders' lines, or markers (screen-space quads); clampSurface sets the surface.
+    auto m=albert::borderMaterial();if(points)m->name="albert:marker";return m;
 }
 }
 void albert::VectorLayers::release(Visual& v){scene_.remove(*v.mesh);v.mesh->geometry()->dispose();v.material->dispose();}
@@ -33,7 +18,7 @@ void albert::VectorLayers::update(const core::Scene& registry,const SceneObjects
         for(std::size_t s=0;s<side.size()/6;++s)for(int j=0;j<6;++j){side[s*6+j]=signs[j]*(ends[j]?-1.f:1.f);time[s*6+j]=float(ends[j]);nextTime[s*6+j]=float(1-ends[j]);corners[(s*6+j)*2]=marker[j*2];corners[(s*6+j)*2+1]=marker[j*2+1];}
         geometry->setAttribute("position",FloatBufferAttribute::create(std::move(positions),3));geometry->setAttribute("nextPosition",FloatBufferAttribute::create(std::move(next),3));geometry->setAttribute("lineSide",FloatBufferAttribute::create(std::move(side),1));geometry->setAttribute("orbitTime",FloatBufferAttribute::create(std::move(time),1));geometry->setAttribute("nextTime",FloatBufferAttribute::create(std::move(nextTime),1));if(points)geometry->setAttribute("markerCorner",FloatBufferAttribute::create(std::move(corners),2));
         geometry->getAttribute<float>("position")->setUsage(DrawUsage::Dynamic);geometry->getAttribute<float>("nextPosition")->setUsage(DrawUsage::Dynamic);
-        auto material=style(points,l.frame==core::LayerFrame::EarthSurface);material->uniforms.at("clampSurface").setValue(l.frame==core::LayerFrame::EarthSurface?1.f:0.f);material->uniforms.at("surfaceOffset").setValue(static_cast<float>(l.clearanceMeters/core::earthRadiusMeters));material->uniforms.at("widthPixels").setValue(l.widthPixels);material->uniforms.at("lineColor").setValue(Color(l.color));
+        auto material=style(points);material->uniforms.at("clampSurface").setValue(l.frame==core::LayerFrame::EarthSurface?1.f:0.f);material->uniforms.at("surfaceOffset").setValue(static_cast<float>(l.clearanceMeters/core::earthRadiusMeters));material->uniforms.at("widthPixels").setValue(l.widthPixels);material->uniforms.at("lineColor").setValue(Color(l.color));
         auto mesh=Mesh::create(geometry,material);mesh->frustumCulled=false;mesh->renderOrder=2;scene_.add(mesh);visuals_.emplace(id,Visual{l,mesh,material,0});visuals_.at(id).anchorInstance=l.anchor.empty()?0:registry.get(l.anchor).instance;
     }
     for(auto i=visuals_.begin();i!=visuals_.end();){auto& v=i->second;const auto found=registry.layers().find(i->first);const bool alive=found!=registry.layers().end();bool visible=alive&&found->second.visible;

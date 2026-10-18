@@ -15,66 +15,6 @@ std::shared_ptr<Texture> colorTexture(Image image){std::vector<Image> images;ima
 std::shared_ptr<Texture> heightTexture(Image image,bool global=false){auto t=DataTexture::create(ImageData(std::move(image.data<float>())),image.width(),image.height());t->type=Type::Float;t->minFilter=t->magFilter=Filter::Linear;t->colorSpace=ColorSpace::NoColorSpace;if(global)t->wrapS=TextureWrapping::Repeat;return t;}
 std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* mask){
     auto m=ShaderMaterial::create();m->name="albert:solid";
-    m->vertexShader=R"(
-        uniform sampler2D heightMap,baseHeightMap;
-        uniform float displacement,isPatch,baseRadius,detailBlend,shapeSurface;
-        uniform vec4 bounds;
-        varying vec2 vUv,vGlobalUv;
-        varying vec3 vNormal,vPosition;
-        void main(){
-            vUv=uv;vGlobalUv=shapeSurface>0.5?uv:bounds.xy+uv*bounds.zw;
-            vec3 radial=normalize(position);
-            vec3 p=position+radial*texture2D(heightMap,uv).r*displacement;
-            if(isPatch>0.5){float coarse=baseRadius+(texture2D(baseHeightMap,vGlobalUv).r+20.0)/6378137.0;p=radial*mix(coarse,length(position),detailBlend);}
-            vec4 view=modelViewMatrix*vec4(p,1.0);
-            vNormal=normalize(normalMatrix*(shapeSurface>0.5?normal:radial));vPosition=view.xyz;
-            gl_Position=projectionMatrix*view;
-        }
-    )";
-    m->fragmentShader=R"(
-        uniform sampler2D dayMap,baseMap,heightMap,baseHeightMap,surfaceMask;
-        uniform vec3 solarDirection;
-        uniform float intensity,angularRadius,masked,detailBlend,auxiliaryStrength,cloudSurface,shapeSurface,haze;
-        uniform vec3 hazeAlbedo;
-        uniform vec4 bounds;
-        varying vec2 vUv,vGlobalUv;
-        varying vec3 vNormal,vPosition;
-        const float PI=3.141592653589793;
-        vec3 linearColor(vec3 c){return mix(c/12.92,pow((c+0.055)/1.055,vec3(2.4)),step(vec3(0.04045),c));}
-        float terrain(vec2 local,vec2 global){return mix(texture2D(baseHeightMap,global).r,texture2D(heightMap,local).r,detailBlend)/6378137.0;}
-        void main(){
-            if(masked>0.5&&texture2D(surfaceMask,vGlobalUv).g<0.5)discard;
-            vec2 localUv=shapeSurface>0.5?vec2(fract(vUv.x-bounds.x),vUv.y-bounds.y)/bounds.zw:vUv;
-            vec4 sampleColor=texture2D(dayMap,localUv);
-            vec2 edge=min(localUv,1.0-localUv);
-            float blend=detailBlend*smoothstep(0.0,0.025,min(edge.x,edge.y));
-            vec3 albedo=linearColor(mix(texture2D(baseMap,vGlobalUv).rgb,sampleColor.rgb,blend));
-            vec3 normal=normalize(vNormal),sigmaX=dFdx(vPosition),sigmaY=dFdy(vPosition);
-            float height=terrain(vUv,vGlobalUv);
-            vec2 gradient=vec2(terrain(vUv+dFdx(vUv),vGlobalUv+dFdx(vGlobalUv))-height,
-                terrain(vUv+dFdy(vUv),vGlobalUv+dFdy(vGlobalUv))-height);
-            vec3 r1=cross(sigmaY,normal),r2=cross(normal,sigmaX);float determinant=dot(sigmaX,r1);
-            normal=normalize(abs(determinant)*normal-sign(determinant)*(gradient.x*r1+gradient.y*r2));
-            vec3 light=normalize(solarDirection),view=normalize(-vPosition);
-            float mu=dot(normal,light),nl=max(mu,0.0),nv=max(dot(normal,view),0.0);
-            // Finite solar disk at the geometric terminator (uniform disk).
-            float a=max(angularRadius,0.00001),x=clamp(mu/a,-1.0,1.0),s=sqrt(max(0.0,1.0-x*x));
-            float irradiance=mu>=a?mu:mu<=-a?0.0:mu*(0.5+(asin(x)+x*s)/PI)+2.0*a*s*s*s/(3.0*PI);
-            // Oren-Nayar diffuse; optional didactic fill is separate from solar irradiance.
-            vec3 lp=light-normal*mu,vp=view-normal*nv;
-            float gamma=max(0.0,dot(lp,vp)/max(length(lp)*length(vp),0.00001));
-            float lo=min(nl,nv),hi=max(nl,nv);
-            float rough=0.70122+0.38017*gamma*sqrt(max(0.0,1.0-lo*lo))*sqrt(max(0.0,1.0-hi*hi))/max(hi,0.02);
-            float aid=auxiliaryStrength*(intensity/2.4)*(1.0-smoothstep(-0.10,0.0,dot(normalize(vNormal),light)));
-            // Opaque haze (Titan in visible light): its own colour, and scattering
-            // carries light past the geometric terminator.
-            float hazeLight=pow(clamp((dot(normalize(vNormal),light)+0.35)/1.35,0.0,1.0),1.3);
-            float direct=mix(max(irradiance,0.0)*mix(rough,1.0,cloudSurface),hazeLight,haze);
-            gl_FragColor=vec4(mix(albedo,hazeAlbedo,haze)*(intensity*direct/PI+aid),1.0);
-            #include <tonemapping_fragment>
-            #include <encodings_fragment>
-        }
-    )";
     m->uniforms.emplace("dayMap",Uniform(day));m->uniforms.emplace("baseMap",Uniform(day));m->uniforms.emplace("heightMap",Uniform(height));m->uniforms.emplace("baseHeightMap",Uniform(height));m->uniforms.emplace("isPatch",Uniform(0.f));m->uniforms.emplace("baseRadius",Uniform(0.f));m->uniforms.emplace("surfaceMask",Uniform(mask));
     m->uniforms.emplace("bounds",Uniform(Vector4(0,0,1,1)));m->uniforms.emplace("solarDirection",Uniform(Vector3(1,0,0)));
     m->uniforms.emplace("cloudSurface",Uniform(0.f));m->uniforms.emplace("intensity",Uniform(2.4f));m->uniforms.emplace("angularRadius",Uniform(.00465f));
@@ -89,28 +29,6 @@ std::shared_ptr<ShaderMaterial> hazeShell(){
     auto m=ShaderMaterial::create();m->name="albert:haze";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
     m->uniforms={{"centre",Uniform(Vector3())},{"radius",Uniform(1.f)},{"altitude",Uniform(.1f)},{"scale",Uniform(.02f)},{"layer",Uniform(.01f)},
         {"solarDirection",Uniform(Vector3(1,0,0))},{"intensity",Uniform(2.4f)},{"visibility",Uniform(1.f)},{"inside",Uniform(0.f)},{"hazeAlbedo",Uniform(Vector3())}};
-    m->vertexShader=R"(varying vec3 vPosition;void main(){vec4 view=modelViewMatrix*vec4(position,1.0);vPosition=view.xyz;gl_Position=projectionMatrix*view;})";
-    m->fragmentShader=R"(
-        uniform vec3 centre,solarDirection,hazeAlbedo;uniform float radius,altitude,scale,layer,intensity,visibility,inside;varying vec3 vPosition;
-        const float PI=3.141592653589793,G=0.65;
-        float phase(float c){float d=1.0+G*G-2.0*G*c;return (1.0-G*G)/(4.0*PI*d*sqrt(d));}
-        void main(){
-            if((inside<0.5)!=gl_FrontFacing)discard; // One surface per ray, inside or outside.
-            vec3 d=normalize(vPosition),l=normalize(solarDirection);float t0=dot(centre,d);vec3 q=t0*d-centre;
-            float b=length(q),h=b-radius;
-            // Column in scale heights: grazing (Chapman) above the limb, one-sided over the disc.
-            float mu=sqrt(max(0.0,1.0-(b/radius)*(b/radius)));
-            float main=h>=0.0?exp(-h/scale)*sqrt(2.0*PI*(radius+h)/scale):1.0/max(mu,0.05);
-            float top=exp(-pow((h-altitude)/layer,2.0))*sqrt(2.0*PI*(radius+max(h,0.0))/layer);
-            float lit=smoothstep(-0.25,0.05,dot(b>0.0?q/b:-d,l));
-            // Forward peak normalised to 1, plus a small isotropic part: faint at moderate
-            // phase (thin bluish limb), bright only when backlit.
-            float forward=0.15+0.85*phase(dot(l,d))/phase(1.0);
-            vec3 colour=hazeAlbedo*(1.0-exp(-0.025*main))+vec3(0.10,0.17,0.36)*(1.0-exp(-0.02*top));
-            gl_FragColor=vec4(colour*intensity*visibility*lit*forward/PI,1.0);
-            #include <tonemapping_fragment>
-            #include <encodings_fragment>
-        })";
     return m;
 }
 // Faint ring systems (Jupiter, Uranus, Neptune): an optically thin slab in single
@@ -125,33 +43,6 @@ std::shared_ptr<ShaderMaterial> thinRings(Texture* profile,float inner,float out
     m->uniforms={{"profile",Uniform(profile)},{"inner",Uniform(inner)},{"outer",Uniform(outer)},{"radius",Uniform(radius)},{"localSun",Uniform(Vector3(1,0,0))},
         {"localCamera",Uniform(Vector3(0,1,0))},{"irradiance",Uniform(1.f)},{"incidence",Uniform(1.f)},{"gain",Uniform(1.f)},
         {"particleAlbedo",Uniform(system.particleAlbedo)},{"dustAlbedo",Uniform(system.dustAlbedo)},{"dustG",Uniform(system.dustAsymmetry)}};
-    m->vertexShader=R"(varying vec3 point;void main(){point=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);})";
-    m->fragmentShader=R"(
-      uniform sampler2D profile;uniform float inner,outer,radius,irradiance,gain,particleAlbedo,dustAlbedo,dustG;uniform vec3 localSun,localCamera;varying vec3 point;
-      const float PI=3.141592653589793;
-      float lambert(float a){return (sin(a)+(PI-a)*cos(a))/PI;}
-      float henyey(float c){float d=1.0+dustG*dustG-2.0*dustG*c;return (1.0-dustG*dustG)/(d*sqrt(d));}
-      // I/F of a slab per unit (single-scattering albedo x phase / 4).
-      float slab(float tau,float mu,float mu0,bool lit){
-        if(tau<=0.0)return 0.0;
-        if(lit)return mu0/(mu+mu0)*(1.0-exp(-tau*(1.0/mu+1.0/mu0)));
-        return abs(mu-mu0)<1e-4?tau/mu*exp(-tau/mu):mu0/(mu-mu0)*(exp(-tau/mu)-exp(-tau/mu0));
-      }
-      void main(){
-        float u=(length(point.xz)-inner)/(outer-inner);if(u<0.0||u>1.0)discard;
-        vec2 tau=texture2D(profile,vec2(u,0.5)).rg;
-        vec3 l=normalize(localSun),v=normalize(localCamera-point);
-        float mu0=max(abs(l.y),1e-3),mu=max(abs(v.y),1e-3);bool lit=l.y*v.y>0.0;
-        float c=clamp(dot(l,v),-1.0,1.0),alpha=acos(c);
-        vec3 p=point/radius;float b=dot(p,l),q=dot(p,p)-1.0,disc=b*b-q,edge=max(fwidth(disc),1e-5);
-        float shadow=1.0-step(0.0,-b)*smoothstep(-edge,edge,disc);
-        float reflectance=particleAlbedo*lambert(alpha)*slab(tau.r,mu,mu0,lit)+dustAlbedo*henyey(-c)/4.0*slab(tau.g,mu,mu0,lit);
-        gl_FragColor=vec4(vec3(reflectance*shadow*gain*irradiance/PI),1.0);
-        #include <tonemapping_fragment>
-        #include <encodings_fragment>
-        // The display stretch scales scattered light only; transmission stays physical.
-        gl_FragColor.a=1.0-exp(-(tau.r+tau.g)/mu);
-      })";
     return m;
 }
 std::shared_ptr<Texture> ringProfileTexture(const albert::RingProfile& profile){
@@ -163,17 +54,7 @@ std::shared_ptr<Texture> ringProfileTexture(const albert::RingProfile& profile){
 std::shared_ptr<ShaderMaterial> rings(Texture* profile,float radius){
     auto m=ShaderMaterial::create();m->name="albert:rings";m->side=Side::Double;m->transparent=true;m->depthWrite=false;
     m->uniforms={{"profile",Uniform(profile)},{"radius",Uniform(radius)},{"localSun",Uniform(Vector3(1,0,0))},{"irradiance",Uniform(1.f)},{"incidence",Uniform(1.f)}};
-    m->vertexShader=R"(varying vec3 point;void main(){point=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);})";
-    m->fragmentShader=R"(
-      uniform sampler2D profile;uniform float radius,irradiance,incidence;uniform vec3 localSun;varying vec3 point;
-      void main(){vec3 p=point/radius;float u=(length(p.xz)-1.23)/(2.3309-1.23);vec4 map=texture2D(profile,vec2(u,.5));
-      vec3 l=normalize(localSun);float b=dot(p,l),c=dot(p,p)-1.0;float disc=b*b-c;
-      float edge=max(fwidth(disc),.00001);float shadow=1.0-step(0.0,-b)*smoothstep(-edge,edge,disc);
-      vec3 albedo=mix(map.rgb/12.92,pow((map.rgb+.055)/1.055,vec3(2.4)),step(vec3(.04045),map.rgb));
-      gl_FragColor=vec4(albedo*irradiance*(.08+.92*sqrt(incidence))*shadow/3.14159265,map.a);
-      #include <tonemapping_fragment>
-      #include <encodings_fragment>
-      })";return m;
+    return m;
 }
 
 }
@@ -216,9 +97,8 @@ albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets)
             body.flattening=definition->polarRadiusMeters/definition->radiusMeters;body.maxLevel=8;body.relief=25e3;body.heights=marsTerrainHeights(s->height->image());
             body.generation=[]{return providers::planetaryRelief().generation();};
             s->terrain=std::make_unique<Terrain>(*s->mesh,s->terrainMaterial,body);
-            // The sky: "albert:atmosphere" on WebGPU (the air's background); OpenGL never draws it.
+            // The sky: "albert:atmosphere", the air's background.
             s->skyMaterial=ShaderMaterial::create();s->skyMaterial->name="albert:atmosphere";s->skyMaterial->uniforms.emplace("visibility",Uniform(1.f));
-            s->skyMaterial->vertexShader="void main(){gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}";s->skyMaterial->fragmentShader="void main(){discard;}";
             s->skyMaterial->transparent=true;s->skyMaterial->depthWrite=false;s->skyMaterial->blending=Blending::Additive;
             s->sky=Mesh::create(SphereGeometry::create(static_cast<float>(gpu::marsAtmosphere().top*1000/core::earthRadiusMeters),96,48),s->skyMaterial);
             s->sky->visible=false;s->sky->renderOrder=4;s->mesh->add(s->sky);
@@ -267,8 +147,8 @@ void albert::SolidBodies::stage(RegionalImages images){
     for(const auto& t:images.gpu)if(t)uploads_.add(t);
     pending_=std::move(images);
 }
-void albert::SolidBodies::update(GLRenderer* renderer,PerspectiveCamera& camera,const Vector3& sun,double jd,const std::string& focus,bool details,float dt,const AuxiliaryLights& auxiliary,bool terrain){
-    uploads_.tick(renderer);
+void albert::SolidBodies::update(PerspectiveCamera& camera,const Vector3& sun,double jd,const std::string& focus,bool details,float dt,const AuxiliaryLights& auxiliary,bool terrain){
+    uploads_.tick();
     if(pending_&&!uploads_.active()){
         auto images=std::move(*pending_);pending_.reset();auto& s=*surfaces_.at(images.body);s.release();s.inactive=0;s.region=std::move(images.gpu);
         if(s.picker){const auto& r=images.region;s.material->uniforms.at("dayMap").setValue(s.region[0].get());s.material->uniforms.at("bounds").setValue(Vector4(static_cast<float>((r.west+180.)/360.),static_cast<float>((r.south+90.)/180.),static_cast<float>((r.east-r.west)/360.),static_cast<float>((r.north-r.south)/180.)));s.blend=0;}

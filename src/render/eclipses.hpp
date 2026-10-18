@@ -5,7 +5,6 @@
 namespace albert {
 // Fraction of an extended, uniformly bright Sun visible from a point.
 double solarVisibility(core::Vector point,core::Vector sun,double sunRadius,core::Vector occluder,double radius);
-const char* eclipseShader();
 class EclipseVisuals {
 public:
     EclipseVisuals(std::shared_ptr<threepp::Mesh> earth,std::shared_ptr<threepp::Mesh> moon,std::shared_ptr<threepp::Mesh> sun);

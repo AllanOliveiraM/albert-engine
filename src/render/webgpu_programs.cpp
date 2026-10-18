@@ -114,7 +114,7 @@ void earthLayers(){
     let light = max(0.0, dot(normalize(v.worldNormal), material.solarDirection));
     let transmission = mix(1.0, visibleSun(v.world, material.eclipseSunPosition, 695700.0 / 6378.137, material.moonPosition, 1737.4 / 6378.137), material.eclipseEnabled);
     let air = airLight(v.world, v.worldNormal); // Sunlight through the air above the cloud tops, and the sky's light.
-    let lit = vec3f(1.0, 0.98, 0.95) * (0.003 + 2.4 * (light * transmission * air.sun + air.sky)); // 2.4: the sun's intensity, as the GLSL.
+    let lit = vec3f(1.0, 0.98, 0.95) * (0.003 + 2.4 * (light * transmission * air.sun + air.sky)); // 2.4: the sun's intensity at 1 AU.
     return vec4f(finish(airApply(v.world, lit)), density * 0.88 * material.visibility);
 }
 )";

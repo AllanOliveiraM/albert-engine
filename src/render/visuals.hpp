@@ -55,7 +55,7 @@ public:
     bool detailActive() const { return pendingImage_.valid() || uploads_.active(); }
     bool uploading() const { return uploads_.active(); }
     void stageRegionalImages(RegionalImages images);
-    void updateUploads(threepp::GLRenderer* renderer); // Null on WebGPU.
+    void updateUploads(); // Publishes staged textures, one a frame.
     void retryDetails() { imageFailed_.fill(false); detailError.clear(); }
     void replaceAssets(DecodedAssets assets);
     // camera: its view limits the terrain's refinement (none: refined all around).
@@ -97,7 +97,7 @@ private:
     std::shared_ptr<threepp::ShaderMaterial> atmosphereMaterial_, nightMaterial_;
     std::shared_ptr<threepp::ShaderMaterial> sunMaterial_;
     std::array<std::shared_ptr<threepp::Texture>, 6> textures_;
-    std::shared_ptr<threepp::Texture> oceanTexture_, liveCloudTexture_, opticalDepthTexture_, cloudDetailTexture_;
+    std::shared_ptr<threepp::Texture> oceanTexture_, liveCloudTexture_, cloudDetailTexture_;
     std::shared_ptr<threepp::Texture> moonHeightTexture_;
     std::shared_ptr<threepp::Texture> previousCloudDetail_;
     std::optional<GeoRegion> cloudDetailBounds_;

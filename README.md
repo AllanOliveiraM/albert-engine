@@ -157,8 +157,10 @@ Se você recebeu uma versão pronta, extraia **a pasta inteira** e abra
 **AlbertEngine** no Linux ou **AlbertEngine.exe** no Windows. Mantenha as pastas
 que acompanham o executável; o aplicativo funciona sem instalação.
 
-São necessários **OpenGL 3.3 ou superior** e acesso à internet para consultar
-os dados astronômicos e, quando ativadas, as nuvens. Use a versão do seu sistema.
+São necessários uma placa com **Vulkan** (Linux), **Direct3D 12 ou Vulkan** (Windows) — sem
+ela, um adaptador por software (WARP no Windows 10/11, lavapipe no Linux) também serve, mais
+lento — e acesso à internet para consultar os dados astronômicos e, quando ativadas, as nuvens.
+Use a versão do seu sistema.
 
 ## Compilar a partir do projeto
 
@@ -310,7 +312,7 @@ componentes básicos do sistema continuam sendo fornecidos pela máquina.
 ## Desenvolvimento e próximos passos
 
 O núcleo mantém estados físicos em dupla precisão, a renderização usa
-threepp/OpenGL e Dear ImGui, e as integrações usam libcurl, ERFA, JSON e
+threepp (cena), WebGPU (wgpu-native) e Dear ImGui, e as integrações usam libcurl, ERFA, JSON e
 gRPC/Protobuf. O CMake declara as versões e os hashes das dependências.
 
 As próximas entregas ampliam os corpos embarcados, modelos externos e camadas,

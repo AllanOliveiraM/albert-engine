@@ -32,7 +32,7 @@ public:
     bool uploading() const{return uploads_.active();}
     void stage(RegionalImages images);
     // terrain: Mars's quadtree relief within three radii of the camera (MOLA).
-    void update(threepp::GLRenderer*,threepp::PerspectiveCamera&,const threepp::Vector3& sun,double jdTDB,const std::string& focus,bool details,float seconds,const AuxiliaryLights& auxiliary={},bool terrain=true);
+    void update(threepp::PerspectiveCamera&,const threepp::Vector3& sun,double jdTDB,const std::string& focus,bool details,float seconds,const AuxiliaryLights& auxiliary={},bool terrain=true);
 private:
     struct Surface;
     std::map<std::string,std::shared_ptr<threepp::Mesh>> nodes_;

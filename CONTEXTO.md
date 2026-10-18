@@ -52,7 +52,10 @@ remover o OpenGL. Subidas até a órbita na Lua (`genericLunarAscent`: 18 × 85 
 11 435 s) e em Marte (`genericMarsAscent`, duas queimas: ~201 × 251 km), guiagem de exemplo por
 corpo (`ex::Body`, `steered`, `climb`, `circularize`) e `albert_flight_client --body=moon|mars`.
 O GRAM Suite: catálogo MFS-33888-1 ("General Public Release"), o Allan vai estudar o pedido.
-Próximo: remover o OpenGL, passo de desempenho (gravação da cena ~7 ms a 1 GHz, GPU no plano aberto).
+OpenGL removido (Display só WebGPU, sem `--renderer=opengl` nem recuo; GLSL dos materiais e a tabela
+de profundidade óptica da atmosfera antiga fora; `TextureUploads` só publica). A medição de
+desempenho fica para quando o Allan parar o resto do PC (os números acima tinham carga de fundo e
+CPU estrangulada). Próximo: passo de desempenho depois dessa medição.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`
@@ -69,7 +72,7 @@ CDLOD. Progresso geral ~81%.
 **Fase 4 — WebGPU é o renderizador padrão (18/10/2026)**: etapas 1–5 do plano no `ROADMAP.md`
 entregues (`src/gpu`: contexto, janela, `SceneRenderer` que desenha a cena do threepp; WGSL de todos
 os materiais em `src/render/webgpu_programs.cpp`; `Display` escolhe o caminho; `visual_test 1` roda
-os dois). `--renderer=opengl` e recuo automático sem adaptador. Máquina de referência: este notebook (i7-1165G7, Iris Xe + MX350, 14 GB, Ubuntu
+os dois; o OpenGL foi removido em 18/10/2026, só WebGPU, sem recuo). Máquina de referência: este notebook (i7-1165G7, Iris Xe + MX350, 14 GB, Ubuntu
 26.04), 1080p/60 e p99 < 25 ms. Etapa 1 entregue (`src/gpu/context.*`, `tests/gpu_smoke.cpp`:
 `DISPLAY=172.17.0.2:100 build/linux/tests/gpu_smoke`, `ALBERT_GPU=software` para llvmpipe; no
 Xvfb o Iris Xe não apresenta por falta de DRI3, então a MX350 é usada). Mars-GRAM: o Allan vai

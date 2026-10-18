@@ -27,23 +27,6 @@ std::shared_ptr<Texture> phaseTexture(){
     t->type=Type::Float;t->magFilter=Filter::Linear;t->minFilter=Filter::Linear;t->generateMipmaps=false;t->colorSpace=ColorSpace::NoColorSpace;t->needsUpdate();return t;
 }
 
-// Shared shading: Halley-Marcus phase, reddish dust (~10% per 1000 A) and the display.
-// Physical radiance by default; the stretch eases into an asinh scale, as in
-// astrophotography, mapping the reference reflectance to I/F 0.15 and fading to black
-// below about 5e-5 of it, where the tail ends: the coma and the far fainter tail show
-// together.
-constexpr const char* phaseFunction=R"(
-    uniform sampler2D phase;uniform float intensity,stretch,reference;
-    const vec3 DUST=vec3(1.06,1.0,0.94),IONS=vec3(0.22,0.48,1.0); // CO+ bands: blue.
-    const float PI=3.141592653589793;
-    float dustPhase(float cosine){float degrees=degrees(acos(clamp(cosine,-1.0,1.0)));return exp(texture2D(phase,vec2((degrees+0.5)/181.0,0.5)).r);}
-    float arcsinh(float x){return log(x+sqrt(x*x+1.0));}
-    vec3 shade(float reflectance,vec3 colour){
-        float soft=reference*5e-5,enhanced=0.15*arcsinh(reflectance/soft)/arcsinh(reference/soft);
-        float value=exp(mix(log(max(reflectance,1e-30)),log(max(enhanced,1e-30)),stretch));
-        return colour*value*intensity/PI;
-    }
-)";
 
 // Steady coma: the albedo-weighted column of a 1/r^2 outflow is Afρ/(8b) in I/F, here
 // averaged over the pixel footprint and limited to the part of the ray in front of
@@ -56,22 +39,6 @@ std::shared_ptr<ShaderMaterial> comaMaterial(Texture* phase){
     auto m=ShaderMaterial::create();m->name="albert:coma";m->transparent=true;m->depthWrite=false;m->side=Side::Front;m->blending=Blending::Additive;
     m->uniforms={{"phase",Uniform(phase)},{"centre",Uniform(Vector3())},{"solar",Uniform(Vector3(1,0,0))},{"afrho",Uniform(0.f)},{"apex",Uniform(1.f)},
         {"radius",Uniform(1.f)},{"nucleus",Uniform(0.f)},{"intensity",Uniform(2.4f)},{"stretch",Uniform(0.f)},{"reference",Uniform(1e-5f)}};
-    m->vertexShader=R"(varying vec3 vPosition;void main(){vec4 view=modelViewMatrix*vec4(position,1.0);vPosition=view.xyz;gl_Position=projectionMatrix*view;})";
-    m->fragmentShader=std::string(R"(
-        uniform vec3 centre,solar;uniform float afrho,apex,radius,nucleus;varying vec3 vPosition;)")+phaseFunction+R"(
-        void main(){
-            vec3 d=normalize(vPosition);float along=dot(centre,d);vec3 q=along*d-centre;float b=length(q);
-            float footprint=fwidth(b),reach=sqrt(b*b+0.25*footprint*footprint);
-            float ahead=0.5+atan(along,reach)/PI; // Share of the 1/r^2 column beyond the camera.
-            float column=afrho/(8.0*reach)*ahead*exp(-b/(10.0*apex));
-            float parabolic=(b+dot(q,solar))/(2.0*apex),envelope=1.0/(1.0+parabolic*parabolic);
-            float edge=1.0-smoothstep(0.8*radius,radius,b);
-            float hidden=b<nucleus?0.5:1.0; // The far half lies behind the nucleus.
-            float reflectance=column*envelope*edge*hidden*dustPhase(dot(solar,-d));
-            gl_FragColor=vec4(shade(reflectance,DUST),1.0);
-            #include <tonemapping_fragment>
-            #include <encodings_fragment>
-        })";
     return m;
 }
 
@@ -81,14 +48,6 @@ std::shared_ptr<ShaderMaterial> comaMaterial(Texture* phase){
 std::shared_ptr<ShaderMaterial> ionMaterial(Texture* phase){
     auto m=ShaderMaterial::create();m->name="albert:ions";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
     m->uniforms={{"phase",Uniform(phase)},{"intensity",Uniform(2.4f)},{"stretch",Uniform(0.f)},{"reference",Uniform(1e-5f)}};
-    m->vertexShader=R"(attribute float axial,across;varying float vAxial,vAcross;
-        void main(){vAxial=axial;vAcross=across;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);})";
-    m->fragmentShader=std::string(R"(varying float vAxial,vAcross;)")+phaseFunction+R"(
-        void main(){
-            gl_FragColor=vec4(shade(vAxial*exp(-0.5*vAcross*vAcross),IONS),1.0);
-            #include <tonemapping_fragment>
-            #include <encodings_fragment>
-        })";
     return m;
 }
 
@@ -99,15 +58,6 @@ std::shared_ptr<ShaderMaterial> capMaterial(Texture* phase,Texture* profile){
     auto m=ShaderMaterial::create();m->name="albert:ion-cap";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
     m->uniforms={{"phase",Uniform(phase)},{"profile",Uniform(profile)},{"intensity",Uniform(2.4f)},{"stretch",Uniform(0.f)},{"reference",Uniform(1e-5f)},
         {"radius",Uniform(1.f)},{"weight",Uniform(0.f)}};
-    m->vertexShader=R"(uniform float radius;varying vec2 vDisc;
-        void main(){vDisc=position.xy;vec4 centre=modelViewMatrix*vec4(0.0,0.0,0.0,1.0);gl_Position=projectionMatrix*(centre+vec4(position.xy*radius,0.0,0.0));})";
-    m->fragmentShader=std::string(R"(uniform sampler2D profile;uniform float weight;varying vec2 vDisc;)")+phaseFunction+R"(
-        void main(){
-            float rho=length(vDisc);if(rho>1.0)discard;
-            gl_FragColor=vec4(shade(weight*texture2D(profile,vec2(sqrt(rho)*63.0/64.0+0.5/64.0,0.5)).r,IONS),1.0);
-            #include <tonemapping_fragment>
-            #include <encodings_fragment>
-        })";
     return m;
 }
 
@@ -116,20 +66,6 @@ std::shared_ptr<ShaderMaterial> capMaterial(Texture* phase,Texture* profile){
 std::shared_ptr<ShaderMaterial> tailMaterial(Texture* phase){
     auto m=ShaderMaterial::create();m->name="albert:dust-tail";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
     m->uniforms={{"phase",Uniform(phase)},{"solar",Uniform(Vector3(1,0,0))},{"intensity",Uniform(2.4f)},{"stretch",Uniform(0.f)},{"reference",Uniform(1e-5f)}};
-    m->vertexShader=R"(
-        attribute float density,thickness;varying float vDensity,vThickness;varying vec3 vWorld,vNormal;
-        void main(){vDensity=density;vThickness=thickness;vNormal=normalize(mat3(modelMatrix)*normal);
-            vec4 world=modelMatrix*vec4(position,1.0);vWorld=world.xyz;gl_Position=projectionMatrix*viewMatrix*world;})";
-    m->fragmentShader=std::string(R"(
-        uniform vec3 solar;varying float vDensity,vThickness;varying vec3 vWorld,vNormal;)")+phaseFunction+R"(
-        void main(){
-            vec3 view=normalize(cameraPosition-vWorld);
-            float slant=max(abs(dot(normalize(vNormal),view)),vThickness);
-            float reflectance=vDensity*0.25*dustPhase(dot(solar,view))/slant;
-            gl_FragColor=vec4(shade(reflectance,DUST),1.0);
-            #include <tonemapping_fragment>
-            #include <encodings_fragment>
-        })";
     return m;
 }
 

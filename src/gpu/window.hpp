@@ -5,7 +5,7 @@
 #include <vector>
 struct GLFWwindow;
 namespace albert::gpu {
-// GLFW window without an OpenGL context that feeds threepp's input listeners (OrbitControls)
+// GLFW window without a graphics API context (WebGPU draws into it) that feeds threepp's input listeners (OrbitControls)
 // as threepp::Canvas does: mouse buttons, cursor, wheel and resizes. Keys go through ImGui.
 class Window:public threepp::PeripheralsEventSource {
 public:

@@ -1,5 +1,4 @@
 #pragma once
-#include "threepp/renderers/GLRenderer.hpp"
 #include "threepp/textures/Texture.hpp"
 #include <memory>
 namespace albert {
@@ -9,9 +8,9 @@ public:
     TextureUploads();
     ~TextureUploads();
     void add(std::shared_ptr<threepp::Texture> texture);
-    // OpenGL: allocates, then streams rows within ~2 ms a frame. Null (WebGPU): publishes the
-    // next texture whole; the scene renderer uploads it on first use.
-    void tick(threepp::GLRenderer* renderer);
+    // Publishes the next texture whole (one a frame); the scene renderer uploads it on first use,
+    // streaming a large one while the previous copy keeps drawing.
+    void tick();
     bool active() const;
 private:
     struct Impl;

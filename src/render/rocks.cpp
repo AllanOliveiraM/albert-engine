@@ -62,28 +62,8 @@ std::shared_ptr<Mesh> albert::makeArtisticRock(const core::LocalOrbit& body){
     material->name="albert:rock";
     material->uniforms.emplace("rockSeed",Uniform(float(seed%8192)));
     material->uniforms.emplace("rockScale",Uniform(float(body.radius*2/core::earthRadiusMeters)));
-    material->vertexShader="varying vec3 rockPoint;\n"+material->vertexShader;
-    const std::string begin="#include <begin_vertex>";material->vertexShader.replace(material->vertexShader.find(begin),begin.size(),begin+"\nrockPoint=position;\n");
-    material->fragmentShader=R"(
-      varying vec3 rockPoint;uniform float rockSeed,rockScale;
-      float rockHash(vec3 p){p=fract(p*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}
-      float rockNoise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
-        return mix(mix(mix(rockHash(i),rockHash(i+vec3(1,0,0)),f.x),mix(rockHash(i+vec3(0,1,0)),rockHash(i+vec3(1,1,0)),f.x),f.y),
-                   mix(mix(rockHash(i+vec3(0,0,1)),rockHash(i+vec3(1,0,1)),f.x),mix(rockHash(i+vec3(0,1,1)),rockHash(i+vec3(1,1,1)),f.x),f.y),f.z);}
-      float rockGrain(vec3 p){float value=0.,weight=.53;for(int i=0;i<4;++i){float footprint=max(max(fwidth(p.x),fwidth(p.y)),fwidth(p.z));value+=weight*mix(.5,rockNoise(p),1.-smoothstep(.3,1.,footprint));p=p*2.13+vec3(7.3,2.6,9.1);weight*=.47;}return value;}
-    )"+material->fragmentShader;
+    const std::string begin="#include <begin_vertex>";
     const std::string colors="#include <color_fragment>";
-    material->fragmentShader.replace(material->fragmentShader.find(colors),colors.size(),colors+R"(
-      float mineral=rockGrain(rockPoint*17.+vec3(rockSeed));
-      float grain=rockGrain(rockPoint*155.+vec3(rockSeed));
-      diffuseColor.rgb*=mix(.42,1.25,mineral)*mix(.70,1.12,grain);
-    )");
     const std::string maps="#include <normal_fragment_maps>";
-    material->fragmentShader.replace(material->fragmentShader.find(maps),maps.size(),maps+R"(
-      vec3 q0=dFdx(-vViewPosition),q1=dFdy(-vViewPosition);
-      vec3 r0=cross(q1,normal),r1=cross(normal,q0);float determinant=dot(q0,r0);
-      vec3 gradient=r0*dFdx(grain)+r1*dFdy(grain);
-      normal=normalize(normal-sign(determinant)*gradient*(rockScale*.0012)/max(abs(determinant),1.e-20));
-    )");
     auto mesh=Mesh::create(geometry,material);mesh->castShadow=mesh->receiveShadow=true;return mesh;
 }

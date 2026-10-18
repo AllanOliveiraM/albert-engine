@@ -919,17 +919,13 @@ struct CameraTransition {
 
 int albert::runRenderer(int argc, char** argv) {
     bool smokeTest = false,demo=false;
-    auto backend=albert::Display::Backend::webgpu; // --renderer=opengl keeps threepp's renderer; no WebGPU adapter falls back to it.
     std::optional<unsigned> rpcPort;
     try {
         for (int i = 1; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--smoke-test") {
                 smokeTest = true;
-            } else if (argument == "--renderer=webgpu") {
-                backend=albert::Display::Backend::webgpu;
-            } else if (argument == "--renderer=opengl") {
-                backend=albert::Display::Backend::opengl;
+            } else if (argument == "--renderer=webgpu") { // The only renderer (OpenGL was removed); kept for scripts.
             } else if (argument == "--rpc" || argument.starts_with("--rpc-port=")) {
                 size_t consumed=0;const auto text=argument=="--rpc" ? std::string("50051") : argument.substr(11);
                 const auto port=std::stoul(text,&consumed);
@@ -973,18 +969,15 @@ int albert::runRenderer(int argc, char** argv) {
         std::function<void()> drawInterface;
         WindowSize initialSize(1280,800); // ALBERT_WINDOW=1920x1080: another first size (frame measurements at a set resolution).
         if(const char* size=std::getenv("ALBERT_WINDOW")){int w=0,h=0;if(std::sscanf(size,"%dx%d",&w,&h)==2&&w>=320&&h>=240&&w<=7680&&h<=4320)initialSize=WindowSize(w,h);}
-        auto openDisplay=[&](albert::Display::Backend b){return std::make_unique<albert::Display>(b,"Albert Engine",initialSize,albert::assetDirectory()/"branding/albert.png",[&]{
+        std::unique_ptr<albert::Display> display;
+        try{display=std::make_unique<albert::Display>("Albert Engine",initialSize,albert::assetDirectory()/"branding/albert.png",[&]{
             applyInterfaceTheme();
             if (drawInterface) drawInterface();
-        });};
-        std::unique_ptr<albert::Display> display;
-        try{display=openDisplay(backend);}
-        catch(const std::exception& e){ // No usable WebGPU adapter (old driver, no Vulkan or D3D12): OpenGL still works.
-            if(backend!=albert::Display::Backend::webgpu)throw;
-            std::cerr<<"WebGPU indisponivel ("<<e.what()<<"); usando OpenGL."<<std::endl;display=openDisplay(albert::Display::Backend::opengl);
+        });}
+        catch(const std::exception& e){ // No WebGPU adapter at all, not even a software one (WARP, lavapipe).
+            throw std::runtime_error(std::string("WebGPU indisponivel: ")+e.what()+". O Albert precisa de Vulkan, Direct3D 12 ou Metal (ou de um adaptador por software).");
         }
         auto& graphics=*display;
-        const float displayPixelRatio = graphics.gl() ? std::min(2.f, graphics.gl()->getTargetPixelRatio()) : 1.f;
         // Light distributions carry only the catalogue: download what is missing,
         // essential first. Complete libraries never start this service.
         std::unique_ptr<albert::AssetDownloads> assetDownloads;
@@ -1975,7 +1968,7 @@ int albert::runRenderer(int argc, char** argv) {
             // Observed clouds belong to the last day; other dates show none.
             cloudsCurrent=std::abs(simulatedUtc-frameTime.utcSeconds)<86400.;
 
-            planets.updateUploads(graphics.gl());
+            planets.updateUploads();
             if (introductionStart) introductionElapsed = std::min(introductionDuration,
                 std::chrono::duration<float>(steadyNow - *introductionStart).count());
 
@@ -2489,16 +2482,14 @@ int albert::runRenderer(int argc, char** argv) {
                 if(over(*earth,1.f))detailFocus="earth";else if(over(*moon,static_cast<float>(1737.4/6378.137)))detailFocus="moon";
                 else for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id)&&over(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters)))detailFocus=id;
             }
-            solids.update(graphics.gl(),*camera,sunPosition,tdb,detailFocus,visualSettings.quality,dt,visualSettings.auxiliary,visualSettings.terrain);
+            solids.update(*camera,sunPosition,tdb,detailFocus,visualSettings.quality,dt,visualSettings.auxiliary,visualSettings.terrain);
             {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
              comets.update(*camera,sunPosition,nuclei,cometStates,tdb,dt);}
             objects.updateLighting(*camera,sunPosition,visualSettings.auxiliary,dt);
 
             if (appliedQuality != visualSettings.quality) {
-                if(auto* gl=graphics.gl()) gl->setPixelRatio(std::min(visualSettings.quality ? 2.f : 1.f, displayPixelRatio));
                 sunlight->shadow->dispose();
                 sunlight->shadow->mapSize.set(visualSettings.quality ? 2048.f : 1024.f, visualSettings.quality ? 2048.f : 1024.f);
-                if(auto* gl=graphics.gl()) gl->shadowMap().needsUpdate = true;
                 appliedQuality = visualSettings.quality;
             }
             graphics.setShadows(visualSettings.shadows && (focus == targets::Earth || focus == targets::Moon));
@@ -2511,7 +2502,6 @@ int albert::runRenderer(int argc, char** argv) {
                 shadowCamera.nearPlane = 0.1f;
                 shadowCamera.farPlane = 300.f;
                 shadowCamera.updateProjectionMatrix();
-                if(auto* gl=graphics.gl()) gl->shadowMap().needsUpdate = true;
                 lastShadow = steadyNow;
             }
             Vector3 solarDirection = sunPosition;solarDirection.sub(earthPosition);
@@ -2600,7 +2590,7 @@ int albert::runRenderer(int argc, char** argv) {
             { // The air: Mars's within three of its radii (its model's ground lies under every surface), else
               // the Earth's, whose ground drops to the terrain under the camera where that lies below the
               // ellipsoid (an eye under the model's ground, 10 m over the Cape's, speckled the aerial perspective).
-                const auto mars=solids.nodes().find("mars");const bool marsAir=mars!=solids.nodes().end()&&!graphics.gl()
+                const auto mars=solids.nodes().find("mars");const bool marsAir=mars!=solids.nodes().end()
                     &&camera->position.distanceTo(mars->second->position)<3.f*static_cast<float>(albert::core::surfaceRadius("mars")/albert::core::earthRadiusMeters);
                 solids.showAir("mars",marsAir,planets.atmosphereVisibility());
                 // The sea's wind: a live-weather flight's near the ground, else the ocean mean (~7 m/s); Mars has neither.
