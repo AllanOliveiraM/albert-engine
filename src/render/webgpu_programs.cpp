@@ -11,15 +11,20 @@ void stars(){ // visuals.cpp makeStarField: proper motion, per-star size, soft d
     p.wgsl=std::string(quadCorner)+R"(
 struct Material { years: f32 };
 @group(2) @binding(0) var<uniform> material: Material;
-struct Varyings { @builtin(position) clip: vec4f, @location(0) colour: vec3f, @location(1) corner: vec2f };
+struct Varyings { @builtin(position) clip: vec4f, @location(0) colour: vec3f, @location(1) corner: vec2f, @location(2) fade: f32 };
 @vertex fn vs_main(@location(0) position: vec3f, @location(1) motion: vec3f, @location(2) colour: vec3f, @location(3) size: f32, @builtin(vertex_index) i: u32) -> Varyings {
     var o: Varyings; let c = quad(i);
     let clip = frame.projection * object.modelView * vec4f(normalize(position + motion * material.years) * 80000.0, 1.0);
-    o.clip = vec4f(clip.xy + c * size / frame.viewport.xy * clip.w, clip.zw); o.colour = colour; o.corner = c;
+    o.clip = vec4f(clip.xy + c * size / frame.viewport.xy * clip.w, clip.zw); o.colour = colour; o.corner = c; o.fade = 1.0;
+    if (frame.air.w > 0.0) { // Through the air, and hidden once the sky outshines them (display brightness is artistic).
+        let d = normalize((frame.planet * vec4f(mat3x3f(object.model[0].xyz, object.model[1].xyz, object.model[2].xyz) * position, 0.0)).xyz);
+        let sky = skyRadiance(frame.air.xyz, d, frame.airSun.xyz); let glow = dot(sky.radiance * frame.sunColor.rgb, vec3f(0.2126, 0.7152, 0.0722)) * frame.exposure.x;
+        o.colour = colour * mix(vec3f(1.0), sky.transmittance, frame.air.w); o.fade = mix(1.0, exp(-40.0 * glow), frame.air.w);
+    }
     return o;
 }
 @fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
-    let alpha = 1.0 - smoothstep(0.2, 1.0, length(v.corner));
+    let alpha = (1.0 - smoothstep(0.2, 1.0, length(v.corner))) * v.fade;
     if (alpha < 0.01) { discard; }
     return vec4f(linearToSrgb(v.colour), alpha);
 }
@@ -86,7 +91,7 @@ void earthLayers(){
     var intensity = clamp(dot(photo, vec3f(0.2126, 0.7152, 0.0722)) / 0.74, 0.05, 1.1);
     intensity = mix(1.0, intensity, smoothstep(0.0, 0.65, n.z));
     let mu = max(0.0, dot(normalize(v.worldNormal), normalize(frame.camera.xyz - v.world)));
-    return vec4f(linearToSrgb(vec3f(1.0, 0.96, 0.88) * intensity * (0.4 + 0.6 * mu)), 1.0);
+    return vec4f(linearToSrgb(vec3f(1.0, 0.96, 0.88) * intensity * (0.4 + 0.6 * mu) * airFilter(v.world)), 1.0); // Reddened through the air.
 }
 )";
     albert::gpu::define("albert:sun",sun);
@@ -96,7 +101,7 @@ void earthLayers(){
     let mu = abs(dot(normalize(v.worldNormal), normalize(frame.camera.xyz - v.world)));
     let impact = sqrt(max(0.0, 1.0 - mu * mu)) * 1.15;
     let glow = exp(-max(0.0, impact - 1.0) * 24.0) * (1.0 - smoothstep(1.04, 1.15, impact));
-    return vec4f(linearToSrgb(vec3f(1.0, 0.94, 0.83)), glow * 0.10);
+    return vec4f(linearToSrgb(vec3f(1.0, 0.94, 0.83) * airFilter(v.world)), glow * 0.10);
 }
 )";
     albert::gpu::define("albert:corona",corona);
@@ -108,7 +113,9 @@ void earthLayers(){
     let density = cloudDensity(v.uv, dpdx(v.uv), dpdy(v.uv));
     let light = max(0.0, dot(normalize(v.worldNormal), material.solarDirection));
     let transmission = mix(1.0, visibleSun(v.world, material.eclipseSunPosition, 695700.0 / 6378.137, material.moonPosition, 1737.4 / 6378.137), material.eclipseEnabled);
-    return vec4f(finish(vec3f(1.0, 0.98, 0.95) * (0.003 + 2.4 * light * transmission)), density * 0.88 * material.visibility);
+    let air = airLight(v.world, v.worldNormal); // Sunlight through the air above the cloud tops, and the sky's light.
+    let lit = vec3f(1.0, 0.98, 0.95) * (0.003 + 2.4 * (light * transmission * air.sun + air.sky)); // 2.4: the sun's intensity, as the GLSL.
+    return vec4f(finish(airApply(v.world, lit)), density * 0.88 * material.visibility);
 }
 )";
     albert::gpu::define("albert:clouds",clouds);
@@ -134,52 +141,21 @@ void earthLayers(){
     }
     let lights = vec3f(1.0, 0.69, 0.32) * pow(emission, 1.3);
     let transmission = exp(-4.5 * cloudDensity(v.uv, dx, dy) * material.cloudOpacity);
-    return vec4f(finish(lights * night * transmission * 1.8), material.visibility);
+    return vec4f(finish(lights * night * transmission * 1.8 * airFilter(v.world)), material.visibility);
 }
 )";
     albert::gpu::define("albert:night",night);
-    Program air;air.attributes=surfaceAttributes;air.textures={"opticalDepthMap"};air.uniforms={{"localCamera",Uniform::vec3},{"visibility",Uniform::f32},{"localSun",Uniform::vec3}};
+    // Bruneton's sky on the frame's air, drawn first as the background (objects overwrite it with
+    // their own aerial perspective); toward the ground it holds the air up to the sphere.
+    Program air;air.attributes=surfaceAttributes;air.background=true;air.uniforms={{"visibility",Uniform::f32}};
     air.wgsl=std::string(surface)+R"(
-struct Material { localCamera: vec3f, visibility: f32, localSun: vec3f };
+struct Material { visibility: f32 };
 @group(2) @binding(0) var<uniform> material: Material;
-@group(2) @binding(1) var opticalDepthMap: texture_2d<f32>;
-@group(2) @binding(2) var opticalSampler: sampler;
-const outerRadius = 1.012543; const metres = 6378137.0;
-const betaR = vec3f(5.802e-6, 13.558e-6, 33.100e-6); const betaM = vec3f(21.0e-6);
-fn sphere(origin: vec3f, ray: vec3f, radius: f32) -> vec2f {
-    let b = dot(origin, ray); let d = b * b - dot(origin, origin) + radius * radius;
-    if (d < 0.0) { return vec2f(1e20, -1e20); }
-    let root = sqrt(d); return vec2f(-b - root, -b + root);
-}
-fn density(p: vec3f) -> vec2f { let h = max(0.0, (length(p) - 1.0) * metres); return exp(-h / vec2f(8000.0, 1200.0)); }
 @fragment fn fs_main(v: Surface) -> @location(0) vec4f {
-    let ray = normalize(v.local - material.localCamera);
-    let air = sphere(material.localCamera, ray, outerRadius);
-    let begin = max(air.x, 0.0); var end = air.y;
-    let ground = sphere(material.localCamera, ray, 1.0);
-    if (ground.x > 0.0 && ground.x < end) { end = ground.x; }
-    if (end <= begin) { discard; }
-    let stepLength = (end - begin) / 8.0;
-    var optical = vec2f(0.0); var sumR = vec3f(0.0); var sumM = vec3f(0.0);
-    for (var i = 0; i < 8; i++) {
-        let p = material.localCamera + ray * (begin + (f32(i) + 0.5) * stepLength);
-        let segment = density(p) * stepLength * metres;
-        optical += segment * 0.5;
-        let blocked = sphere(p, material.localSun, 1.0);
-        if (blocked.x <= 0.0 || blocked.y <= 0.0) {
-            let muSun = dot(normalize(p), material.localSun); let altitude = max(0.0, (length(p) - 1.0) * metres);
-            var lookup = vec2f(muSun * 0.5 + 0.5, sqrt(clamp(altitude / 80000.0, 0.0, 1.0)));
-            lookup = (lookup * vec2f(255.0, 127.0) + 0.5) / vec2f(256.0, 128.0); // Texel centres keep the horizon.
-            let depth = optical + textureSampleLevel(opticalDepthMap, opticalSampler, lookup, 0.0).rg;
-            let attenuation = exp(-betaR * depth.x - betaM * 1.1 * depth.y);
-            sumR += attenuation * segment.x; sumM += attenuation * segment.y;
-        }
-        optical += segment * 0.5;
-    }
-    let mu = dot(ray, material.localSun);
-    let phaseR = 0.0596831 * (1.0 + mu * mu); let g = 0.76;
-    let phaseM = 0.0795775 * (1.0 - g * g) / pow(max(0.01, 1.0 + g * g - 2.0 * g * mu), 1.5);
-    return vec4f(finish(2.5 * (betaR * phaseR * sumR + betaM * phaseM * sumM)), material.visibility);
+    if (frame.air.w <= 0.0) { discard; }
+    let c = frame.air.xyz; let ray = normalize(airPoint(v.world) - c); var sky = skyRadiance(c, ray, frame.airSun.xyz);
+    if (length(c) < topRadius() && skyHitsGround(c, ray)) { sky = skyRadianceToPoint(c, horizonPoint(c, ray), frame.airSun.xyz, true); } // Below the sphere's horizon, where the coarser globe mesh leaves gaps: the horizon's haze.
+    return vec4f(finish(sky.radiance * frame.sunColor.rgb), material.visibility * frame.air.w);
 }
 )";
     albert::gpu::define("albert:atmosphere",air);
@@ -600,9 +576,10 @@ fn rockGrain(q: vec3f) -> f32 { // Octave fade by footprint; fwidth stays in uni
     n = normalize(n - sign(determinant) * (r0 * dpdx(grain) + r1 * dpdy(grain)) * (material.rockScale * 0.0012) / max(abs(determinant), 1e-20));
 )";
     s+=R"(
-    var colour = standardLight(albedo, material.roughness, material.metalness, n, geometryNormal, v.position, vec3f(0.0), shadowFactor(v.world, v.worldNormal)) + material.emissive;
+    let air = airLight(v.world, v.worldNormal); // Sunlight and sky light under the frame's air (vehicles on the pad).
+    var colour = standardLight(albedo, material.roughness, material.metalness, n, geometryNormal, v.position, air.sky * frame.sunColor.rgb, shadowFactor(v.world, v.worldNormal) * air.sun) + material.emissive;
     colour += albedo * material.auxiliaryStrength * (1.0 - smoothstep(-0.10, 0.0, dot(n, normalize(material.auxiliarySolarDirection))));
-    return vec4f(finish(colour), material.opacity);
+    return vec4f(finish(airApply(v.world, colour)), material.opacity);
 }
 )";
     return s;

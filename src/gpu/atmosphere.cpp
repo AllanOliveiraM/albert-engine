@@ -29,9 +29,11 @@ fn topRadius() -> f32 { return atmosphere.absorption.w; }
 fn clampCosine(mu: f32) -> f32 { return clamp(mu, -1.0, 1.0); }
 fn clampRadius(r: f32) -> f32 { return clamp(r, bottomRadius(), topRadius()); }
 fn safeSqrt(a: f32) -> f32 { return sqrt(max(a, 0.0)); }
-fn distanceToTop(r: f32, mu: f32) -> f32 { let t = topRadius(); return max(-r * mu + safeSqrt(r * r * (mu * mu - 1.0) + t * t), 0.0); }
-fn distanceToBottom(r: f32, mu: f32) -> f32 { let b = bottomRadius(); return max(-r * mu - safeSqrt(r * r * (mu * mu - 1.0) + b * b), 0.0); }
-fn intersectsGround(r: f32, mu: f32) -> bool { let b = bottomRadius(); return mu < 0.0 && r * r * (mu * mu - 1.0) + b * b >= 0.0; }
+// Discriminants as (rμ)² ± (R - r)(R + r): r² - R² in f32 at r ≈ 6378 km loses metres, enough to
+// flip ground hits between neighbouring pixels for a camera near the ground.
+fn distanceToTop(r: f32, mu: f32) -> f32 { let t = topRadius(); return max(-r * mu + safeSqrt(r * mu * r * mu + (t - r) * (t + r)), 0.0); }
+fn distanceToBottom(r: f32, mu: f32) -> f32 { let b = bottomRadius(); return max(-r * mu - safeSqrt(r * mu * r * mu - (r - b) * (r + b)), 0.0); }
+fn intersectsGround(r: f32, mu: f32) -> bool { let b = bottomRadius(); return mu < 0.0 && r * mu * r * mu >= (r - b) * (r + b); }
 fn distanceToNearest(r: f32, mu: f32, ground: bool) -> f32 { if (ground) { return distanceToBottom(r, mu); } return distanceToTop(r, mu); }
 fn layerDensity(layer: vec4f, constant: f32, altitude: f32) -> f32 { return clamp(layer.y * exp(layer.z * altitude) + layer.w * altitude + constant, 0.0, 1.0); }
 fn profileDensity(p: Profile, altitude: f32) -> f32 {
@@ -42,15 +44,16 @@ fn texCoord(x: f32, size: u32) -> f32 { return 0.5 / f32(size) + x * (1.0 - 1.0 
 fn unitRange(u: f32, size: u32) -> f32 { return (u - 0.5 / f32(size)) / (1.0 - 1.0 / f32(size)); }
 fn airHorizon() -> f32 { let t = topRadius(); let b = bottomRadius(); return sqrt(t * t - b * b); } // Ground to top, horizontally.
 fn transmittanceUv(r: f32, mu: f32) -> vec2f {
-    let H = airHorizon(); let b = bottomRadius(); let rho = safeSqrt(r * r - b * b);
+    let H = airHorizon(); let b = bottomRadius(); let rho = safeSqrt((r - b) * (r + b));
     let d = distanceToTop(r, mu); let dMin = topRadius() - r; let dMax = rho + H;
     return vec2f(texCoord((d - dMin) / (dMax - dMin), TW), texCoord(rho / H, TH));
 }
 fn transmittanceToTop(t: texture_2d<f32>, s: sampler, r: f32, mu: f32) -> vec3f { return textureSampleLevel(t, s, transmittanceUv(r, mu), 0.0).rgb; }
 fn transmittanceAlong(t: texture_2d<f32>, s: sampler, r: f32, mu: f32, d: f32, ground: bool) -> vec3f {
     let rd = clampRadius(sqrt(d * d + 2.0 * r * mu * d + r * r)); let muD = clampCosine((r * mu + d) / rd);
-    if (ground) { return min(transmittanceToTop(t, s, rd, -muD) / transmittanceToTop(t, s, r, -mu), vec3f(1.0)); }
-    return min(transmittanceToTop(t, s, r, mu) / transmittanceToTop(t, s, rd, muD), vec3f(1.0));
+    // Denominators kept above 0: half-float tables (no float32 filtering) underflow near the horizon.
+    if (ground) { return min(transmittanceToTop(t, s, rd, -muD) / max(transmittanceToTop(t, s, r, -mu), vec3f(1e-30)), vec3f(1.0)); }
+    return min(transmittanceToTop(t, s, r, mu) / max(transmittanceToTop(t, s, rd, muD), vec3f(1e-30)), vec3f(1.0));
 }
 fn transmittanceToSun(t: texture_2d<f32>, s: sampler, r: f32, muS: f32) -> vec3f {
     let sinH = bottomRadius() / r; let cosH = -sqrt(max(1.0 - sinH * sinH, 0.0)); let a = atmosphere.solar.w;
@@ -65,8 +68,8 @@ fn sunZenithRange() -> f32 { // A of the mu_s mapping.
     let dMin = topRadius() - bottomRadius(); return (distanceToTop(bottomRadius(), atmosphere.mieScattering.w) - dMin) / (airHorizon() - dMin);
 }
 fn scatteringUvwz(r: f32, mu: f32, muS: f32, nu: f32, ground: bool) -> vec4f {
-    let H = airHorizon(); let b = bottomRadius(); let rho = safeSqrt(r * r - b * b);
-    let rMu = r * mu; let disc = rMu * rMu - r * r + b * b;
+    let H = airHorizon(); let b = bottomRadius(); let rho = safeSqrt((r - b) * (r + b));
+    let rMu = r * mu; let disc = rMu * rMu - (r - b) * (r + b);
     var uMu: f32;
     if (ground) {
         let d = -rMu - safeSqrt(disc); let dMin = r - b; let dMax = rho;
@@ -234,11 +237,14 @@ void pack(float* p,const DensityProfile& d){
     const auto& a=d.lower;const auto& b=d.upper;const float v[12]{a.width,a.expTerm,a.expScale,a.linearTerm,b.width,b.expTerm,b.expScale,b.linearTerm,a.constantTerm,b.constantTerm,0,0};std::memcpy(p,v,sizeof v);
 }
 }
-AtmosphereModel earthAtmosphere(){ // demo.cc's values at kLambdaR/G/B, lengths in km.
+AtmosphereModel earthAtmosphere(){ // demo.cc's values at kLambdaR/G/B (aerosols apart), lengths in km.
     AtmosphereModel m;m.bottom=6378.137f;m.top=m.bottom+80.f;
     auto rayleigh=[](double micrometres){return static_cast<float>(1.24062e-3*std::pow(micrometres,-4));};
     m.rayleigh={rayleigh(.68),rayleigh(.55),rayleigh(.44)};
-    m.mieExtinction={4.44e-3f,4.44e-3f,4.44e-3f};m.mieScattering={3.996e-3f,3.996e-3f,3.996e-3f};
+    // Aerosols: a clear day's optical depth of 0.1 at 550 nm (Ångström exponent 1, single scattering
+    // albedo 0.95) instead of Bruneton's 0.0053, which leaves the sky too dark and the horizon blue.
+    auto aerosol=[](double micrometres){return 0.1/1.2*std::pow(micrometres/.55,-1.);};
+    for(int c=0;c<3;++c){const double l=c==0?.68:c==1?.55:.44;m.mieExtinction[static_cast<std::size_t>(c)]=static_cast<float>(aerosol(l));m.mieScattering[static_cast<std::size_t>(c)]=static_cast<float>(.95*aerosol(l));}
     constexpr double ozone=300.*2.687e20/15000.*1e3; // Peak number density (per m³) times km.
     m.absorption={static_cast<float>(ozone*1.209e-25),static_cast<float>(ozone*3.5e-25),static_cast<float>(ozone*1.582e-26)};
     m.groundAlbedo={.1f,.1f,.1f};

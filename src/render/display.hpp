@@ -5,7 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
-namespace threepp {class Scene;class Camera;class GLRenderer;}
+namespace threepp {class Scene;class Camera;class GLRenderer;class Object3D;}
 namespace albert {
 // Window, scene renderer and ImGui for one graphics backend: WebGPU (src/gpu, the default) or
 // threepp's OpenGL renderer (--renderer=opengl, and the fallback without a WebGPU adapter). `draw` draws the
@@ -30,6 +30,10 @@ public:
     void setExposure(float value);
     void setShadows(bool enabled); // Sun shadow map (OpenGL: the renderer's; WebGPU: every frame).
     [[nodiscard]] float exposure()const;
+    // WebGPU: Earth's air around `body` (local frame in units of kmPerUnit km) at strength 0-1 —
+    // sky, aerial perspective, sunlight and sky light; its tables build over the first frames.
+    // OpenGL: no effect (the atmosphere shell's own shader).
+    void setAir(const threepp::Object3D* body,float kmPerUnit,float strength);
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

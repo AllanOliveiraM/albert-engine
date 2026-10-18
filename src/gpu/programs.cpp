@@ -19,6 +19,9 @@ struct Frame {
     exposure: vec4f,
     shadowViewProj: mat4x4f, // World to the sun's shadow clip space (depth 0-1).
     shadow: vec4f,           // Enabled, bias, normal bias, texel size.
+    planet: mat4x4f,         // World to the air's planet frame (km from its centre).
+    air: vec4f,              // Camera in the planet frame; w: strength (0: no air this frame).
+    airSun: vec4f,           // Towards the sun in the planet frame.
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -50,6 +53,98 @@ fn finish(colour: vec3f) -> vec3f { // tonemapping (ACES, or none) + encodings.
     return linearToSrgb(max(colour, vec3f(0.0)));
 }
 )";
+// Bruneton's rendering functions on the frame's tables (GetSkyRadiance, GetSkyRadianceToPoint,
+// GetSunAndSkyIrradiance), and their use on world positions: lengths in km in the planet frame.
+const char* const air=R"(
+@group(0) @binding(3) var<uniform> atmosphere: AtmosphereParameters;
+@group(0) @binding(4) var airTransmittance: texture_2d<f32>;
+@group(0) @binding(5) var airScattering: texture_3d<f32>;
+@group(0) @binding(6) var airMie: texture_3d<f32>;
+@group(0) @binding(7) var airIrradiance: texture_2d<f32>;
+@group(0) @binding(8) var airSampler: sampler;
+struct Sky { radiance: vec3f, transmittance: vec3f }; // Radiance relative to the sun's colour.
+fn airScatter(r: f32, mu: f32, muS: f32, nu: f32, ground: bool) -> ScatterPair {
+    let uvwz = scatteringUvwz(r, mu, muS, nu, ground);
+    let x = uvwz.x * f32(SNU - 1u); let tx = floor(x); let l = x - tx;
+    let uvw0 = vec3f((tx + uvwz.y) / f32(SNU), uvwz.z, uvwz.w); let uvw1 = vec3f((tx + 1.0 + uvwz.y) / f32(SNU), uvwz.z, uvwz.w);
+    let s = textureSampleLevel(airScattering, airSampler, uvw0, 0.0) * (1.0 - l) + textureSampleLevel(airScattering, airSampler, uvw1, 0.0) * l;
+    let m = textureSampleLevel(airMie, airSampler, uvw0, 0.0) * (1.0 - l) + textureSampleLevel(airMie, airSampler, uvw1, 0.0) * l;
+    return ScatterPair(s.rgb, m.rgb);
+}
+struct AirRay { camera: vec3f, r: f32, rmu: f32, hit: bool };
+fn airEntry(camera: vec3f, ray: vec3f) -> AirRay { // From space: moved to the top of the air, or a miss.
+    let r = length(camera); let rmu = dot(camera, ray); let top = topRadius();
+    if (r < bottomRadius()) { let c = camera * (bottomRadius() / r); return AirRay(c, bottomRadius(), dot(c, ray), true); }
+    if (r <= top) { return AirRay(camera, r, rmu, true); }
+    let disc = rmu * rmu - (r - top) * (r + top);
+    if (disc < 0.0 || rmu >= 0.0) { return AirRay(camera, r, rmu, false); }
+    let d = -rmu - sqrt(disc); return AirRay(camera + ray * d, top, rmu + d, true);
+}
+fn skyRadiance(camera: vec3f, ray: vec3f, sun: vec3f) -> Sky { // Along the whole ray (to the ground or space).
+    let e = airEntry(camera, ray); if (!e.hit) { return Sky(vec3f(0.0), vec3f(1.0)); }
+    let mu = e.rmu / e.r; let muS = dot(e.camera, sun) / e.r; let nu = dot(ray, sun); let ground = intersectsGround(e.r, mu);
+    let s = airScatter(e.r, mu, muS, nu, ground);
+    return Sky(s.rayleigh * rayleighPhase(nu) + s.mie * miePhase(nu), select(transmittanceToTop(airTransmittance, airSampler, e.r, mu), vec3f(0.0), ground));
+}
+// A point inside the air; onGround: the point is on the ground, so a downward ray reaches it there
+// (a point on the sphere makes the discriminant ~0, and its sign noise flips the lookups per pixel).
+fn skyRadianceToPoint(camera: vec3f, point: vec3f, sun: vec3f, onGround: bool) -> Sky {
+    let ray = normalize(point - camera); let e = airEntry(camera, ray); if (!e.hit) { return Sky(vec3f(0.0), vec3f(1.0)); }
+    let r = e.r; let mu = e.rmu / r; let muS = dot(e.camera, sun) / r; let nu = dot(ray, sun); let ground0 = bottomRadius();
+    let disc = r * mu * r * mu - (r - ground0) * (r + ground0); let ground = mu < 0.0 && (onGround || disc >= 0.0);
+    var d = length(point - e.camera); if (ground) { d = min(d, -r * mu - safeSqrt(disc)); } // Not past the model's ground.
+    let t = transmittanceAlong(airTransmittance, airSampler, r, mu, d, ground);
+    let a = airScatter(r, mu, muS, nu, ground);
+    let rp = clampRadius(sqrt(d * d + 2.0 * r * mu * d + r * r)); let b = airScatter(rp, clampCosine((r * mu + d) / rp), clampCosine((r * muS + d * nu) / rp), nu, ground);
+    let rayleigh = max(a.rayleigh - t * b.rayleigh, vec3f(0.0)); let mie = max(a.mie - t * b.mie, vec3f(0.0)) * smoothstep(0.0, 0.01, muS); // Bruneton's twilight fix.
+    return Sky(rayleigh * rayleighPhase(nu) + mie * miePhase(nu), t);
+}
+fn airPoint(world: vec3f) -> vec3f { return (frame.planet * vec4f(world, 1.0)).xyz; }
+fn horizonPoint(c: vec3f, toward: vec3f) -> vec3f { // The model sphere's horizon seen from c, in the azimuth of `toward`.
+    let b0 = bottomRadius(); let rc = max(length(c), b0 + 0.001); let rho = sqrt((rc - b0) * (rc + b0)); let up = c / length(c);
+    let h = toward - dot(toward, up) * up; let hl = max(length(h), 1e-9);
+    return up * rc + (h / hl * (b0 / rc) - up * (rho / rc)) * rho;
+}
+struct AirLight { sun: vec3f, sky: vec3f }; // Sunlight reaching a point (fraction of the sun's colour); sky irradiance (relative to it).
+fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {
+    if (frame.air.w <= 0.0) { return AirLight(vec3f(1.0), vec3f(0.0)); }
+    let p = airPoint(world); let r = length(p); if (r >= topRadius()) { return AirLight(vec3f(1.0), vec3f(0.0)); }
+    let up = p / r; let muS = dot(up, frame.airSun.xyz); let rc = max(r, bottomRadius());
+    let n = normalize((frame.planet * vec4f(worldNormal, 0.0)).xyz);
+    let sky = lookupIrradiance(airIrradiance, airSampler, rc, muS) * (1.0 + dot(n, up)) * 0.5;
+    return AirLight(mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, muS), frame.air.w), sky * frame.air.w);
+}
+fn skyHitsGround(c: vec3f, ray: vec3f) -> bool { let e = airEntry(c, ray); return e.hit && intersectsGround(e.r, e.rmu / e.r); }
+fn airBetween(c: vec3f, point: vec3f, sun: vec3f) -> Sky { // The air between c and a point (planet frame, km).
+    var p = point; let r = length(p);
+    if (r > topRadius()) { // Beyond the air: the whole ray, if the air lies between.
+        let ray = normalize(p - c); let e = airEntry(c, ray);
+        if (!e.hit || (length(c) > topRadius() && length(e.camera - c) >= length(p - c))) { return Sky(vec3f(0.0), vec3f(1.0)); }
+        // Below the model's horizon from inside the air (the globe mesh's is lower): the horizon's air.
+        if (length(c) <= topRadius() && skyHitsGround(c, ray)) { return skyRadianceToPoint(c, horizonPoint(c, ray), sun, true); }
+        return skyRadiance(c, ray, sun);
+    }
+    // Ground below the model's sphere (chords of the globe mesh sag up to ~1 km) breaks the lookups,
+    // which assume the ground on it: lift such points onto it. The sagging mesh also shows ground past
+    // the sphere's horizon, where the lifted point would get less air than the horizon: use the
+    // horizon point in that azimuth.
+    let onGround = r < bottomRadius() + 0.05;
+    if (onGround) {
+        let b0 = bottomRadius(); p = p * (b0 / min(r, b0)); let rc = max(length(c), b0 + 0.001);
+        if (length(p - c) > sqrt((rc - b0) * (rc + b0))) { p = horizonPoint(c, p - c); }
+    }
+    return skyRadianceToPoint(c, p, sun, onGround);
+}
+fn airSky(world: vec3f) -> Sky { return airBetween(frame.air.xyz, airPoint(world), frame.airSun.xyz); } // Camera to a world point.
+fn airApply(world: vec3f, colour: vec3f) -> vec3f { // Aerial perspective: an opaque surface seen through the air.
+    if (frame.air.w <= 0.0) { return colour; }
+    let sky = airSky(world); return mix(colour, colour * sky.transmittance + sky.radiance * frame.sunColor.rgb, frame.air.w);
+}
+fn airFilter(world: vec3f) -> vec3f { // Transmittance only: light added over what is behind it.
+    if (frame.air.w <= 0.0) { return vec3f(1.0); }
+    return mix(vec3f(1.0), airSky(world).transmittance, frame.air.w);
+}
+)";
 const char* const lighting=R"(
 const PI_L = 3.141592653589793;
 fn sunView() -> vec3f { return normalize((frame.view * vec4f(frame.sun.xyz, 0.0)).xyz); }
@@ -67,16 +162,17 @@ fn blinnPhong(n: vec3f, l: vec3f, v: vec3f, specular: vec3f, shininess: f32) -> 
     return (specular * (1.0 - fresnel) + fresnel) * 0.25 * (shininess * 0.5 + 1.0) / PI_L * pow(clamp(dot(n, h), 0.0, 1.0), shininess);
 }
 // MeshStandardMaterial: direct sun, ambient and extra irradiance (light maps) on a dielectric/metal.
-fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geometryNormal: vec3f, position: vec3f, extra: vec3f, shadow: f32) -> vec3f {
+// `sun`: the sun's light reaching the point, as a factor of frame.sunColor (shadow, air).
+fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geometryNormal: vec3f, position: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
     let dxy = max(abs(dpdx(geometryNormal)), abs(dpdy(geometryNormal)));
     let roughness = min(max(roughnessIn, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
     let diffuse = albedo * (1.0 - metalness); let f0 = mix(vec3f(0.04), albedo, metalness);
-    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w * shadow;
-    return nl * frame.sunColor.rgb * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * diffuse / PI_L;
+    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
+    return nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * diffuse / PI_L;
 }
-fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f, shadow: f32) -> vec3f {
-    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w * shadow;
-    return nl * frame.sunColor.rgb * (albedo / PI_L + blinnPhong(n, l, v, specular, shininess)) + (frame.ambient.rgb + extra) * albedo / PI_L;
+fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
+    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
+    return nl * frame.sunColor.rgb * sun * (albedo / PI_L + blinnPhong(n, l, v, specular, shininess)) + (frame.ambient.rgb + extra) * albedo / PI_L;
 }
 // three.js perturbNormalArb with dHdxy_fwd (invariant under WebGPU's flipped framebuffer y).
 fn bumpNormal(position: vec3f, normal: vec3f, dBx: f32, dBy: f32, face: f32) -> vec3f {
@@ -95,9 +191,9 @@ fn heightAt(image: texture_2d<f32>, uv: vec2f, wraps: bool) -> f32 { // wraps: l
     let c = textureLoad(image, vec2i(x0, y1), 0).r; let d = textureLoad(image, vec2i(x1, y1), 0).r;
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
-fn lambertLight(albedo: vec3f, n: vec3f, extra: vec3f, shadow: f32) -> vec3f {
-    let nl = clamp(dot(n, sunView()), 0.0, 1.0) * frame.sun.w * shadow;
-    return (nl * frame.sunColor.rgb + frame.ambient.rgb + extra) * albedo / PI_L;
+fn lambertLight(albedo: vec3f, n: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
+    let nl = clamp(dot(n, sunView()), 0.0, 1.0) * frame.sun.w;
+    return (nl * frame.sunColor.rgb * sun + frame.ambient.rgb + extra) * albedo / PI_L;
 }
 fn flatNormal(position: vec3f) -> vec3f { return normalize(cross(dpdy(position), dpdx(position))); } // GL's cross(dFdx, dFdy) with y flipped.
 )";

@@ -62,6 +62,7 @@ public:
     void setRegionalImages(RegionalImages images);
     bool releaseDistantDetails(const std::string& focus,const threepp::Vector3& camera,bool enabled,float seconds);
     void updateImageDetail(const threepp::Vector3& camera, bool enabled);
+    [[nodiscard]] float atmosphereVisibility() const { return displayedAtmosphere_; } // The air's shown strength, 0-1.
 
     std::shared_ptr<threepp::Mesh> earth, moon, sun;
 

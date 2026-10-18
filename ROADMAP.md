@@ -40,6 +40,12 @@ Standard/Phong do threepp com sombras PCF, uma cena e uma câmera por quadro, Im
 6. **Ganhos da fase 4**: espalhamento de Bruneton com LUTs em compute, terreno CDLOD (Copernicus,
    LOLA, MOLA) inclusive sob veículos na Lua e em Marte, iluminação rasante do solo.
 
+Etapa 6, em andamento: espalhamento de Bruneton entregue em 18/10/2026 (tabelas em compute, céu do
+solo e do espaço, perspectiva aérea, luz do Sol filtrada e luz do céu nos materiais; aerossol de dia
+limpo, AOD 0,1). Faltam terreno CDLOD (Copernicus/LOLA/MOLA), nuvens ao vivo no modelo de ar,
+oceano, atmosfera de Marte nas mesmas tabelas e o solo regional mais claro (hoje escuro também no
+OpenGL).
+
 Estado em 18/10/2026: etapas 1–5 entregues. Os 22 programas e os materiais embutidos rodam em WGSL;
 o `visual_test` passa nos dois renderizadores (llvmpipe e MX350); sombra PCF, MSAA 4×, texturas em
 fatias com mipmaps na GPU; passada da cena ~3 ms de GPU na MX350 a 1280×800. WebGPU é o padrão,

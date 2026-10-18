@@ -43,7 +43,7 @@ Context::Context(GLFWwindow* window){
     ac.callback=[](WGPURequestAdapterStatus status,WGPUAdapter a,WGPUStringView m,void* u,void*){auto& r=*static_cast<Result*>(u);if(status==WGPURequestAdapterStatus_Success)r.handle=a;else r.message=text(m);};
     wgpuInstanceRequestAdapter(instance_,&o,ac);wgpuInstanceProcessEvents(instance_);
     if(!(adapter_=static_cast<WGPUAdapter>(adapter.handle)))throw std::runtime_error("No WebGPU adapter: "+adapter.message);
-    WGPUAdapterInfo info{};if(wgpuAdapterGetInfo(adapter_,&info)==WGPUStatus_Success){adapterName_=text(info.device);wgpuAdapterInfoFreeMembers(info);}
+    WGPUAdapterInfo info{};if(wgpuAdapterGetInfo(adapter_,&info)==WGPUStatus_Success){adapterName_=text(info.device);software_=info.adapterType==WGPUAdapterType_CPU;wgpuAdapterInfoFreeMembers(info);}
     WGPUDeviceDescriptor dd{};dd.label=view("Albert");
     // Linear filtering of float textures (heights, LUTs); GPU timestamps for frame statistics.
     std::vector<WGPUFeatureName> features;

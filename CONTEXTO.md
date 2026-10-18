@@ -1,5 +1,16 @@
 # Albert Engine — contexto para continuidade
 
+**Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`
+(tabelas em compute, incrementais por quadro), `air` em `src/gpu/programs.cpp` (céu como fundo,
+`airApply`, `airLight`, `airFilter`), `SceneRenderer::air`, `Display::setAir` chamado pelo app com a
+Terra. Revisão independente da migração WebGPU (subagente; Codex sem cota) corrigida em `d07bb97`
+com regressões; revisão do Fable da atmosfera (P1 objeto acima do ar pintado de céu, P2 corpo abaixo
+do horizonte do modelo preto, P3 tabelas f16 sem filtragem f32 e teste dependente de NaN) corrigida
+com testes das funções WGSL no `atmosphere_test`; o CI publica a saída dos testes que falham como anotações (lidas sem login pela API
+de check-runs). Revisões: Fable (`model: fable`) quando pertinente e Codex nos marcos. Previews:
+`build/air-preview.py nome:drag:dx:dy …` (pad no Cabo, `UTC=` em segundos Unix). Próximo: terreno
+CDLOD. Progresso geral ~81%.
+
 **Fase 4 — WebGPU é o renderizador padrão (18/10/2026)**: etapas 1–5 do plano no `ROADMAP.md`
 entregues (`src/gpu`: contexto, janela, `SceneRenderer` que desenha a cena do threepp; WGSL de todos
 os materiais em `src/render/webgpu_programs.cpp`; `Display` escolhe o caminho; `visual_test 1` roda

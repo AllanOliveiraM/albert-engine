@@ -15,7 +15,8 @@ struct AtmosphereModel {
     float mieG=0,sunAngularRadius=0,maxSunZenith=0; // Radians.
     int orders=4; // Scattering orders.
 };
-// Bruneton's Earth (Rayleigh, Mie, 300 DU of ozone) on the WGS84 equatorial radius, 80 km deep.
+// Bruneton's Earth (Rayleigh, 300 DU of ozone) with clear-day aerosols (optical depth 0.1 at
+// 550 nm), on the WGS84 equatorial radius, 80 km deep.
 AtmosphereModel earthAtmosphere();
 class Atmosphere {
 public:

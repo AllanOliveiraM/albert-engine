@@ -2450,7 +2450,11 @@ int albert::runRenderer(int argc, char** argv) {
             }
             // Photographic exposure adapts to the irradiance at the focused planet;
             // physical solar illumination and geometry remain unchanged.
-            const float photographicExposure=focus==targets::Moon?2.1f:solids.contains(focus)?std::clamp(1.05f*std::pow(sunPosition.distanceTo(solids.nodes().at(focus)->position)*6378137.f/149597870700.f,2.f),.25f,1200.f):1.05f;
+            // Under Earth's air (below ~30 km) the view is mostly sky and lit ground, not a lit planet on
+            // black: one stop more, as a camera on the ground would take.
+            const float airAltitude=(camera->position.distanceTo(planets.earth->position)-1.f)*6378.137f;
+            const float photographicExposure=(focus==targets::Moon?2.1f:solids.contains(focus)?std::clamp(1.05f*std::pow(sunPosition.distanceTo(solids.nodes().at(focus)->position)*6378137.f/149597870700.f,2.f),.25f,1200.f):1.05f)
+                *(1.f+planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f)));
             graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
             solids.update(graphics.gl(),*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary);
             {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
@@ -2558,6 +2562,7 @@ int albert::runRenderer(int argc, char** argv) {
                 snapshot.clock=frameTime;snapshot.simulation=moment;snapshot.simulation.utcSeconds=simulatedUtc;snapshot.approximatePositions=approximatePositions;commands.publish(std::move(snapshot));
             }
             eclipses.update(visualSettings.shadows);
+            graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility());
             graphics.render(*scene, *camera);
             graphics.ui();
 #ifdef ALBERT_HAS_RPC

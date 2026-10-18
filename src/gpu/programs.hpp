@@ -16,11 +16,18 @@ struct Program {
     std::vector<std::string> textures;
     std::vector<std::pair<std::string,int>> attributes; // Name and float components.
     bool points=false;
+    // Drawn before everything else, without depth and showing back faces only: a shell (the sky)
+    // around the camera, or seen from outside, covers its whole disc once and objects overwrite it.
+    bool background=false;
 };
 void define(const std::string& name,Program program);
 const Program* program(const std::string& name);
 extern const char* const prelude;
+// The frame's air (group 0, bindings 3-8; needs atmosphereWgsl): sky radiance, aerial perspective
+// (airApply), sunlight and sky light at a point (airLight), transmittance (airFilter).
+extern const char* const air;
 // threepp's physical lighting (r166+ conventions, no legacy π): GGX with correlated Smith,
-// Blinn-Phong, Lambert, three.js bump mapping; view space, light from `frame`.
+// Blinn-Phong, Lambert, three.js bump mapping; view space, light from `frame`. Every program's
+// module is prelude + atmosphereWgsl + air + lighting + its own WGSL.
 extern const char* const lighting;
 }

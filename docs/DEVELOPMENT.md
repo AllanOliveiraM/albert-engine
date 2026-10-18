@@ -311,12 +311,31 @@ interpolado em f32, mapa de rugosidade, light map e sombra PCF do Sol. Profundid
 (`depth32float`, infinito na perspectiva). Texturas grandes sobem em fatias de ~8 MB por quadro e os
 mipmaps são renderizados na GPU. `ALBERT_FRAME_STATS=1` imprime média, p99 e pior quadro a cada 300
 quadros, com o trabalho da CPU, a apresentação e o tempo da passada da cena na GPU (timestamps).
-`visual_test 1` roda as mesmas cenas nos dois renderizadores; `gpu_scene_test` cobre fundo,
-profundidade, misturas, texturas, pontos instanciados e sombra fora da tela (pulado sem adaptador).
+`visual_test 1` roda as mesmas cenas nos dois renderizadores (`visual_test webgpu`, no ctest, só o
+WebGPU fora da tela); `gpu_scene_test` cobre fundo, profundidade, misturas, texturas (troca a cada
+quadro e streaming em dois quadros), atributos compartilhados, MSAA e sombra (pulado sem adaptador).
+
+**Atmosfera (WebGPU).** Espalhamento pré-computado de Bruneton (implementação de referência de
+2017, BSD-3) portado para WGSL em `src/gpu/atmosphere.*`: transmitância, irradiância do céu e
+espalhamento simples e múltiplo (4 ordens) a 680/550/440 nm, com Sol branco de irradiância 1 (os
+shaders multiplicam pela cor do Sol). Terra no raio equatorial WGS84, 80 km de ar, ozônio de 300 DU
+e aerossol de dia limpo (espessura óptica 0,1 a 550 nm, Ångström 1; o de Bruneton, 0,0053, deixava
+o céu escuro). As integrais usam 200 amostras (50 na referência superestimavam o Mie em 14%). O
+pré-cômputo roda em compute, em fatias de uma camada, 4 por quadro (1 em adaptador por software):
+0,5 s na MX350, 23 s no llvmpipe; o ar aparece quando as tabelas ficam prontas. Uso nos shaders
+(`air` em `src/gpu/programs.cpp`): o céu é desenhado como fundo, antes de tudo e sem profundidade;
+cada material opaco aplica a perspectiva aérea até o seu ponto (`airApply`), e os embutidos e os
+objetos recebem a luz do Sol filtrada e a luz do céu (`airLight`); nuvens, luzes noturnas, Sol e
+estrelas atravessam o ar (estrelas somem quando o céu as ofusca). Solo abaixo da esfera do modelo
+(as cordas da malha do globo afundam até ~1 km) é levado à esfera, e o que a malha mostra além do
+horizonte da esfera usa o ponto do horizonte. Abaixo de 30 km a exposição fotográfica sobe até um
+ponto (como numa câmera no solo); a iluminação física não muda. `atmosphere_test` confere a
+transmitância zenital e o espalhamento simples vertical com formas fechadas e desenha uma cena com
+céu, objeto à frente do céu e solo.
 
 Terra elipsoidal WGS84, base global até 4K e blocos regionais de um mosaico 86400×43200, filtragem
 anisotrópica/mipmaps, antialiasing MSAA 4x, iluminação solar, reflexos oceânicos,
-luzes noturnas, camada de nuvens e atmosfera por espalhamento simples Rayleigh/Mie
+luzes noturnas, camada de nuvens e, no caminho OpenGL, atmosfera por espalhamento simples Rayleigh/Mie
 (8 amostras no raio da câmera; profundidade óptica solar consultada em uma
 tabela 256×128 calculada uma única vez com 128 amostras por raio; alturas de
 escala de 8/1,2 km). A tabela evita integrar um segundo raio a cada pixel.

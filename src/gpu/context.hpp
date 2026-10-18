@@ -15,13 +15,14 @@ public:
     WGPUQueue queue()const{return queue_;}
     WGPUTextureFormat format()const{return format_;} // Surface format: 8-bit unorm, not sRGB.
     const std::string& adapter()const{return adapterName_;}
+    [[nodiscard]] bool software()const{return software_;} // A CPU adapter (llvmpipe, WARP).
     void resize(int width,int height);
     // The next surface image, or nullptr when it must be reconfigured (resize) or is lost.
     WGPUTextureView acquire();
     void present();
 private:
     WGPUInstance instance_=nullptr;WGPUSurface surface_=nullptr;WGPUAdapter adapter_=nullptr;WGPUDevice device_=nullptr;WGPUQueue queue_=nullptr;
-    WGPUTextureFormat format_=WGPUTextureFormat_BGRA8Unorm;WGPUTexture current_=nullptr;WGPUTextureView view_=nullptr;std::string adapterName_;
+    WGPUTextureFormat format_=WGPUTextureFormat_BGRA8Unorm;WGPUTexture current_=nullptr;WGPUTextureView view_=nullptr;std::string adapterName_;bool software_=false;
     int width_=0,height_=0;
 };
 std::string text(WGPUStringView s);
