@@ -25,7 +25,9 @@ class Gfs {
 public:
     using Transport=std::function<std::string(const std::string&,DownloadProgress*)>;
     explicit Gfs(std::filesystem::path cache,Transport transport={});
-    std::shared_ptr<const physics::Weather> around(double latitude,double longitude,double utc,DownloadProgress* progress=nullptr);
+    std::shared_ptr<const physics::Weather> around(double latitude,double longitude,double utc,DownloadProgress* progress=nullptr){return fetch(latitude,longitude,utc,progress).model;}
+    struct Download {std::shared_ptr<const physics::Weather> model;std::vector<std::string> grib;}; // Raw GRIB2 of both hours, for replay.
+    Download fetch(double latitude,double longitude,double utc,DownloadProgress* progress=nullptr);
 private:
     std::filesystem::path cache_;Transport transport_;std::mutex mutex_;
 };

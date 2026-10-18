@@ -306,6 +306,14 @@ em [wire.hpp](../src/rpc/wire.hpp) é um cliente pronto. Medido: ~30 µs por tro
 1 ms no teste e, no aplicativo com clima ao vivo, 600 mil trocas a 1 kHz (10 min de voo) em 46 s
 sem perda (`albert_flight_client --wire`).
 
+**Replay.** `ExportFlight` devolve, em pedaços de até 1 MiB, um `FlightLog` com o pedido de
+criação (instante resolvido, semente do IMU), os dados de ar usados (GRIB2 das duas horas do GFS e
+os dias de clima espacial) e cada passo com seus comandos na ordem em que chegaram, pelo gRPC ou
+pelo plano de dados. `ReplayFlight` recria o voo só com esse conteúdo, sem rede, refaz os passos e
+responde `DATA_LOSS` se o hash final divergir; um log cujo ar não pode ser reconstruído é
+recusado com `FAILED_PRECONDITION`. A mesma sequência de passos é necessária: agrupar ticks de
+outra forma muda os sorteios do IMU e a divisão dos passos.
+
 O exemplo [flight_client.cpp](../examples/flight_client.cpp) leva o lançador genérico
 de Kennedy (LC-39A) à órbita com a lógica de [gravity_turn.hpp](../examples/gravity_turn.hpp):
 subida vertical, pitch kick, gravity turn sem incidência, controle da taxa vertical no

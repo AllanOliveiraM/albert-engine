@@ -93,7 +93,7 @@ physics::WeatherGrid gfsGrid(const std::vector<std::vector<GribField>>& hours,st
 Gfs::Gfs(std::filesystem::path cache,Transport transport):cache_(std::move(cache)),transport_(std::move(transport)){
     if(!transport_)transport_=[](const std::string& url,DownloadProgress* p){return httpGet(url,p,{32*1024*1024,90});};
 }
-std::shared_ptr<const physics::Weather> Gfs::around(double lat,double lon,double utc,DownloadProgress* progress){
+Gfs::Download Gfs::fetch(double lat,double lon,double utc,DownloadProgress* progress){
     if(!(std::abs(lat)<=90)||!std::isfinite(lon)||!std::isfinite(utc))throw std::invalid_argument("Invalid weather request");
     std::lock_guard lock(mutex_);
     const double clat=std::round(lat*4)/4,clon=std::round(std::remainder(lon,360.)*4)/4;
@@ -106,10 +106,10 @@ std::shared_ptr<const physics::Weather> Gfs::around(double lat,double lon,double
         if(k<0||k+1>120)continue;
         const std::string day=stamp(cycle,false),hh=stamp(cycle,true).substr(8,2);
         auto path=[&](int f){std::ostringstream key;key<<"gfs-"<<day<<hh<<"-f"<<f<<"-"<<south<<"_"<<west<<".grb2";return cache_/key.str();};
-        std::vector<std::vector<GribField>> hours(2);
+        std::vector<std::vector<GribField>> hours(2);std::vector<std::string> raw(2);
         for(int i=0;i<2;++i){std::string bytes;if(std::ifstream in{path(k+i),std::ios::binary})bytes.assign(std::istreambuf_iterator<char>(in),{});
             try{hours[static_cast<std::size_t>(i)]=decodeGrib2(bytes);}catch(const std::exception&){}
-            if(!complete(hours[static_cast<std::size_t>(i)]))hours[static_cast<std::size_t>(i)].clear();}
+            if(!complete(hours[static_cast<std::size_t>(i)]))hours[static_cast<std::size_t>(i)].clear();else raw[static_cast<std::size_t>(i)]=std::move(bytes);}
         if(hours[0].empty()||hours[1].empty()){ // Not cached completely: needs the cycle published.
             char name[64];std::snprintf(name,sizeof name,"gfs.t%sz.pgrb2.0p25.f%03d",hh.c_str(),k+1);
             try{transport_("https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs."+day+"/"+hh+"/atmos/"+name+".idx",progress);}catch(const std::exception& e){last=e.what();continue;}
@@ -122,14 +122,14 @@ std::shared_ptr<const physics::Weather> Gfs::around(double lat,double lon,double
                 if(!complete(fields))throw std::runtime_error("Incomplete GFS response");
                 std::error_code ec;std::filesystem::create_directories(cache_,ec);
                 if(!ec){const auto partial=path(k+i).string()+".tmp";{std::ofstream o{partial,std::ios::binary};o.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));}std::filesystem::rename(partial,path(k+i),ec);}
-                hours[static_cast<std::size_t>(i)]=std::move(fields);
+                hours[static_cast<std::size_t>(i)]=std::move(fields);raw[static_cast<std::size_t>(i)]=bytes;
             }
         }
         std::error_code ec; // Drop downloads older than two days.
         for(const auto& entry:std::filesystem::directory_iterator(cache_,ec))
             if(entry.path().extension()==".grb2"&&std::filesystem::last_write_time(entry,ec)<std::filesystem::file_time_type::clock::now()-std::chrono::hours(48))std::filesystem::remove(entry,ec);
         char source[160];std::snprintf(source,sizeof source,"NOAA GFS 0.25° %.4s-%.2s-%.2s %sZ (+%d/+%d h), %.2f..%.2f N, %.2f..%.2f E",day.c_str(),day.c_str()+4,day.c_str()+6,hh.c_str(),k,k+1,south,north,west,east);
-        return std::make_shared<const physics::Weather>(gfsGrid(hours,source));
+        return{std::make_shared<const physics::Weather>(gfsGrid(hours,source)),std::move(raw)};
     }
     throw std::runtime_error("No published GFS cycle covers this instant ("+last+")");
 }

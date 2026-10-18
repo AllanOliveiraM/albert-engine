@@ -179,7 +179,7 @@ struct LayerServices final:api::LayerService::Service {
     grpc::Status RemoveLayer(grpc::ServerContext* c,const api::ObjectRequest* r,api::Applied* out)override{return services.RemoveLayer(c,r,out);}
     grpc::Status SetVisibility(grpc::ServerContext* c,const api::VisibilityRequest* r,api::Applied* out)override{return services.apply(c,core::LayerVisibility{r->id(),r->visible()},out);}
 };
-struct Server::Impl {core::Bridge& bridge;Services services;LayerServices layers;FlightServices flights;std::unique_ptr<grpc::Server> server;int port=0;Impl(core::Bridge& b,catalog::Manager* c,Server::AirSources a):bridge(b),services(b,c),layers(services),flights(b,{std::move(a.weather),std::move(a.upper)}){}};
+struct Server::Impl {core::Bridge& bridge;Services services;LayerServices layers;FlightServices flights;std::unique_ptr<grpc::Server> server;int port=0;Impl(core::Bridge& b,catalog::Manager* c,AirSources a):bridge(b),services(b,c),layers(services),flights(b,std::move(a)){}};
 Server::Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog,AirSources air):impl_(std::make_unique<Impl>(bridge,catalog,std::move(air))){
     if(port>65535)throw std::invalid_argument("Invalid gRPC port");grpc::ServerBuilder builder;
     builder.AddListeningPort("127.0.0.1:"+std::to_string(port),grpc::InsecureServerCredentials(),&impl_->port);

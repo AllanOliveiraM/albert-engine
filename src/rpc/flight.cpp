@@ -9,6 +9,7 @@
 #include "providers/space_weather.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <cmath>
 #include <mutex>
 #include <optional>
@@ -26,13 +27,41 @@ core::Reply wait(core::Ticket t){
 }
 grpc::Status failed(const core::Reply& r){return r.code==core::Code::Ok?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,r.message};}
 }
+namespace {
+struct Prepared {ph::Vehicle vehicle;double utc=0,pitch=90,seconds=.001,coast=1;unsigned degree=20;};
+Prepared prepare(const api::CreateFlightRequest& r,double utc){
+    Prepared p;
+    switch(r.vehicle()){
+    case api::GENERIC_LAUNCHER:{const double payload=r.has_payload_kilograms()?r.payload_kilograms():5000.;
+        if(!(payload>=0&&payload<=30000))throw std::invalid_argument("Payload must be 0-30000 kg");p.vehicle=ph::genericLauncher(payload);break;}
+    case api::NESC_TWO_STAGE:p.vehicle=ph::nescTwoStage();break;
+    case api::NESC_SPHERE:p.vehicle=ph::nescSphere();break;
+    default:throw std::invalid_argument("Unknown vehicle");
+    }
+    const auto& site=r.site();p.pitch=r.has_pitch_degrees()?r.pitch_degrees():90.;p.seconds=r.has_step_seconds()?r.step_seconds():.001;p.coast=r.has_coast_step_seconds()?r.coast_step_seconds():1.;
+    if(!(std::abs(site.latitude_degrees())<=90&&std::abs(site.longitude_degrees())<=360&&site.height_meters()>=-500&&site.height_meters()<=1e4))throw std::invalid_argument("Invalid launch site");
+    if(!finite(r.heading_degrees())||!(std::abs(p.pitch)<=90)||!(p.seconds>=1e-5&&p.seconds<=.1)||!(p.coast>=0&&p.coast<=10))throw std::invalid_argument("Invalid heading, pitch, step or coast step");
+    if(!(utc>=time::Simulation::earliestUtc&&utc<=time::Simulation::latestUtc))throw std::invalid_argument("Instant outside 1900-2100");
+    p.utc=utc;p.degree=r.has_gravity_degree()?r.gravity_degree():20u;
+    if(p.degree<2||p.degree>static_cast<unsigned>(ph::egm2008Maximum))throw std::invalid_argument("Gravity degree must be 2-70");
+    return p;
+}
+}
 struct FlightServices::Impl {
+    struct Command {std::uint32_t kind;double a=0,b=0,c=0;};
     core::Bridge& bridge;AirSources sources;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
     ph::Tt step=ph::second/1000,start=0;std::uint64_t tick=0;int shown=0;std::vector<api::FlightEvent> events;
     std::chrono::steady_clock::time_point published{};
     Impl(core::Bridge& b,AirSources s):bridge(b),sources(std::move(s)){
-        if(!sources.weather)sources.weather=[](double lat,double lon,double utc){return std::shared_ptr<const physics::AirModel>(providers::gfs().around(lat,lon,utc));};
-        if(!sources.upper)sources.upper=[](double utc)->std::shared_ptr<const physics::AirModel>{try{return providers::spaceWeather().msis(utc);}catch(const std::exception&){return nullptr;}};
+        if(!sources.weather)sources.weather=[](double lat,double lon,double utc){auto d=providers::gfs().fetch(lat,lon,utc);return LiveAir{d.model,std::move(d.grib)};};
+        if(!sources.upper)sources.upper=[](double utc){UpperAir a;try{a.model=providers::spaceWeather().msis(utc,&a.days);}catch(const std::exception&){a={};}return a;};
+    }
+    // Replay log: the creation and every committed step (u32 ticks, u32 count, then per command u32 kind and three doubles).
+    api::FlightLog log;std::string record;
+    void note(const std::vector<Command>& commands,std::uint32_t ticks){
+        auto put=[&](const void* p,std::size_t n){record.append(static_cast<const char*>(p),n);};
+        const auto count=static_cast<std::uint32_t>(commands.size());put(&ticks,4);put(&count,4);
+        for(const auto& c:commands){put(&c.kind,4);put(&c.a,8);put(&c.b,8);put(&c.c,8);}
     }
     double elapsed()const{return ph::secondsSinceJ2000(flight->state().time-start);}
     core::Sample scene()const{ // Cylinder axis (local y) along body x, centred on the stack.
@@ -64,7 +93,8 @@ struct FlightServices::Impl {
         const ph::Sample x=flight->sample();const auto& st=flight->state();
         return{true,st.burning,st.clamped,st.landed,flight->vehicle().name,atmosphere,elapsed(),x.geodetic.height,ph::norm(x.nedVelocity),x.mach,x.dynamicPressure,x.mass,st.propellant,x.air.wind.x,x.air.wind.y,st.stage,static_cast<int>(flight->vehicle().stages.size())};
     }
-    struct Command {std::uint32_t kind;double a=0,b=0,c=0;};
+    grpc::Status create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
+        std::vector<std::string> grib,std::vector<ph::SpaceWeatherDay> days,const std::function<bool()>& cancelled,api::FlightSample* out);
     std::uint32_t eventBits=0; // For the data plane, since its last response.
     grpc::Status run(const std::vector<Command>& commands,std::uint32_t ticks,const std::function<bool()>& cancelled){
         if(!flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
@@ -90,7 +120,7 @@ struct FlightServices::Impl {
         if(cancelled()){events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
         ph::Imu sensor=*imu;const auto inc=next.increments();
         if(inc.seconds>0)reading=sensor.measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,next.sample().air.pressure);
-        *flight=std::move(next);*imu=std::move(sensor);tick+=ticks;eventBits|=bits;
+        *flight=std::move(next);*imu=std::move(sensor);tick+=ticks;eventBits|=bits;note(commands,ticks);
         if(ticks)publish(changed||flight->state().stage!=shown);
         return grpc::Status::OK;
     }
@@ -138,56 +168,88 @@ FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(st
     });
 }
 FlightServices::~FlightServices()=default;
-grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api::CreateFlightRequest* r,api::FlightSample* out){
-    std::optional<ph::Flight> made;ph::Tt step=0,t=0;std::string atmosphere="U.S. Standard Atmosphere 1976";
-    try{
-        ph::Vehicle vehicle;
-        switch(r->vehicle()){
-        case api::GENERIC_LAUNCHER:{const double payload=r->has_payload_kilograms()?r->payload_kilograms():5000.;
-            if(!(payload>=0&&payload<=30000))throw std::invalid_argument("Payload must be 0-30000 kg");vehicle=ph::genericLauncher(payload);break;}
-        case api::NESC_TWO_STAGE:vehicle=ph::nescTwoStage();break;
-        case api::NESC_SPHERE:vehicle=ph::nescSphere();break;
-        default:throw std::invalid_argument("Unknown vehicle");
-        }
-        const auto& site=r->site();const double pitch=r->has_pitch_degrees()?r->pitch_degrees():90.,seconds=r->has_step_seconds()?r->step_seconds():.001;
-        if(!(std::abs(site.latitude_degrees())<=90&&std::abs(site.longitude_degrees())<=360&&site.height_meters()>=-500&&site.height_meters()<=1e4))throw std::invalid_argument("Invalid launch site");
-        const double coast=r->has_coast_step_seconds()?r->coast_step_seconds():1.;
-        if(!finite(r->heading_degrees())||!(std::abs(pitch)<=90)||!(seconds>=1e-5&&seconds<=.1)||!(coast>=0&&coast<=10))throw std::invalid_argument("Invalid heading, pitch, step or coast step");
-        const auto shown=impl_->bridge.snapshot();const double utc=r->has_utc_unix_seconds()?r->utc_unix_seconds():shown?shown->simulation.utcSeconds:time::simulation().read().utcSeconds;
-        if(!(utc>=time::Simulation::earliestUtc&&utc<=time::Simulation::latestUtc))throw std::invalid_argument("Instant outside 1900-2100");
-        t=ph::ttFromUtc(utc);step=static_cast<ph::Tt>(std::llround(seconds*1e9));
-        const unsigned degree=r->has_gravity_degree()?r->gravity_degree():20u;
-        if(degree<2||degree>static_cast<unsigned>(ph::egm2008Maximum))throw std::invalid_argument("Gravity degree must be 2-70");
-        std::shared_ptr<const physics::AirModel> air;
-        if(r->weather()!=api::CreateFlightRequest::STANDARD_ATMOSPHERE){ // Weather only while Albert follows the real clock.
-            const bool live=!shown||shown->simulation.live;const double now=shown?shown->clock.utcSeconds:std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
-            air=impl_->sources.upper(utc); // NRLMSISE-00 over the weather, or alone.
-            std::string unavailable;
-            if(r->weather()==api::CreateFlightRequest::LIVE_GFS||(live&&std::abs(utc-now)<=7200)){
-                try{auto weather=impl_->sources.weather(site.latitude_degrees(),site.longitude_degrees(),utc);
-                    if(const auto grid=std::dynamic_pointer_cast<const physics::Weather>(weather))weather=grid->above(air);
-                    air=std::move(weather);}
-                catch(const std::exception& e){if(r->weather()==api::CreateFlightRequest::LIVE_GFS)return{grpc::StatusCode::UNAVAILABLE,std::string("Live weather unavailable: ")+e.what()};unavailable=std::string(" (live weather unavailable: ")+e.what()+")";}
-            }
-            atmosphere=(air?air->source():atmosphere)+unavailable;
-        }
-        ph::Environment env;env.air=air;env.planet.degree=static_cast<int>(degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(utc-946728000.));env.ground=site.height_meters();
-        made.emplace(vehicle,env,ph::Flight::pad(env,vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r->heading_degrees()*deg,pitch*deg));
-        made->steps(step,static_cast<ph::Tt>(std::llround(coast*1e9)));
-    }catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
-    if(context->IsCancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
-    std::lock_guard lock(impl_->mutex);auto& m=*impl_;
-    m.flight=std::move(made);m.step=step;m.start=t;m.tick=0;m.events.clear();m.eventBits=0;m.atmosphere=atmosphere;
+grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
+    std::vector<std::string> grib,std::vector<ph::SpaceWeatherDay> days,const std::function<bool()>& cancelled,api::FlightSample* out){
+    const auto& site=r.site();const ph::Tt t=ph::ttFromUtc(p.utc),stepNs=static_cast<ph::Tt>(std::llround(p.seconds*1e9));
+    ph::Environment env;env.air=air;env.planet.degree=static_cast<int>(p.degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(p.utc-946728000.));env.ground=site.height_meters();
+    std::optional<ph::Flight> made;
+    try{made.emplace(p.vehicle,env,ph::Flight::pad(env,p.vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r.heading_degrees()*deg,p.pitch*deg));}
+    catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    made->steps(stepNs,static_cast<ph::Tt>(std::llround(p.coast*1e9)));
+    if(cancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
+    std::lock_guard lock(mutex);
+    flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;this->atmosphere=atmosphere;
     { // The IMU starts with one sample at the pad.
-        const auto g=r->imu().grade();m.imu.emplace(ph::imuModel(g==api::ImuSettings::TACTICAL?ph::ImuGrade::tactical:g==api::ImuSettings::INDUSTRIAL?ph::ImuGrade::industrial:ph::ImuGrade::ideal),r->imu().seed());
-        const ph::Sample x=m.flight->sample();const double dt=ph::secondsSinceJ2000(step);
-        m.reading=m.imu->measure(dt,x.specificForce,m.flight->state().rate,x.specificForce*dt,m.flight->state().rate*dt,x.air.pressure);
+        const auto g=r.imu().grade();imu.emplace(ph::imuModel(g==api::ImuSettings::TACTICAL?ph::ImuGrade::tactical:g==api::ImuSettings::INDUSTRIAL?ph::ImuGrade::industrial:ph::ImuGrade::ideal),r.imu().seed());
+        const ph::Sample x=flight->sample();const double dt=p.seconds;
+        reading=imu->measure(dt,x.specificForce,flight->state().rate,x.specificForce*dt,flight->state().rate*dt,x.air.pressure);
     }
-    m.shown=0;(void)wait(m.bridge.submit(core::Remove{objectId}));
-    if(auto s=failed(wait(m.bridge.submit(core::Create{m.object()})));!s.ok())return s;
-    if(auto s=failed(wait(m.bridge.submit(core::SetTime{ph::utcFromTt(t),0.,false})));!s.ok())return s;
-    if(r->focus_camera())(void)wait(m.bridge.submit(core::Focus{objectId,true}));
-    m.published=std::chrono::steady_clock::now();m.fill(out);return grpc::Status::OK;
+    log=api::FlightLog{};record.clear();log.set_engine("Albert Engine "+std::string(ALBERT_VERSION));*log.mutable_request()=r;log.mutable_request()->set_utc_unix_seconds(p.utc);log.set_atmosphere(atmosphere);
+    for(auto& b:grib)log.add_gfs(std::move(b));
+    for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}
+    shown=0;(void)wait(bridge.submit(core::Remove{objectId}));
+    if(auto s=failed(wait(bridge.submit(core::Create{object()})));!s.ok())return s;
+    if(auto s=failed(wait(bridge.submit(core::SetTime{ph::utcFromTt(t),0.,false})));!s.ok())return s;
+    if(r.focus_camera())(void)wait(bridge.submit(core::Focus{objectId,true}));
+    published=std::chrono::steady_clock::now();fill(out);return grpc::Status::OK;
+}
+grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api::CreateFlightRequest* r,api::FlightSample* out){
+    Prepared p;
+    const auto shown=impl_->bridge.snapshot();
+    try{p=prepare(*r,r->has_utc_unix_seconds()?r->utc_unix_seconds():shown?shown->simulation.utcSeconds:time::simulation().read().utcSeconds);}
+    catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    std::shared_ptr<const physics::AirModel> air;std::string atmosphere="U.S. Standard Atmosphere 1976";std::vector<std::string> grib;std::vector<ph::SpaceWeatherDay> days;
+    if(r->weather()!=api::CreateFlightRequest::STANDARD_ATMOSPHERE){ // Weather only while Albert follows the real clock.
+        const bool live=!shown||shown->simulation.live;const double now=shown?shown->clock.utcSeconds:std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+        UpperAir upper=impl_->sources.upper(p.utc);air=upper.model;days=std::move(upper.days); // NRLMSISE-00 over the weather, or alone.
+        std::string unavailable;
+        if(r->weather()==api::CreateFlightRequest::LIVE_GFS||(live&&std::abs(p.utc-now)<=7200)){
+            try{auto w=impl_->sources.weather(r->site().latitude_degrees(),r->site().longitude_degrees(),p.utc);auto model=w.model;
+                if(const auto grid=std::dynamic_pointer_cast<const physics::Weather>(model))model=grid->above(air);
+                air=std::move(model);grib=std::move(w.grib);}
+            catch(const std::exception& e){if(r->weather()==api::CreateFlightRequest::LIVE_GFS)return{grpc::StatusCode::UNAVAILABLE,std::string("Live weather unavailable: ")+e.what()};unavailable=std::string(" (live weather unavailable: ")+e.what()+")";}
+        }
+        atmosphere=(air?air->source():atmosphere)+unavailable;
+    }
+    return impl_->create(*r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),[&]{return context->IsCancelled();},out);
+}
+grpc::Status FlightServices::ExportFlight(grpc::ServerContext*,const api::Empty*,grpc::ServerWriter<api::FlightLogChunk>* writer){
+    std::string bytes;
+    {std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+        api::FlightLog log=impl_->log;log.set_steps(impl_->record);log.set_state_hash(impl_->flight->hash());log.set_tick(impl_->tick);bytes=log.SerializeAsString();}
+    for(std::size_t at=0;at<bytes.size();at+=1u<<20){api::FlightLogChunk c;c.set_data(bytes.substr(at,1u<<20));if(!writer->Write(c))return{grpc::StatusCode::CANCELLED,"Client stopped reading"};}
+    return grpc::Status::OK;
+}
+grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::ServerReader<api::FlightLogChunk>* reader,api::FlightSample* out){
+    std::string bytes;api::FlightLogChunk c;
+    while(reader->Read(&c)){bytes+=c.data();if(bytes.size()>(512u<<20))return{grpc::StatusCode::RESOURCE_EXHAUSTED,"Flight log above 512 MiB"};}
+    api::FlightLog log;if(!log.ParseFromString(bytes))return{grpc::StatusCode::INVALID_ARGUMENT,"Malformed flight log"};
+    const auto& r=log.request();Prepared p;
+    try{p=prepare(r,r.utc_unix_seconds());}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    // Air from the embedded inputs only: never the network.
+    std::shared_ptr<const physics::AirModel> air;std::vector<ph::SpaceWeatherDay> days;std::vector<std::string> grib(log.gfs().begin(),log.gfs().end());
+    for(const auto& d:log.space_weather()){ph::SpaceWeatherDay x;x.day=d.day();x.f107=d.f107();x.f107a=d.f107a();x.apAverage=d.ap_average();x.type=d.type();x.hasAp=d.ap_size()==8;for(int i=0;i<d.ap_size()&&i<8;++i)x.ap[static_cast<std::size_t>(i)]=d.ap(i);days.push_back(x);}
+    try{
+        if(!days.empty())air=providers::msisFrom(days,p.utc);
+        if(!grib.empty()){std::vector<std::vector<providers::GribField>> hours;for(const auto& b:grib)hours.push_back(providers::decodeGrib2(b));
+            const auto grid=std::make_shared<const physics::Weather>(providers::gfsGrid(hours,log.atmosphere().substr(0,log.atmosphere().find(" + "))));air=grid->above(air);}
+    }catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,std::string("Flight log air data: ")+e.what()};}
+    const std::string expected=air?air->source():"U.S. Standard Atmosphere 1976";
+    if(log.atmosphere().rfind(expected,0)!=0)return{grpc::StatusCode::FAILED_PRECONDITION,"The log does not carry the air data it used ("+log.atmosphere()+")"};
+    api::FlightSample created;
+    if(auto s=impl_->create(r,p,std::move(air),log.atmosphere(),std::move(grib),std::move(days),[&]{return context->IsCancelled();},&created);!s.ok())return s;
+    const std::string& steps=log.steps();
+    for(std::size_t at=0;at<steps.size();){
+        auto get=[&](void* d,std::size_t n){if(at+n>steps.size())throw std::invalid_argument("Truncated flight log");std::memcpy(d,steps.data()+at,n);at+=n;};
+        std::uint32_t ticks=0,count=0;std::vector<Impl::Command> commands;
+        try{get(&ticks,4);get(&count,4);if(count>64)throw std::invalid_argument("Malformed flight log step");commands.resize(count);for(auto& k:commands){get(&k.kind,4);get(&k.a,8);get(&k.b,8);get(&k.c,8);}}
+        catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+        std::lock_guard lock(impl_->mutex);
+        if(auto s=impl_->run(commands,ticks,[&]{return context->IsCancelled();});!s.ok())return s;
+    }
+    std::lock_guard lock(impl_->mutex);impl_->fill(out);
+    if(out->state_hash()!=log.state_hash()||out->tick()!=log.tick())return{grpc::StatusCode::DATA_LOSS,"Replay diverged from the recorded state"};
+    return grpc::Status::OK;
 }
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
     std::vector<Impl::Command> commands;

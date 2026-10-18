@@ -5,8 +5,9 @@ expostos na API (`imu`). Revisão do Codex da fase 2 (6 P2) corrigida com regres
 grade GRIB2, coast só sem torque, cache GFS antes da rede e só se completo, índices solares
 seguindo o instante (tabela imutável), cancelamento em `CreateFlight`/fim do `Step`. Plano de dados binário (TCP
 local, `src/rpc/flight_wire.hpp`/`wire.*`) entregue: 600 mil quadros a 1 kHz em 46 s, 0 perdidos,
-órbita alcançada (`build/wire-run.py --wire`). Próximos: latências de sensor/atuador e política de
-comando ausente (modo tempo real), replay com sementes e dados embutidos. Progresso geral ~46%.
+órbita alcançada (`build/wire-run.py --wire`). Replay (`ExportFlight`/`ReplayFlight`, log com GRIB e
+clima espacial embutidos, passos com comandos em ordem) entregue e testado. Próximo: modo tempo
+real com latências de sensor/atuador e política de comando ausente. Progresso geral ~48%.
 
 **Fase 2 entregue (18/10/2026):** clima ao vivo do NOAA GFS na física e na tela
 (`src/providers/gfs.*`: GRIB2 5.0, ciclo pelo índice da AWS, recorte NOMADS ±6°, cache 48 h;

@@ -1,5 +1,10 @@
 #include "rpc/server.hpp"
 #include "rpc/wire.hpp"
+#include "providers/gfs.hpp"
+#include "providers/space_weather.hpp"
+#include "physics/weather.hpp"
+#include <cmath>
+#include <fstream>
 #include "model_fixture.hpp"
 #include "albert/v1/engine.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
@@ -12,7 +17,7 @@
 #include <thread>
 namespace api=albert::v1;using namespace albert::core;
 void require(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
-int main(){try{
+int main(int argc,char** argv){try{
     Scene registry;Bridge bridge;double monotonic=0;albert::time::Simulation simulation([]{return 100.5;},[&]{return monotonic;});
     std::jthread owner([&](std::stop_token stop){CameraState camera;
         while(!stop.stop_requested()){
@@ -39,8 +44,12 @@ int main(){try{
         albert::physics::Air at(std::int64_t,double,double,double h)const override{auto a=albert::physics::standardAtmosphere(h);a.wind={0,10,0};return a;}
         std::string source()const override{return "test breeze";}
     };
-    albert::rpc::Server server(bridge,0,nullptr,{[](double lat,double,double)->std::shared_ptr<const albert::physics::AirModel>{if(lat<0)throw std::runtime_error("offline");if(lat==1)std::this_thread::sleep_for(std::chrono::milliseconds(300));return std::make_shared<Breeze>();},
-        [](double)->std::shared_ptr<const albert::physics::AirModel>{return nullptr;}}); // No network in tests.
+    // Replay inputs: the Tampa GFS analysis and ten synthetic space-weather days around 2026-12-01.
+    std::string grib;{std::ifstream in{argc>1?argv[1]:"",std::ios::binary};grib.assign(std::istreambuf_iterator<char>(in),{});}
+    std::vector<albert::physics::SpaceWeatherDay> days;for(int d=0;d<10;++d){albert::physics::SpaceWeatherDay x;x.day=std::floor(1796083200./86400.)-5+d;x.f107=120+d;x.f107a=110;x.apAverage=6;x.ap.fill(4+d);x.hasAp=true;x.type="OBS";days.push_back(x);}
+    albert::rpc::Server server(bridge,0,nullptr,{[&](double lat,double,double)->albert::rpc::LiveAir{if(lat<0)throw std::runtime_error("offline");if(lat==1)std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            if(lat==27.5)return{std::make_shared<albert::physics::Weather>(albert::providers::gfsGrid({albert::providers::decodeGrib2(grib)},"NOAA GFS fixture")),{grib}};return{std::make_shared<Breeze>(),{}};},
+        [&](double utc){albert::rpc::UpperAir a;if(std::abs(utc-1796083200.)<86400){a.model=albert::providers::msisFrom(days,utc);a.days=days;}return a;}}); // No network in tests.
     auto channel=grpc::CreateChannel("127.0.0.1:"+std::to_string(server.port()),grpc::InsecureChannelCredentials());
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto scene=api::SceneService::NewStub(channel);auto camera=api::CameraService::NewStub(channel);api::Applied applied;
@@ -147,6 +156,26 @@ int main(){try{
             const double each=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-t0).count()/n;
             std::printf("data plane: %.1f us per 1 ms tick (%.0fx real time), tick %llu\n",each,1000/each,static_cast<unsigned long long>(r.tick));
             require(r.status==albert::wire::ok&&r.tick==3000+n&&each<500,"Data plane throughput");
+        }
+        { // Replay: export, recreate without network, same hash; air data travels inside the log.
+            auto exported=[&]{grpc::ClientContext c;auto reader=flight->ExportFlight(&c,{});api::FlightLogChunk k;std::vector<api::FlightLogChunk> v;while(reader->Read(&k))v.push_back(k);require(reader->Finish().ok(),"ExportFlight");return v;};
+            auto replay=[&](const std::vector<api::FlightLogChunk>& v,api::FlightSample& out){grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&out);for(const auto& k:v)writer->Write(k);writer->WritesDone();return writer->Finish();};
+            api::CreateFlightRequest noisy=create;noisy.mutable_imu()->set_grade(api::ImuSettings::INDUSTRIAL);noisy.mutable_imu()->set_seed(11);
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,noisy,&s).ok(),"Replay flight");}
+            {grpc::ClientContext c;api::StepRequest r;r.set_ticks(2000);r.add_commands()->set_ignite(true);r.add_commands()->mutable_gimbal()->set_pitch_radians(.01);require(flight->Step(&c,r,&s).ok(),"Replay steps");}
+            {albert::wire::Connection wire(s.data_port());albert::wire::Request q;q.commands=albert::wire::gimbal|albert::wire::torque;q.gimbalYaw=-.02;q.torqueValue[2]=100;for(int i=0;i<500;++i)wire.exchange(q);}
+            {grpc::ClientContext c;api::StepRequest r;r.set_ticks(3000);r.add_commands()->set_throttle(.8);require(flight->Step(&c,r,&s).ok(),"Replay steps");}
+            const std::uint64_t hash=s.state_hash();const double force=s.measured_specific_force_meters_per_second2().x();const auto log=exported();
+            api::FlightSample again;const auto status=replay(log,again);if(!status.ok())std::cerr<<status.error_message()<<"\n";
+            require(status.ok()&&again.state_hash()==hash&&again.tick()==5500&&again.measured_specific_force_meters_per_second2().x()==force,"Replay reproduces the flight");
+            api::CreateFlightRequest weathered=create;weathered.set_weather(api::CreateFlightRequest::LIVE_GFS);weathered.set_utc_unix_seconds(1796083200.);weathered.mutable_site()->set_latitude_degrees(27.5);weathered.mutable_site()->set_longitude_degrees(-82.4);
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,weathered,&s).ok()&&s.atmosphere()=="NOAA GFS fixture + NRLMSISE-00 (at start: F10.7 124.0, 81-day 110.0, Ap 6 (OBS), CelesTrak)","Embedded air");}
+            {grpc::ClientContext c;api::StepRequest r;r.set_ticks(20000);r.add_commands()->set_ignite(true);require(flight->Step(&c,r,&s).ok()&&s.wind_ned_meters_per_second().x()!=0,"Weathered flight");}
+            const auto weatherLog=exported();api::FlightSample second;
+            require(replay(weatherLog,second).ok()&&second.state_hash()==s.state_hash()&&second.atmosphere()==s.atmosphere(),"Replay with embedded GFS and space weather");
+            api::CreateFlightRequest breeze=create;breeze.set_weather(api::CreateFlightRequest::LIVE_GFS);
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,breeze,&s).ok(),"Breeze flight");}
+            api::FlightSample third;require(replay(exported(),third).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Replay without the air data accepted");
         }
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));

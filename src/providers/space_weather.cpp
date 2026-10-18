@@ -44,12 +44,16 @@ std::vector<SpaceWeatherDay> SpaceWeatherService::table(const std::string& name,
     }catch(const std::exception&){std::ifstream in{path,std::ios::binary};text.assign(std::istreambuf_iterator<char>(in),{});if(text.empty())throw;} // Stale copy beats none.
     return parseSpaceWeather(text);
 }
-std::shared_ptr<const physics::Msis> SpaceWeatherService::msis(double utc){
-    std::lock_guard lock(mutex_);std::string note;
-    auto t=std::make_shared<const physics::SpaceWeatherTable>(table("SW-Last5Years.csv",12*3600.));auto w=t->at(utc,&note);
-    if(!w){t=std::make_shared<const physics::SpaceWeatherTable>(table("SW-All.csv",7*86400.));w=t->at(utc,&note);}
-    if(!w)return nullptr;
-    return std::make_shared<const physics::Msis>(*w,"NRLMSISE-00 (at start: "+note+", CelesTrak)",std::move(t));
+std::shared_ptr<const physics::Msis> SpaceWeatherService::msis(double utc,std::vector<SpaceWeatherDay>* used){
+    std::lock_guard lock(mutex_);
+    auto days=table("SW-Last5Years.csv",12*3600.);if(!physics::SpaceWeatherTable(days).at(utc))days=table("SW-All.csv",7*86400.);
+    const double d=std::floor(utc/86400.);std::erase_if(days,[&](const SpaceWeatherDay& x){return x.day<d-4||x.day>d+60;}); // The flight's span.
+    auto m=msisFrom(days,utc);if(m&&used)*used=std::move(days);
+    return m;
+}
+std::shared_ptr<const physics::Msis> msisFrom(const std::vector<SpaceWeatherDay>& days,double utc){
+    std::string note;auto t=std::make_shared<const physics::SpaceWeatherTable>(days);const auto w=t->at(utc,&note);
+    return w?std::make_shared<const physics::Msis>(*w,"NRLMSISE-00 (at start: "+note+", CelesTrak)",std::move(t)):nullptr;
 }
 SpaceWeatherService& spaceWeather(){static SpaceWeatherService value(dataDirectory()/"spaceweather");return value;}
 }

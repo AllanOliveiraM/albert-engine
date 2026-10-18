@@ -64,7 +64,7 @@ if(ALBERT_RPC)
             add_dependencies(rpc_test ${zlib_test})
         endif()
     endforeach()
-    add_test(NAME rpc_commands COMMAND rpc_test)
+    add_test(NAME rpc_commands COMMAND rpc_test ${CMAKE_CURRENT_SOURCE_DIR}/gfs_tampa_2026101712_f000.grb2)
     set_tests_properties(rpc_commands PROPERTIES TIMEOUT 30)
 endif()
 

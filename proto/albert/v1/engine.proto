@@ -231,9 +231,20 @@ message FlightSample {
   Vector3 delta_velocity_meters_per_second=39; Vector3 delta_angle_radians=40; double measured_static_pressure_pascals=41;
   uint32 data_port=42; // Binary lockstep data plane on 127.0.0.1 (src/rpc/flight_wire.hpp).
 }
+// Replay: the creation request (instant resolved), the air inputs (GFS GRIB2 of both hours,
+// space-weather days) and every step with its commands in order. Replaying needs no network
+// and ends with the same state_hash.
+message SpaceWeatherDay { double day=1; double f107=2; double f107a=3; double ap_average=4; repeated double ap=5; string type=6; }
+message FlightLog {
+  string engine=1; CreateFlightRequest request=2; repeated bytes gfs=3; repeated SpaceWeatherDay space_weather=4;
+  bytes steps=5; uint64 state_hash=6; uint64 tick=7; string atmosphere=8;
+}
+message FlightLogChunk { bytes data=1; } // A serialised FlightLog in pieces of up to 1 MiB.
 service FlightService {
   rpc CreateFlight(CreateFlightRequest) returns (FlightSample); // Replaces any current flight.
   rpc Step(StepRequest) returns (FlightSample);
   rpc GetFlight(Empty) returns (FlightSample);
   rpc EndFlight(Empty) returns (Applied);                       // Removes the vehicle from the scene.
+  rpc ExportFlight(Empty) returns (stream FlightLogChunk);
+  rpc ReplayFlight(stream FlightLogChunk) returns (FlightSample); // Becomes the current flight.
 }
