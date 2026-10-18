@@ -34,8 +34,11 @@ irradiância solar local perto de outro corpo (luz da cena 2,4/d², o céu e ve�
 Todos com teste que falha no código antigo, exceto a luz local (fiação do aplicativo); CI verde.
 Sombra das nuvens na luz do ar (mapa desenhado no grupo do quadro, bindings 9/10). Mar com
 rugosidade de Cox-Munk pelo vento (GFS do voo ou 7 m/s; `frame.weather.z`). Imagem regional para
-veículos perto do solo da Lua e de Marte (`detailFocus`). Próximo: perfil de desempenho na MX350, solo
-regional mais escuro que o global (Terra e Marte).
+veículos perto do solo da Lua e de Marte (`detailFocus`). Perfil na MX350 a 1920×1080 (Xvfb :101,
+`build/perf-1080.py`, `ALBERT_FRAME_STATS`): cena na GPU 9,4–10,6 ms (p99 10,7) no Cabo, Alpes e
+Jezero; trabalho de CPU 3,5–5,3 ms; o "present" de ~40 ms é a cópia do Xvfb (sem DRI3; 23 ms a
+1280×800, escala com os pixels), então o p99 < 25 ms em tela nativa não foi medido aqui (o desktop
+pessoal fica fora). Próximo: solo regional mais escuro que o global (Terra e Marte).
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`
