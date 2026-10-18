@@ -28,6 +28,7 @@ public:
     void render(threepp::Scene& scene,threepp::Camera& camera); // In work.
     void ui();                                     // In work, after the scene.
     void setExposure(float value);
+    void setShadows(bool enabled); // Sun shadow map (OpenGL: the renderer's; WebGPU: every frame).
     [[nodiscard]] float exposure()const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;

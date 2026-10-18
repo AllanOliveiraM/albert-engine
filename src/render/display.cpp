@@ -62,6 +62,7 @@ bool albert::Display::isOpen()const{return impl_->canvas?impl_->canvas->isOpen()
 void albert::Display::close(){if(impl_->canvas)impl_->canvas->close();else impl_->window->close();}
 float albert::Display::aspect()const{return impl_->canvas?impl_->canvas->aspect():impl_->window->aspect();}
 void albert::Display::onResize(std::function<void(WindowSize)> f){if(impl_->canvas)impl_->canvas->onWindowResize(std::move(f));else impl_->window->onResize(std::move(f));}
+void albert::Display::setShadows(bool enabled){if(impl_->renderer)impl_->renderer->shadowMap().enabled=enabled;else impl_->scene->shadows=enabled;}
 void albert::Display::setExposure(float value){if(impl_->renderer)impl_->renderer->toneMappingExposure=value;else impl_->scene->exposure=value;}
 float albert::Display::exposure()const{return impl_->renderer?impl_->renderer->toneMappingExposure:impl_->scene->exposure;}
 namespace {

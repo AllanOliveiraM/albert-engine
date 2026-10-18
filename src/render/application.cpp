@@ -2457,7 +2457,7 @@ int albert::runRenderer(int argc, char** argv) {
                 if(auto* gl=graphics.gl()) gl->shadowMap().needsUpdate = true;
                 appliedQuality = visualSettings.quality;
             }
-            if(auto* gl=graphics.gl()) gl->shadowMap().enabled = visualSettings.shadows && (focus == targets::Earth || focus == targets::Moon); // WebGPU: no shadow maps yet.
+            graphics.setShadows(visualSettings.shadows && (focus == targets::Earth || focus == targets::Moon));
             static auto lastShadow = steadyNow - std::chrono::seconds(1);
             if (steadyNow - lastShadow >= std::chrono::milliseconds(100)) {
                 auto& shadowCamera = static_cast<OrthographicCamera&>(*sunlight->shadow->camera);

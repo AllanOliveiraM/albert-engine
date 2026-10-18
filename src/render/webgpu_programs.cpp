@@ -564,10 +564,11 @@ std::string assisted(bool flat,bool rock){
     std::string s=R"(
 struct Material { diffuse: vec3f, opacity: f32, emissive: vec3f, roughness: f32, metalness: f32, auxiliaryStrength: f32, auxiliarySolarDirection: vec3f, doubleSided: f32, rockSeed: f32, rockScale: f32 };
 @group(2) @binding(0) var<uniform> material: Material;
-struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, @location(1) normal: vec3f, @location(2) local: vec3f };
+struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, @location(1) normal: vec3f, @location(2) local: vec3f, @location(3) world: vec3f, @location(4) worldNormal: vec3f };
 @vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f) -> Varyings {
     var o: Varyings; let view = object.modelView * vec4f(position, 1.0);
-    o.clip = frame.projection * view; o.position = view.xyz; o.normal = object.normalView * normal; o.local = position; return o;
+    o.clip = frame.projection * view; o.position = view.xyz; o.normal = object.normalView * normal; o.local = position;
+    o.world = (object.model * vec4f(position, 1.0)).xyz; o.worldNormal = normalize(object.normalWorld * normal); return o;
 }
 fn rockHash(q: vec3f) -> f32 { var p = fract(q * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
 fn rockNoise(p: vec3f) -> f32 {
@@ -599,7 +600,7 @@ fn rockGrain(q: vec3f) -> f32 { // Octave fade by footprint; fwidth stays in uni
     n = normalize(n - sign(determinant) * (r0 * dpdx(grain) + r1 * dpdy(grain)) * (material.rockScale * 0.0012) / max(abs(determinant), 1e-20));
 )";
     s+=R"(
-    var colour = standardLight(albedo, material.roughness, material.metalness, n, geometryNormal, v.position, vec3f(0.0)) + material.emissive;
+    var colour = standardLight(albedo, material.roughness, material.metalness, n, geometryNormal, v.position, vec3f(0.0), shadowFactor(v.world, v.worldNormal)) + material.emissive;
     colour += albedo * material.auxiliaryStrength * (1.0 - smoothstep(-0.10, 0.0, dot(n, normalize(material.auxiliarySolarDirection))));
     return vec4f(finish(colour), material.opacity);
 }

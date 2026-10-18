@@ -17,10 +17,24 @@ struct Frame {
     sun: vec4f,      // Towards the directional light (world); w = 1 when present.
     sunColor: vec4f, ambient: vec4f,
     exposure: vec4f,
+    shadowViewProj: mat4x4f, // World to the sun's shadow clip space (depth 0-1).
+    shadow: vec4f,           // Enabled, bias, normal bias, texel size.
 };
-struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f };
+struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
+@group(0) @binding(1) var shadowMap: texture_depth_2d;
+@group(0) @binding(2) var shadowSampler: sampler_comparison;
 @group(1) @binding(0) var<uniform> object: Object;
+// threepp's PCF directional shadow: normal bias in world space, depth bias, 3x3 comparisons.
+fn shadowFactor(world: vec3f, normal: vec3f) -> f32 {
+    if (frame.shadow.x < 0.5 || object.flags.x < 0.5) { return 1.0; }
+    let p = frame.shadowViewProj * vec4f(world + normal * frame.shadow.z, 1.0);
+    let uv = vec2f(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5); let depth = p.z + frame.shadow.y;
+    if (any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) || depth > 1.0) { return 1.0; }
+    var sum = 0.0;
+    for (var y = -1; y <= 1; y++) { for (var x = -1; x <= 1; x++) { sum += textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(f32(x), f32(y)) * frame.shadow.w, depth); } }
+    return sum / 9.0;
+}
 fn srgbToLinear(c: vec3f) -> vec3f { return select(pow((c + 0.055) / 1.055, vec3f(2.4)), c / 12.92, c <= vec3f(0.04045)); }
 fn linearToSrgb(c: vec3f) -> vec3f { return select(pow(c, vec3f(0.41666)) * 1.055 - 0.055, c * 12.92, c <= vec3f(0.0031308)); }
 fn aces(colour: vec3f) -> vec3f {
@@ -50,15 +64,15 @@ fn blinnPhong(n: vec3f, l: vec3f, v: vec3f, specular: vec3f, shininess: f32) -> 
     return (specular * (1.0 - fresnel) + fresnel) * 0.25 * (shininess * 0.5 + 1.0) / PI_L * pow(clamp(dot(n, h), 0.0, 1.0), shininess);
 }
 // MeshStandardMaterial: direct sun, ambient and extra irradiance (light maps) on a dielectric/metal.
-fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geometryNormal: vec3f, position: vec3f, extra: vec3f) -> vec3f {
+fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geometryNormal: vec3f, position: vec3f, extra: vec3f, shadow: f32) -> vec3f {
     let dxy = max(abs(dpdx(geometryNormal)), abs(dpdy(geometryNormal)));
     let roughness = min(max(roughnessIn, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
     let diffuse = albedo * (1.0 - metalness); let f0 = mix(vec3f(0.04), albedo, metalness);
-    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
+    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w * shadow;
     return nl * frame.sunColor.rgb * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * diffuse / PI_L;
 }
-fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f) -> vec3f {
-    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
+fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f, shadow: f32) -> vec3f {
+    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w * shadow;
     return nl * frame.sunColor.rgb * (albedo / PI_L + blinnPhong(n, l, v, specular, shininess)) + (frame.ambient.rgb + extra) * albedo / PI_L;
 }
 // three.js perturbNormalArb with dHdxy_fwd (invariant under WebGPU's flipped framebuffer y).

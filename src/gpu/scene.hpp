@@ -15,6 +15,7 @@ public:
     ~SceneRenderer();
     SceneRenderer(const SceneRenderer&)=delete;SceneRenderer& operator=(const SceneRenderer&)=delete;
     float exposure=1;
+    bool shadows=false; // Sun shadow map for castShadow meshes on receiveShadow ones.
     // Clears target (scene background) and depth, then draws, recording into encoder.
     void render(threepp::Scene& scene,threepp::Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder);
     [[nodiscard]] unsigned drawn()const; // Draw calls in the last render.

@@ -74,6 +74,23 @@ struct Material { size: f32 };
         require(top[0]>200&&bottom[0]<20,"Texture rows: v = 1 at the top, as in GL");
         require(point[0]>240&&point[1]>240,"Instanced point quad");
         require(renderer.drawn()==5&&albert::gpu::errors()==0,"Draw count and no WebGPU errors");
+        { // Sun shadow: a caster square above a lit Standard plane darkens what it covers.
+            Scene world;PerspectiveCamera eye(60,static_cast<float>(w)/h,.1f,100);eye.position.set(0,6,.01f);eye.lookAt(Vector3(0,0,0));
+            auto sunlight=DirectionalLight::create(0xffffff,3.f);sunlight->position.set(6,10,0);sunlight->castShadow=true;sunlight->shadow->mapSize.set(512,512);
+            auto& oc=static_cast<OrthographicCamera&>(*sunlight->shadow->camera);oc.left=oc.bottom=-4;oc.right=oc.top=4;oc.nearPlane=.1f;oc.farPlane=30;oc.updateProjectionMatrix();
+            world.add(sunlight); // The default target sits at the origin.
+            auto ground=MeshStandardMaterial::create();ground->color=Color(.8f,.8f,.8f);ground->roughness=1;
+            auto plane=Mesh::create(PlaneGeometry::create(8,8),ground);plane->rotation.x=-3.14159265f/2;plane->receiveShadow=true;world.add(plane);
+            auto blocker=Mesh::create(PlaneGeometry::create(2,2),MeshBasicMaterial::create());blocker->rotation.x=-3.14159265f/2;blocker->position.set(2,2,0);blocker->castShadow=true;world.add(blocker);
+            renderer.shadows=true;
+            WGPUCommandEncoder e2=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);renderer.render(world,eye,view,w,h,e2);
+            WGPUCommandBuffer c2=wgpuCommandEncoderFinish(e2,nullptr);wgpuQueueSubmit(gpu->queue(),1,&c2);wgpuCommandBufferRelease(c2);wgpuCommandEncoderRelease(e2);
+            const auto shot=read(*gpu,target,w,h);auto lum=[&](float u,float v){const auto* p=&shot[(static_cast<std::size_t>(v*(h-1))*w+static_cast<unsigned>(u*(w-1)))*4];return p[0]+p[1]+p[2];};
+            // Sun from +x (tan 0.6): the blocker over x in [1, 3] at height 2 shades the ground at x in [-0.2, 1.8],
+            // seen at u 0.48-0.64 where the blocker itself (u 0.65-0.93) does not cover it.
+            const int lit=lum(.20f,.5f),shaded=lum(.56f,.5f);std::printf("shadow: lit %d, shaded %d\n",lit,shaded);
+            require(lit>200&&shaded<lit/3&&albert::gpu::errors()==0,"Sun shadow on the receiver");
+        }
         wgpuTextureViewRelease(view);wgpuTextureRelease(target);
         std::printf("gpu_scene_test: ok\n");return 0;
     }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 1;}

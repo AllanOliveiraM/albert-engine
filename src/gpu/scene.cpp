@@ -80,10 +80,11 @@ struct Material { colour: vec4f, emissive: vec4f, params: vec4f, flags: vec4f, s
 @group(2) @binding(8) var bumpSampler: sampler;
 @group(2) @binding(9) var roughnessMap: texture_2d<f32>;
 @group(2) @binding(10) var roughnessSampler: sampler;
-struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) uv2: vec2f };
+struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) uv2: vec2f, @location(4) world: vec3f, @location(5) worldNormal: vec3f };
 @vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) uv2: vec2f) -> Varyings {
     var o: Varyings; let view = object.modelView * vec4f(position, 1.0);
     o.clip = frame.projection * view; o.position = view.xyz; o.normal = object.normalView * normal; o.uv = uv; o.uv2 = uv2;
+    o.world = (object.model * vec4f(position, 1.0)).xyz; o.worldNormal = normalize(object.normalWorld * normal);
     return o;
 }
 @fragment fn fs_main(v: Varyings, @builtin(front_facing) front: bool) -> @location(0) vec4f {
@@ -103,14 +104,15 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
     if (material.flags.z > 0.5) { base.a = base.a * mask; }
     if (base.a < material.params.z) { discard; }
     let extra = select(vec3f(0.0), lightTexel * material.params.w, material.flags.w > 0.5);
+    let shadow = shadowFactor(v.world, v.worldNormal);
     var colour: vec3f;
     let kind = material.flags.y;
     if (kind < 0.5) { colour = base.rgb * select(vec3f(1.0), extra / PI_L, material.flags.w > 0.5); }
     else if (kind > 1.5 && kind < 2.5) {
         let roughness = material.params.x * select(1.0, roughTexel.g, material.more.y > 0.5);
-        colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra);
-    } else if (kind > 2.5) { colour = phongLight(base.rgb, vec3f(0.0), 1.0, n, v.position, extra); }
-    else { colour = phongLight(base.rgb, material.specular.rgb, material.params.y, n, v.position, extra); }
+        colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra, shadow);
+    } else if (kind > 2.5) { colour = phongLight(base.rgb, vec3f(0.0), 1.0, n, v.position, extra, shadow); }
+    else { colour = phongLight(base.rgb, material.specular.rgb, material.params.y, n, v.position, extra, shadow); }
     return vec4f(finish(colour + material.emissive.rgb), base.a);
 }
 )";
@@ -132,15 +134,28 @@ struct SceneRenderer::Impl {
     std::unordered_map<unsigned,Geometry> geometries;std::unordered_map<unsigned,Texture> textures;std::unordered_map<unsigned,MaterialState> materials;
     std::unordered_map<std::string,Compiled> compiled;std::unordered_map<std::string,WGPURenderPipeline> pipelines;std::set<std::string> reported;
     unsigned frame=0,drawn=0;bool floatFilterable=false;
+    // Sun shadow map: depth from the light's orthographic camera, compared with PCF in the receivers.
+    WGPUTexture shadowTexture=nullptr,dummyShadow=nullptr;WGPUTextureView shadowView=nullptr,dummyShadowView=nullptr,boundShadow=nullptr;unsigned shadowSize=0;
+    WGPUSampler shadowSampler=nullptr;WGPUBindGroup casterFrame=nullptr;WGPURenderPipeline shadowPipeline=nullptr;WGPUPipelineLayout shadowLayout=nullptr;WGPUShaderModule shadowModule=nullptr;
     // Scene-pass GPU time: two timestamps resolved into a buffer, read back a few frames later.
     WGPUQuerySet timestamps=nullptr;WGPUBuffer resolved=nullptr,readback=nullptr;bool mapping=false,mapPending=false;double gpuMs=-1;WGPUBufferMapCallbackInfo pendingMap{};
     explicit Impl(Context& c):gpu(c),device(c.device()),queue(c.queue()){
         auto uniformLayout=[&](bool dynamic){
             WGPUBindGroupLayoutEntry e{};e.binding=0;e.visibility=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;e.buffer.type=WGPUBufferBindingType_Uniform;e.buffer.hasDynamicOffset=dynamic;
             WGPUBindGroupLayoutDescriptor d{};d.entryCount=1;d.entries=&e;return wgpuDeviceCreateBindGroupLayout(device,&d);};
-        frameLayout=uniformLayout(false);objectLayout=uniformLayout(true);
-        frameBuffer=buffer(256,WGPUBufferUsage_Uniform);
-        {WGPUBindGroupEntry e{};e.binding=0;e.buffer=frameBuffer;e.size=256;WGPUBindGroupDescriptor d{};d.layout=frameLayout;d.entryCount=1;d.entries=&e;frameGroup=wgpuDeviceCreateBindGroup(device,&d);}
+        objectLayout=uniformLayout(true);
+        { // Frame: uniforms, the shadow depth map and its comparison sampler.
+            WGPUBindGroupLayoutEntry e[3]{};e[0].binding=0;e[0].visibility=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;e[0].buffer.type=WGPUBufferBindingType_Uniform;
+            e[1].binding=1;e[1].visibility=WGPUShaderStage_Fragment;e[1].texture.sampleType=WGPUTextureSampleType_Depth;e[1].texture.viewDimension=WGPUTextureViewDimension_2D;
+            e[2].binding=2;e[2].visibility=WGPUShaderStage_Fragment;e[2].sampler.type=WGPUSamplerBindingType_Comparison;
+            WGPUBindGroupLayoutDescriptor d{};d.entryCount=3;d.entries=e;frameLayout=wgpuDeviceCreateBindGroupLayout(device,&d);
+        }
+        frameBuffer=buffer(512,WGPUBufferUsage_Uniform);
+        {WGPUTextureDescriptor d{};d.size={1,1,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_TextureBinding;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
+         dummyShadow=wgpuDeviceCreateTexture(device,&d);dummyShadowView=wgpuTextureCreateView(dummyShadow,nullptr);
+         WGPUSamplerDescriptor sd{};sd.addressModeU=sd.addressModeV=sd.addressModeW=WGPUAddressMode_ClampToEdge;sd.magFilter=sd.minFilter=WGPUFilterMode_Linear;sd.mipmapFilter=WGPUMipmapFilterMode_Nearest;
+         sd.compare=WGPUCompareFunction_LessEqual;sd.lodMaxClamp=1;sd.maxAnisotropy=1;shadowSampler=wgpuDeviceCreateSampler(device,&sd);}
+        bindFrame(dummyShadowView);
         zeros=buffer(64,WGPUBufferUsage_Vertex);
         WGPUTextureDescriptor t{};t.size={1,1,1};t.format=WGPUTextureFormat_RGBA8Unorm;t.usage=WGPUTextureUsage_TextureBinding|WGPUTextureUsage_CopyDst;t.mipLevelCount=1;t.sampleCount=1;t.dimension=WGPUTextureDimension_2D;
         auto solid=[&](std::uint32_t rgba,WGPUTexture& texture,WGPUTextureView& view){texture=wgpuDeviceCreateTexture(device,&t);view=wgpuTextureCreateView(texture,nullptr);
@@ -162,10 +177,32 @@ struct SceneRenderer::Impl {
         for(auto& [k,c]:compiled){wgpuShaderModuleRelease(c.module);wgpuBindGroupLayoutRelease(c.layout);wgpuPipelineLayoutRelease(c.pipelineLayout);}
         for(auto& [k,g]:geometries)release(g);for(auto& [k,t]:textures)release(t);for(auto& [k,m]:materials)release(m);
         for(auto b:{frameBuffer,objectBuffer,zeros,resolved,readback})if(b)wgpuBufferRelease(b);if(timestamps)wgpuQuerySetRelease(timestamps);
-        if(frameGroup)wgpuBindGroupRelease(frameGroup);if(objectGroup)wgpuBindGroupRelease(objectGroup);
+        if(frameGroup)wgpuBindGroupRelease(frameGroup);if(casterFrame)wgpuBindGroupRelease(casterFrame);if(objectGroup)wgpuBindGroupRelease(objectGroup);
+        if(shadowView)wgpuTextureViewRelease(shadowView);if(shadowTexture)wgpuTextureRelease(shadowTexture);wgpuTextureViewRelease(dummyShadowView);wgpuTextureRelease(dummyShadow);wgpuSamplerRelease(shadowSampler);
+        if(shadowPipeline)wgpuRenderPipelineRelease(shadowPipeline);if(shadowLayout)wgpuPipelineLayoutRelease(shadowLayout);if(shadowModule)wgpuShaderModuleRelease(shadowModule);
         wgpuBindGroupLayoutRelease(frameLayout);wgpuBindGroupLayoutRelease(objectLayout);
         wgpuSamplerRelease(linear);wgpuTextureViewRelease(white);wgpuTextureRelease(whiteTexture);wgpuTextureViewRelease(black);wgpuTextureRelease(blackTexture);
         if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);
+    }
+    WGPUBindGroup frameWith(WGPUTextureView shadow){
+        WGPUBindGroupEntry e[3]{};e[0].binding=0;e[0].buffer=frameBuffer;e[0].size=512;e[1].binding=1;e[1].textureView=shadow;e[2].binding=2;e[2].sampler=shadowSampler;
+        WGPUBindGroupDescriptor d{};d.layout=frameLayout;d.entryCount=3;d.entries=e;return wgpuDeviceCreateBindGroup(device,&d);
+    }
+    void bindFrame(WGPUTextureView shadow){
+        if(!casterFrame)casterFrame=frameWith(dummyShadowView); // The shadow pass cannot sample the map it writes.
+        if(frameGroup&&boundShadow==shadow)return;if(frameGroup)wgpuBindGroupRelease(frameGroup);boundShadow=shadow;frameGroup=frameWith(shadow);
+    }
+    WGPURenderPipeline shadowCaster(){ // Depth only, positions through the sun's view-projection.
+        if(shadowPipeline)return shadowPipeline;
+        const std::string code=std::string(prelude)+"@vertex fn vs_main(@location(0) position: vec3f) -> @builtin(position) vec4f { return frame.shadowViewProj * object.model * vec4f(position, 1.0); }\n";
+        WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code=sv(code);WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;shadowModule=wgpuDeviceCreateShaderModule(device,&md);
+        WGPUBindGroupLayout layouts[]{frameLayout,objectLayout};WGPUPipelineLayoutDescriptor pd{};pd.bindGroupLayoutCount=2;pd.bindGroupLayouts=layouts;shadowLayout=wgpuDeviceCreatePipelineLayout(device,&pd);
+        WGPUVertexAttribute a{};a.format=WGPUVertexFormat_Float32x3;WGPUVertexBufferLayout b{};b.arrayStride=12;b.stepMode=WGPUVertexStepMode_Vertex;b.attributeCount=1;b.attributes=&a;
+        WGPUDepthStencilState ds{};ds.format=WGPUTextureFormat_Depth32Float;ds.depthWriteEnabled=WGPUOptionalBool_True;ds.depthCompare=WGPUCompareFunction_Less;
+        ds.stencilFront.compare=ds.stencilBack.compare=WGPUCompareFunction_Always;ds.stencilFront.failOp=ds.stencilFront.depthFailOp=ds.stencilFront.passOp=WGPUStencilOperation_Keep;ds.stencilBack=ds.stencilFront;
+        WGPURenderPipelineDescriptor d{};d.label=sv("albert:shadow");d.layout=shadowLayout;d.vertex.module=shadowModule;d.vertex.entryPoint=sv("vs_main");d.vertex.bufferCount=1;d.vertex.buffers=&b;
+        d.primitive.topology=WGPUPrimitiveTopology_TriangleList;d.primitive.cullMode=WGPUCullMode_None;d.depthStencil=&ds;d.multisample.count=1;d.multisample.mask=~0u;
+        return shadowPipeline=wgpuDeviceCreateRenderPipeline(device,&d);
     }
     WGPUBuffer buffer(std::size_t bytes,WGPUBufferUsage usage){WGPUBufferDescriptor d{};d.size=align(std::max<std::size_t>(bytes,16),4);d.usage=usage|WGPUBufferUsage_CopyDst;return wgpuDeviceCreateBuffer(device,&d);}
     void release(Geometry& g){for(auto& [k,b]:g.attributes)if(b.buffer)wgpuBufferRelease(b.buffer);if(g.index.buffer)wgpuBufferRelease(g.index.buffer);}
@@ -387,8 +424,11 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     Frustum frustum;Matrix4 screen;screen.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);frustum.setFromProjectionMatrix(screen);
     struct Item {Object3D* object;Material* material;BufferGeometry* geometry;const Impl::Compiled* program;float z;int order;bool points;};
     std::vector<Item> opaque,blended;Vector3 sun;float sunOn=0;Color sunColor(0,0,0),ambient(0,0,0);
+    DirectionalLight* shadowLight=nullptr;std::vector<Mesh*> casters;
     scene.traverseVisible([&](Object3D& o){
-        if(auto* light=dynamic_cast<DirectionalLight*>(&o)){Vector3 p,t;p.setFromMatrixPosition(*light->matrixWorld);t.setFromMatrixPosition(*light->target().matrixWorld);sun=p.sub(t).normalize();sunOn=1;sunColor=light->color;sunColor.multiplyScalar(light->intensity);return;}
+        if(auto* light=dynamic_cast<DirectionalLight*>(&o)){Vector3 p,t;p.setFromMatrixPosition(*light->matrixWorld);t.setFromMatrixPosition(*light->target().matrixWorld);sun=p.sub(t).normalize();sunOn=1;sunColor=light->color;sunColor.multiplyScalar(light->intensity);
+            if(shadows&&light->castShadow&&light->shadow)shadowLight=light;return;}
+        if(auto* mesh=dynamic_cast<Mesh*>(&o);mesh&&o.castShadow&&mesh->material()&&mesh->material()->visible&&mesh->geometry())casters.push_back(mesh);
         if(auto* light=dynamic_cast<AmbientLight*>(&o)){Color c=light->color;c.multiplyScalar(light->intensity);ambient.add(c);return;}
         const bool points=dynamic_cast<Points*>(&o)!=nullptr;if(!points&&!dynamic_cast<Mesh*>(&o))return;
         auto geometry=o.geometry();auto material=o.material();if(!geometry||!material||!material->visible)return;
@@ -401,17 +441,30 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     std::stable_sort(opaque.begin(),opaque.end(),[](const Item& a,const Item& b){return a.order!=b.order?a.order<b.order:a.z<b.z;});
     std::stable_sort(blended.begin(),blended.end(),[](const Item& a,const Item& b){return a.order!=b.order?a.order<b.order:a.z>b.z;});
     // Frame uniforms.
-    float f[64]{};std::memcpy(f,camera.matrixWorldInverse.elements.data(),64);std::memcpy(f+16,projection.elements.data(),64);
+    float f[128]{};std::memcpy(f,camera.matrixWorldInverse.elements.data(),64);std::memcpy(f+16,projection.elements.data(),64);
+    const bool shadowing=shadowLight&&!casters.empty()&&dynamic_cast<OrthographicCamera*>(shadowLight->shadow->camera.get());
+    if(shadowing){ // threepp places the light camera; the projection maps its depth to 0-1 for WebGPU.
+        auto& sh=*shadowLight->shadow;sh.updateMatrices(*shadowLight);const auto& oc=static_cast<OrthographicCamera&>(*sh.camera);
+        Matrix4 p;auto& e=p.elements;e.fill(0);e[0]=2/(oc.right-oc.left);e[5]=2/(oc.top-oc.bottom);e[10]=-1/(oc.farPlane-oc.nearPlane);
+        e[12]=-(oc.right+oc.left)/(oc.right-oc.left);e[13]=-(oc.top+oc.bottom)/(oc.top-oc.bottom);e[14]=-oc.nearPlane/(oc.farPlane-oc.nearPlane);e[15]=1;
+        Matrix4 vp;vp.multiplyMatrices(p,oc.matrixWorldInverse);std::memcpy(f+56,vp.elements.data(),64);
+        const unsigned size=static_cast<unsigned>(std::clamp(sh.mapSize.x,256.f,4096.f));
+        if(size!=g.shadowSize){if(g.shadowView)wgpuTextureViewRelease(g.shadowView);if(g.shadowTexture)wgpuTextureRelease(g.shadowTexture);
+            WGPUTextureDescriptor d{};d.size={size,size,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_TextureBinding;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
+            g.shadowTexture=wgpuDeviceCreateTexture(g.device,&d);g.shadowView=wgpuTextureCreateView(g.shadowTexture,nullptr);g.shadowSize=size;}
+        f[72]=1;f[73]=sh.bias;f[74]=sh.normalBias;f[75]=1.f/static_cast<float>(size);
+    }
+    g.bindFrame(shadowing?g.shadowView:g.dummyShadowView);
     Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);f[32]=eye.x;f[33]=eye.y;f[34]=eye.z;f[35]=1;
     f[36]=static_cast<float>(width);f[37]=static_cast<float>(height);f[38]=camera.nearPlane;
     f[40]=sun.x;f[41]=sun.y;f[42]=sun.z;f[43]=sunOn;f[44]=sunColor.r;f[45]=sunColor.g;f[46]=sunColor.b;f[48]=ambient.r;f[49]=ambient.g;f[50]=ambient.b;f[52]=exposure;
     wgpuQueueWriteBuffer(g.queue,g.frameBuffer,0,f,sizeof f);
-    // Object uniforms, one 256-byte slot per draw.
-    const std::size_t count=opaque.size()+blended.size();
+    // Object uniforms, one 256-byte slot per draw, then one per shadow caster.
+    const std::size_t count=opaque.size()+blended.size()+(shadowing?casters.size():0);
     if(count*objectStride>g.objectCapacity){
         if(g.objectBuffer)wgpuBufferRelease(g.objectBuffer);if(g.objectGroup)wgpuBindGroupRelease(g.objectGroup);
         g.objectCapacity=std::max<std::size_t>(count*objectStride*2,objectStride*64);g.objectBuffer=g.buffer(g.objectCapacity,WGPUBufferUsage_Uniform);
-        WGPUBindGroupEntry e{};e.binding=0;e.buffer=g.objectBuffer;e.size=224;WGPUBindGroupDescriptor d{};d.layout=g.objectLayout;d.entryCount=1;d.entries=&e;g.objectGroup=wgpuDeviceCreateBindGroup(g.device,&d);
+        WGPUBindGroupEntry e{};e.binding=0;e.buffer=g.objectBuffer;e.size=240;WGPUBindGroupDescriptor d{};d.layout=g.objectLayout;d.entryCount=1;d.entries=&e;g.objectGroup=wgpuDeviceCreateBindGroup(g.device,&d);
     }
     std::vector<std::byte> objects(std::max<std::size_t>(count,1)*objectStride);std::size_t slot=0;
     auto writeObject=[&](Object3D& o){
@@ -419,10 +472,26 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         Matrix4 mv;mv.multiplyMatrices(camera.matrixWorldInverse,*o.matrixWorld);std::memcpy(p+16,mv.elements.data(),64);
         Matrix3 nw;nw.getNormalMatrix(*o.matrixWorld);Matrix3 nv;nv.getNormalMatrix(mv);
         for(int c=0;c<3;++c){std::memcpy(p+32+4*c,nw.elements.data()+3*c,12);std::memcpy(p+44+4*c,nv.elements.data()+3*c,12);}
+        p[56]=o.receiveShadow?1.f:0.f;
         return static_cast<std::uint32_t>(slot++*objectStride);
     };
     std::vector<std::uint32_t> offsets;for(auto* list:{&opaque,&blended})for(auto& i:*list)offsets.push_back(writeObject(*i.object));
+    std::vector<std::uint32_t> casterOffsets;if(shadowing)for(auto* m:casters)casterOffsets.push_back(writeObject(*m));
     if(count)wgpuQueueWriteBuffer(g.queue,g.objectBuffer,0,objects.data(),count*objectStride);
+    if(shadowing){ // Sun depth from the casters' positions (geometry buffers shared with the main pass).
+        WGPURenderPassDepthStencilAttachment sd{};sd.view=g.shadowView;sd.depthLoadOp=WGPULoadOp_Clear;sd.depthStoreOp=WGPUStoreOp_Store;sd.depthClearValue=1;
+        WGPURenderPassDescriptor spd{};spd.depthStencilAttachment=&sd;WGPURenderPassEncoder sp=wgpuCommandEncoderBeginRenderPass(encoder,&spd);
+        wgpuRenderPassEncoderSetPipeline(sp,g.shadowCaster());wgpuRenderPassEncoderSetBindGroup(sp,0,g.casterFrame,0,nullptr);
+        for(std::size_t i=0;i<casters.size();++i){
+            auto* geometry=casters[i]->geometry().get();auto* positions=geometry->getAttribute<float>("position");if(!positions||positions->itemSize()!=3)continue;
+            auto& geo=g.geometries[geometry->id];geo.used=g.frame;auto& b=geo.attributes["position"];g.upload(b,positions->array().data(),positions->array().size()*4,WGPUBufferUsage_Vertex,positions->version);
+            wgpuRenderPassEncoderSetBindGroup(sp,1,g.objectGroup,1,&casterOffsets[i]);wgpuRenderPassEncoderSetVertexBuffer(sp,0,b.buffer,0,WGPU_WHOLE_SIZE);
+            if(auto* idx=geometry->getIndex()){g.upload(geo.index,idx->array().data(),idx->array().size()*4,WGPUBufferUsage_Index,idx->version);
+                wgpuRenderPassEncoderSetIndexBuffer(sp,geo.index.buffer,WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE);wgpuRenderPassEncoderDrawIndexed(sp,static_cast<std::uint32_t>(idx->array().size()),1,0,0,0);}
+            else wgpuRenderPassEncoderDraw(sp,static_cast<std::uint32_t>(positions->count()),1,0,0);
+        }
+        wgpuRenderPassEncoderEnd(sp);wgpuRenderPassEncoderRelease(sp);
+    }
     // Pass.
     WGPURenderPassColorAttachment colour{};colour.view=target;colour.depthSlice=WGPU_DEPTH_SLICE_UNDEFINED;colour.loadOp=WGPULoadOp_Clear;colour.storeOp=WGPUStoreOp_Store;
     if(scene.background.isColor()){const Color c=scene.background.color();colour.clearValue={c.r,c.g,c.b,1};}else colour.clearValue={0,0,0,1};
