@@ -22,7 +22,7 @@ struct Frame {
     planet: mat4x4f,         // World to the air's planet frame (km from its centre).
     air: vec4f,              // Camera in the planet frame; w: strength (0: no air this frame).
     airSun: vec4f,           // Towards the sun in the planet frame; w: the model's ground offset (km, <= 0).
-    weather: vec4f,          // x: cloud layer height over the air's ground (km); y: its opacity (0: none); z: surface wind (m/s, 0: none).
+    weather: vec4f,          // x: cloud layer height over the air's ground (km); y: its opacity (0: none); z: surface wind (m/s, 0: none); w: polar/equatorial axis ratio.
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -116,7 +116,8 @@ fn cloudShadow(p: vec3f, r: f32) -> f32 {
     let top = bottomRadius() + frame.weather.x; let sun = frame.airSun.xyz;
     if (frame.weather.y <= 0.0 || r >= top) { return 1.0; }
     let rmu = dot(p, sun); let crossing = normalize(p + sun * (-rmu + sqrt(max(rmu * rmu - (r - top) * (r + top), 0.0))));
-    let uv = vec2f(atan2(crossing.z, -crossing.x) / (2.0 * AIR_PI), asin(clamp(crossing.y, -1.0, 1.0)) / AIR_PI + 0.5);
+    // The layer's v is geodetic (as its shell's map): tan φ = tan β · a / b from the frame's parametric β.
+    let uv = vec2f(atan2(crossing.z, -crossing.x) / (2.0 * AIR_PI), atan2(crossing.y, length(crossing.xz) * frame.weather.w) / AIR_PI + 0.5);
     return 1.0 - frame.weather.y * textureSampleLevel(airClouds, airCloudSampler, uv, 0.0).g;
 }
 struct AirLight { sun: vec3f, sky: vec3f }; // Sunlight reaching a point (fraction of the sun's colour); sky irradiance (relative to it).

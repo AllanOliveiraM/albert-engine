@@ -329,12 +329,15 @@ nunca bloquear a construção; mais o geoide EGM2008 numa grade de 2°. "Relevo 
 liga e desliga. Na Lua (até 3 raios) o mesmo terreno usa a grade global do pacote e blocos LOLA
 LDEM_128 de 128×128 postes (~237 m) a partir do nível 6, cada bloco numa única requisição com uma
 faixa por linha (`PlanetaryRelief::cachedHeight`/`fetchMissing`, multipart/byteranges, cache em
-disco). Os caches gravam um arquivo ao lado e renomeiam (nada parcial no disco); um cabeçalho COG
-corrompido é apagado e baixado de novo; uma peça cuja descarga falhou volta quando a fila esvazia; e a
+disco). Os caches gravam um arquivo ao lado (nome por processo e thread) e renomeiam (nada parcial no
+disco); o que se baixa é validado antes (cabeçalho COG legível, bloco que descomprime), e uma falha
+de gravação é erro (a peça vai para a fila de falhas, com espera); um cabeçalho ou bloco corrompido
+no disco é apagado e baixado de novo; uma peça cuja descarga falhou volta quando a fila esvazia; e a
 thread do terreno nunca recebe exceção de uma fonte (o nó fica provisório). Em Marte (até 3 raios) a grade MOLA do pacote e blocos MEGDR de 128 postes por grau a
 partir do nível 7 (raio MOLA menos o elipsoide IAU; acima de 88° de latitude só a grade). A
 exposição fotográfica é a do corpo perto da câmera (Lua 2,1; demais pela distância ao Sol), e a luz
-do Sol da cena é a irradiância ali (2,4/d²): céu, luz do ar, terreno e veículos na mesma escala. Com o
+do Sol da cena é a irradiância ali (2,4/d²): céu, luz do ar, terreno e veículos na mesma escala; as
+duas deslizam com o mesmo filtro, então o produto não salta na borda dos 3 raios. Com o
 terreno ativo os remendos regionais ficam ocultos e a imagem regional vai para os nós inteiramente
 dentro da região (`Terrain::detail`: o material do remendo sem bump, coordenadas sobre a região em
 `uv`, as globais em `uv2` para o mapa de preenchimento); nós que cruzam a borda ficam com o mapa
@@ -363,7 +366,8 @@ pré-cômputo roda em compute, em fatias de uma camada, 4 por quadro (1 em adapt
 cada material opaco aplica a perspectiva aérea até o seu ponto (`airApply`), e os embutidos e os
 objetos recebem a luz do Sol filtrada e a luz do céu (`airLight`), com a sombra das nuvens (o raio
 até o Sol cruza a camada de 12 km e o mapa de nuvens desenhado dá a opacidade, 0,88 × densidade,
-a mesma da casca); a água (texels de rugosidade abaixo de 0,5 nas máscaras) tem a rugosidade de
+a mesma da casca, lido em latitude geodética como ela); a água (texels de rugosidade abaixo de 0,5
+nos materiais "albert:water": globo, terreno e remendos da Terra) tem a rugosidade de
 Cox-Munk para o vento de superfície (σ² = 0,003 + 0,00512·U; α = σ; o vento do voo com GFS ao vivo
 perto do solo, senão 7 m/s, a média oceânica), e superfícies lisas espelham o céu no raio refletido
 (`airReflection`, Fresnel de Schlick com rugosidade, some entre 0,5 e 0,8, a rugosidade do solo); nuvens, luzes noturnas, Sol e

@@ -28,7 +28,8 @@ public:
     // air's ground, cloudShadow its opacity: sunlight crossing it there is dimmed (no clouds: null).
     struct Air {Atmosphere* atmosphere=nullptr;const threepp::Object3D* body=nullptr;float kmPerUnit=1,strength=0,groundKm=0;
         threepp::Texture* clouds=nullptr;float cloudKm=12,cloudShadow=0;
-        float surfaceWind=0;} air; // m/s: water (roughness texels under 0.5) takes Cox-Munk's slopes for it (0: the maps').
+        float surfaceWind=0; // m/s: water (texels under 0.5 in the roughness maps of materials named "albert:water") takes Cox-Munk's slopes (0: the maps').
+        float polarRatio=1;} air; // The body's polar/equatorial axis ratio: the layer's map is in geodetic latitude.
     unsigned airSteps=4;
     // Clears target (scene background) and depth, then draws, recording into encoder. Uniforms are
     // written through the queue: submit this encoder before the next render().

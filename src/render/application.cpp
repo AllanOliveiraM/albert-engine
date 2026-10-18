@@ -1245,6 +1245,7 @@ int albert::runRenderer(int argc, char** argv) {
         struct PendingEvent {const SimulationEvent* event;std::uint64_t generation;};
         std::optional<PendingEvent> pendingEvent;
         std::optional<albert::core::FlightTelemetry> flightTelemetry; // From the gRPC flight API.
+        auto flightTelemetryAt=std::chrono::steady_clock::now(); // Its latest sample (the sea's wind ignores a stale one).
         bool menuOpen = false;
         float menuProgress = 0.f;
         float resetZoomProgress = 0.f;
@@ -2113,7 +2114,7 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::LayerVisibility>)registry.layerVisible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Focus>) setFocus(value.id,value.reset);
                     else if constexpr(std::is_same_v<T,albert::core::SetTime>) {if(value.live)simulation.live();else if(value.hold&&value.utcSeconds)simulation.stall(*value.utcSeconds);else simulation.choose(value.utcSeconds,value.rate);}
-                    else if constexpr(std::is_same_v<T,albert::core::FlightTelemetry>) {if(value.active)flightTelemetry=std::move(value);else flightTelemetry.reset();}
+                    else if constexpr(std::is_same_v<T,albert::core::FlightTelemetry>) {if(value.active){flightTelemetry=std::move(value);flightTelemetryAt=steadyNow;}else flightTelemetry.reset();}
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
                             throw std::invalid_argument("Invalid orbit parameters");
@@ -2472,7 +2473,8 @@ int albert::runRenderer(int argc, char** argv) {
             // The sunlight where the camera is: near another body its irradiance at that distance (Mars:
             // 2.4 / 1.52²), so its sky, air light, terrain and vehicles share one scale; the exposure lifts it.
             const float bodyAu=solids.contains(exposed)?sunPosition.distanceTo(solids.nodes().at(exposed)->position)*6378137.f/149597870700.f:1.f;
-            sunlight->intensity=2.4f/(bodyAu*bodyAu);
+            // It glides with the exposure (same filter in log space), so their product never steps at the 3-radius boundary.
+            sunlight->intensity=std::exp(std::lerp(std::log(sunlight->intensity),std::log(2.4f/(bodyAu*bodyAu)),-std::expm1(-dt/.65f)));
             const float photographicExposure=(exposed==targets::Moon?2.1f:solids.contains(exposed)?std::clamp(1.05f*bodyAu*bodyAu,.25f,1200.f):1.05f)
                 *(1.f+planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f)));
             graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
@@ -2600,9 +2602,9 @@ int albert::runRenderer(int argc, char** argv) {
                     &&camera->position.distanceTo(mars->second->position)<3.f*static_cast<float>(albert::core::surfaceRadius("mars")/albert::core::earthRadiusMeters);
                 solids.showAir("mars",marsAir,planets.atmosphereVisibility());
                 // The sea's wind: a live-weather flight's near the ground, else the ocean mean (~7 m/s); Mars has neither.
-                float wind=7.f;if(flightTelemetry&&flightTelemetry->active&&flightTelemetry->height<1000&&flightTelemetry->atmosphere.find("GFS")!=std::string::npos)
+                float wind=7.f;if(flightTelemetry&&flightTelemetry->active&&steadyNow-flightTelemetryAt<std::chrono::seconds(10)&&flightTelemetry->height<1000&&flightTelemetry->atmosphere.find("GFS")!=std::string::npos)
                     wind=std::max(.5f,static_cast<float>(std::hypot(flightTelemetry->windNorth,flightTelemetry->windEast)));
-                graphics.setWeather(marsAir?nullptr:planets.cloudMap(),12.f,planets.cloudOpacity(),marsAir?0.f:wind); // The cloud shell's height over the ellipsoid.
+                graphics.setWeather(marsAir?nullptr:planets.cloudMap(),12.f,planets.cloudOpacity(),marsAir?0.f:wind,earth->scale.y); // The cloud shell's height over the ellipsoid.
                 if(marsAir)graphics.setAir(mars->second.get(),6378.137f,planets.atmosphereVisibility(),0.f,true);
                 else{Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
                     graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}}

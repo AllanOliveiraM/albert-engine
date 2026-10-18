@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <random>
 #include <thread>
 extern "C" int stbi_zlib_decode_buffer(char* out,int outLength,const char* in,int inLength);
 namespace albert::providers {
@@ -28,14 +29,17 @@ std::vector<float> decodeFloatTile(const std::string& compressed,unsigned w,unsi
 }
 namespace {
 struct NotCached {}; // Thrown inside cachedHeight when a piece needs the network.
-// Whole files only: written beside and renamed, so a reader (or a crash mid-write) never leaves a
-// partial one in the cache; a failed rename leaves the piece missing, fetched again later.
-void publish(const std::filesystem::path& path,const std::string& bytes){
+// Whole files only: written beside (a name per process and thread: two instances may share the
+// cache) and renamed, so no reader or crash leaves a partial one; false when it did not land.
+bool publish(const std::filesystem::path& path,const std::string& bytes){
+    static const auto process=std::random_device{}();
     std::error_code ec;std::filesystem::create_directories(path.parent_path(),ec);
-    auto part=path;part+=".part"+std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id()));
-    {std::ofstream out(part,std::ios::binary);out<<bytes;if(!out.flush()){out.close();std::filesystem::remove(part,ec);return;}}
-    std::filesystem::rename(part,path,ec);if(ec)std::filesystem::remove(part,ec);
+    auto part=path;part+=".part"+std::to_string(process)+"-"+std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    {std::ofstream out(part,std::ios::binary);out<<bytes;if(!out.flush()){out.close();std::filesystem::remove(part,ec);return false;}}
+    std::filesystem::rename(part,path,ec);if(ec){std::filesystem::remove(part,ec);return false;}
+    return true;
 }
+void stored(const std::filesystem::path& path,const std::string& bytes){if(!publish(path,bytes))throw std::runtime_error("Cache write failed: "+path.filename().string());}
 }
 struct CopernicusDem::File {int latitude=0,longitude=0;std::string url;unsigned width=0,height=0,tileWidth=0,tileHeight=0;double west=0,north=0,stepX=0,stepY=0;std::vector<std::uint64_t> offsets,counts;bool ocean=false;};
 CopernicusDem::CopernicusDem(std::filesystem::path cache,Transport transport):cache_(std::move(cache)),transport_(std::move(transport)){
@@ -88,13 +92,13 @@ const std::vector<float>& CopernicusDem::block(const File& f,int index,DownloadP
     std::ostringstream name;name<<f.url.substr(f.url.rfind('/')+1)<<"."<<index;const auto path=cache_/name.str();std::string bytes;
     if(std::ifstream in{path,std::ios::binary})bytes.assign(std::istreambuf_iterator<char>(in),{});
     const auto offset=f.offsets.at(static_cast<std::size_t>(index)),count=f.counts.at(static_cast<std::size_t>(index));
-    if(bytes.size()!=count){
-        if(offline_){missing_.insert({f.latitude,f.longitude,index});throw NotCached{};}
-        bytes=transport_(f.url,std::to_string(offset)+"-"+std::to_string(offset+count-1),&progress);
-        if(bytes.size()!=count)throw std::runtime_error("Short DEM tile");
-        publish(path,bytes);
-    }
-    return blocks_[key]=decodeFloatTile(bytes,f.tileWidth,f.tileHeight);
+    if(bytes.size()==count)try{return blocks_[key]=decodeFloatTile(bytes,f.tileWidth,f.tileHeight);} // Corrupt though sized right: fetched again.
+        catch(const std::exception&){std::error_code ec;std::filesystem::remove(path,ec);}
+    if(offline_){missing_.insert({f.latitude,f.longitude,index});throw NotCached{};}
+    bytes=transport_(f.url,std::to_string(offset)+"-"+std::to_string(offset+count-1),&progress);
+    if(bytes.size()!=count)throw std::runtime_error("Short DEM tile");
+    auto tile=decodeFloatTile(bytes,f.tileWidth,f.tileHeight);publish(path,bytes); // Used even if the cache cannot keep it.
+    return blocks_[key]=std::move(tile);
 }
 double CopernicusDem::sample(double lat,double lon,DownloadProgress& progress){
     const int la=static_cast<int>(std::floor(lat)),lo=static_cast<int>(std::floor(lon));const File* f=file(la,lo,progress);
@@ -125,16 +129,18 @@ bool CopernicusDem::fetchMissing(DownloadProgress& progress){
         std::string head;
         try{head=transport_(url,"0-65535",&progress);}
         catch(const std::exception& e){if(std::string(e.what()).find("404")==std::string::npos&&std::string(e.what()).find("403")==std::string::npos)throw;head="ocean";}
-        publish(path,head);
+        if(File probe;head!="ocean"&&!parse(head,probe))throw std::runtime_error("Unsupported DEM GeoTIFF"); // A portal's page, say: not cached.
+        stored(path,head);
     }else{
-        std::uint64_t offset=0,count=0;
+        std::uint64_t offset=0,count=0;unsigned tileWidth=0,tileHeight=0;
         {std::lock_guard lock(mutex_);const File* f=file(lat,lon,progress); // The header is cached by now.
-         offset=f->offsets.at(static_cast<std::size_t>(index));count=f->counts.at(static_cast<std::size_t>(index));}
+         offset=f->offsets.at(static_cast<std::size_t>(index));count=f->counts.at(static_cast<std::size_t>(index));tileWidth=f->tileWidth;tileHeight=f->tileHeight;}
         std::ostringstream block;block<<name<<".tif."<<index;const auto path=cache_/block.str();
         if(std::filesystem::file_size(path,ec)!=count){
             const auto bytes=transport_(url,std::to_string(offset)+"-"+std::to_string(offset+count-1),&progress);
             if(bytes.size()!=count)throw std::runtime_error("Short DEM tile");
-            publish(path,bytes);
+            (void)decodeFloatTile(bytes,tileWidth,tileHeight); // Throws on a corrupt answer: not cached.
+            stored(path,bytes);
         }
     }
     }catch(...){std::lock_guard lock(mutex_);failed_.insert(item);throw;} // Kept: a camera at rest would never note it again.
@@ -232,7 +238,7 @@ bool PlanetaryRelief::fetchMissing(DownloadProgress& progress){
     const auto parts=byteRanges(transport_(url,ranges,&progress));
     std::string bytes;for(const auto& part:parts)bytes+=part;
     if(parts.size()!=128||bytes.size()!=128*128*2)throw std::runtime_error("Unexpected relief block answer");
-    publish(path,bytes);
+    stored(path,bytes);
     }catch(...){std::lock_guard lock(mutex_);failedBlocks_.insert(key);throw;} // Kept: a camera at rest would never note it again.
     ++generation_;return true;
 }

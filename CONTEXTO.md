@@ -38,8 +38,14 @@ veículos perto do solo da Lua e de Marte (`detailFocus`). Perfil na MX350 a 192
 `build/perf-1080.py`, `ALBERT_FRAME_STATS`): cena na GPU 9,4–10,6 ms (p99 10,7) no Cabo, Alpes e
 Jezero; trabalho de CPU 3,5–5,3 ms; o "present" de ~40 ms é a cópia do Xvfb (sem DRI3; 23 ms a
 1280×800, escala com os pixels), então o p99 < 25 ms em tela nativa não foi medido aqui (o desktop
-pessoal fica fora). Landsat dos sítios no tom médio do mapa global da região (`matchTone`). Próximo:
-medir o quadro em tela nativa quando o Allan puder, nuvens volumétricas.
+pessoal fica fora). Landsat dos sítios no tom médio do mapa global da região (`matchTone`). Revisão
+Fable de 45c2f95..7e95e29: P2 `publish` falhava calado e `fetchMissing` avançava a geração (laço de
+rebaixar sem espera; agora lança e vai a `failed_`, cabeçalho e bloco validados antes de gravar); P2
+bloco de tamanho certo mas corrompido ficava para sempre (apagado e baixado de novo; `.part` por
+processo); P2 luz do Sol saltava na borda de 3 raios enquanto a exposição deslizava (mesmo filtro);
+P3 sombra das nuvens em latitude paramétrica (agora geodética, `weather.w`); P3 vento do mar com
+telemetria velha (10 s); latente: Cox-Munk só em materiais "albert:water". Próximo: medir o quadro
+em tela nativa quando o Allan puder, nuvens volumétricas.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

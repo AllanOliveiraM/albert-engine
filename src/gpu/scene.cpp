@@ -122,7 +122,7 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
     if (kind < 0.5) { colour = base.rgb * select(vec3f(1.0), mapped / PI_L, material.flags.w > 0.5); return vec4f(finish(colour + material.emissive.rgb), base.a); } // Unlit, no air.
     else if (kind > 1.5 && kind < 2.5) {
         var roughness = material.params.x * select(1.0, roughTexel.g, material.more.y > 0.5);
-        if (material.more.y > 0.5 && frame.weather.z > 0.0 && frame.air.w > 0.0) { // Water (roughness texels under 0.5): Cox-Munk slopes for the surface wind.
+        if (material.more.y > 1.5 && frame.weather.z > 0.0 && frame.air.w > 0.0) { // Water ("albert:water" maps, texels under 0.5): Cox-Munk slopes for the surface wind.
             roughness = mix(roughness, sqrt(sqrt(0.003 + 0.00512 * frame.weather.z)), 1.0 - smoothstep(0.35, 0.5, roughTexel.g)); }
         colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra, shadow)
             + airReflection(v.world, n, v.position, roughness, mix(vec3f(0.04), base.rgb, material.params.y)); // The sky on smooth water.
@@ -412,7 +412,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
             if(auto* w=dynamic_cast<MaterialWithLightMap*>(&m)){light=w->lightMap.get();f[11]=w->lightMapIntensity;}
             if(auto* w=dynamic_cast<MaterialWithBumpMap*>(&m)){bump=w->bumpMap.get();f[19]=w->bumpScale;f[7]=bump&&bump->wrapS==TextureWrapping::Repeat?1.f:0.f;}
             if(auto* w=dynamic_cast<MaterialWithRoughness*>(&m))rough=w->roughnessMap.get();
-            f[12]=map&&map->colorSpace==ColorSpace::sRGB?1.f:0.f;f[14]=alpha?1.f:0.f;f[15]=light?1.f:0.f;f[20]=bump?1.f:0.f;f[21]=rough?1.f:0.f;
+            f[12]=map&&map->colorSpace==ColorSpace::sRGB?1.f:0.f;f[14]=alpha?1.f:0.f;f[15]=light?1.f:0.f;f[20]=bump?1.f:0.f;f[21]=rough?(m.name=="albert:water"?2.f:1.f):0.f;
             bytes.resize(sizeof f);std::memcpy(bytes.data(),f,sizeof f);maps={map,alpha,light,bump,rough};
         }
         if(!state.uniforms.buffer||state.uniforms.bytes<bytes.size()){if(state.uniforms.buffer)wgpuBufferRelease(state.uniforms.buffer);state.uniforms.buffer=buffer(bytes.size(),WGPUBufferUsage_Uniform);state.uniforms.bytes=bytes.size();if(state.group){wgpuBindGroupRelease(state.group);state.group=nullptr;}}
@@ -535,6 +535,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     // Cloud shadows: the layer's map (its GPU copy is the cloud material's), its height and opacity.
     std::uint64_t cloudSerial=2;WGPUTextureView cloudView=g.black;
     if(airTables&&air.clouds&&air.cloudShadow>0){cloudView=g.view(air.clouds,true,cloudSerial);f[100]=air.cloudKm;f[101]=std::min(air.cloudShadow,1.f);}
+    f[103]=air.polarRatio>0?air.polarRatio:1.f;
     if(airTables)f[102]=std::max(air.surfaceWind,0.f); // The sea's roughness (Cox-Munk).
     g.bindFrame(shadowing?g.shadowView:g.dummyShadowView,airTables,cloudView,cloudSerial);
     Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);f[32]=eye.x;f[33]=eye.y;f[34]=eye.z;f[35]=1;

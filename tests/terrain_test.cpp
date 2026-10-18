@@ -70,6 +70,23 @@ int main(int argc,char** argv){try{
         require(healed&&std::abs(*healed-expected(10.5,20.5))<1e-3,"The header is fetched again and heights return");
         for(const auto& e:std::filesystem::directory_iterator(cache))require(e.path().string().find(".part")==std::string::npos,"No partial cache file left");
     }
+    { // Review: a portal's page answering a header request is not cached as one, and the fetch fails
+      // (so it backs off) instead of reporting a piece that never landed (an unthrottled refetch loop).
+        albert::providers::CopernicusDem portal(cache/"portal",[](const std::string&,const std::string&,albert::DownloadProgress*)->std::string{return "<html>Sign in to the network</html>";});
+        require(!portal.cachedHeight(11.5,20.5),"Uncached header");bool threw=false;
+        try{portal.fetchMissing(p);}catch(const std::runtime_error&){threw=true;}
+        require(threw&&portal.generation()==0,"A non-GeoTIFF header fails its fetch, uncached");
+    }
+    { // Review: a block of the right size but corrupt (two instances writing one cache) is fetched again.
+        int corrupted=0;for(const auto& e:std::filesystem::directory_iterator(cache))if(e.path().string().find("N10_00_E020")!=std::string::npos&&e.path().string().find(".tif.")!=std::string::npos){
+            const auto size=std::filesystem::file_size(e.path());std::ofstream(e.path(),std::ios::binary)<<std::string(size,'\x5a');++corrupted;}
+        albert::providers::CopernicusDem fresh(cache,[&](const std::string&,const std::string& range,albert::DownloadProgress*)->std::string{
+            const auto dash=range.find('-');const std::size_t a=std::stoul(range.substr(0,dash)),z=std::stoul(range.substr(dash+1));return file.substr(a,std::min<std::size_t>(z+1,file.size())-a);});
+        bool threw=false;std::optional<double> first;try{first=fresh.cachedHeight(10.5,20.5);}catch(const std::exception&){threw=true;}
+        require(corrupted>0&&!threw&&!first,"A corrupt block reads as missing");
+        while(fresh.fetchMissing(p)){}const auto healed=fresh.cachedHeight(10.5,20.5);
+        require(healed&&std::abs(*healed-expected(10.5,20.5))<1e-3,"The corrupt block is fetched again");
+    }
     { // LOLA and MOLA by byte range: pixel-is-area centres, endianness, scaling, tile seams and the 360° wrap.
         auto dn=[](int row,int column){return static_cast<std::int16_t>((row*7+column*3)%20000-10000);};
         int pdsRequests=0;

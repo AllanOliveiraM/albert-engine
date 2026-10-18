@@ -147,7 +147,7 @@ int main(){
             // A frame at the Earth whose air ground is lowered 27 m (the Cape's terrain): identity planet frame.
             float lowered[128]{};lowered[76]=lowered[81]=lowered[86]=lowered[91]=1;lowered[95]=1;lowered[96]=.57f;lowered[98]=.82f;lowered[99]=-.027f;lowered[35]=1;
             WGPUBuffer loweredBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),loweredBuffer,0,lowered,sizeof lowered);
-            auto run=[&](const std::string& source,WGPUBuffer frameIn,const Atmosphere* tables=nullptr){ // One dispatch (with a frame, if given); the 64 floats of its probes.
+            auto run=[&](const std::string& source,WGPUBuffer frameIn,const Atmosphere* tables=nullptr,WGPUTextureView cloudMap=nullptr,WGPUSampler cloudSampler=nullptr){ // One dispatch (with a frame, if given); the 64 floats of its probes.
                 const Atmosphere& air=tables?*tables:earth;
                 const bool withFrame=frameIn!=nullptr;
                 WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code={source.data(),source.size()};WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;
@@ -155,11 +155,12 @@ int main(){
                 WGPUComputePipelineDescriptor pd{};pd.compute.module=module;pd.compute.entryPoint={"main",4};WGPUComputePipeline pipe=wgpuDeviceCreateComputePipeline(gpu->device(),&pd);
                 WGPUBufferDescriptor bd{};bd.size=256;bd.usage=WGPUBufferUsage_Storage|WGPUBufferUsage_CopySrc;WGPUBuffer out=wgpuDeviceCreateBuffer(gpu->device(),&bd);
                 bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;WGPUBuffer back=wgpuDeviceCreateBuffer(gpu->device(),&bd);
-                WGPUBindGroupEntry e0[6]{};e0[0].binding=3;e0[0].buffer=air.parameters();e0[0].size=Atmosphere::parameterBytes; // skyRadiance: no irradiance table.
+                WGPUBindGroupEntry e0[8]{};e0[0].binding=3;e0[0].buffer=air.parameters();e0[0].size=Atmosphere::parameterBytes; // skyRadiance: no irradiance table.
                 const WGPUTextureView views[3]{air.transmittance(),air.scattering(),air.mie()};for(std::uint32_t i=0;i<3;++i){e0[1+i].binding=4+i;e0[1+i].textureView=views[i];}
                 e0[4].binding=8;e0[4].sampler=sampler;e0[5].binding=0;e0[5].buffer=frameIn;e0[5].size=sizeof frame;
                 WGPUBindGroupLayout l0=wgpuComputePipelineGetBindGroupLayout(pipe,0),l2=wgpuComputePipelineGetBindGroupLayout(pipe,2);
-                WGPUBindGroupDescriptor g0{};g0.layout=l0;g0.entryCount=withFrame?6:5;g0.entries=e0;WGPUBindGroup group0=wgpuDeviceCreateBindGroup(gpu->device(),&g0);
+                e0[6].binding=9;e0[6].textureView=cloudMap;e0[7].binding=10;e0[7].sampler=cloudSampler;
+                WGPUBindGroupDescriptor g0{};g0.layout=l0;g0.entryCount=cloudMap?8u:withFrame?6u:5u;g0.entries=e0;WGPUBindGroup group0=wgpuDeviceCreateBindGroup(gpu->device(),&g0);
                 WGPUBindGroupEntry e2{};e2.binding=0;e2.buffer=out;e2.size=256;WGPUBindGroupDescriptor g2{};g2.layout=l2;g2.entryCount=1;g2.entries=&e2;WGPUBindGroup group2=wgpuDeviceCreateBindGroup(gpu->device(),&g2);
                 WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);WGPUComputePassEncoder cp=wgpuCommandEncoderBeginComputePass(en,nullptr);
                 wgpuComputePassEncoderSetPipeline(cp,pipe);wgpuComputePassEncoderSetBindGroup(cp,0,group0,0,nullptr);wgpuComputePassEncoderSetBindGroup(cp,2,group2,0,nullptr);
@@ -192,7 +193,29 @@ int main(){
     probe[3] = vec4f(skyRadiance(ground, vec3f(0.0, cos(0.5236), sin(0.5236)), sun).radiance, 0.0);
 }
 )";
-            const auto values=run(code,nullptr),farValues=run(farCode,frameBuffer),groundValues=run(groundCode,loweredBuffer),marsValues=run(marsCode,nullptr,&mars);const float* v=values.data();
+            // Cloud shadows read the layer's map in geodetic latitude (as its shell): a map whose density is v,
+            // a body of axis ratio 0.5, a point at parametric latitude 45 degrees under the layer, the sun overhead.
+            float shadowFrame[128]{};shadowFrame[76]=shadowFrame[81]=shadowFrame[86]=shadowFrame[91]=1;shadowFrame[95]=1;shadowFrame[96]=shadowFrame[97]=std::sqrt(.5f);
+            shadowFrame[100]=12;shadowFrame[101]=1;shadowFrame[103]=.5f;
+            WGPUBuffer shadowBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),shadowBuffer,0,shadowFrame,sizeof shadowFrame);
+            constexpr unsigned rows=256;std::vector<unsigned char> gradient(4*rows*4);for(unsigned r=0;r<rows;++r)for(unsigned c=0;c<4;++c){auto* t=&gradient[4*(r*4+c)];t[0]=t[2]=0;t[1]=static_cast<unsigned char>(std::lround((r+.5)/rows*255));t[3]=255;}
+            WGPUTextureDescriptor cd{};cd.size={4,rows,1};cd.format=WGPUTextureFormat_RGBA8Unorm;cd.usage=WGPUTextureUsage_TextureBinding|WGPUTextureUsage_CopyDst;cd.mipLevelCount=1;cd.sampleCount=1;cd.dimension=WGPUTextureDimension_2D;
+            WGPUTexture cloudTexture=wgpuDeviceCreateTexture(gpu->device(),&cd);
+            {WGPUTexelCopyTextureInfo dst{};dst.texture=cloudTexture;WGPUTexelCopyBufferLayout l{};l.bytesPerRow=16;l.rowsPerImage=rows;const WGPUExtent3D e{4,rows,1};wgpuQueueWriteTexture(gpu->queue(),&dst,gradient.data(),gradient.size(),&l,&e);}
+            WGPUTextureView cloudView=wgpuTextureCreateView(cloudTexture,nullptr);WGPUSamplerDescriptor cs{};cs.addressModeU=WGPUAddressMode_Repeat;cs.addressModeV=cs.addressModeW=WGPUAddressMode_ClampToEdge;
+            cs.magFilter=cs.minFilter=WGPUFilterMode_Linear;cs.lodMaxClamp=1;cs.maxAnisotropy=1;WGPUSampler cloudSampler=wgpuDeviceCreateSampler(gpu->device(),&cs);
+            const std::string shadowCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(1) fn main() {
+    let p = normalize(vec3f(1.0, 1.0, 0.0)) * (bottomRadius() + 0.001);
+    probe[0] = vec4f(1.0 - cloudShadow(p, length(p)), 0.0, 0.0, 0.0); // The map's v where the sun ray crosses the layer.
+    probe[1] = vec4f(skyRadiance(p, normalize(p), normalize(p)).transmittance, 0.0); // The tables bound as elsewhere.
+}
+)";
+            const auto values=run(code,nullptr),farValues=run(farCode,frameBuffer),groundValues=run(groundCode,loweredBuffer),marsValues=run(marsCode,nullptr,&mars),
+                shadowValues=run(shadowCode,shadowBuffer,nullptr,cloudView,cloudSampler);const float* v=values.data();
+            {const double geodetic=std::atan2(1.,.5)/3.14159265358979+.5;std::printf("cloud map read at v %.4f (geodetic %.4f, parametric 0.7500)\n",shadowValues[0],geodetic);
+             near("Cloud shadows read the layer's map in geodetic latitude",shadowValues[0],geodetic,.006);}
             {const double h=11.1,above=marsModel.top-3396.19,column=h*(1-std::exp(-above/h)),depth=.5*(1-std::exp(-above/h))+2.5e-4*column;
              std::printf("Mars zenith transmittance from the datum %.4f %.4f %.4f (want %.4f at 550 nm)\n",marsValues[0],marsValues[1],marsValues[2],std::exp(-depth));
              near("Mars: dust optical depth 0.5 above the datum, as the model states",marsValues[1],std::exp(-depth),.003);
@@ -264,15 +287,18 @@ struct V { @builtin(position) clip: vec4f, @location(0) world: vec3f };
             }
             { // The sea's glitter (water: roughness texels under 0.5) widens with the wind (Cox-Munk): the sun 5
               // degrees up ahead; at 15 m/s the glint is dimmer at its peak and spread over more pixels than at 1 m/s.
-                auto water=MeshStandardMaterial::create();water->color=Color(.02f,.05f,.1f);water->roughness=1;
+                auto water=MeshStandardMaterial::create();water->color=Color(.02f,.05f,.1f);water->roughness=1;water->name="albert:water";
                 auto mask=DataTexture::create(ImageData(std::vector<unsigned char>(8*4*4,50)),8,4);mask->needsUpdate();water->roughnessMap=mask;globe->setMaterial(water);
                 sunlight->position.set(0,std::sin(.0873f),-std::cos(.0873f));
                 const float exposure=renderer.exposure;renderer.exposure=exposure*.02f; // The glint unclipped.
                 auto glint=[&](float w){wind=w;const auto im=frameOf(1);int peak=0,half=0;for(unsigned y=ih/2;y<ih;++y)for(unsigned x=0;x<iw;++x)peak=std::max(peak,px(im,x,y)[0]);
                     for(unsigned y=ih/2;y<ih;++y)for(unsigned x=0;x<iw;++x)half+=px(im,x,y)[0]*2>peak;return std::pair{peak,half};};
-                const auto [calmPeak,calmArea]=glint(1);const auto [windyPeak,windyArea]=glint(15);wind=0;renderer.exposure=exposure;
+                const auto [calmPeak,calmArea]=glint(1);const auto [windyPeak,windyArea]=glint(15);wind=0;
                 std::printf("sea glint: 1 m/s peak %d (%d pixels over half), 15 m/s peak %d (%d pixels over half)\n",calmPeak,calmArea,windyPeak,windyArea);
                 check(calmPeak>windyPeak*3/2&&windyArea>calmArea&&windyPeak<255,"The sea's glitter widens and dims with the wind (Cox-Munk)");
+                water->name="vehicle paint";const auto [paintCalm,paintCalmArea]=glint(1);const auto [paintWindy,paintWindyArea]=glint(15);wind=0;renderer.exposure=exposure;
+                std::printf("a smooth roughness map not named water: 1 m/s peak %d, 15 m/s peak %d\n",paintCalm,paintWindy);
+                check(paintCalm==paintWindy&&paintCalmArea==paintWindyArea,"Only water materials take the sea's wind (a vehicle's roughness map keeps its own)");
                 globe->setMaterial(globeMaterial);sunlight->position.set(0,std::sin(.5236f),std::cos(.5236f));
             }
             wgpuTextureViewRelease(view);wgpuTextureRelease(target);

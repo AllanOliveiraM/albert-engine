@@ -223,7 +223,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     opaqueMask_=texture(Image(std::vector<unsigned char>(4,255),1,1),ColorSpace::NoColorSpace);
     earthMaterial_ = MeshStandardMaterial::create();
     earthMaterial_->metalness = 0.f;
-    earthMaterial_->roughness = 1.f;
+    earthMaterial_->roughness = 1.f;earthMaterial_->name="albert:water"; // Its roughness map's water takes the sea's wind (WebGPU).
     earthMaterial_->alphaMap=opaqueMask_;earthMaterial_->alphaTest=.5f;
     // GEBCO source encodes elevations from 0 to 6400 m. No exaggerated relief.
     earthMaterial_->bumpScale = 1.f / 6378137.f;
@@ -232,7 +232,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     earth->geometry()->setAttribute("uv2",FloatBufferAttribute::create(earth->geometry()->getAttribute<float>("uv")->array(),2));
     earthMaterial_->lightMap=surfaceFillTextures_[0];
     earthTerrainMaterial_=MeshStandardMaterial::create(); // The globe's, without the bump map (the relief is geometry).
-    earthTerrainMaterial_->metalness=0.f;earthTerrainMaterial_->roughness=1.f;earthTerrainMaterial_->alphaTest=.5f;
+    earthTerrainMaterial_->metalness=0.f;earthTerrainMaterial_->roughness=1.f;earthTerrainMaterial_->alphaTest=.5f;earthTerrainMaterial_->name="albert:water";
     earth->scale.y = static_cast<float>(6356.752314245 / 6378.137);
     earth->castShadow = earth->receiveShadow = true;
     scene.add(earth);
@@ -606,7 +606,7 @@ void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
         patch=Mesh::create(geometry,moonDetailMaterial_);
     } else {
         auto material=MeshStandardMaterial::create();
-        material->map=regionalTextures_[slot];material->roughness=1;material->metalness=0;
+        material->map=regionalTextures_[slot];material->roughness=1;material->metalness=0;material->name="albert:water";
         material->lightMap=surfaceFillTextures_[0];
         material->bumpMap=regionalHeights_[0];material->bumpScale=1.f/6378137.f;
         if(regionalTextures_[1]) regionalTextures_[1]->dispose();
@@ -616,7 +616,7 @@ void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
         }
         material->transparent=false;material->depthWrite=true;material->alphaTest=.001f;
         earthTerrainDetail_=MeshStandardMaterial::create();earthTerrainDetail_->map=material->map;earthTerrainDetail_->roughnessMap=material->roughnessMap;
-        earthTerrainDetail_->roughness=1;earthTerrainDetail_->metalness=0;earthTerrainDetail_->lightMap=surfaceFillTextures_[0];
+        earthTerrainDetail_->roughness=1;earthTerrainDetail_->metalness=0;earthTerrainDetail_->lightMap=surfaceFillTextures_[0];earthTerrainDetail_->name="albert:water";
         earthDetailBounds_=region;
         patch=Mesh::create(geometry,material);
     }
