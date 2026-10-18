@@ -1,0 +1,61 @@
+// Quadtree terrain without a GPU: the selection tiles the sphere exactly (4π, no overlaps), refines
+// to the finest level under the camera, culls the far side, and nodes carry the source's heights.
+#include "terrain.hpp"
+#include "threepp/core/Object3D.hpp"
+#include "threepp/materials/MeshBasicMaterial.hpp"
+#include "threepp/objects/Mesh.hpp"
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <numbers>
+#include <thread>
+using namespace threepp;
+namespace {
+int failures=0;
+void check(bool ok,const char* what){std::printf("%s %s\n",ok?"ok  ":"FAIL",what);if(!ok)++failures;}
+// Updates until nothing is pending and the selection is stable.
+void settle(albert::Terrain& t,const Vector3& camera,bool cull){
+    std::size_t last=~0u;int stable=0;
+    for(int i=0;i<20000&&stable<5;++i){t.update(camera,nullptr,cull);const auto n=t.drawn();stable=(n==last&&t.pending()==0)?stable+1:0;last=n;std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+}
+}
+int main(){
+    constexpr double radius=6378137,height=1000;
+    Object3D parent;auto material=MeshBasicMaterial::create();
+    albert::TerrainBody body;body.radius=radius;body.maxLevel=9;
+    body.heights=[](const std::vector<double>& lat,const std::vector<double>&,int,std::vector<float>& out){for(std::size_t i=0;i<lat.size();++i)out[i]=static_cast<float>(height);return true;};
+    albert::Terrain terrain(parent,material,body);
+    const double sphere=4*std::numbers::pi;
+    settle(terrain,Vector3(0,0,10),false);
+    std::printf("far: %zu nodes, finest level %d, %.12f sr\n",terrain.drawn(),terrain.finestLevel(),terrain.coveredSolidAngle());
+    check(terrain.drawn()==6&&std::abs(terrain.coveredSolidAngle()-sphere)<1e-9,"Far camera: the six faces cover the sphere");
+    const Vector3 near(0,0,static_cast<float>(1+100/radius));
+    settle(terrain,near,false);
+    std::printf("near: %zu nodes, finest level %d, %.12f sr\n",terrain.drawn(),terrain.finestLevel(),terrain.coveredSolidAngle());
+    check(terrain.finestLevel()==body.maxLevel,"Refined to the finest level under the camera");
+    check(std::abs(terrain.coveredSolidAngle()-sphere)<1e-8,"Selected nodes tile the sphere exactly (no gaps, no overlaps)");
+    double worst=0;std::size_t meshes=0;
+    for(const auto& child:parent.children){auto* mesh=dynamic_cast<Mesh*>(child);if(!mesh||!mesh->visible)continue;++meshes;
+        const auto* p=mesh->geometry()->getAttribute<float>("position");
+        for(int i=0;i<albert::Terrain::posts*albert::Terrain::posts;++i){const double x=p->getX(i)+mesh->position.x,y=p->getY(i)+mesh->position.y,z=p->getZ(i)+mesh->position.z;
+            worst=std::max(worst,std::abs(std::sqrt(x*x+y*y+z*z)-(1+height/radius))*radius);}}
+    std::printf("vertex radius error %.3f m over %zu visible nodes\n",worst,meshes);
+    check(meshes==terrain.drawn()&&worst<1.,"Visible nodes are the selection, at the source's height (float placement)");
+    settle(terrain,near,true);
+    std::printf("culled: %zu nodes, %.6f sr\n",terrain.drawn(),terrain.coveredSolidAngle());
+    check(terrain.coveredSolidAngle()<sphere/2&&terrain.coveredSolidAngle()>.01,"Horizon culling keeps the near side only");
+    { // Provisional nodes (finer data downloading) are rebuilt once the source's generation advances.
+        std::atomic<std::uint64_t> generation{0};Object3D other;albert::TerrainBody b=body;b.maxLevel=2;
+        b.heights=[&generation](const std::vector<double>& lat,const std::vector<double>&,int,std::vector<float>& out){
+            const bool ready=generation.load()>0;for(std::size_t i=0;i<lat.size();++i)out[i]=ready?2000.f:500.f;return ready;};
+        b.generation=[&generation]{return generation.load();};
+        albert::Terrain provisional(other,material,b);
+        auto heightOf=[&]{for(const auto& child:other.children)if(auto* m=dynamic_cast<Mesh*>(child);m&&m->visible){const auto* p=m->geometry()->getAttribute<float>("position");
+            const double x=p->getX(0)+m->position.x,y=p->getY(0)+m->position.y,z=p->getZ(0)+m->position.z;return (std::sqrt(x*x+y*y+z*z)-1)*radius;}return -1.;};
+        settle(provisional,Vector3(0,0,10),false);const double before=heightOf();generation=1;settle(provisional,Vector3(0,0,10),false);const double after=heightOf();
+        std::printf("provisional %.1f m, rebuilt %.1f m\n",before,after);
+        check(std::abs(before-500)<1&&std::abs(after-2000)<1,"Provisional nodes rebuilt when finer data arrives");
+    }
+    std::printf(failures?"%d failure(s)\n":"terrain lod ok\n",failures);return failures?1:0;
+}

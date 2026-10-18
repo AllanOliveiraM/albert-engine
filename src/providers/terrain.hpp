@@ -3,7 +3,10 @@
 #include "physics/earth.hpp"
 #include <filesystem>
 #include <functional>
+#include <atomic>
 #include <map>
+#include <optional>
+#include <set>
 #include <tuple>
 #include <memory>
 #include <mutex>
@@ -21,12 +24,19 @@ public:
     // edges included). Ocean tiles, which Copernicus omits, read as 0.
     std::vector<float> heights(double west,double south,double east,double north,unsigned width,unsigned height,DownloadProgress& progress);
     double height(double latitude,double longitude,DownloadProgress& progress); // Degrees.
+    // Without the network: the height when its header and block are cached (memory or disk); else
+    // nothing, and the missing piece is noted for fetchMissing().
+    std::optional<double> cachedHeight(double latitude,double longitude);
+    // Downloads one noted piece into the disk cache, without holding the lock; false when none is
+    // noted. Throws on transport errors (the piece is noted again when next needed).
+    bool fetchMissing(DownloadProgress& progress);
+    [[nodiscard]] std::uint64_t generation()const{return generation_.load();} // Pieces fetched so far.
 private:
     struct File;
     const File* file(int latitude,int longitude,DownloadProgress& progress);
     const std::vector<float>& block(const File& f,int index,DownloadProgress& progress);
     double sample(double latitude,double longitude,DownloadProgress& progress);
-    std::filesystem::path cache_;Transport transport_;std::mutex mutex_;
+    std::filesystem::path cache_;Transport transport_;std::mutex mutex_;bool offline_=false;std::set<std::tuple<int,int,int>> missing_;std::atomic<std::uint64_t> generation_{0}; // Missing: latitude, longitude, block (-1: header).
     std::map<std::pair<int,int>,std::shared_ptr<File>> files_;std::map<std::pair<const File*,int>,std::vector<float>> blocks_;
 };
 // Decodes one DEFLATE + floating-point-predictor (TIFF 3) float32 tile.

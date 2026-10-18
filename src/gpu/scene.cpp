@@ -5,9 +5,11 @@
 #include <threepp/threepp.hpp>
 #include <threepp/materials/ShaderMaterial.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <set>
 #include <string_view>
 #include <unordered_map>
@@ -144,7 +146,7 @@ struct SceneRenderer::Impl {
     struct MaterialState {Buffer uniforms;WGPUBindGroup group=nullptr;std::vector<std::uint64_t> serials;std::string program;unsigned used=0;};
     struct Compiled {WGPUShaderModule module=nullptr;WGPUBindGroupLayout layout=nullptr;WGPUPipelineLayout pipelineLayout=nullptr;Program program;};
     std::unordered_map<unsigned,Geometry> geometries;std::unordered_map<const BufferAttribute*,Attribute> attributes;std::unordered_map<unsigned,Texture> textures;std::uint64_t serials=2;std::unordered_map<unsigned,MaterialState> materials; // Serials 1, 2: white, black.
-    std::unordered_map<std::string,Compiled> compiled;std::unordered_map<std::string,WGPURenderPipeline> pipelines;std::set<std::string> reported;
+    std::unordered_map<std::string,Compiled> compiled;std::map<std::array<std::int64_t,24>,WGPURenderPipeline> pipelines;std::set<std::string> reported;
     unsigned frame=0,drawn=0;bool floatFilterable=false;float tickNanoseconds=1;
     // Sun shadow map: depth from the light's orthographic camera, compared with PCF in the receivers.
     WGPUTexture shadowTexture=nullptr,dummyShadow=nullptr;WGPUTextureView shadowView=nullptr,dummyShadowView=nullptr;unsigned shadowSize=0;std::uint64_t shadowSerial=0,boundFrame=~0ull; // boundFrame: the shadow map serial in frameGroup (0: the dummy).
@@ -246,7 +248,7 @@ struct SceneRenderer::Impl {
     void report(const std::string& what){if(reported.insert(what).second)std::fprintf(stderr,"WebGPU renderer: %s\n",what.c_str());}
     void upload(Buffer& b,const void* data,std::size_t bytes,WGPUBufferUsage usage,unsigned version){
         if(b.version==version&&b.buffer)return;
-        if(!b.buffer||b.bytes<bytes){if(b.buffer)wgpuBufferRelease(b.buffer);b.buffer=buffer(bytes,usage);b.bytes=align(std::max<std::size_t>(bytes,16),4);}
+        if(!b.buffer||b.bytes<bytes){if(b.buffer)wgpuBufferRelease(b.buffer);b.buffer=buffer(bytes,usage);b.bytes=align(std::max<std::size_t>(bytes,16),4);++reallocations;}
         if(bytes%4==0)wgpuQueueWriteBuffer(queue,b.buffer,0,data,bytes);
         else{std::vector<std::byte> padded(align(bytes,4));std::memcpy(padded.data(),data,bytes);wgpuQueueWriteBuffer(queue,b.buffer,0,padded.data(),padded.size());}
         b.version=version;
@@ -270,6 +272,7 @@ struct SceneRenderer::Impl {
         return &compiled.emplace(name,std::move(c)).first->second;
     }
     std::unordered_map<int,WGPURenderPipeline> mipPipelines;WGPUBindGroupLayout mipLayout=nullptr;WGPUPipelineLayout mipPipelineLayout=nullptr;WGPUShaderModule mipModule=nullptr;
+    unsigned reallocations=0; // Buffers created by upload(): a new one may reuse a released one's address.
     static constexpr std::size_t streamLimit=8u<<20;std::size_t streamBudget=0; // Bytes a frame for streamed updates; still allowed this frame.
     // Box-filtered mip chain rendered level by level (a full-screen triangle sampling the level above).
     void mipmaps(WGPUTexture texture,WGPUTextureFormat format,unsigned levels){
@@ -379,7 +382,9 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         return {};
     }
     WGPUBindGroup materialGroup(Material& m,const Compiled& c){
-        auto& state=materials[m.id];state.used=frame;
+        auto& state=materials[m.id];
+        if(state.used==frame&&state.group&&state.program==m.name)return state.group; // Shared by many meshes (terrain nodes): once a frame.
+        state.used=frame;
         std::vector<std::byte> bytes;std::vector<threepp::Texture*> maps;
         if(auto* shader=dynamic_cast<ShaderMaterial*>(&m)){
             std::size_t offset=0;std::vector<std::size_t> at;
@@ -418,11 +423,13 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
     WGPURenderPipeline pipeline(const std::string& name,const Compiled& c,const Material& m,const std::vector<int>& strides,unsigned samples){
         WGPUBlendState b{};const bool blended=blend(m,b);
         const auto cull=m.side==Side::Double?WGPUCullMode_None:m.side==Side::Back?WGPUCullMode_Front:WGPUCullMode_Back;
-        std::string key=name;
+        // Program, blend and depth state, polygon offsets, strides: numbers, not a string per draw.
+        std::array<std::int64_t,24> key{};key.fill(-1);std::size_t at=0;key[at++]=reinterpret_cast<std::intptr_t>(&c);
         for(int v:{blended?1:0,static_cast<int>(b.color.srcFactor),static_cast<int>(b.color.dstFactor),static_cast<int>(b.color.operation),static_cast<int>(b.alpha.srcFactor),static_cast<int>(b.alpha.dstFactor),
-            static_cast<int>(b.alpha.operation),m.depthTest?1:0,m.depthWrite?1:0,static_cast<int>(cull),m.colorWrite?1:0,static_cast<int>(samples)})key+='|'+std::to_string(v);
-        if(m.polygonOffset)key+='|'+std::to_string(m.polygonOffsetFactor)+'/'+std::to_string(m.polygonOffsetUnits);
-        for(int s:strides)key+=','+std::to_string(s);
+            static_cast<int>(b.alpha.operation),m.depthTest?1:0,m.depthWrite?1:0,static_cast<int>(cull),m.colorWrite?1:0,static_cast<int>(samples)})key[at++]=v;
+        const float offsets[2]{m.polygonOffset?m.polygonOffsetFactor:0.f,m.polygonOffset?m.polygonOffsetUnits:0.f};for(float o:offsets){std::int32_t bits;std::memcpy(&bits,&o,4);key[at++]=bits;}
+        if(strides.size()>key.size()-at){report("too many vertex buffers for '"+name+"'");return nullptr;}
+        for(int s:strides)key[at++]=s;
         if(const auto it=pipelines.find(key);it!=pipelines.end())return it->second;
         std::vector<WGPUVertexAttribute> attributes(1+c.program.attributes.size());std::vector<WGPUVertexBufferLayout> buffers(attributes.size());
         const auto step=c.program.points?WGPUVertexStepMode_Instance:WGPUVertexStepMode_Vertex;
@@ -567,24 +574,32 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     WGPURenderPassEncoder pass=wgpuCommandEncoderBeginRenderPass(encoder,&pd);
     wgpuRenderPassEncoderSetBindGroup(pass,0,g.frameGroup,0,nullptr);
     std::size_t index=0;
+    // State already set by the previous draw is not set again (terrain nodes share almost all of it).
+    WGPURenderPipeline lastPipe=nullptr;WGPUBindGroup lastGroup=nullptr;WGPUBuffer lastIndex=nullptr;std::array<WGPUBuffer,8> lastBuffers{};
+    std::vector<WGPUBuffer> buffers;std::vector<int> strides;const std::string position="position";unsigned seenReallocations=g.reallocations;
     for(auto* list:{&background,&opaque,&blended})for(auto& item:*list){
         const std::uint32_t offset=offsets[index++];auto& geo=g.geometries[item.geometry->id];geo.used=g.frame;
         const auto* positions=item.geometry->getAttribute<float>("position");if(!positions)continue;
         const unsigned vertices=static_cast<unsigned>(positions->count());
-        std::vector<WGPUBuffer> buffers;std::vector<int> strides;
+        buffers.clear();strides.clear();
         auto bind=[&](const std::string& name,int components){
             if(WGPUBuffer b=g.vertices(*item.geometry,name,components)){buffers.push_back(b);strides.push_back(components*4);}else{buffers.push_back(g.zeros);strides.push_back(0);}};
-        bind("position",3);for(const auto& [n,c]:item.program->program.attributes)bind(n,c);
-        WGPURenderPipeline pipe=g.pipeline(g.programName(*item.material),*item.program,*item.material,strides,msaa);
+        bind(position,3);for(const auto& [n,c]:item.program->program.attributes)bind(n,c);
+        WGPURenderPipeline pipe=g.pipeline(g.programName(*item.material),*item.program,*item.material,strides,msaa);if(!pipe||buffers.size()>lastBuffers.size())continue;
         WGPUBindGroup group=g.materialGroup(*item.material,*item.program);
-        wgpuRenderPassEncoderSetPipeline(pass,pipe);wgpuRenderPassEncoderSetBindGroup(pass,1,g.objectGroup,1,&offset);wgpuRenderPassEncoderSetBindGroup(pass,2,group,0,nullptr);
-        for(std::size_t i=0;i<buffers.size();++i)wgpuRenderPassEncoderSetVertexBuffer(pass,static_cast<std::uint32_t>(i),buffers[i],0,WGPU_WHOLE_SIZE);
+        if(g.reallocations!=seenReallocations){lastIndex=nullptr;lastBuffers.fill(nullptr);seenReallocations=g.reallocations;}
+        if(pipe!=lastPipe){wgpuRenderPassEncoderSetPipeline(pass,pipe);lastPipe=pipe;}
+        wgpuRenderPassEncoderSetBindGroup(pass,1,g.objectGroup,1,&offset);
+        if(group!=lastGroup){wgpuRenderPassEncoderSetBindGroup(pass,2,group,0,nullptr);lastGroup=group;}
+        for(std::size_t i=0;i<buffers.size();++i)if(buffers[i]!=lastBuffers[i]){wgpuRenderPassEncoderSetVertexBuffer(pass,static_cast<std::uint32_t>(i),buffers[i],0,WGPU_WHOLE_SIZE);lastBuffers[i]=buffers[i];}
         const auto range=item.geometry->drawRange;
         if(item.points){const unsigned first=static_cast<unsigned>(std::max(0,range.start)),n=std::min<unsigned>(vertices-std::min(first,vertices),static_cast<unsigned>(range.count));if(n)wgpuRenderPassEncoderDraw(pass,6,n,0,first);}
         else if(auto* idx=item.geometry->getIndex()){
             g.upload(geo.index,idx->array().data(),idx->array().size()*4,WGPUBufferUsage_Index,idx->version);
             const unsigned total=static_cast<unsigned>(idx->array().size()),first=std::min(total,static_cast<unsigned>(std::max(0,range.start))),n=std::min(total-first,static_cast<unsigned>(range.count));
-            wgpuRenderPassEncoderSetIndexBuffer(pass,geo.index.buffer,WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE);if(n)wgpuRenderPassEncoderDrawIndexed(pass,n,1,first,0,0);
+            if(g.reallocations!=seenReallocations){lastIndex=nullptr;seenReallocations=g.reallocations;lastBuffers.fill(nullptr);}
+            if(geo.index.buffer!=lastIndex){wgpuRenderPassEncoderSetIndexBuffer(pass,geo.index.buffer,WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE);lastIndex=geo.index.buffer;}
+            if(n)wgpuRenderPassEncoderDrawIndexed(pass,n,1,first,0,0);
         }else{const unsigned first=std::min(vertices,static_cast<unsigned>(std::max(0,range.start))),n=std::min(vertices-first,static_cast<unsigned>(range.count));if(n)wgpuRenderPassEncoderDraw(pass,n,1,first,0);}
         ++g.drawn;
     }

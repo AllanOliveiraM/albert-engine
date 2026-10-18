@@ -1421,6 +1421,7 @@ int albert::runRenderer(int argc, char** argv) {
                     if (earthControls) {
                         if(focus!=targets::Earth)ImGui::TextDisabled("TERRA");
                         ImGui::Checkbox("Atmosfera", &visualSettings.atmosphere);
+                        ImGui::Checkbox("Relevo detalhado", &visualSettings.terrain);
                         ImGui::Checkbox("Nuvens em tempo real", &visualSettings.clouds);
                         ImGui::TextDisabled("Observacoes de satelite, com atraso.");
                         ImGui::Checkbox("Luzes das cidades", &visualSettings.nightLights);
@@ -2483,7 +2484,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
             Vector3 solarDirection = sunPosition;solarDirection.sub(earthPosition);
             auto shownSettings=visualSettings;shownSettings.clouds=visualSettings.clouds&&cloudsCurrent;
-            planets.update(solarDirection.normalize(), camera->position, shownSettings, dt);
+            planets.update(solarDirection.normalize(), camera->position, shownSettings, dt, camera.get());
             Vector3 earthCamera = camera->position;
             earth->worldToLocal(earthCamera);
             planets.updateImageDetail(camera->position, visualSettings.quality);

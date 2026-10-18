@@ -25,17 +25,19 @@ std::vector<float> decodeFloatTile(const std::string& compressed,unsigned w,unsi
     }
     return out;
 }
-struct CopernicusDem::File {std::string url;unsigned width=0,height=0,tileWidth=0,tileHeight=0;double west=0,north=0,stepX=0,stepY=0;std::vector<std::uint64_t> offsets,counts;bool ocean=false;};
+namespace {struct NotCached {};} // Thrown inside cachedHeight when a piece needs the network.
+struct CopernicusDem::File {int latitude=0,longitude=0;std::string url;unsigned width=0,height=0,tileWidth=0,tileHeight=0;double west=0,north=0,stepX=0,stepY=0;std::vector<std::uint64_t> offsets,counts;bool ocean=false;};
 CopernicusDem::CopernicusDem(std::filesystem::path cache,Transport transport):cache_(std::move(cache)),transport_(std::move(transport)){
     if(!transport_)transport_=[](const std::string& url,const std::string& range,DownloadProgress* p){return httpGet(url,p,{16*1024*1024,60,range});};
 }
 const CopernicusDem::File* CopernicusDem::file(int lat,int lon,DownloadProgress& progress){
     const auto key=std::make_pair(lat,lon);if(const auto i=files_.find(key);i!=files_.end())return i->second.get();
-    auto f=std::make_shared<File>();const std::string name=tileName(lat,lon);
+    auto f=std::make_shared<File>();f->latitude=lat;f->longitude=lon;const std::string name=tileName(lat,lon);
     f->url="https://copernicus-dem-30m.s3.amazonaws.com/"+name+"/"+name+".tif";
     const auto path=cache_/(name+".header");std::string head;
     if(std::ifstream in{path,std::ios::binary})head.assign(std::istreambuf_iterator<char>(in),{});
     if(head.empty()){
+        if(offline_){missing_.insert({lat,lon,-1});throw NotCached{};}
         try{head=transport_(f->url,"0-65535",&progress);}
         catch(const std::exception& e){if(std::string(e.what()).find("404")==std::string::npos&&std::string(e.what()).find("403")==std::string::npos)throw;head="ocean";} // Absent: no land.
         std::error_code ec;std::filesystem::create_directories(cache_,ec);std::ofstream(path,std::ios::binary)<<head;
@@ -69,6 +71,7 @@ const std::vector<float>& CopernicusDem::block(const File& f,int index,DownloadP
     if(std::ifstream in{path,std::ios::binary})bytes.assign(std::istreambuf_iterator<char>(in),{});
     const auto offset=f.offsets.at(static_cast<std::size_t>(index)),count=f.counts.at(static_cast<std::size_t>(index));
     if(bytes.size()!=count){
+        if(offline_){missing_.insert({f.latitude,f.longitude,index});throw NotCached{};}
         bytes=transport_(f.url,std::to_string(offset)+"-"+std::to_string(offset+count-1),&progress);
         if(bytes.size()!=count)throw std::runtime_error("Short DEM tile");
         std::ofstream(path,std::ios::binary)<<bytes;
@@ -88,6 +91,34 @@ double CopernicusDem::sample(double lat,double lon,DownloadProgress& progress){
         +fx*((1-fy)*post(static_cast<long>(ix)+1,static_cast<long>(iy))+fy*post(static_cast<long>(ix)+1,static_cast<long>(iy)+1));
 }
 double CopernicusDem::height(double lat,double lon,DownloadProgress& progress){std::lock_guard lock(mutex_);return sample(lat,lon,progress);}
+std::optional<double> CopernicusDem::cachedHeight(double lat,double lon){
+    std::lock_guard lock(mutex_);offline_=true;DownloadProgress unused;
+    try{const double h=sample(lat,lon,unused);offline_=false;return h;}catch(const NotCached&){offline_=false;return std::nullopt;}catch(...){offline_=false;throw;}
+}
+bool CopernicusDem::fetchMissing(DownloadProgress& progress){
+    std::tuple<int,int,int> item;
+    {std::lock_guard lock(mutex_);if(missing_.empty())return false;item=*missing_.begin();missing_.erase(missing_.begin());}
+    const auto [lat,lon,index]=item;const std::string name=tileName(lat,lon),url="https://copernicus-dem-30m.s3.amazonaws.com/"+name+"/"+name+".tif";
+    std::error_code ec;std::filesystem::create_directories(cache_,ec);
+    if(index<0){
+        const auto path=cache_/(name+".header");if(std::filesystem::exists(path,ec)){++generation_;return true;}
+        std::string head;
+        try{head=transport_(url,"0-65535",&progress);}
+        catch(const std::exception& e){if(std::string(e.what()).find("404")==std::string::npos&&std::string(e.what()).find("403")==std::string::npos)throw;head="ocean";}
+        std::ofstream(path,std::ios::binary)<<head;
+    }else{
+        std::uint64_t offset=0,count=0;
+        {std::lock_guard lock(mutex_);const File* f=file(lat,lon,progress); // The header is cached by now.
+         offset=f->offsets.at(static_cast<std::size_t>(index));count=f->counts.at(static_cast<std::size_t>(index));}
+        std::ostringstream block;block<<name<<".tif."<<index;const auto path=cache_/block.str();
+        if(std::filesystem::file_size(path,ec)!=count){
+            const auto bytes=transport_(url,std::to_string(offset)+"-"+std::to_string(offset+count-1),&progress);
+            if(bytes.size()!=count)throw std::runtime_error("Short DEM tile");
+            std::ofstream(path,std::ios::binary)<<bytes;
+        }
+    }
+    ++generation_;return true;
+}
 std::vector<float> CopernicusDem::heights(double west,double south,double east,double north,unsigned w,unsigned h,DownloadProgress& progress){
     if(w<2||h<2||w>8192||h>8192)throw std::invalid_argument("Invalid DEM grid");
     std::lock_guard lock(mutex_);std::vector<float> out(static_cast<std::size_t>(w)*h);

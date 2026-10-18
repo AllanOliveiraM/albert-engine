@@ -106,7 +106,9 @@ void albert::Display::clear(){auto& d=*impl_;if(d.renderer)d.renderer->clear();e
 void albert::Display::render(Scene& scene,Camera& camera){
     auto& d=*impl_;if(d.renderer){d.renderer->render(scene,camera);return;}
     if(!d.encoder)return;
-    unsigned w,h;d.framebuffer(w,h);d.scene->render(scene,camera,d.target,w,h,d.encoder);d.drawnTarget=true;
+    unsigned w,h;d.framebuffer(w,h);const auto t0=std::chrono::steady_clock::now();d.scene->render(scene,camera,d.target,w,h,d.encoder);d.drawnTarget=true;
+    static const bool debug=std::getenv("ALBERT_TERRAIN_DEBUG")!=nullptr;
+    if(debug){static int n=0;static double sum=0;sum+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();if(++n%60==0){std::fprintf(stderr,"scene render cpu %.2f ms, %u draws\n",sum/60,d.scene->drawn());sum=0;}}
 }
 void albert::Display::ui(){
     auto& d=*impl_;if(d.imgui){d.imgui->render();return;}

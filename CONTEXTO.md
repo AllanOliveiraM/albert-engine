@@ -1,5 +1,13 @@
 # Albert Engine — contexto para continuidade
 
+**Terreno em quadtree na Terra (18/10/2026)**: `src/render/terrain.*` (esfera-cubo, nós 65×65 com
+saias, thread de construção, frustum/horizonte, nós provisórios), alturas em `earthHeights`
+(visuals.cpp: GEBCO + Copernicus só do cache, geoide em grade de 2°) e `CopernicusDem::cachedHeight`
+/`fetchMissing` (download em thread própria; a rede daqui estava lenta, ~11 KB/s, e o design não
+bloqueia). Na MX350 a 1280×800, Alpes: GPU ~7 ms, CPU ~5 ms. Preview: `LAT=46.577 LON=7.91
+UTC=1792234800 build/air-preview.py nome:drag:0:-500` (pad-probe aceita lat/lon). Próximo: Lua e
+Marte (LOLA/MOLA em grade), imagem regional nos nós, morph entre níveis.
+
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`
 (tabelas em compute, incrementais por quadro), `air` em `src/gpu/programs.cpp` (céu como fundo,
 `airApply`, `airLight`, `airFilter`), `SceneRenderer::air`, `Display::setAir` chamado pelo app com a

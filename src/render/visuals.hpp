@@ -11,7 +11,9 @@
 #include "uploads.hpp"
 #include "solids.hpp"
 #include "lighting.hpp"
+#include "terrain.hpp"
 #include <future>
+#include <thread>
 
 #include <array>
 #include <filesystem>
@@ -40,6 +42,7 @@ struct VisualSettings {
     AuxiliaryLights auxiliary;
     bool shadows = true;
     bool borders = false;
+    bool terrain = true; // Quadtree relief near the Earth (Copernicus 30 m close by).
     int quality = 1; // 0: one framebuffer pixel per logical pixel; 1: up to 2x.
 };
 
@@ -55,7 +58,8 @@ public:
     void updateUploads(threepp::GLRenderer* renderer); // Null on WebGPU.
     void retryDetails() { imageFailed_.fill(false); detailError.clear(); }
     void replaceAssets(DecodedAssets assets);
-    void update(const threepp::Vector3& solarDirection, const threepp::Vector3& cameraPosition, const VisualSettings& settings, float seconds);
+    // camera: its view limits the terrain's refinement (none: refined all around).
+    void update(const threepp::Vector3& solarDirection, const threepp::Vector3& cameraPosition, const VisualSettings& settings, float seconds, threepp::Camera* camera=nullptr);
     void updateBorderMaterial(threepp::ShaderMaterial& material, const threepp::Vector3& cameraPosition);
     void setCloudImage(threepp::Image image);
     void setCloudDetail(threepp::Image image, const GeoRegion& region);
@@ -63,6 +67,7 @@ public:
     bool releaseDistantDetails(const std::string& focus,const threepp::Vector3& camera,bool enabled,float seconds);
     void updateImageDetail(const threepp::Vector3& camera, bool enabled);
     [[nodiscard]] float atmosphereVisibility() const { return displayedAtmosphere_; } // The air's shown strength, 0-1.
+    [[nodiscard]] const Terrain* earthTerrain() const { return earthTerrain_.get(); } // Null until assets load.
 
     std::shared_ptr<threepp::Mesh> earth, moon, sun;
 
@@ -76,7 +81,9 @@ private:
     std::array<std::shared_ptr<threepp::Texture>,2> surfaceMasks_;
     std::shared_ptr<threepp::Texture> opaqueMask_;
     std::shared_ptr<threepp::MeshPhongMaterial> moonDetailMaterial_;
-    std::shared_ptr<threepp::MeshStandardMaterial> earthMaterial_;
+    std::shared_ptr<threepp::MeshStandardMaterial> earthMaterial_, earthTerrainMaterial_;
+    std::unique_ptr<Terrain> earthTerrain_; // Replaces the globe mesh near the Earth (children of `earth`).
+    DownloadProgress demProgress_;std::jthread demFetcher_; // Downloads the Copernicus pieces the terrain noted.
     std::shared_ptr<threepp::MeshPhongMaterial> moonMaterial_;
     std::shared_ptr<threepp::ShaderMaterial> cloudMaterial_;
     std::shared_ptr<threepp::ShaderMaterial> atmosphereMaterial_, nightMaterial_;

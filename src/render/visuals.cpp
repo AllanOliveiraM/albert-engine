@@ -3,6 +3,10 @@
 #include "platform.hpp"
 #include "asset_pack.hpp"
 #include "animation.hpp"
+#include "providers/terrain.hpp"
+#include "physics/earth.hpp"
+#include <atomic>
+#include <chrono>
 
 #include "threepp/materials/ShaderMaterial.hpp"
 #include "threepp/objects/Points.hpp"
@@ -11,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <numbers>
 #include <sstream>
 #include <stdexcept>
@@ -80,6 +85,37 @@ void updateFillMask(Texture& texture, Vector3& previous, const Vector3& localSun
     }
     texture.needsUpdate();
     previous=localSun;
+}
+
+// EGM2008 (degree 70, wavelengths over ~5°) on a 2° grid, built once by the first caller (~1 s):
+// the terrain's worker then interpolates it instead of 54 µs a vertex.
+double geoidGrid(double lat,double lon) {
+    static const std::vector<float> grid=[]{std::vector<float> g(91*181);
+        for(int j=0;j<91;++j)for(int i=0;i<181;++i)g[static_cast<std::size_t>(j*181+i)]=static_cast<float>(albert::physics::geoidHeight((j*2-90)*pi/180,(i*2-180)*pi/180));return g;}();
+    const double x=std::clamp((lon*180/pi+180)/2,0.,179.999),y=std::clamp((lat*180/pi+90)/2,0.,89.999);const auto i=static_cast<std::size_t>(x),j=static_cast<std::size_t>(y);const double fx=x-static_cast<double>(i),fy=y-static_cast<double>(j);
+    auto g=[&](std::size_t a,std::size_t b){return static_cast<double>(grid[b*181+a]);};
+    return (1-fy)*((1-fx)*g(i,j)+fx*g(i+1,j))+fy*((1-fx)*g(i,j+1)+fx*g(i+1,j+1));
+}
+// Earth's relief for the terrain: the global grid (GEBCO, 0-6400 m) bilinear, Copernicus GLO-30
+// from level 9 (posts ≤ 300 m) when cached (missing pieces are noted for the fetcher; the node is
+// provisional meanwhile), plus the EGM2008 geoid (both over mean sea level). Metres over the ellipsoid.
+albert::TerrainHeights earthHeights(const Image& global) {
+    auto grid=std::make_shared<const std::vector<float>>(global.data<float>());const long w=global.width(),h=global.height();
+    return [grid,w,h](const std::vector<double>& lat,const std::vector<double>& lon,int level,std::vector<float>& out) {
+        bool fine=level>=9;
+        if(fine){auto& dem=albert::providers::copernicusDem(); // All samples, so every missing piece gets noted at once.
+            for(std::size_t i=0;i<lat.size();++i)if(const auto v=dem.cachedHeight(lat[i]*180/pi,lon[i]*180/pi))out[i]=static_cast<float>(*v);else fine=false;}
+        const auto& g=*grid;auto at=[&](long x,long y){x=((x%w)+w)%w;y=std::clamp<long>(y,0,h-1);return static_cast<double>(g[static_cast<std::size_t>(4*(y*w+x))]);};
+        for(std::size_t i=0;i<lat.size();++i) {
+            if(!fine) {
+                const double x=(lon[i]/pi*.5+.5)*static_cast<double>(w)-.5,y=(lat[i]/pi+.5)*static_cast<double>(h)-.5,fx=x-std::floor(x),fy=y-std::floor(y);
+                const long x0=static_cast<long>(std::floor(x)),y0=static_cast<long>(std::floor(y));
+                out[i]=static_cast<float>((1-fy)*((1-fx)*at(x0,y0)+fx*at(x0+1,y0))+fy*((1-fx)*at(x0,y0+1)+fx*at(x0+1,y0+1)));
+            }
+            out[i]+=static_cast<float>(geoidGrid(lat[i],lon[i]));
+        }
+        return fine||level<9;
+    };
 }
 
 void geodeticEarthUV(Mesh& body) {
@@ -226,6 +262,8 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     geodeticEarthUV(*earth);
     earth->geometry()->setAttribute("uv2",FloatBufferAttribute::create(earth->geometry()->getAttribute<float>("uv")->array(),2));
     earthMaterial_->lightMap=surfaceFillTextures_[0];
+    earthTerrainMaterial_=MeshStandardMaterial::create(); // The globe's, without the bump map (the relief is geometry).
+    earthTerrainMaterial_->metalness=0.f;earthTerrainMaterial_->roughness=1.f;earthTerrainMaterial_->alphaTest=.5f;
     earth->scale.y = static_cast<float>(6356.752314245 / 6378.137);
     earth->castShadow = earth->receiveShadow = true;
     scene.add(earth);
@@ -432,7 +470,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
 }
 
 albert::PlanetVisuals::~PlanetVisuals() {
-    detailProgress.cancelled=true;
+    detailProgress.cancelled=true;demProgress_.cancelled=true;
     if(pendingImage_.valid()) pendingImage_.wait();
 }
 
@@ -459,6 +497,18 @@ void albert::PlanetVisuals::replaceAssets(DecodedAssets assets) {
         positions->needsUpdate();
     };
     displace(*earth,textures_[5]->image(),1.f);
+    earthTerrain_.reset();
+    albert::TerrainBody body;body.radius=6378137.;body.flattening=6356.752314245/6378.137;body.maxLevel=12;body.heights=earthHeights(textures_[5]->image());
+    body.generation=[]{return albert::providers::copernicusDem().generation();};
+    earthTerrain_=std::make_unique<albert::Terrain>(*earth,earthTerrainMaterial_,body);
+    if(!demFetcher_.joinable())demFetcher_=std::jthread([this](std::stop_token stop) { // Copernicus pieces the terrain noted, one at a time.
+        while(!stop.stop_requested())try {
+            if(!albert::providers::copernicusDem().fetchMissing(demProgress_))std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        } catch(const std::exception& e) {
+            if(demProgress_.cancelled)return;std::cerr<<"Relevo Copernicus: "<<e.what()<<std::endl;
+            for(int i=0;i<150&&!stop.stop_requested();++i)std::this_thread::sleep_for(std::chrono::milliseconds(200)); // 30 s before the next try.
+        }
+    });
     displace(*moon,moonHeightTexture_->image(),static_cast<float>(1737.4/6378.137));
     if (oceanTexture_) oceanTexture_->dispose();
     oceanTexture_ = texture(std::move(*assets.oceans), ColorSpace::NoColorSpace);
@@ -651,7 +701,7 @@ void albert::PlanetVisuals::updateImageDetail(const Vector3& camera, bool enable
     }
 }
 
-void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3& cameraPosition, const VisualSettings& settings, float seconds) {
+void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3& cameraPosition, const VisualSettings& settings, float seconds, Camera* camera) {
     cloudDetailBlend_=animateValue(cloudDetailBlend_,1.f,seconds);
     for(auto* mat:{cloudMaterial_.get(),nightMaterial_.get()}) mat->uniforms.at("detailBlend").setValue(cloudDetailBlend_);
     if(cloudDetailBlend_==1.f && previousCloudDetail_) {
@@ -693,6 +743,15 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     const auto moonMask=moonDetail_ && moonDetail_->visible ? surfaceMasks_[1] : opaqueMask_;
     if(earthMaterial_->alphaMap!=earthMask) {earthMaterial_->alphaMap=earthMask;earthMaterial_->needsUpdate();}
     if(moonMaterial_->alphaMap!=moonMask) {moonMaterial_->alphaMap=moonMask;moonMaterial_->needsUpdate();}
+    // Near the Earth the quadtree terrain draws the surface (the globe's material, without bump).
+    {auto& t=*earthTerrainMaterial_;const auto& e=*earthMaterial_;
+     if(t.map!=e.map||t.roughnessMap!=e.roughnessMap||t.lightMap!=e.lightMap||t.alphaMap!=e.alphaMap){t.map=e.map;t.roughnessMap=e.roughnessMap;t.lightMap=e.lightMap;t.alphaMap=e.alphaMap;t.needsUpdate();}
+     t.lightMapIntensity=e.lightMapIntensity;}
+    std::optional<Frustum> view; // The camera's frustum in the globe's frame.
+    if(camera){camera->updateMatrixWorld();Matrix4 m;m.multiplyMatrices(camera->projectionMatrix,camera->matrixWorldInverse);m.multiply(*earth->matrixWorld);view.emplace();view->setFromProjectionMatrix(m);}
+    const bool terrainCovers=earthTerrain_&&settings.terrain&&localCamera.length()<3.f&&earthTerrain_->update(localCamera,view?&*view:nullptr);
+    if(earthTerrain_&&!terrainCovers) earthTerrain_->hide();
+    earthMaterial_->visible=!terrainCovers;
     // Close-up city lights are a visual overlay above the regional terrain.
     // No other body can lie between this near-Earth camera and the surface.
     nightMaterial_->depthTest=!(earthDetail_ && earthDetail_->visible);
