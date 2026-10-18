@@ -1,4 +1,5 @@
 #include "providers/gfs.hpp"
+#include "providers/space_weather.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -69,5 +70,33 @@ int main(int argc,char** argv){try{
     require(live->source().find("NOAA GFS 0.25° 2026-10-17 12Z (+0/+1 h)")!=std::string::npos,"Source names the cycle");
     gfs.around(27.7,-82.4,now);require(downloads==2,"Cached hours reused");
     std::printf("provider: %d index probes, %d downloads\n",index,downloads);
+    // CelesTrak SW-Last5Years.csv (2026-10-18 00 UTC download), 2026-10-12 to 22: observed then predicted.
+    const std::string csv=
+        "DATE,BSRN,ND,KP1,KP2,KP3,KP4,KP5,KP6,KP7,KP8,KP_SUM,AP1,AP2,AP3,AP4,AP5,AP6,AP7,AP8,AP_AVG,CP,C9,ISN,F10.7_OBS,F10.7_ADJ,F10.7_DATA_TYPE,F10.7_OBS_CENTER81,F10.7_OBS_LAST81,F10.7_ADJ_CENTER81,F10.7_ADJ_LAST81\n"
+        "2026-10-12,2634,14,17,20,30,10,3,10,20,10,120,6,7,15,4,2,4,7,4,6,0.3,1,89,122.9,122.4,OBS,109.2,114.6,108.8,116.6\n"
+        "2026-10-13,2634,15,33,33,20,30,30,20,27,10,203,18,18,7,15,15,7,12,4,12,0.7,3,65,136.0,135.3,OBS,108.8,114.5,108.4,116.4\n"
+        "2026-10-14,2634,16,23,33,13,20,17,20,27,27,180,9,18,5,7,6,7,12,12,10,0.5,2,101,123.2,122.6,OBS,108.9,114.2,108.4,116.0\n"
+        "2026-10-15,2634,17,20,10,7,33,23,30,27,23,173,7,4,3,18,9,15,12,9,10,0.5,2,72,125.7,125.0,OBS,108.9,113.9,108.4,115.7\n"
+        "2026-10-16,2634,18,30,10,13,23,17,33,40,20,187,15,4,5,9,6,18,27,7,11,0.7,3,81,131.2,130.4,OBS,109.0,113.7,108.3,115.4\n"
+        "2026-10-17,2634,19,13,7,3,3,7,27,30,10,100,5,3,2,2,3,12,15,4,6,0.3,1,71,131.6,130.7,OBS,109.0,113.6,108.3,115.2\n"
+        "2026-10-18,2634,20,13,13,13,13,13,13,13,13,107,5,5,5,5,5,5,5,5,5,0.2,1,80,130.9,130.0,PRD,109.0,113.4,108.3,115.0\n"
+        "2026-10-19,2634,21,27,27,27,27,27,27,27,27,216,12,12,12,12,12,12,12,12,12,0.7,3,80,126.0,125.0,PRD,109.0,113.1,108.2,114.6\n"
+        "2026-10-20,2634,22,37,37,37,37,37,37,37,37,296,22,22,22,22,22,22,22,22,22,1.1,5,80,126.0,125.0,PRD,108.9,112.9,108.1,114.3\n"
+        "2026-10-21,2634,23,30,30,30,30,30,30,30,30,240,15,15,15,15,15,15,15,15,15,0.8,4,80,116.0,115.0,PRD,108.8,112.6,107.9,113.9\n"
+        "2026-10-22,2634,24,24,24,24,24,24,24,24,24,192,10,10,10,10,10,10,10,10,10,0.6,3,80,111.0,110.0,PRD,108.8,112.4,107.8,113.7\n";
+    const auto days=providers::parseSpaceWeather(csv);require(days.size()==11&&days.back().type=="PRD","Space-weather rows");
+    std::string note;const auto sw=providers::spaceWeatherAt(days,1792238400.,&note); // 2026-10-17 12 UTC.
+    require(sw&&sw->history,"Space weather at noon");
+    near(sw->f107,131.2,1e-9,"Previous-day F10.7");near(sw->f107a,109.0,1e-9,"81-day F10.7");near(sw->ap[0],6,1e-9,"Daily Ap");
+    near(sw->ap[1],3,1e-9,"Current 3-hour ap");near(sw->ap[2],2,1e-9,"ap 3 h before");near(sw->ap[3],2,1e-9,"ap 6 h before");near(sw->ap[4],3,1e-9,"ap 9 h before");
+    near(sw->ap[5],81./8,1e-9,"Mean ap 12-33 h before");near(sw->ap[6],85./8,1e-9,"Mean ap 36-57 h before");
+    require(!providers::spaceWeatherAt(days,1792238400.+30*86400.),"Outside the table");
+    const auto predicted=providers::spaceWeatherAt(days,1792238400.+3*86400.);require(predicted&&predicted->history&&predicted->ap[1]==22,"Predicted days carry flat 3-hour values");
+    // NRLMSISE-00 above the weather: the thermosphere instead of vacuum.
+    const auto upper=std::make_shared<const physics::Msis>(*sw,"NRLMSISE-00");const auto layered=w.above(upper);
+    const auto thermosphere=layered->at(static_cast<std::int64_t>(t),lat,lon,300e3);
+    std::printf("300 km: %.0f K, %.3g kg/m3 (%s)\n",thermosphere.temperature,thermosphere.density,layered->source().c_str());
+    require(thermosphere.density>5e-12&&thermosphere.density<1e-10&&thermosphere.temperature>700&&thermosphere.temperature<1300,"Thermosphere from NRLMSISE-00");
+    near(layered->at(static_cast<std::int64_t>(t),lat,lon,5000).temperature,w.at(static_cast<std::int64_t>(t),lat,lon,5000).temperature,1e-9,"Weather below the blend");
     std::cout<<"weather_test: ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

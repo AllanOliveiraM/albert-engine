@@ -57,6 +57,15 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - University of Wyoming, Department of Atmospheric Science: radiossondagem de Tampa
   (72210) de 2026-10-17 12 UTC, níveis padrão em `tests/weather_test.cpp`,
   https://weather.uwyo.edu.
+- NRLMSISE-00 (Picone, Hedin e Drob, NRL; obra do governo dos EUA): porte em C++ em
+  `src/physics/msis.cpp` e coeficientes em `src/physics/msis_data.inc`, a partir da classe
+  `NRLMSISE00` do Orekit, © CS GROUP, Apache License 2.0
+  (https://www.orekit.org, https://www.apache.org/licenses/LICENSE-2.0); alterações: só a
+  versão em `double`, estrutura condensada, interface própria. Licença e NOTICE em
+  `third_party/orekit/` e `licenses/Orekit` na distribuição.
+- CelesTrak (T. S. Kelso): índices de clima espacial `SW-Last5Years.csv`/`SW-All.csv`
+  baixados em uso (https://celestrak.org/SpaceData/), com dados de NOAA/SWPC, GFZ Potsdam e
+  NRCan; recorte de 2026-10-12 a 22 em `tests/weather_test.cpp`.
 - NASA GIBS: paleta pública de fração de nuvens MODIS, convertida para JSON,
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml.
 - Planetas e luas (créditos e limites por corpo em `assets/planetary-sources.json`,

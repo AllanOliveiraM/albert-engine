@@ -12,7 +12,7 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Referenciais | GCRF inercial; ITRF por IAU 2006/2000A (CIO) + ERA, matriz C2I a cada 60 s interpolada | movimento do polo ignorado (≤15 m); TT−UT1 fixo por voo |
 | Gravidade | EGM2008 tide-free em harmônicos esféricos (recursão de Cunningham), 20×20 por padrão, até 70×70; elipsoide WGS 84 | maré permanente não aplicada; graus acima de 70 omitidos |
 | Terceiros corpos | Sol (epv00) e Lua (moon98), aceleração de maré, 60 s interpolados | sem planetas; sem relatividade |
-| Atmosfera | NOAA GFS 0,25° ao vivo (41 níveis isobáricos até 0,01 hPa ≈ 80 km: altura geopotencial, temperatura, vento, umidade específica), interpolado no tempo, na horizontal e na vertical; transição de 8 km para a US Standard Atmosphere 1976 no topo e de 0,5° nas bordas do recorte de ±6°; sem GFS, só a de 1976 (até 86 km), co-rotativa | vácuo acima de 86 km até a alta atmosfera empírica; sem ventos fora do recorte |
+| Atmosfera | NOAA GFS 0,25° ao vivo (41 níveis isobáricos até 0,01 hPa ≈ 80 km: altura geopotencial, temperatura, vento, umidade específica), interpolado no tempo, na horizontal e na vertical; acima (transição de 8 km) e fora do recorte de ±6° (transição de 0,5°), NRLMSISE-00 até 1000 km com F10.7 e Ap da CelesTrak (observados ou previstos); sem índices, US Standard Atmosphere 1976 (vácuo acima de 86 km); co-rotativa | NRLMSIS 2.x excluído pela licença (uso acadêmico, sem modificação); sem ventos acima do GFS (HWM pendente) |
 | Vento | do GFS no veículo; a velocidade do ar desconta vento e rotação da Terra | rajadas e turbulência não modeladas |
 | Aerodinâmica | tabelas bilineares (Mach, ângulo); arrasto oposto ao ar relativo, sustentação no plano x-z, força lateral em y; amortecimento opcional | fora da tabela o valor é mantido |
 | Propulsão | `F = F_vac·throttle − p_a·A_e`; `ṁ = F_vac·throttle/v_e`; cardã em arfagem e guinada | sem transiente de ignição |
@@ -40,6 +40,8 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
   2026-10-17 12 UTC interpolada contra a radiossondagem de Tampa (72210, U. Wyoming) em 14
   níveis de 925 a 10 hPa: mediana de |ΔT| 0,38 K, máximo 2,4 K, vento RMS 3,0 m/s,
   pressão ≤0,4% (a análise assimila a sondagem; previsões terão erros maiores).
+- NRLMSISE-00: os 17 casos de referência da distribuição do NRL nos 7 algarismos publicados;
+  índices da CelesTrak (F10.7 do dia anterior, média de 81 dias, Ap diário e histórico de 3 h).
 - EGM2008 contra o gradiente do potencial somado com funções de Legendre normalizadas diretas
   (graus 20 e 70, <2e-7 m/s²) e alturas geoidais por Bruns: 28,9 m em Timbuktu (exemplo
   do GeographicLib, 28,7 m) e −105,1 m no mínimo do Oceano Índico (≈ −106 m).

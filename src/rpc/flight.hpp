@@ -8,9 +8,13 @@ namespace albert::rpc {
 // Lockstep flight API over physics::Flight; mirrors the vehicle into the scene.
 class FlightServices final:public ::albert::v1::FlightService::Service {
 public:
-    // Live air around a site (degrees) at an instant (Unix UTC); default: NOAA GFS.
-    using Weather=std::function<std::shared_ptr<const physics::AirModel>(double latitude,double longitude,double utc)>;
-    explicit FlightServices(core::Bridge& bridge,Weather weather={});
+    // Live air around a site (degrees) at an instant (Unix UTC), default NOAA GFS; upper or
+    // climatological air at an instant, default NRLMSISE-00 with CelesTrak indices (null: none).
+    struct AirSources {
+        std::function<std::shared_ptr<const physics::AirModel>(double latitude,double longitude,double utc)> weather;
+        std::function<std::shared_ptr<const physics::AirModel>(double utc)> upper;
+    };
+    explicit FlightServices(core::Bridge& bridge,AirSources sources={});
     ~FlightServices() override;
     grpc::Status CreateFlight(grpc::ServerContext*,const ::albert::v1::CreateFlightRequest*,::albert::v1::FlightSample*) override;
     grpc::Status Step(grpc::ServerContext*,const ::albert::v1::StepRequest*,::albert::v1::FlightSample*) override;

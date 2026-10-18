@@ -1,6 +1,7 @@
 #pragma once
 #include "physics/atmosphere.hpp"
 #include "physics/earth.hpp"
+#include <memory>
 #include <string>
 #include <vector>
 namespace albert::physics {
@@ -17,14 +18,17 @@ struct WeatherGrid {
 // Linear in time, bilinear horizontally, linear in geopotential height between levels
 // (pressure log-linear); geoid from EGM2008 and latitude-dependent normal gravity convert
 // ellipsoidal heights. Over the top 8 km of the grid, and within 0.5° of its edges, it
-// blends into the standard atmosphere, used alone above and outside.
+// blends into the upper model (default: standard atmosphere), used alone above and outside.
 class Weather final:public AirModel {
 public:
-    explicit Weather(WeatherGrid grid);
+    explicit Weather(WeatherGrid grid,std::shared_ptr<const AirModel> upper={});
     Air at(std::int64_t tt,double latitude,double longitude,double height)const override;
-    std::string source()const override{return grid_.source;}
-    const WeatherGrid& grid()const{return grid_;}
+    std::string source()const override{return upper_?grid_->source+" + "+upper_->source():grid_->source;}
+    const WeatherGrid& grid()const{return *grid_;}
+    // Same grid over another upper model (standard atmosphere when null).
+    std::shared_ptr<const Weather> above(std::shared_ptr<const AirModel> upper)const{return std::shared_ptr<const Weather>(new Weather(grid_,geoid_,std::move(upper)));}
 private:
-    WeatherGrid grid_;std::vector<double> geoid_;
+    Weather(std::shared_ptr<const WeatherGrid> g,std::shared_ptr<const std::vector<double>> n,std::shared_ptr<const AirModel> u):grid_(std::move(g)),geoid_(std::move(n)),upper_(std::move(u)){}
+    std::shared_ptr<const WeatherGrid> grid_;std::shared_ptr<const std::vector<double>> geoid_;std::shared_ptr<const AirModel> upper_;
 };
 }

@@ -7,18 +7,19 @@ namespace {
 constexpr double deg=3.14159265358979323846/180,dryGas=287.05,g0=9.80665,meanRadius=6371008.8;
 struct Column {double temperature,logPressure,east,north,humidity,top;};
 }
-Weather::Weather(WeatherGrid g):grid_(std::move(g)){
-    const std::size_t nodes=static_cast<std::size_t>(grid_.rows)*static_cast<std::size_t>(grid_.columns),field=nodes*grid_.pressure.size();
-    if(grid_.rows<2||grid_.columns<2||grid_.pressure.size()<2||grid_.times.empty()||!(grid_.step>0))throw std::invalid_argument("Incomplete weather grid");
-    for(std::size_t k=1;k<grid_.pressure.size();++k)if(!(grid_.pressure[k]<grid_.pressure[k-1]))throw std::invalid_argument("Weather levels must decrease in pressure");
-    for(std::size_t i=0;i<grid_.times.size();++i){const auto& t=grid_.times[i];
+Weather::Weather(WeatherGrid source,std::shared_ptr<const AirModel> upper):upper_(std::move(upper)){
+    const auto& g=source;const std::size_t nodes=static_cast<std::size_t>(g.rows)*static_cast<std::size_t>(g.columns),field=nodes*g.pressure.size();
+    if(g.rows<2||g.columns<2||g.pressure.size()<2||g.times.empty()||!(g.step>0))throw std::invalid_argument("Incomplete weather grid");
+    for(std::size_t k=1;k<g.pressure.size();++k)if(!(g.pressure[k]<g.pressure[k-1]))throw std::invalid_argument("Weather levels must decrease in pressure");
+    for(std::size_t i=0;i<g.times.size();++i){const auto& t=g.times[i];
         if(t.height.size()!=field||t.temperature.size()!=field||t.east.size()!=field||t.north.size()!=field||t.humidity.size()!=field)throw std::invalid_argument("Weather field size mismatch");
-        if(i&&!(t.valid>grid_.times[i-1].valid))throw std::invalid_argument("Weather times must increase");}
-    geoid_.resize(nodes);
-    for(int r=0;r<grid_.rows;++r)for(int c=0;c<grid_.columns;++c)geoid_[static_cast<std::size_t>(r*grid_.columns+c)]=geoidHeight((grid_.south+r*grid_.step)*deg,(grid_.west+c*grid_.step)*deg);
+        if(i&&!(t.valid>g.times[i-1].valid))throw std::invalid_argument("Weather times must increase");}
+    std::vector<double> geoid(nodes);
+    for(int r=0;r<g.rows;++r)for(int c=0;c<g.columns;++c)geoid[static_cast<std::size_t>(r*g.columns+c)]=geoidHeight((g.south+r*g.step)*deg,(g.west+c*g.step)*deg);
+    grid_=std::make_shared<const WeatherGrid>(std::move(source));geoid_=std::make_shared<const std::vector<double>>(std::move(geoid));
 }
 Air Weather::at(std::int64_t tt,double latitude,double longitude,double height)const{
-    const Air upper=standardAtmosphere(height);
+    const Air upper=upper_?upper_->at(tt,latitude,longitude,height):standardAtmosphere(height);const WeatherGrid& grid_=*this->grid_;
     const double x=std::remainder(longitude/deg-grid_.west,360.)/grid_.step,y=(latitude/deg-grid_.south)/grid_.step;
     const double edge=std::min({x,grid_.columns-1-x,y,grid_.rows-1-y})*grid_.step/.5;
     if(!(edge>0))return upper;
@@ -26,7 +27,7 @@ Air Weather::at(std::int64_t tt,double latitude,double longitude,double height)c
     const std::size_t nodes=static_cast<std::size_t>(grid_.rows*grid_.columns),levels=grid_.pressure.size();
     auto node=[&](int r,int c){return static_cast<std::size_t>(r*grid_.columns+c);};
     const double weights[4]{(1-fx)*(1-fy),fx*(1-fy),(1-fx)*fy,fx*fy};const std::size_t corners[4]{node(r0,c0),node(r0,c0+1),node(r0+1,c0),node(r0+1,c0+1)};
-    double n=0;for(int i=0;i<4;++i)n+=weights[i]*geoid_[corners[i]];
+    double n=0;for(int i=0;i<4;++i)n+=weights[i]*(*geoid_)[corners[i]];
     // Geometric height above the geoid to geopotential height (normal gravity, Somigliana).
     const double s2=std::sin(latitude)*std::sin(latitude),gamma=9.7803253359*(1+.00193185265241*s2)/std::sqrt(1-earth.e2()*s2);
     const double z=height-n,h=gamma*meanRadius*z/((meanRadius+z)*g0);

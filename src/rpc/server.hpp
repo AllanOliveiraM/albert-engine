@@ -7,8 +7,12 @@ namespace albert::catalog {class Manager;}
 namespace albert::rpc {
 class Server {
 public:
-    using Weather=std::function<std::shared_ptr<const physics::AirModel>(double latitude,double longitude,double utc)>; // Default: NOAA GFS.
-    Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog=nullptr,Weather weather={});
+    // Live weather and upper/climatological air for flights; defaults: NOAA GFS, NRLMSISE-00.
+    struct AirSources {
+        std::function<std::shared_ptr<const physics::AirModel>(double latitude,double longitude,double utc)> weather;
+        std::function<std::shared_ptr<const physics::AirModel>(double utc)> upper;
+    };
+    Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog=nullptr,AirSources air={});
     ~Server();
     unsigned port() const;
 private:

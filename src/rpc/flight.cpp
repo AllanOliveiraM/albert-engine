@@ -1,7 +1,9 @@
 #include "flight.hpp"
 #include "core/simulation.hpp"
 #include "physics/vehicles.hpp"
+#include "physics/weather.hpp"
 #include "providers/gfs.hpp"
+#include "providers/space_weather.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -22,10 +24,13 @@ core::Reply wait(core::Ticket t){
 grpc::Status failed(const core::Reply& r){return r.code==core::Code::Ok?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,r.message};}
 }
 struct FlightServices::Impl {
-    core::Bridge& bridge;Weather weather;std::mutex mutex;std::optional<ph::Flight> flight;std::string atmosphere;
+    core::Bridge& bridge;AirSources sources;std::mutex mutex;std::optional<ph::Flight> flight;std::string atmosphere;
     ph::Tt step=ph::second/1000,start=0;std::uint64_t tick=0;int shown=0;std::vector<api::FlightEvent> events;
     std::chrono::steady_clock::time_point published{};
-    Impl(core::Bridge& b,Weather w):bridge(b),weather(std::move(w)){if(!weather)weather=[](double lat,double lon,double utc){return std::shared_ptr<const physics::AirModel>(providers::gfs().around(lat,lon,utc));};}
+    Impl(core::Bridge& b,AirSources s):bridge(b),sources(std::move(s)){
+        if(!sources.weather)sources.weather=[](double lat,double lon,double utc){return std::shared_ptr<const physics::AirModel>(providers::gfs().around(lat,lon,utc));};
+        if(!sources.upper)sources.upper=[](double utc)->std::shared_ptr<const physics::AirModel>{try{return providers::spaceWeather().msis(utc);}catch(const std::exception&){return nullptr;}};
+    }
     double elapsed()const{return ph::secondsSinceJ2000(flight->state().time-start);}
     core::Sample scene()const{ // Cylinder axis (local y) along body x, centred on the stack.
         const auto& s=flight->state();const auto& st=flight->vehicle().stages[s.stage];
@@ -73,7 +78,7 @@ struct FlightServices::Impl {
         o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());
     }
 };
-FlightServices::FlightServices(core::Bridge& bridge,Weather weather):impl_(std::make_unique<Impl>(bridge,std::move(weather))){}
+FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(std::make_unique<Impl>(bridge,std::move(sources))){}
 FlightServices::~FlightServices()=default;
 grpc::Status FlightServices::CreateFlight(grpc::ServerContext*,const api::CreateFlightRequest* r,api::FlightSample* out){
     std::optional<ph::Flight> made;ph::Tt step=0,t=0;std::string atmosphere="U.S. Standard Atmosphere 1976";
@@ -98,10 +103,15 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext*,const api::Create
         std::shared_ptr<const physics::AirModel> air;
         if(r->weather()!=api::CreateFlightRequest::STANDARD_ATMOSPHERE){ // Weather only while Albert follows the real clock.
             const bool live=!shown||shown->simulation.live;const double now=shown?shown->clock.utcSeconds:std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+            air=impl_->sources.upper(utc); // NRLMSISE-00 over the weather, or alone.
+            std::string unavailable;
             if(r->weather()==api::CreateFlightRequest::LIVE_GFS||(live&&std::abs(utc-now)<=7200)){
-                try{air=impl_->weather(site.latitude_degrees(),site.longitude_degrees(),utc);atmosphere=air->source();}
-                catch(const std::exception& e){if(r->weather()==api::CreateFlightRequest::LIVE_GFS)return{grpc::StatusCode::UNAVAILABLE,std::string("Live weather unavailable: ")+e.what()};atmosphere+=std::string(" (live weather unavailable: ")+e.what()+")";}
+                try{auto weather=impl_->sources.weather(site.latitude_degrees(),site.longitude_degrees(),utc);
+                    if(const auto grid=std::dynamic_pointer_cast<const physics::Weather>(weather))weather=grid->above(air);
+                    air=std::move(weather);}
+                catch(const std::exception& e){if(r->weather()==api::CreateFlightRequest::LIVE_GFS)return{grpc::StatusCode::UNAVAILABLE,std::string("Live weather unavailable: ")+e.what()};unavailable=std::string(" (live weather unavailable: ")+e.what()+")";}
             }
+            atmosphere=(air?air->source():atmosphere)+unavailable;
         }
         ph::Environment env;env.air=air;env.planet.degree=static_cast<int>(degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(utc-946728000.));env.ground=site.height_meters();
         made.emplace(vehicle,env,ph::Flight::pad(env,vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r->heading_degrees()*deg,pitch*deg));

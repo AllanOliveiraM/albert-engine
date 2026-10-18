@@ -38,7 +38,8 @@ int main(){try{
         albert::physics::Air at(std::int64_t,double,double,double h)const override{auto a=albert::physics::standardAtmosphere(h);a.wind={0,10,0};return a;}
         std::string source()const override{return "test breeze";}
     };
-    albert::rpc::Server server(bridge,0,nullptr,[](double lat,double,double)->std::shared_ptr<const albert::physics::AirModel>{if(lat<0)throw std::runtime_error("offline");return std::make_shared<Breeze>();});
+    albert::rpc::Server server(bridge,0,nullptr,{[](double lat,double,double)->std::shared_ptr<const albert::physics::AirModel>{if(lat<0)throw std::runtime_error("offline");return std::make_shared<Breeze>();},
+        [](double)->std::shared_ptr<const albert::physics::AirModel>{return nullptr;}}); // No network in tests.
     auto channel=grpc::CreateChannel("127.0.0.1:"+std::to_string(server.port()),grpc::InsecureChannelCredentials());
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto scene=api::SceneService::NewStub(channel);auto camera=api::CameraService::NewStub(channel);api::Applied applied;

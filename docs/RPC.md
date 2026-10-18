@@ -260,9 +260,10 @@ de 86 km o Albert usa passos internos de até `coast_step_seconds` (padrão 1 s;
 então chamadas longas propagam órbitas rapidamente; os ticks continuam exatos. A gravidade usa o
 EGM2008 até `gravity_degree` (padrão 20; de 2 a 70). `weather` escolhe o ar: `WEATHER_AUTOMATIC` (padrão) usa o
 NOAA GFS ao vivo quando o Albert segue o relógio real e o instante está a até 2 h de agora
-(recorte de ±6° em torno do sítio, ~1,5 MB por voo, guardado por 48 h), senão a US Standard
-Atmosphere 1976; `LIVE_GFS` exige o GFS e falha com `UNAVAILABLE` sem ele;
-`STANDARD_ATMOSPHERE` força a de 1976. A amostra informa a fonte (`atmosphere`) e o vento
+(recorte de ±6° em torno do sítio, ~1,5 MB por voo, guardado por 48 h), senão o NRLMSISE-00
+(ou a US Standard Atmosphere 1976 sem índices solares); `LIVE_GFS` exige o GFS e falha com `UNAVAILABLE` sem ele;
+`STANDARD_ATMOSPHERE` força a de 1976. Fora desse caso, acima do GFS e sem ele, o ar vem do
+NRLMSISE-00 com os índices solares e geomagnéticos da CelesTrak para o instante do voo. A amostra informa a fonte (`atmosphere`) e o vento
 no veículo, e o painel **Voo** no canto inferior direito mostra estado, vento e fonte. Cada `Step` aplica os
 comandos — todos ou nenhum — e avança `ticks` passos (até 600 mil; uma chamada cancelada ou
 vencida não altera o voo); a resposta traz a

@@ -4,8 +4,9 @@
 (`src/providers/gfs.*`: GRIB2 5.0, ciclo pelo índice da AWS, recorte NOMADS ±6°, cache 48 h;
 `src/physics/weather.*`; vento no voo; painel **Voo**; `weather` na API), validado contra
 radiossonda de Tampa e casos NESC 7/8. NRLMSIS 2.x descartado (licença só acadêmica, proíbe
-modificação); próximo: NRLMSISE-00 portado do Orekit (Apache 2.0) + índices CelesTrak.
-Progresso geral (pesos em memória): ~33%.
+modificação); NRLMSISE-00 portado do Orekit (Apache 2.0, 17 casos de referência exatos) com
+índices CelesTrak, acima do GFS e fora do modo ao vivo. Pendentes: ventos acima do GFS (HWM,
+verificar licença), validação contra METAR/previsão (não só análise). Progresso geral ~34%.
 
 **Nova direção (17/10/2026, noite):** o Albert vira sandbox + motor físico realista e leve
 (foguete da superfície à órbita, software de voo externo, Terra/Lua/Marte, clima só ao vivo).
