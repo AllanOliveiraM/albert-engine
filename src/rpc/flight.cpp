@@ -9,6 +9,7 @@
 #include "providers/space_weather.hpp"
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <deque>
 #include <thread>
 #include <cstring>
@@ -62,16 +63,17 @@ struct FlightServices::Impl {
     api::FlightLog log;std::string record;
     // Real time: the pacing thread, its settings, delayed commands and samples.
     struct Realtime {double rate=1;std::uint32_t sensor=0,actuator=0,every=10;double timeout=0;int missing=0;
-        std::deque<std::pair<std::uint64_t,std::vector<Command>>> queue;std::deque<wire::Response> samples;
+        std::deque<std::pair<std::uint64_t,std::vector<Command>>> queue;std::deque<std::pair<wire::Response,bool>> samples;std::uint32_t carry=0; // Samples: sent flag; carry: events of dropped samples.
         std::chrono::steady_clock::time_point command;bool policyApplied=false;std::uint64_t late=0,policies=0;double worst=0;};
-    Realtime realtime;std::thread pacer;std::atomic_bool pacing{false};
+    Realtime realtime;std::thread pacer;std::atomic_bool pacing{false};std::mutex control,sleeper;std::condition_variable wake; // control: start/stop of the pacer.
     void status(api::RealtimeStatus* o){o->set_running(pacing);o->set_tick(tick);o->set_late_ticks(realtime.late);o->set_worst_lag_seconds(realtime.worst);o->set_policy_events(realtime.policies);}
-    void stopPacing(){pacing=false;if(pacer.joinable())pacer.join();} // Without the mutex held.
+    void stopPacing(){std::lock_guard c(control);stopLocked();} // Without the flight mutex held.
+    void stopLocked(){{std::lock_guard l(sleeper);pacing=false;}wake.notify_all();if(pacer.joinable())pacer.join();}
     void pace(){
         const auto begin=std::chrono::steady_clock::now();std::uint64_t n=0;
         while(pacing){
             const auto deadline=begin+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(static_cast<double>(++n)*ph::secondsSinceJ2000(step)/realtime.rate));
-            std::this_thread::sleep_until(deadline);
+            {std::unique_lock l(sleeper);if(wake.wait_until(l,deadline,[&]{return !pacing.load();}))break;}
             std::optional<wire::Response> out; // Pushed after unlocking: a slow client never holds the flight.
             {std::lock_guard lock(mutex);if(!flight||!pacing)break;
             auto& rt=realtime;const auto now=std::chrono::steady_clock::now();
@@ -84,15 +86,23 @@ struct FlightServices::Impl {
             }
             std::vector<Command> due;while(!rt.queue.empty()&&rt.queue.front().first<=tick){for(auto& c:rt.queue.front().second)due.push_back(c);rt.queue.pop_front();}
             if(!run(due,1,[]{return false;}).ok())(void)run({},1,[]{return false;}); // A refused command must not stop the clock.
-            wire::Response r;fill(r);r.reserved=rt.sensor;rt.samples.push_back(r);while(rt.samples.size()>rt.sensor+1)rt.samples.pop_front();
-            if(tick%rt.every==0&&rt.samples.size()==rt.sensor+1)out=rt.samples.front();}
+            wire::Response r;fill(r);r.reserved=rt.sensor;rt.samples.push_back({r,false});
+            while(rt.samples.size()>rt.sensor+1){if(!rt.samples.front().second)rt.carry|=rt.samples.front().first.events;rt.samples.pop_front();}
+            if(tick%rt.every==0&&rt.samples.size()==rt.sensor+1){auto& f=rt.samples.front();out=f.first;out->events|=rt.carry;rt.carry=0;f.second=true;}}
             if(out)(void)data->push(*out);
         }
     }
+    // Records: u32 repeat, u32 ticks, u32 count, then per command u32 kind and three doubles;
+    // identical consecutive steps only bump the repeat. Capped at 256 MiB (replay unavailable).
+    std::size_t lastRecord=std::string::npos;bool truncated=false;
     void note(const std::vector<Command>& commands,std::uint32_t ticks){
-        auto put=[&](const void* p,std::size_t n){record.append(static_cast<const char*>(p),n);};
+        if(truncated)return;
+        std::string r;auto put=[&](const void* p,std::size_t n){r.append(static_cast<const char*>(p),n);};
         const auto count=static_cast<std::uint32_t>(commands.size());put(&ticks,4);put(&count,4);
         for(const auto& c:commands){put(&c.kind,4);put(&c.a,8);put(&c.b,8);put(&c.c,8);}
+        if(lastRecord!=std::string::npos&&record.compare(lastRecord+4,std::string::npos,r)==0){std::uint32_t n;std::memcpy(&n,record.data()+lastRecord,4);if(n<0xffffffffu){++n;std::memcpy(record.data()+lastRecord,&n,4);return;}}
+        if(record.size()+r.size()+4>(256u<<20)){truncated=true;return;}
+        lastRecord=record.size();const std::uint32_t one=1;record.append(reinterpret_cast<const char*>(&one),4);record+=r;
     }
     double elapsed()const{return ph::secondsSinceJ2000(flight->state().time-start);}
     core::Sample scene()const{ // Cylinder axis (local y) along body x, centred on the stack.
@@ -130,6 +140,7 @@ struct FlightServices::Impl {
     grpc::Status run(const std::vector<Command>& commands,std::uint32_t ticks,const std::function<bool()>& cancelled){
         if(!flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
         if(ticks>600000)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 600000 ticks per step"};
+        if(commands.size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 commands per step"};
         ph::Flight next=*flight; // Commands apply atomically.
         try{for(const auto& c:commands)switch(c.kind){
             case wire::ignite:next.ignite();break;case wire::cutoff:next.cutoff();break;case wire::separate:next.separate();break;case wire::release:next.release();break;
@@ -217,7 +228,7 @@ grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,cons
         const ph::Sample x=flight->sample();const double dt=p.seconds;
         reading=imu->measure(dt,x.specificForce,flight->state().rate,x.specificForce*dt,flight->state().rate*dt,x.air.pressure);
     }
-    log=api::FlightLog{};record.clear();log.set_engine("Albert Engine "+std::string(ALBERT_VERSION));*log.mutable_request()=r;log.mutable_request()->set_utc_unix_seconds(p.utc);log.set_atmosphere(atmosphere);
+    log=api::FlightLog{};record.clear();lastRecord=std::string::npos;truncated=false;log.set_engine("Albert Engine "+std::string(ALBERT_VERSION));*log.mutable_request()=r;log.mutable_request()->set_utc_unix_seconds(p.utc);log.set_atmosphere(atmosphere);
     for(auto& b:grib)log.add_gfs(std::move(b));
     for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}
     shown=0;(void)wait(bridge.submit(core::Remove{objectId}));
@@ -249,8 +260,9 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api
 grpc::Status FlightServices::ExportFlight(grpc::ServerContext*,const api::Empty*,grpc::ServerWriter<api::FlightLogChunk>* writer){
     std::string bytes;
     {std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+        if(impl_->truncated)return{grpc::StatusCode::FAILED_PRECONDITION,"Flight log exceeded 256 MiB; replay unavailable"};
         api::FlightLog log=impl_->log;log.set_steps(impl_->record);log.set_state_hash(impl_->flight->hash());log.set_tick(impl_->tick);bytes=log.SerializeAsString();}
-    for(std::size_t at=0;at<bytes.size();at+=1u<<20){api::FlightLogChunk c;c.set_data(bytes.substr(at,1u<<20));if(!writer->Write(c))return{grpc::StatusCode::CANCELLED,"Client stopped reading"};}
+    for(std::size_t at=0;at<bytes.size();at+=1u<<19){api::FlightLogChunk c;c.set_data(bytes.substr(at,1u<<19));if(!writer->Write(c))return{grpc::StatusCode::CANCELLED,"Client stopped reading"};} // 512 KiB: below the 1 MiB message limit.
     return grpc::Status::OK;
 }
 grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::ServerReader<api::FlightLogChunk>* reader,api::FlightSample* out){
@@ -274,11 +286,11 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
     const std::string& steps=log.steps();
     for(std::size_t at=0;at<steps.size();){
         auto get=[&](void* d,std::size_t n){if(at+n>steps.size())throw std::invalid_argument("Truncated flight log");std::memcpy(d,steps.data()+at,n);at+=n;};
-        std::uint32_t ticks=0,count=0;std::vector<Impl::Command> commands;
-        try{get(&ticks,4);get(&count,4);if(count>64)throw std::invalid_argument("Malformed flight log step");commands.resize(count);for(auto& k:commands){get(&k.kind,4);get(&k.a,8);get(&k.b,8);get(&k.c,8);}}
+        std::uint32_t repeat=0,ticks=0,count=0;std::vector<Impl::Command> commands;
+        try{get(&repeat,4);get(&ticks,4);get(&count,4);if(count>64||repeat==0)throw std::invalid_argument("Malformed flight log step");commands.resize(count);for(auto& k:commands){get(&k.kind,4);get(&k.a,8);get(&k.b,8);get(&k.c,8);}}
         catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
-        std::lock_guard lock(impl_->mutex);
-        if(auto s=impl_->run(commands,ticks,[&]{return context->IsCancelled();});!s.ok())return s;
+        for(std::uint32_t i=0;i<repeat;++i){std::lock_guard lock(impl_->mutex);
+            if(auto s=impl_->run(commands,ticks,[&]{return context->IsCancelled();});!s.ok())return s;}
     }
     std::lock_guard lock(impl_->mutex);impl_->fill(out);
     if(out->state_hash()!=log.state_hash()||out->tick()!=log.tick())return{grpc::StatusCode::DATA_LOSS,"Replay diverged from the recorded state"};
@@ -312,7 +324,7 @@ grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::Empty*,ap
 grpc::Status FlightServices::StartRealtime(grpc::ServerContext*,const api::RealtimeRequest* r,api::RealtimeStatus* out){
     const double rate=r->rate()==0?1.:r->rate();
     if(!(rate>0&&rate<=100)||!(r->command_timeout_seconds()>=0)||r->sensor_delay_ticks()>100000||r->actuator_delay_ticks()>100000)return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid real-time settings"};
-    impl_->stopPacing();std::lock_guard lock(impl_->mutex);
+    std::lock_guard control(impl_->control);impl_->stopLocked();std::lock_guard lock(impl_->mutex);
     if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     auto& rt=impl_->realtime;rt=Impl::Realtime{};rt.rate=rate;rt.sensor=r->sensor_delay_ticks();rt.actuator=r->actuator_delay_ticks();rt.every=r->sample_every_ticks()?r->sample_every_ticks():10;
     rt.timeout=r->command_timeout_seconds();rt.missing=r->missing();rt.command=std::chrono::steady_clock::now();

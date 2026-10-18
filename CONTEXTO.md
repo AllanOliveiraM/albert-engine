@@ -1,5 +1,11 @@
 # Albert Engine — contexto para continuidade
 
+**Revisão do Codex da fase 3 (4 P1, 4 P2) corrigida com regressões:** parada do tempo real
+interrompível (condition variable, envio com tempo-limite de 200 ms), início/parada serializados,
+SIGPIPE suprimido, tabela de clima espacial limitada a 200 mil dias, pedaços de 512 KiB, no máximo
+64 comandos por passo, eventos acumulados entre amostras, log com repetição compactada e teto de
+256 MiB.
+
 **Fase 3 entregue (18/10/2026):** modelo de IMU (IEEE 952, Allan ±5%) e incrementos Δv/Δθ no RK4,
 expostos na API (`imu`). Revisão do Codex da fase 2 (6 P2) corrigida com regressões: limite de
 grade GRIB2, coast só sem torque, cache GFS antes da rede e só se completo, índices solares

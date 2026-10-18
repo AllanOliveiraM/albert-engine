@@ -16,6 +16,7 @@ void startSockets(){static const bool started=[]{WSADATA d;if(WSAStartup(MAKEWOR
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 using Socket=int;constexpr Socket invalidSocket=-1;
 void closeSocket(Socket s){::close(s);}
@@ -23,14 +24,30 @@ void startSockets(){}
 #endif
 namespace albert::wire {
 namespace {
+#ifdef MSG_NOSIGNAL
+constexpr int noSignal=MSG_NOSIGNAL; // A vanished client must not raise SIGPIPE.
+#else
+constexpr int noSignal=0;
+#endif
 bool exact(Socket s,char* data,std::size_t n,bool send){
     for(std::size_t done=0;done<n;){
-        const auto r=send ? ::send(s,data+done,static_cast<int>(n-done),0) : ::recv(s,data+done,static_cast<int>(n-done),0);
+        const auto r=send ? ::send(s,data+done,static_cast<int>(n-done),noSignal) : ::recv(s,data+done,static_cast<int>(n-done),0);
         if(r<=0)return false;done+=static_cast<std::size_t>(r);
     }
     return true;
 }
-void noDelay(Socket s){int one=1;setsockopt(s,IPPROTO_TCP,TCP_NODELAY,reinterpret_cast<const char*>(&one),sizeof one);}
+void noDelay(Socket s){int one=1;setsockopt(s,IPPROTO_TCP,TCP_NODELAY,reinterpret_cast<const char*>(&one),sizeof one);
+#ifdef SO_NOSIGPIPE
+    setsockopt(s,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof one);
+#endif
+}
+void sendTimeout(Socket s){ // A client that stops reading delays pushes by at most 200 ms each.
+#ifdef _WIN32
+    const DWORD ms=200;setsockopt(s,SOL_SOCKET,SO_SNDTIMEO,reinterpret_cast<const char*>(&ms),sizeof ms);
+#else
+    const timeval t{0,200000};setsockopt(s,SOL_SOCKET,SO_SNDTIMEO,&t,sizeof t);
+#endif
+}
 sockaddr_in loopback(unsigned port){sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(static_cast<unsigned short>(port));a.sin_addr.s_addr=htonl(INADDR_LOOPBACK);return a;}
 }
 struct Server::Impl {
@@ -38,7 +55,7 @@ struct Server::Impl {
     void serve(){
         while(!stopping){
             const Socket c=::accept(listener,nullptr,nullptr);if(c==invalidSocket){if(stopping)return;continue;}
-            noDelay(c);client=c;Request q;Response r;
+            noDelay(c);sendTimeout(c);client=c;Request q;Response r;
             while(!stopping&&exact(c,reinterpret_cast<char*>(&q),sizeof q,false)){
                 if(std::memcmp(q.magic,"ALBQ",4)!=0)break; // Unknown framing: drop the client.
                 if(handler(q,r)){std::lock_guard lock(sending);if(!exact(c,reinterpret_cast<char*>(&r),sizeof r,true))break;}

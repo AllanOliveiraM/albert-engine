@@ -225,7 +225,8 @@ MsisOutput nrlmsise00(int doy,double sec,double alt,double lat,double lon,double
 }
 SpaceWeatherTable::SpaceWeatherTable(const std::vector<SpaceWeatherDay>& days){
     if(days.empty())return;
-    double lo=days[0].day,hi=lo;for(const auto& d:days){lo=std::min(lo,d.day);hi=std::max(hi,d.day);}
+    double lo=days[0].day,hi=lo;for(const auto& d:days){if(!std::isfinite(d.day))throw std::invalid_argument("Invalid space-weather day");lo=std::min(lo,d.day);hi=std::max(hi,d.day);}
+    if(hi-lo>200000)throw std::invalid_argument("Space-weather table spans more than 200000 days");
     first_=lo;const auto n=static_cast<std::size_t>(hi-lo)+1;days_.resize(n);present_.assign(n,false);
     for(const auto& d:days){const auto i=static_cast<std::size_t>(d.day-lo);days_[i]=d;present_[i]=true;}
 }

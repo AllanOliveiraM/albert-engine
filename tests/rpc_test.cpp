@@ -177,6 +177,29 @@ int main(int argc,char** argv){try{
             api::FlightSample replayed;{grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&replayed);for(const auto& k:chunks)writer->Write(k);writer->WritesDone();
                 require(writer->Finish().ok()&&replayed.state_hash()==s.state_hash(),"A real-time flight replays exactly");}
         }
+        { // Review regressions: concurrent starts, prompt stop at a slow rate, events between
+          // samples, abrupt disconnect, command limit, compact logs, forged space-weather days.
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,create,&s).ok(),"Regression flight");}
+            {api::RealtimeRequest slow;slow.set_rate(.001);std::vector<std::thread> starts;
+                for(int i=0;i<4;++i)starts.emplace_back([&]{grpc::ClientContext c;api::RealtimeStatus st;(void)flight->StartRealtime(&c,slow,&st);});for(auto& t:starts)t.join();
+                const auto t0=std::chrono::steady_clock::now();grpc::ClientContext c;api::RealtimeStatus st;require(flight->StopRealtime(&c,{},&st).ok()&&!st.running(),"Stop after concurrent starts");
+                require(std::chrono::steady_clock::now()-t0<std::chrono::milliseconds(500),"Stop waits for a slow tick");}
+            {albert::wire::Connection link(s.data_port());api::RealtimeRequest rq;rq.set_rate(2);rq.set_sample_every_ticks(10);
+                {grpc::ClientContext c;api::RealtimeStatus st;require(flight->StartRealtime(&c,rq,&st).ok(),"Start for events");}
+                albert::wire::Request ignite;ignite.commands=albert::wire::ignite;link.send(ignite);std::uint32_t seen=0;
+                for(int i=0;i<200&&!(seen&albert::wire::liftoff);++i)seen|=link.receive().events;
+                require(seen&albert::wire::liftoff,"Liftoff reaches the client between samples");
+            } // The client disconnects while samples are pushed.
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            {grpc::ClientContext c;api::RealtimeStatus st;require(flight->StopRealtime(&c,{},&st).ok(),"Stop after a disconnect");}
+            {grpc::ClientContext c;api::StepRequest q;q.set_ticks(1);for(int i=0;i<65;++i)q.add_commands()->set_throttle(1);require(flight->Step(&c,q,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"65 commands accepted");}
+            {albert::wire::Connection wire(s.data_port());albert::wire::Request q;for(int i=0;i<20000;++i)wire.exchange(q);}
+            std::size_t largest=0,total=0;{grpc::ClientContext c;auto reader=flight->ExportFlight(&c,{});api::FlightLogChunk k;while(reader->Read(&k)){largest=std::max(largest,k.data().size());total+=k.data().size();}require(reader->Finish().ok(),"Export");}
+            std::printf("log after 20000 identical ticks: %zu bytes\n",total);require(largest<=(1u<<19)&&total<4096,"Compact log in small chunks");
+            api::FlightLog forged;*forged.mutable_request()=create;forged.mutable_request()->set_utc_unix_seconds(1792238400.);forged.add_space_weather()->set_day(0);forged.add_space_weather()->set_day(1e8);forged.set_atmosphere("x");
+            api::FlightLogChunk k;k.set_data(forged.SerializeAsString());api::FlightSample out;grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&out);writer->Write(k);writer->WritesDone();
+            require(writer->Finish().error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Forged space-weather span accepted");
+        }
         { // Replay: export, recreate without network, same hash; air data travels inside the log.
             auto exported=[&]{grpc::ClientContext c;auto reader=flight->ExportFlight(&c,{});api::FlightLogChunk k;std::vector<api::FlightLogChunk> v;while(reader->Read(&k))v.push_back(k);require(reader->Finish().ok(),"ExportFlight");return v;};
             auto replay=[&](const std::vector<api::FlightLogChunk>& v,api::FlightSample& out){grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&out);for(const auto& k:v)writer->Write(k);writer->WritesDone();return writer->Finish();};
