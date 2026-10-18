@@ -134,6 +134,9 @@ jobs:
           key: ${{ steps.ccache.outputs.cache-primary-key }}
       - name: Tests
         run: ctest --preset ${{ matrix.preset }}
+      - name: Report test failures
+        if: failure()
+        run: python scripts/ci-test-failures.py build/${{ matrix.preset }}
       - name: HTTP errors, retry and cancellation (Linux)
         if: runner.os == 'Linux'
         run: python3 tests/http_fixture.py build/linux/tests/download_test
