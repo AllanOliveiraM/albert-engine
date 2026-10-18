@@ -89,6 +89,8 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     const Stage& st=vehicle_.stages[s.stage];const Mass ms=mass(st,s.propellant);
     const Orientation o=env_.rotation.at(s.time);const V3 rf=o.fixed*s.position;const M3 back=transpose(o.fixed);
     V3 g=back*gravitation(env_.planet,rf);if(env_.sunMoon)g+=tidal(s);
+    if(env_.relativity){constexpr double c2=299792458.*299792458.;const double r=norm(s.position),gm=env_.planet.gm;
+        g+=(s.position*(4*gm/r-dot(s.velocity,s.velocity))+s.velocity*(4*dot(s.position,s.velocity)))*(gm/(c2*r*r*r));}
     const M3 b=matrix(s.attitude),bt=transpose(b);
     const Geodetic geo=geodetic(env_.planet,rf);const M3 ned=nedFromFixed(geo.latitude,geo.longitude);
     const Air atm=!env_.atmosphere?Air{}:env_.air?env_.air->at(s.time,geo.latitude,geo.longitude,geo.height):climatology(env_.center,geo.height);

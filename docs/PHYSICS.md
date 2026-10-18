@@ -11,7 +11,7 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Tempo | TT em nanossegundos inteiros desde J2000; UTC por `eraDat` | antes de 1960 TAI−UTC = 0 |
 | Referenciais | GCRF inercial; ITRF por IAU 2006/2000A (CIO) + ERA, matriz C2I a cada 60 s interpolada | movimento do polo ignorado (≤15 m); TT−UT1 fixo por voo |
 | Gravidade | EGM2008 tide-free em harmônicos esféricos (recursão de Cunningham), 20×20 por padrão, até 70×70; elipsoide WGS 84 | maré permanente não aplicada; graus acima de 70 omitidos |
-| Terceiros corpos | Sol (epv00) e Lua (moon98), aceleração de maré, 60 s interpolados | sem planetas; sem relatividade |
+| Terceiros corpos | Sol (epv00) e Lua (moon98), aceleração de maré, 60 s interpolados; termo relativístico de Schwarzschild do corpo central (IERS 2010, 10.12) | sem planetas; sem Lense-Thirring nem de Sitter |
 | Atmosfera | NOAA GFS 0,25° ao vivo (41 níveis isobáricos até 0,01 hPa ≈ 80 km: altura geopotencial, temperatura, vento, umidade específica), interpolado no tempo, na horizontal e na vertical; acima (transição de 8 km) e fora do recorte de ±6° (transição de 0,5°), NRLMSISE-00 até 1000 km com F10.7 e Ap da CelesTrak (observados ou previstos); sem índices, US Standard Atmosphere 1976 (vácuo acima de 86 km); co-rotativa | NRLMSIS 2.x excluído pela licença (uso acadêmico, sem modificação); sem ventos acima do GFS (HWM pendente) |
 | Vento | do GFS no veículo; a velocidade do ar desconta vento e rotação da Terra | rajadas e turbulência não modeladas |
 | Aerodinâmica | tabelas bilineares (Mach, ângulo); arrasto oposto ao ar relativo, sustentação no plano x-z, força lateral em y; amortecimento opcional | fora da tabela o valor é mantido |
@@ -111,6 +111,8 @@ propagação de 6 h com passos de 1 s, sem arrasto nem radiação solar):
   ao longo da trajetória e em degraus a cada volta. A pressão de radiação solar com sombra
   (Cr·A/m de 0,02 a 0,06 m²/kg) muda o resultado em menos de 1 m; o degrau por volta é arrasto
   no periapsis (~255 km), na termosfera que o modelo não tem acima de 150 km.
+- Relatividade: avanço do periapsis de 6πGM/(c²a(1−e²)) por volta (40 voltas a 8000 km, e = 0,2:
+  4,3541e-7 rad, igual à teoria em 5 algarismos).
 - Aquecimento: fórmula de Sutton-Graves exata na amostra (77,7 W/cm² a 60 km e 7 km/s com raio de
   1,83 m), carga térmica de 1 s a 5%, nula no pad e no vácuo.
 - Pernas de pouso (`genericLander` na Lua): repouso com a deflexão estática m g/4k (6,84 mm,

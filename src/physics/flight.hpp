@@ -50,6 +50,7 @@ struct Environment {
     Rotation rotation=Rotation::iau(69.184);
     Center center=Center::earth;
     bool atmosphere=true,sunMoon=true; // sunMoon: third bodies of the centre (see thirdBodies).
+    bool relativity=true;             // Schwarzschild term of the central body (IERS 2010, 10.12).
     std::shared_ptr<const Gravity> field; // Owns planet.field.
     std::shared_ptr<const AirModel> air; // Replaces the standard atmosphere when set.
     double ground=-std::numeric_limits<double>::infinity(); // Ellipsoidal height of the surface (m).

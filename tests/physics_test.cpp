@@ -23,7 +23,7 @@ void near(double a,double b,double tol,const char* m){if(!(std::abs(a-b)<=tol)){
 Environment nesc(bool round,bool rotating,bool drag){
     Environment e;
     e.planet=round?Planet{3.986004418e14,6371007.1809,0,0,6371007.1809,{},0}:Planet{3.986004418e14,6378137.,1/298.257223563,7.292115e-5,6378137.,{0,0,1.08262982e-3},2};
-    e.rotation=Rotation::uniform(rotating?7.292115e-5:0);e.atmosphere=drag;e.sunMoon=false;return e;
+    e.rotation=Rotation::uniform(rotating?7.292115e-5:0);e.atmosphere=drag;e.sunMoon=false;e.relativity=false;return e;
 }
 // Case 17: first stage ignites at release, coasts 96.79 s after depletion, then stages.
 Flight rocket(Tt step,double until,std::vector<State>* trace=nullptr,double every=25){
@@ -138,7 +138,7 @@ int main(){try{
     }
     // Two-body orbit: ten revolutions against Kepler's equation; energy.
     {
-        Environment e;e.planet={earth.gm,6378137.,0,0,6378137.,{},0};e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;
+        Environment e;e.planet={earth.gm,6378137.,0,0,6378137.,{},0};e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;e.relativity=false;
         const double a=7e6,ecc=.01,n=std::sqrt(e.planet.gm/(a*a*a)),period=2*pi/n;
         State s;s.position={a*(1-ecc),0,0};s.velocity={0,std::sqrt(e.planet.gm/a*(1+ecc)/(1-ecc))*.8,std::sqrt(e.planet.gm/a*(1+ecc)/(1-ecc))*.6};
         Flight f(nescSphere(),e,s);const Tt step=second;const Tt end=static_cast<Tt>(std::llround(10*period*1e9));
@@ -290,6 +290,16 @@ int main(){try{
         const double expected=1361./299792458.*std::pow(149597870700./norm(d),2)*1.5*10/x.mass;
         near(norm(x.specificForce)/expected,1,1e-9,"Radiation pressure magnitude");
         near(dot(matrix(f.state().attitude)*x.specificForce,d)/(norm(x.specificForce)*norm(d)),-1,1e-12,"Radiation pressure points away from the Sun");
+    }
+    // Relativity: the Schwarzschild term advances the periapsis by 6π GM/(c² a (1−e²)) per orbit
+    // (difference of the same integration with and without it, 40 orbits at a = 8000 km, e = 0.2).
+    {
+        Environment e;e.planet={earth.gm,6378137.,0,0,6378137.,{},0};e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;
+        const double a=8e6,ecc=.2,period=2*pi*std::sqrt(a*a*a/e.planet.gm);State s;s.position={a*(1-ecc),0,0};s.velocity={0,std::sqrt(e.planet.gm/a*(1+ecc)/(1-ecc)),0};
+        auto periapsis=[&](bool on){Environment x=e;x.relativity=on;Flight f(nescSphere(),x,s);f.steps(second);f.advance(static_cast<Tt>(std::llround(40*period*1e9)));
+            const V3 r=f.state().position,v=f.state().velocity,ev=cross(v,cross(r,v))/x.planet.gm-r/norm(r);return std::atan2(ev.y,ev.x);};
+        const double shift=periapsis(true)-periapsis(false),expected=40*6*pi*e.planet.gm/(299792458.*299792458.*a*(1-ecc*ecc));
+        std::printf("relativity: periapsis advance %.4e rad in 40 orbits (theory %.4e)\n",shift,expected);near(shift/expected,1,.01,"Schwarzschild precession");
     }
     // Aerodynamic heating: Sutton-Graves at 60 km and 7 km/s (≈ k √(ρ/Rn) v³), integrated into the
     // heat load; none on the pad and none in vacuum.
