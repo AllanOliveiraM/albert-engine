@@ -1,5 +1,23 @@
 # Albert Engine — contexto para continuidade
 
+**Fase 5 (Lua e Marte) — marco entregue em 18/10/2026, revisão do Codex em andamento:**
+gravidade por recursão de Cunningham normalizada (`src/physics/gravity.*`, qualquer grau);
+GRAIL GRGM1200A (≤600) e MRO GMM-3 (≤120) lidos do PDS por faixa até o grau e guardados
+(`src/providers/gravity_models.*`); rotação IAU de `pck00011` com ω analítico (Lua no referencial
+médio da Terra, campo nos eixos principais DE440 por `Planet::fieldFrame`; Marte IAU 2015 contra
+CSPICE <2e-9); terceiros corpos por centro (`thirdBodies`, Marte por `plan94`); `Environment
+environment(Center, campo, grau)`; atmosfera marciana hidrostática (Viking 1/2: 23%/51% de erro
+médio — o critério de 20% pede Mars-GRAM ou MCD, licença a cargo do Allan); pressão de radiação
+solar com sombra cônica (`Vehicle::sunArea`); relevo LOLA/MOLA por faixa de bytes
+(`PlanetaryRelief`). `FlightService`: `body` (EARTH/MOON/MARS), grau padrão 100 fora da Terra,
+tabela do campo no log de replay, veículo desenhado sobre a Lua/Marte da cena (Horizons + ERFA),
+`terrain_height` em todos os corpos. Validação contra Horizons (trajetórias reconstruídas): LRO
+35 m em 24 h (grau 150; critério 100 m/dia ✓); MRO 458 m em 24 h — degrau por volta = arrasto no
+periapsis (~255 km), termosfera ausente acima de 150 km; SRP não explica. Câmera mantida acima do
+solo sob um veículo focado. Pendências visuais (fase 4): terreno regional e iluminação rasante
+perto do veículo na Lua/Marte (o sítio do Apollo 11 fica 1,9 km abaixo da esfera lisa desenhada).
+Progresso geral ~62%.
+
 **Fase 4 iniciada:** relevo Copernicus DEM 30 m (`src/providers/terrain.*`: COG por faixa de
 bytes, DEFLATE + preditor 3, cache por bloco; Everest 8.738 m no tile real) e imagem Landsat WELD
 2000 (NASA GIBS, ~31 m) no detalhe regional da Terra para regiões ≤2° ou ao redor de um objeto
