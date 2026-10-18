@@ -266,7 +266,14 @@ variável) e mostra o veículo na cena:
 ./build/linux/src/rpc/albert_flight_client
 ```
 
-O veículo genérico usa números públicos aproximados; não representa um foguete real.
+`albert_landing_client` faz o mesmo na Lua: o módulo de pouso genérico sai das pernas na Base da
+Tranquilidade (altura do LOLA), sobe a 150 m, paira e pousa a menos de 1 m/s:
+
+```sh
+./build/linux/src/rpc/albert_landing_client
+```
+
+Os veículos genéricos usam números públicos aproximados; não representam veículos reais.
 
 Essa base permite construir integradores de simulação e ferramentas educativas.
 O primeiro catálogo interno já reutiliza o Horizons. O suporte inicial a GLB estático também está disponível. Pontos e linhas geográficas também podem ser adicionados por gRPC.

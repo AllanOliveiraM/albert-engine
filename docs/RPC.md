@@ -355,6 +355,17 @@ depois propaga uma volta inteira em nove chamadas (~0,1 s de cálculo).
 ./build/linux/src/rpc/albert_flight_client --fast     # o mais rápido possível
 ```
 
+O exemplo [landing_client.cpp](../examples/landing_client.cpp) usa o `GENERIC_LANDER` na Lua:
+sítio do Apollo 11 com `terrain_height` (LOLA), liberação e ignição, subida a 150 m freando a
+~1 m/s², 10 s pairando e descida que desacelera até 1 m/s; o evento `TOUCHDOWN` corta o motor
+(pouso a ~0,8 m/s com ~7,7 t de propelante). A tela ainda desenha a Lua lisa, então o sítio, 1,9 km
+abaixo da esfera, fica escondido até o relevo regional da fase 4.
+
+```sh
+./build/linux/src/rpc/albert_landing_client          # tempo real
+./build/linux/src/rpc/albert_landing_client --fast   # o mais rápido possível
+```
+
 ## Coordenadas e tempo
 
 - Posições em metros e velocidades em m/s, no **ICRF com origem no centro da Terra**.
