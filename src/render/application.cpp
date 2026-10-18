@@ -2348,6 +2348,19 @@ int albert::runRenderer(int argc, char** argv) {
                 camera->position.copy(controls.target).add(offset.normalize().multiplyScalar(zoomDisplayed));
                 camera->lookAt(controls.target);
             }
+            // An external target near a solid surface: keep the eye above the ground under it (the
+            // orbit offset can point below a pad) and above the drawn surface.
+            if(!transition.active&&focus.front()!='@'&&objects.nodes().contains(focus)&&!registry.get(focus).builtin){
+                const float base=static_cast<float>(registry.get(focus).radiusMeters/albert::core::earthRadiusMeters),margin=static_cast<float>(10./albert::core::earthRadiusMeters);
+                auto keepAbove=[&](Object3D& body,float radius){
+                    body.updateMatrixWorld();Vector3 eye=camera->position,aim=controls.target;body.worldToLocal(eye);body.worldToLocal(aim);
+                    const float floor=std::max(radius,aim.length()-base)+margin;
+                    if(aim.length()>radius*1.05f||eye.length()>=floor)return;
+                    eye.multiplyScalar(floor/std::max(eye.length(),1e-12f));body.localToWorld(eye);camera->position.copy(eye);camera->lookAt(controls.target);
+                };
+                keepAbove(*earth,1.f);keepAbove(*moon,static_cast<float>(1737.4/6378.137));
+                for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id))keepAbove(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters));
+            }
 
             stars->position.copy(camera->position);
             albert::setStarEpoch(*stars, tdb); // Proper motion for the simulated date.
