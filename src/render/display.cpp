@@ -10,7 +10,7 @@
 #include <imgui_impl_wgpu.h>
 using namespace threepp;
 struct albert::Display::Impl {
-    Backend backend;std::function<void()> interface;
+    Backend backend;std::function<void()> draw;
     // OpenGL.
     std::unique_ptr<Canvas> canvas;std::unique_ptr<GLRenderer> renderer;std::unique_ptr<ImguiFunctionalContext> imgui;
     // WebGPU.
@@ -24,15 +24,15 @@ struct albert::Display::Impl {
         wgpuRenderPassEncoderEnd(p);wgpuRenderPassEncoderRelease(p);drawnTarget=true;
     }
 };
-albert::Display::Display(Backend backend,const std::string& title,WindowSize size,const std::filesystem::path& icon,std::function<void()> interface):impl_(std::make_unique<Impl>()){
-    auto& d=*impl_;d.backend=backend;d.interface=std::move(interface);
+albert::Display::Display(Backend backend,const std::string& title,WindowSize size,const std::filesystem::path& icon,std::function<void()> draw):impl_(std::make_unique<Impl>()){
+    auto& d=*impl_;d.backend=backend;d.draw=std::move(draw);
     if(backend==Backend::opengl){
         Canvas::Parameters p;p.title(title).antialiasing(4).size(size).favicon(icon);
         d.canvas=std::make_unique<Canvas>(p);d.canvas->exitOnKeyEscape(false);d.renderer=std::make_unique<GLRenderer>(*d.canvas);
         setWindowIcon(d.canvas->windowPtr(),icon);
         d.renderer->toneMapping=ToneMapping::ACESFilmic;d.renderer->toneMappingExposure=1.05f;d.renderer->setPixelRatio(std::min(2.f,d.renderer->getTargetPixelRatio()));
         d.renderer->shadowMap().enabled=true;d.renderer->shadowMap().type=ShadowMap::PFC;d.renderer->shadowMap().autoUpdate=false;
-        d.imgui=std::make_unique<ImguiFunctionalContext>(*d.canvas,[this]{if(impl_->interface)impl_->interface();});
+        d.imgui=std::make_unique<ImguiFunctionalContext>(*d.canvas,[this]{if(impl_->draw)impl_->draw();});
         d.canvas->onWindowResize([this](WindowSize s){impl_->renderer->setSize(s);});
         return;
     }
@@ -80,7 +80,7 @@ void albert::Display::ui(){
     auto& d=*impl_;if(d.imgui){d.imgui->render();return;}
     if(!d.encoder)return;
     if(!d.styled){ImGuiStyle& style=ImGui::GetStyle();style=ImGuiStyle();style.FontScaleDpi=d.dpi;style.ScaleAllSizes(d.dpi);d.styled=true;} // As threepp's ImGui context.
-    ImGui_ImplWGPU_NewFrame();ImGui_ImplGlfw_NewFrame();ImGui::NewFrame();if(d.interface)d.interface();ImGui::Render();
+    ImGui_ImplWGPU_NewFrame();ImGui_ImplGlfw_NewFrame();ImGui::NewFrame();if(d.draw)d.draw();ImGui::Render();
     if(!d.drawnTarget)d.pass(WGPULoadOp_Clear);
     d.pass(WGPULoadOp_Load);
 }

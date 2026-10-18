@@ -8,12 +8,12 @@
 namespace threepp {class Scene;class Camera;class GLRenderer;}
 namespace albert {
 // Window, scene renderer and ImGui for one graphics backend: threepp's OpenGL renderer (default)
-// or WebGPU (src/gpu; --renderer=webgpu until the port reaches parity). `interface` draws the
+// or WebGPU (src/gpu; --renderer=webgpu until the port reaches parity). `draw` draws the
 // ImGui windows each frame.
 class Display {
 public:
     enum class Backend {opengl,webgpu};
-    Display(Backend backend,const std::string& title,threepp::WindowSize size,const std::filesystem::path& icon,std::function<void()> interface);
+    Display(Backend backend,const std::string& title,threepp::WindowSize size,const std::filesystem::path& icon,std::function<void()> draw);
     ~Display();
     Display(const Display&)=delete;Display& operator=(const Display&)=delete;
     [[nodiscard]] Backend backend()const;
