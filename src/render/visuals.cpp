@@ -240,7 +240,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     moon->castShadow = moon->receiveShadow = true;
     scene.add(moon);
 
-    sunMaterial_ = ShaderMaterial::create();
+    sunMaterial_ = ShaderMaterial::create();sunMaterial_->name="albert:sun";
     sunMaterial_->vertexShader = surfaceVertex;
     sunMaterial_->uniforms.emplace("sunMap", Uniform(static_cast<Texture*>(nullptr)));
     sunMaterial_->fragmentShader = R"(
@@ -277,11 +277,11 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
             #include <encodings_fragment>
         }
     )");
-    coronaMaterial->side = Side::Back;
+    coronaMaterial->side = Side::Back;coronaMaterial->name="albert:corona";
     coronaMaterial->toneMapped = false;
     sun->add(Mesh::create(SphereGeometry::create(static_cast<float>(695700.0 / 6378.137 * 1.15), 96, 48), coronaMaterial));
 
-    cloudMaterial_ = ShaderMaterial::create();
+    cloudMaterial_ = ShaderMaterial::create();cloudMaterial_->name="albert:clouds";
     cloudMaterial_->vertexShader = surfaceVertex;
     cloudMaterial_->fragmentShader = std::string(cloudSampling) + eclipseShader() + R"(
         uniform vec3 solarDirection, moonPosition, eclipseSunPosition;
@@ -337,7 +337,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
             #include <encodings_fragment>
         }
     )");
-    nightMaterial_->fragmentShader = std::string(cloudSampling) + nightMaterial_->fragmentShader;
+    nightMaterial_->fragmentShader = std::string(cloudSampling) + nightMaterial_->fragmentShader;nightMaterial_->name="albert:night";
     nightMaterial_->uniforms.emplace("nightDetailMap",Uniform(static_cast<Texture*>(nullptr)));
     nightMaterial_->uniforms.emplace("nightDetailBounds",Uniform(Vector4(0,0,1,1)));
     nightMaterial_->uniforms.emplace("nightDetailEnabled",Uniform(0.f));
@@ -420,7 +420,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
             #include <encodings_fragment>
         }
     )");
-    opticalDepthTexture_ = opticalDepthTexture();
+    opticalDepthTexture_ = opticalDepthTexture();atmosphereMaterial_->name="albert:atmosphere";
     atmosphereMaterial_->uniforms.emplace("opticalDepthMap", Uniform(opticalDepthTexture_.get()));
     atmosphereMaterial_->uniforms.emplace("localCamera", Uniform(Vector3()));
     atmosphereMaterial_->uniforms.emplace("localSun", Uniform(Vector3(1,0,0)));

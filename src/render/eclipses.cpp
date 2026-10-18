@@ -34,7 +34,7 @@ const char* albert::eclipseShader(){return R"(
 namespace {
 albert::core::Vector vector(const Vector3& v){return {v.x,v.y,v.z};}
 std::shared_ptr<ShaderMaterial> material(bool lunar){
-    auto m=ShaderMaterial::create();m->transparent=true;m->depthWrite=false;m->blending=Blending::Multiply;m->toneMapped=false;
+    auto m=ShaderMaterial::create();m->name="albert:eclipse";m->transparent=true;m->depthWrite=false;m->blending=Blending::Multiply;m->toneMapped=false;
     m->polygonOffset=true;m->polygonOffsetFactor=-1.f;m->polygonOffsetUnits=-1.f;
     m->uniforms={{"sunPosition",Uniform(Vector3())},{"blockerPosition",Uniform(Vector3())},{"blockerRadius",Uniform(lunar?1.f:float(1737.4/6378.137))},
         {"lunar",Uniform(lunar?1.f:0.f)},{"alphaMap",Uniform(static_cast<Texture*>(nullptr))},{"surfaceMap",Uniform(static_cast<Texture*>(nullptr))},

@@ -119,7 +119,7 @@ struct SceneRenderer::Impl {
     WGPUTexture depth=nullptr;WGPUTextureView depthView=nullptr;unsigned depthWidth=0,depthHeight=0;
     WGPUBuffer frameBuffer=nullptr,objectBuffer=nullptr;std::size_t objectCapacity=0;
     WGPUBindGroupLayout frameLayout=nullptr,objectLayout=nullptr;WGPUBindGroup frameGroup=nullptr,objectGroup=nullptr;
-    WGPUBuffer zeros=nullptr;WGPUTexture whiteTexture=nullptr;WGPUTextureView white=nullptr;WGPUSampler linear=nullptr;
+    WGPUBuffer zeros=nullptr;WGPUTexture whiteTexture=nullptr,blackTexture=nullptr;WGPUTextureView white=nullptr,black=nullptr;WGPUSampler linear=nullptr;
     struct Buffer {WGPUBuffer buffer=nullptr;std::size_t bytes=0;unsigned version=~0u;};
     struct Geometry {std::unordered_map<std::string,Buffer> attributes;Buffer index;unsigned used=0;};
     struct Texture {WGPUTexture texture=nullptr;WGPUTextureView view=nullptr;WGPUSampler sampler=nullptr;unsigned version=~0u,used=0;};
@@ -137,8 +137,9 @@ struct SceneRenderer::Impl {
         {WGPUBindGroupEntry e{};e.binding=0;e.buffer=frameBuffer;e.size=256;WGPUBindGroupDescriptor d{};d.layout=frameLayout;d.entryCount=1;d.entries=&e;frameGroup=wgpuDeviceCreateBindGroup(device,&d);}
         zeros=buffer(64,WGPUBufferUsage_Vertex);
         WGPUTextureDescriptor t{};t.size={1,1,1};t.format=WGPUTextureFormat_RGBA8Unorm;t.usage=WGPUTextureUsage_TextureBinding|WGPUTextureUsage_CopyDst;t.mipLevelCount=1;t.sampleCount=1;t.dimension=WGPUTextureDimension_2D;
-        whiteTexture=wgpuDeviceCreateTexture(device,&t);white=wgpuTextureCreateView(whiteTexture,nullptr);const std::uint32_t one=0xffffffffu;
-        WGPUTexelCopyTextureInfo dst{};dst.texture=whiteTexture;WGPUTexelCopyBufferLayout l{};l.bytesPerRow=4;l.rowsPerImage=1;wgpuQueueWriteTexture(queue,&dst,&one,4,&l,&t.size);
+        auto solid=[&](std::uint32_t rgba,WGPUTexture& texture,WGPUTextureView& view){texture=wgpuDeviceCreateTexture(device,&t);view=wgpuTextureCreateView(texture,nullptr);
+            WGPUTexelCopyTextureInfo dst{};dst.texture=texture;WGPUTexelCopyBufferLayout l{};l.bytesPerRow=4;l.rowsPerImage=1;wgpuQueueWriteTexture(queue,&dst,&rgba,4,&l,&t.size);};
+        solid(0xffffffffu,whiteTexture,white);solid(0xff000000u,blackTexture,black); // Black: GL's empty texture for ShaderMaterials.
         WGPUSamplerDescriptor s{};s.addressModeU=s.addressModeV=s.addressModeW=WGPUAddressMode_ClampToEdge;s.magFilter=s.minFilter=WGPUFilterMode_Linear;s.mipmapFilter=WGPUMipmapFilterMode_Linear;s.lodMaxClamp=32;s.maxAnisotropy=1;
         linear=wgpuDeviceCreateSampler(device,&s);
         floatFilterable=wgpuDeviceHasFeature(device,WGPUFeatureName_Float32Filterable);
@@ -151,7 +152,7 @@ struct SceneRenderer::Impl {
         for(auto b:{frameBuffer,objectBuffer,zeros})if(b)wgpuBufferRelease(b);
         if(frameGroup)wgpuBindGroupRelease(frameGroup);if(objectGroup)wgpuBindGroupRelease(objectGroup);
         wgpuBindGroupLayoutRelease(frameLayout);wgpuBindGroupLayoutRelease(objectLayout);
-        wgpuSamplerRelease(linear);wgpuTextureViewRelease(white);wgpuTextureRelease(whiteTexture);
+        wgpuSamplerRelease(linear);wgpuTextureViewRelease(white);wgpuTextureRelease(whiteTexture);wgpuTextureViewRelease(black);wgpuTextureRelease(blackTexture);
         if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);
     }
     WGPUBuffer buffer(std::size_t bytes,WGPUBufferUsage usage){WGPUBufferDescriptor d{};d.size=align(std::max<std::size_t>(bytes,16),4);d.usage=usage|WGPUBufferUsage_CopyDst;return wgpuDeviceCreateBuffer(device,&d);}
@@ -186,13 +187,13 @@ struct SceneRenderer::Impl {
     }
     // A texture's GPU copy: 8-bit RGBA (rows flipped like GL's UNPACK_FLIP_Y), or float data as
     // rgba32float (filterable when the adapter allows it); mipmaps by box filtering on the CPU.
-    WGPUTextureView view(threepp::Texture* source){
-        if(!source)return white;
+    WGPUTextureView view(threepp::Texture* source,bool blank=false){ // blank: black instead of white when absent.
+        if(!source)return blank?black:white;
         auto& t=textures[source->id];t.used=frame;
         if(t.view&&t.version==source->version())return t.view;
         release(t);t={};t.used=frame;t.version=source->version();
         const Image& image=source->image();const unsigned w=image.width(),h=std::max(1u,image.height());
-        if(!w)return white;
+        if(!w)return blank?black:white;
         const int channels=source->format==Format::Red?1:source->format==Format::RG?2:source->format==Format::RGB?3:4;
         const bool floats=image.isFloat()||image.isHalfFloat(); // Half floats (unused by Albert) are widened.
         const bool mips=source->generateMipmaps&&source->minFilter!=Filter::Linear&&source->minFilter!=Filter::Nearest;
@@ -267,7 +268,7 @@ struct SceneRenderer::Impl {
         }
         if(!state.uniforms.buffer||state.uniforms.bytes<bytes.size()){if(state.uniforms.buffer)wgpuBufferRelease(state.uniforms.buffer);state.uniforms.buffer=buffer(bytes.size(),WGPUBufferUsage_Uniform);state.uniforms.bytes=bytes.size();if(state.group){wgpuBindGroupRelease(state.group);state.group=nullptr;}}
         wgpuQueueWriteBuffer(queue,state.uniforms.buffer,0,bytes.data(),bytes.size());
-        std::vector<WGPUTextureView> views;for(auto* t:maps)views.push_back(view(t));
+        const bool shader=dynamic_cast<ShaderMaterial*>(&m)!=nullptr;std::vector<WGPUTextureView> views;for(std::size_t i=0;i<maps.size();++i)views.push_back(view(maps[i],shader||i>0));
         if(state.group&&views==state.views&&state.program==m.name)return state.group;
         if(state.group)wgpuBindGroupRelease(state.group);state.views=views;state.program=m.name;
         std::vector<WGPUBindGroupEntry> e(1+2*maps.size());e[0].binding=0;e[0].buffer=state.uniforms.buffer;e[0].size=state.uniforms.bytes;
