@@ -77,6 +77,17 @@ int main(int argc,char** argv){try{
         try{portal.fetchMissing(p);}catch(const std::runtime_error&){threw=true;}
         require(threw&&portal.generation()==0,"A non-GeoTIFF header fails its fetch, uncached");
     }
+    { // Review: a header with absurd tile sizes (65535) is refused before any tile decode sizes itself on
+      // them (16 GiB), and the decoder refuses such sizes before allocating.
+        std::string bad=file;std::uint32_t ifd=0;std::memcpy(&ifd,bad.data()+4,4);std::uint16_t n=0;std::memcpy(&n,bad.data()+ifd,2);
+        for(std::uint16_t i=0;i<n;++i){const std::size_t e=ifd+2+12u*i;std::uint16_t tag=0;std::memcpy(&tag,bad.data()+e,2);if(tag==322||tag==323){const std::uint16_t huge=65535;std::memcpy(bad.data()+e+8,&huge,2);}}
+        albert::providers::CopernicusDem absurd(cache/"absurd",[&](const std::string&,const std::string& range,albert::DownloadProgress*)->std::string{
+            const auto dash=range.find('-');const std::size_t a=std::stoul(range.substr(0,dash)),z=std::stoul(range.substr(dash+1));return bad.substr(a,std::min<std::size_t>(z+1,bad.size())-a);});
+        require(!absurd.cachedHeight(10.5,20.5),"Uncached header");bool threw=false;try{absurd.fetchMissing(p);}catch(const std::runtime_error&){threw=true;}
+        require(threw&&absurd.generation()==0,"A header with absurd tile sizes is refused, uncached");
+        bool refused=false;try{(void)albert::providers::decodeFloatTile("xx",65536,65536);}catch(const std::exception&){refused=true;}
+        require(refused,"The tile decoder refuses absurd sizes before allocating");
+    }
     { // Review: a block of the right size but corrupt (two instances writing one cache) is fetched again.
         int corrupted=0;for(const auto& e:std::filesystem::directory_iterator(cache))if(e.path().string().find("N10_00_E020")!=std::string::npos&&e.path().string().find(".tif.")!=std::string::npos){
             const auto size=std::filesystem::file_size(e.path());std::ofstream(e.path(),std::ios::binary)<<std::string(size,'\x5a');++corrupted;}

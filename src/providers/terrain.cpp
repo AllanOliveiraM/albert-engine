@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <random>
@@ -17,6 +18,7 @@ std::string tileName(int lat,int lon){
 }
 }
 std::vector<float> decodeFloatTile(const std::string& compressed,unsigned w,unsigned h){
+    if(!w||!h||w>2048||h>2048||compressed.size()>static_cast<std::size_t>(std::numeric_limits<int>::max()))throw std::runtime_error("Unsupported DEM tile size"); // Before allocating.
     const std::size_t bytes=static_cast<std::size_t>(w)*h*4;std::string raw(bytes,'\0');
     if(stbi_zlib_decode_buffer(raw.data(),static_cast<int>(bytes),compressed.data(),static_cast<int>(compressed.size()))!=static_cast<int>(bytes))throw std::runtime_error("Corrupt DEM tile");
     std::vector<float> out(static_cast<std::size_t>(w)*h);const std::size_t row=static_cast<std::size_t>(w)*4;
@@ -65,7 +67,13 @@ bool CopernicusDem::parse(const std::string& head,File& out){
         case 33922:{const auto at=read<std::uint32_t>(head,e+8);tieX=read<double>(head,at+24);tieY=read<double>(head,at+32);break;}
         }
     }
-    if(compression!=8||predictor!=3||bits!=32||!f->tileWidth||!f->tileHeight||!(scaleX>0)||!(scaleY>0)||f->offsets.size()!=f->counts.size()||f->offsets.empty())return false;
+    if(compression!=8||predictor!=3||bits!=32||!(scaleX>0)||!(scaleY>0)||f->offsets.size()!=f->counts.size()||f->offsets.empty())return false;
+    // Tiles of at most 2048 posts a side (Copernicus: 1024), as many as the image needs: a corrupt size
+    // would otherwise size the decode (65535² floats: 16 GiB).
+    auto tile=[](unsigned t){return t>=1&&t<=2048;};
+    if(!tile(f->tileWidth)||!tile(f->tileHeight)||!f->width||!f->height||f->width>100000||f->height>100000)return false;
+    if(f->offsets.size()!=static_cast<std::size_t>((f->width+f->tileWidth-1)/f->tileWidth)*((f->height+f->tileHeight-1)/f->tileHeight))return false;
+    for(const auto c:f->counts)if(c>static_cast<std::uint64_t>(f->tileWidth)*f->tileHeight*8+65536)return false; // A tile's bytes: at most twice the raw size.
     f->west=tieX;f->north=tieY;f->stepX=scaleX;f->stepY=scaleY;return true;
     }catch(const std::exception&){return false;}
 }

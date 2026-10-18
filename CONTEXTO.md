@@ -55,7 +55,9 @@ O GRAM Suite: catálogo MFS-33888-1 ("General Public Release"), o Allan vai estu
 OpenGL removido (Display só WebGPU, sem `--renderer=opengl` nem recuo; GLSL dos materiais e a tabela
 de profundidade óptica da atmosfera antiga fora; `TextureUploads` só publica). A medição de
 desempenho fica para quando o Allan parar o resto do PC (os números acima tinham carga de fundo e
-CPU estrangulada). Próximo: passo de desempenho depois dessa medição.
+CPU estrangulada). Revisão do Codex de 7e95e29..e6fbfab: um P2 (cabeçalho COG com blocos absurdos
+dimensionava a decodificação: 65535² = 16 GiB) corrigido com teste; veículos, uniforms e remoção do
+OpenGL sem regressões. Próximo: passo de desempenho depois dessa medição.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`
