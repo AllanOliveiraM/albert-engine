@@ -2469,7 +2469,11 @@ int albert::runRenderer(int argc, char** argv) {
             std::string exposed=focus;
             if(camera->position.distanceTo(planets.moon->position)<3.f*static_cast<float>(1737.4/6378.137))exposed=targets::Moon;
             for(const auto& [id,node]:solids.nodes())if(camera->position.distanceTo(node->position)<3.f*static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters))exposed=id;
-            const float photographicExposure=(exposed==targets::Moon?2.1f:solids.contains(exposed)?std::clamp(1.05f*std::pow(sunPosition.distanceTo(solids.nodes().at(exposed)->position)*6378137.f/149597870700.f,2.f),.25f,1200.f):1.05f)
+            // The sunlight where the camera is: near another body its irradiance at that distance (Mars:
+            // 2.4 / 1.52²), so its sky, air light, terrain and vehicles share one scale; the exposure lifts it.
+            const float bodyAu=solids.contains(exposed)?sunPosition.distanceTo(solids.nodes().at(exposed)->position)*6378137.f/149597870700.f:1.f;
+            sunlight->intensity=2.4f/(bodyAu*bodyAu);
+            const float photographicExposure=(exposed==targets::Moon?2.1f:solids.contains(exposed)?std::clamp(1.05f*bodyAu*bodyAu,.25f,1200.f):1.05f)
                 *(1.f+planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f)));
             graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
             solids.update(graphics.gl(),*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary,visualSettings.terrain);

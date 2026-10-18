@@ -99,13 +99,15 @@ struct Terrain::Impl {
             Key key;
             {std::unique_lock l(lock);wake.wait(l,[this]{return stop||!queue.empty();});if(stop)return;
              const auto best=std::min_element(queue.begin(),queue.end());key=best->second;queue.erase(best);}
-            Built b=build(key);
+            Built b;
+            try{b=build(key);}catch(const std::exception& e){ // A failing source: the node without its heights, provisional.
+                static std::once_flag reported;std::call_once(reported,[&]{std::fprintf(stderr,"Terrain heights unavailable: %s\n",e.what());});b=build(key,false);}
             std::lock_guard l(lock);done.push_back(std::move(b)); // Still queued until adopted: no second build.
         }
     }
     // Heights on (posts + 2)² points (a ring beyond the node for its edge normals), the node's
     // vertices relative to its centre, normals, texture coordinates and skirts.
-    Built build(const Key& k)const{
+    Built build(const Key& k,bool sourced=true)const{
         const auto e=extent(k);constexpr int m=posts+2;const double step=e.size/(posts-1);
         std::vector<Vec> dirs(m*m);std::vector<double> lat(m*m),lon(m*m),phi(m*m);
         for(int j=0;j<m;++j)for(int i=0;i<m;++i){
@@ -114,7 +116,7 @@ struct Terrain::Impl {
             lat[at]=std::atan2(std::sin(parametric),body.flattening*std::cos(parametric));lon[at]=std::remainder(phi[at]-pi,2*pi);
         }
         Built b;b.key=k;b.generation=body.generation?body.generation():0;
-        std::vector<float> h(m*m,0.f);if(body.heights)b.complete=body.heights(lat,lon,k.level,h);
+        std::vector<float> h(m*m,0.f);if(body.heights&&sourced)b.complete=body.heights(lat,lon,k.level,h);else if(body.heights)b.complete=false;
         std::vector<Vec> p(m*m);for(std::size_t i=0;i<p.size();++i)p[i]=dirs[i]*(1+h[i]/body.radius);
         const auto mid=static_cast<std::size_t>((posts/2+1)*m+posts/2+1);b.centre=p[mid];const double centrePhi=phi[mid];
         const double skirt=std::max(e.size*.03,2e3/body.radius); // Below any step between levels.
@@ -163,7 +165,8 @@ struct Terrain::Impl {
     // Hidden behind the body's horizon from the camera (mountains up to body.relief), or outside the
     // view frustum (in the parent's frame), which then neither draws nor refines it.
     bool culled(const Shape& s,const Vec& camera,double distance,const Frustum* frustum)const{
-        if(frustum){const double r=(std::sin(std::min(s.radius,pi/2))*1.05+body.relief/body.radius)*body.scale;const Vec at=s.centre*body.scale;
+        if(frustum){ // Bounded by its rim's chord from the centre, 2 sin(θ/2) (sin θ fell short: 0.857 for a face's 0.919).
+            const double r=(2*std::sin(std::min(s.radius,pi)/2)*1.05+body.relief/body.radius)*body.scale;const Vec at=s.centre*body.scale;
             if(!frustum->intersectsSphere(Sphere(Vector3(static_cast<float>(at.x),static_cast<float>(at.y),static_cast<float>(at.z)),static_cast<float>(r))))return true;}
         if(distance<=1.)return false;
         const double horizon=std::acos(1/distance)+std::acos(1/(1+body.relief/body.radius));

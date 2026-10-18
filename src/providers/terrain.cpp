@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 extern "C" int stbi_zlib_decode_buffer(char* out,int outLength,const char* in,int inLength);
 namespace albert::providers {
 namespace {
@@ -25,25 +26,25 @@ std::vector<float> decodeFloatTile(const std::string& compressed,unsigned w,unsi
     }
     return out;
 }
-namespace {struct NotCached {};} // Thrown inside cachedHeight when a piece needs the network.
+namespace {
+struct NotCached {}; // Thrown inside cachedHeight when a piece needs the network.
+// Whole files only: written beside and renamed, so a reader (or a crash mid-write) never leaves a
+// partial one in the cache; a failed rename leaves the piece missing, fetched again later.
+void publish(const std::filesystem::path& path,const std::string& bytes){
+    std::error_code ec;std::filesystem::create_directories(path.parent_path(),ec);
+    auto part=path;part+=".part"+std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    {std::ofstream out(part,std::ios::binary);out<<bytes;if(!out.flush()){out.close();std::filesystem::remove(part,ec);return;}}
+    std::filesystem::rename(part,path,ec);if(ec)std::filesystem::remove(part,ec);
+}
+}
 struct CopernicusDem::File {int latitude=0,longitude=0;std::string url;unsigned width=0,height=0,tileWidth=0,tileHeight=0;double west=0,north=0,stepX=0,stepY=0;std::vector<std::uint64_t> offsets,counts;bool ocean=false;};
 CopernicusDem::CopernicusDem(std::filesystem::path cache,Transport transport):cache_(std::move(cache)),transport_(std::move(transport)){
     if(!transport_)transport_=[](const std::string& url,const std::string& range,DownloadProgress* p){return httpGet(url,p,{16*1024*1024,60,range});};
 }
-const CopernicusDem::File* CopernicusDem::file(int lat,int lon,DownloadProgress& progress){
-    const auto key=std::make_pair(lat,lon);if(const auto i=files_.find(key);i!=files_.end())return i->second.get();
-    auto f=std::make_shared<File>();f->latitude=lat;f->longitude=lon;const std::string name=tileName(lat,lon);
-    f->url="https://copernicus-dem-30m.s3.amazonaws.com/"+name+"/"+name+".tif";
-    const auto path=cache_/(name+".header");std::string head;
-    if(std::ifstream in{path,std::ios::binary})head.assign(std::istreambuf_iterator<char>(in),{});
-    if(head.empty()){
-        if(offline_){missing_.insert({lat,lon,-1});throw NotCached{};}
-        try{head=transport_(f->url,"0-65535",&progress);}
-        catch(const std::exception& e){if(std::string(e.what()).find("404")==std::string::npos&&std::string(e.what()).find("403")==std::string::npos)throw;head="ocean";} // Absent: no land.
-        std::error_code ec;std::filesystem::create_directories(cache_,ec);std::ofstream(path,std::ios::binary)<<head;
-    }
-    if(head=="ocean"){f->ocean=true;return (files_[key]=f).get();}
-    if(head.size()<8||head.compare(0,2,"II")!=0||read<std::uint16_t>(head,2)!=42)throw std::runtime_error("Unsupported DEM GeoTIFF");
+// A COG header's tiling and georeference; false when it is not one (truncated, corrupt).
+bool CopernicusDem::parse(const std::string& head,File& out){
+    try{auto* f=&out;
+    if(head.size()<8||head.compare(0,2,"II")!=0||read<std::uint16_t>(head,2)!=42)return false;
     const auto ifd=read<std::uint32_t>(head,4);const auto n=read<std::uint16_t>(head,ifd);
     double scaleX=0,scaleY=0,tieX=0,tieY=0;unsigned compression=0,predictor=0,bits=0;
     auto values=[&](std::uint16_t type,std::uint32_t count,std::size_t field){
@@ -60,8 +61,25 @@ const CopernicusDem::File* CopernicusDem::file(int lat,int lon,DownloadProgress&
         case 33922:{const auto at=read<std::uint32_t>(head,e+8);tieX=read<double>(head,at+24);tieY=read<double>(head,at+32);break;}
         }
     }
-    if(compression!=8||predictor!=3||bits!=32||!f->tileWidth||!f->tileHeight||!(scaleX>0)||!(scaleY>0)||f->offsets.size()!=f->counts.size()||f->offsets.empty())throw std::runtime_error("Unexpected DEM layout");
-    f->west=tieX;f->north=tieY;f->stepX=scaleX;f->stepY=scaleY;
+    if(compression!=8||predictor!=3||bits!=32||!f->tileWidth||!f->tileHeight||!(scaleX>0)||!(scaleY>0)||f->offsets.size()!=f->counts.size()||f->offsets.empty())return false;
+    f->west=tieX;f->north=tieY;f->stepX=scaleX;f->stepY=scaleY;return true;
+    }catch(const std::exception&){return false;}
+}
+const CopernicusDem::File* CopernicusDem::file(int lat,int lon,DownloadProgress& progress){
+    const auto key=std::make_pair(lat,lon);if(const auto i=files_.find(key);i!=files_.end())return i->second.get();
+    auto f=std::make_shared<File>();f->latitude=lat;f->longitude=lon;const std::string name=tileName(lat,lon);
+    f->url="https://copernicus-dem-30m.s3.amazonaws.com/"+name+"/"+name+".tif";
+    const auto path=cache_/(name+".header");std::string head;
+    if(std::ifstream in{path,std::ios::binary})head.assign(std::istreambuf_iterator<char>(in),{});
+    if(!head.empty()&&head!="ocean"&&!parse(head,*f)){std::error_code ec;std::filesystem::remove(path,ec);head.clear();} // Corrupt: fetched again.
+    if(head.empty()){
+        if(offline_){missing_.insert({lat,lon,-1});throw NotCached{};}
+        try{head=transport_(f->url,"0-65535",&progress);}
+        catch(const std::exception& e){if(std::string(e.what()).find("404")==std::string::npos&&std::string(e.what()).find("403")==std::string::npos)throw;head="ocean";} // Absent: no land.
+        if(head!="ocean"&&!parse(head,*f))throw std::runtime_error("Unsupported DEM GeoTIFF");
+        publish(path,head);
+    }
+    if(head=="ocean")f->ocean=true;
     return (files_[key]=f).get();
 }
 const std::vector<float>& CopernicusDem::block(const File& f,int index,DownloadProgress& progress){
@@ -74,7 +92,7 @@ const std::vector<float>& CopernicusDem::block(const File& f,int index,DownloadP
         if(offline_){missing_.insert({f.latitude,f.longitude,index});throw NotCached{};}
         bytes=transport_(f.url,std::to_string(offset)+"-"+std::to_string(offset+count-1),&progress);
         if(bytes.size()!=count)throw std::runtime_error("Short DEM tile");
-        std::ofstream(path,std::ios::binary)<<bytes;
+        publish(path,bytes);
     }
     return blocks_[key]=decodeFloatTile(bytes,f.tileWidth,f.tileHeight);
 }
@@ -97,7 +115,9 @@ std::optional<double> CopernicusDem::cachedHeight(double lat,double lon){
 }
 bool CopernicusDem::fetchMissing(DownloadProgress& progress){
     std::tuple<int,int,int> item;
-    {std::lock_guard lock(mutex_);if(missing_.empty())return false;item=*missing_.begin();missing_.erase(missing_.begin());}
+    {std::lock_guard lock(mutex_);if(missing_.empty())missing_.swap(failed_); // Failed pieces again once the noted ones are done.
+     if(missing_.empty())return false;item=*missing_.begin();missing_.erase(missing_.begin());}
+    try{
     const auto [lat,lon,index]=item;const std::string name=tileName(lat,lon),url="https://copernicus-dem-30m.s3.amazonaws.com/"+name+"/"+name+".tif";
     std::error_code ec;std::filesystem::create_directories(cache_,ec);
     if(index<0){
@@ -105,7 +125,7 @@ bool CopernicusDem::fetchMissing(DownloadProgress& progress){
         std::string head;
         try{head=transport_(url,"0-65535",&progress);}
         catch(const std::exception& e){if(std::string(e.what()).find("404")==std::string::npos&&std::string(e.what()).find("403")==std::string::npos)throw;head="ocean";}
-        std::ofstream(path,std::ios::binary)<<head;
+        publish(path,head);
     }else{
         std::uint64_t offset=0,count=0;
         {std::lock_guard lock(mutex_);const File* f=file(lat,lon,progress); // The header is cached by now.
@@ -114,9 +134,10 @@ bool CopernicusDem::fetchMissing(DownloadProgress& progress){
         if(std::filesystem::file_size(path,ec)!=count){
             const auto bytes=transport_(url,std::to_string(offset)+"-"+std::to_string(offset+count-1),&progress);
             if(bytes.size()!=count)throw std::runtime_error("Short DEM tile");
-            std::ofstream(path,std::ios::binary)<<bytes;
+            publish(path,bytes);
         }
     }
+    }catch(...){std::lock_guard lock(mutex_);failed_.insert(item);throw;} // Kept: a camera at rest would never note it again.
     ++generation_;return true;
 }
 std::vector<float> CopernicusDem::heights(double west,double south,double east,double north,unsigned w,unsigned h,DownloadProgress& progress){
@@ -201,7 +222,9 @@ std::optional<double> PlanetaryRelief::cachedHeight(physics::Center body,double 
     }catch(const NotCached&){return std::nullopt;}
 }
 bool PlanetaryRelief::fetchMissing(DownloadProgress& progress){
-    BlockKey key{};{std::lock_guard lock(mutex_);if(missingBlocks_.empty())return false;key=*missingBlocks_.begin();missingBlocks_.erase(missingBlocks_.begin());}
+    BlockKey key{};{std::lock_guard lock(mutex_);if(missingBlocks_.empty())missingBlocks_.swap(failedBlocks_); // Failed blocks again once the noted ones are done.
+     if(missingBlocks_.empty())return false;key=*missingBlocks_.begin();missingBlocks_.erase(missingBlocks_.begin());}
+    try{
     const auto path=cache_/blockName(key.body,key.row,key.column);std::error_code ec;
     if(std::filesystem::file_size(path,ec)==128*128*2){++generation_;return true;}
     const bool moon=key.body==static_cast<int>(physics::Center::moon);std::string url,ranges;
@@ -209,7 +232,8 @@ bool PlanetaryRelief::fetchMissing(DownloadProgress& progress){
     const auto parts=byteRanges(transport_(url,ranges,&progress));
     std::string bytes;for(const auto& part:parts)bytes+=part;
     if(parts.size()!=128||bytes.size()!=128*128*2)throw std::runtime_error("Unexpected relief block answer");
-    std::filesystem::create_directories(cache_,ec);std::ofstream(path,std::ios::binary)<<bytes;
+    publish(path,bytes);
+    }catch(...){std::lock_guard lock(mutex_);failedBlocks_.insert(key);throw;} // Kept: a camera at rest would never note it again.
     ++generation_;return true;
 }
 double PlanetaryRelief::height(physics::Center body,double latitude,double longitude,DownloadProgress& progress){

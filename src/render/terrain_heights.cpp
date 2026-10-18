@@ -3,6 +3,7 @@
 #include "providers/terrain.hpp"
 #include "threepp/textures/Image.hpp"
 #include <algorithm>
+#include <optional>
 #include <cmath>
 #include <memory>
 #include <numbers>
@@ -24,6 +25,9 @@ double geoidGrid(double lat,double lon) {
 }
 // A global equirectangular height image (RGBA floats, metres in red, south row first), bilinear
 // at texel centres; latitude and longitude in radians.
+// A cached lookup that never throws at the terrain's worker: an error (a corrupt piece) reads as not
+// cached, so the node stays provisional on the coarse grid.
+template<class Lookup> std::optional<double> safely(Lookup lookup){try{return lookup();}catch(const std::exception&){return std::nullopt;}}
 struct GlobalHeights {
     std::shared_ptr<const std::vector<float>> grid;long w=0,h=0;
     explicit GlobalHeights(const Image& image):grid(std::make_shared<const std::vector<float>>(image.data<float>())),w(image.width()),h(image.height()){}
@@ -41,7 +45,7 @@ TerrainHeights earthHeights(const Image& global) {
     return [coarse=GlobalHeights(global)](const std::vector<double>& lat,const std::vector<double>& lon,int level,std::vector<float>& out) {
         bool fine=level>=9;
         if(fine){auto& dem=providers::copernicusDem(); // All samples, so every missing piece gets noted at once.
-            for(std::size_t i=0;i<lat.size();++i)if(const auto v=dem.cachedHeight(lat[i]*180/pi,lon[i]*180/pi))out[i]=static_cast<float>(*v);else fine=false;}
+            for(std::size_t i=0;i<lat.size();++i)if(const auto v=safely([&]{return dem.cachedHeight(lat[i]*180/pi,lon[i]*180/pi);}))out[i]=static_cast<float>(*v);else fine=false;}
         for(std::size_t i=0;i<lat.size();++i)out[i]=static_cast<float>((fine?out[i]:coarse(lat[i],lon[i]))+geoidGrid(lat[i],lon[i]));
         return fine||level<9;
     };
@@ -52,7 +56,7 @@ TerrainHeights moonHeights(const Image& global) {
     return [coarse=GlobalHeights(global)](const std::vector<double>& lat,const std::vector<double>& lon,int level,std::vector<float>& out) {
         bool fine=level>=6;
         if(fine){auto& relief=providers::planetaryRelief();
-            for(std::size_t i=0;i<lat.size();++i)if(const auto v=relief.cachedHeight(physics::Center::moon,lat[i]*180/pi,lon[i]*180/pi))out[i]=static_cast<float>(*v);else fine=false;}
+            for(std::size_t i=0;i<lat.size();++i)if(const auto v=safely([&]{return relief.cachedHeight(physics::Center::moon,lat[i]*180/pi,lon[i]*180/pi);}))out[i]=static_cast<float>(*v);else fine=false;}
         if(!fine)for(std::size_t i=0;i<lat.size();++i)out[i]=static_cast<float>(coarse(lat[i],lon[i]));
         return fine||level<6;
     };
@@ -68,7 +72,7 @@ TerrainHeights marsTerrainHeights(const Image& global){
         const bool polar=std::any_of(lat.begin(),lat.end(),[](double l){return std::abs(l)>88*pi/180;}); // MOLA stops at ±88°: the grid only, complete.
         bool fine=level>=7&&!polar;
         if(fine){auto& relief=providers::planetaryRelief();
-            for(std::size_t i=0;i<lat.size();++i)if(const auto v=relief.cachedHeight(physics::Center::mars,lat[i]*180/pi,lon[i]*180/pi))out[i]=static_cast<float>(*v);else fine=false;}
+            for(std::size_t i=0;i<lat.size();++i)if(const auto v=safely([&]{return relief.cachedHeight(physics::Center::mars,lat[i]*180/pi,lon[i]*180/pi);}))out[i]=static_cast<float>(*v);else fine=false;}
         if(!fine)for(std::size_t i=0;i<lat.size();++i)out[i]=static_cast<float>(coarse(lat[i],lon[i]));
         return fine||level<7||polar;
     };

@@ -25,7 +25,14 @@ Morph entre níveis na CPU (filhos sobem da superfície do pai em 0,4 s). Atmosf
 tabelas de Bruneton (céu caramelo em Jezero conferido; da órbita, limbo com poeira). CI verde no
 Windows de novo: o `visual_test` olhava o detalhe medido de longe demais e o WARP passava de 3 s
 (liberação por tempo de parede). Assimetria de Mie por canal (pôr do sol azul de Marte conferido em
-compute: azul/vermelho 1,58 junto ao Sol, 0,60 longe dele). Próximo: nuvens ao vivo no ar, oceano.
+compute: azul/vermelho 1,58 junto ao Sol, 0,60 longe dele). Reflexo do céu em superfícies lisas.
+Revisão do Codex (aec065e..45c2f95, 18/10 10:49): P1 cabeçalho COG parcial derrubava a thread do
+terreno (agora gravação atômica, cabeçalho corrompido é apagado e baixado de novo, alturas e worker
+contêm exceções); P2 frustum com raio sin θ (curto para faces: corda 2 sin θ/2); P2 falha de download
+esquecida (fica em `failed_` e volta quando a fila esvazia); P2 imagem regional de Marte nos nós; P2
+irradiância solar local perto de outro corpo (luz da cena 2,4/d², o céu e veículos na mesma escala).
+Todos com teste que falha no código antigo, exceto a luz local (fiação do aplicativo). Próximo: nuvens
+ao vivo no ar, oceano.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

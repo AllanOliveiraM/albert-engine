@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <optional>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -56,6 +58,18 @@ int main(int argc,char** argv){try{
     const auto grid=dem.heights(20.25,10.25,20.75,10.75,3,3,p);require(std::abs(grid[4]-expected(10.5,20.5))<1e-3&&std::abs(grid[0]-expected(10.25,20.25))<1e-3,"Height grid");
     const int before=requests;albert::providers::CopernicusDem again(cache,[&](const std::string&,const std::string&,albert::DownloadProgress*)->std::string{throw std::runtime_error("offline");});
     require(std::abs(again.height(10.5,20.5,p)-expected(10.5,20.5))<1e-3&&requests==before,"Cached header and tiles reused offline");
+    { // Review: a truncated cached header (a crash mid-write, or a reader racing the writer) is dropped and
+      // fetched again; cachedHeight never throws it at the terrain's worker.
+        std::filesystem::path header;for(const auto& e:std::filesystem::directory_iterator(cache))if(e.path().extension()==".header"&&e.path().string().find("N10_00_E020")!=std::string::npos)header=e.path();
+        require(!header.empty(),"Cached header");{std::string head;{std::ifstream in(header,std::ios::binary);head.assign(std::istreambuf_iterator<char>(in),{});}std::ofstream(header,std::ios::binary)<<head.substr(0,100);}
+        albert::providers::CopernicusDem fresh(cache,[&](const std::string& url,const std::string& range,albert::DownloadProgress*)->std::string{
+            const auto dash=range.find('-');const std::size_t a=std::stoul(range.substr(0,dash)),z=std::stoul(range.substr(dash+1));(void)url;return file.substr(a,std::min<std::size_t>(z+1,file.size())-a);});
+        bool threw=false;std::optional<double> first;try{first=fresh.cachedHeight(10.5,20.5);}catch(const std::exception&){threw=true;}
+        require(!threw&&!first,"A truncated header reads as missing, not as an error");
+        while(fresh.fetchMissing(p)){}const auto healed=fresh.cachedHeight(10.5,20.5);
+        require(healed&&std::abs(*healed-expected(10.5,20.5))<1e-3,"The header is fetched again and heights return");
+        for(const auto& e:std::filesystem::directory_iterator(cache))require(e.path().string().find(".part")==std::string::npos,"No partial cache file left");
+    }
     { // LOLA and MOLA by byte range: pixel-is-area centres, endianness, scaling, tile seams and the 360° wrap.
         auto dn=[](int row,int column){return static_cast<std::int16_t>((row*7+column*3)%20000-10000);};
         int pdsRequests=0;
@@ -106,6 +120,13 @@ int main(int argc,char** argv){try{
         const int before=pdsRequests;albert::providers::PlanetaryRelief offline([](const std::string&,const std::string&,albert::DownloadProgress*)->std::string{throw std::runtime_error("offline");},blocks);
         const auto again=offline.cachedHeight(albert::physics::Center::moon,apollo.first,apollo.second);
         require(again&&std::abs(*again-*moon)<1e-12&&pdsRequests==before,"Blocks reused from disk");
+        { // Review: a failed download is retried by the next fetchMissing, with no new lookup (a camera at rest).
+            int failures=1;albert::providers::PlanetaryRelief flaky([&](const std::string& url,const std::string& range,albert::DownloadProgress* p)->std::string{
+                if(failures-->0)throw std::runtime_error("network down");return transport(url,range,p);},cache/"relief-retry");
+            const auto site=std::pair{-12.5,140.25};require(!flaky.cachedHeight(albert::physics::Center::moon,site.first,site.second),"No block before the retry test");
+            bool threw=false;try{flaky.fetchMissing(progress);}catch(const std::exception&){threw=true;}
+            require(threw&&flaky.fetchMissing(progress)&&flaky.cachedHeight(albert::physics::Center::moon,site.first,site.second),"A failed block is fetched on the next pass");
+        }
         std::printf("relief blocks: %d fetched, generation %llu\n",fetched,static_cast<unsigned long long>(relief.generation()));
     }
     std::cout<<"terrain_test: ok\n";return 0;

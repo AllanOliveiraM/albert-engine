@@ -185,6 +185,7 @@ struct albert::SolidBodies::Surface {
     std::array<std::shared_ptr<Texture>,5> region;
     std::shared_ptr<BVH> picker;
     std::shared_ptr<MeshStandardMaterial> terrainMaterial;std::unique_ptr<Terrain> terrain; // Mars: relief near the camera.
+    std::shared_ptr<MeshStandardMaterial> terrainDetail;std::optional<Vector4> terrainBounds; // Its regional imagery on the nodes inside it.
     std::shared_ptr<Mesh> sky;std::shared_ptr<ShaderMaterial> skyMaterial; // Mars: its air's background (WebGPU).
     float blend=0,inactive=0,fill=0;
     std::chrono::steady_clock::time_point updated=std::chrono::steady_clock::now();
@@ -192,6 +193,7 @@ struct albert::SolidBodies::Surface {
         material->uniforms.at("masked").setValue(0.f);material->uniforms.at("surfaceMask").setValue(mask.get());
         if(picker){material->uniforms.at("dayMap").setValue(day.get());material->uniforms.at("detailBlend").setValue(0.f);material->uniforms.at("bounds").setValue(Vector4(0,0,1,1));}
         if(patch){mesh->remove(*patch);patch->geometry()->dispose();patchMaterial->dispose();patch.reset();patchMaterial.reset();}
+        if(terrain)terrain->detail(nullptr,std::nullopt);terrainDetail.reset();terrainBounds.reset();
         for(auto& t:region)if(t){t->dispose();t.reset();}
     }
     ~Surface(){terrain.reset();if(sky){sky->geometry()->dispose();skyMaterial->dispose();}if(ring){ring->geometry()->dispose();ringMaterial->dispose();ringTexture->dispose();}if(shell){shell->geometry()->dispose();shellMaterial->dispose();}release();day->dispose();height->dispose();mask->dispose();material->dispose();mesh->geometry()->dispose();}
@@ -208,7 +210,7 @@ albert::SolidBodies::SolidBodies(Scene& scene,std::vector<SurfaceAssets> assets)
         if(s->picker){} // DSK positions already carry physical dimensions.
         else if(definition->axesMeters[0]>0){const auto& axes=definition->axesMeters;const double r=definition->radiusMeters;s->mesh->scale.set(static_cast<float>(axes[0]/r),static_cast<float>(axes[2]/r),static_cast<float>(axes[1]/r));}
         else if(definition->polarRadiusMeters>0)s->mesh->scale.y=static_cast<float>(definition->polarRadiusMeters/definition->radiusMeters);
-        if(asset.body=="mars"&&!s->picker){ // The pack's grid and MOLA blocks, lit like the surface program (the scene sun is the Earth's).
+        if(asset.body=="mars"&&!s->picker){ // The pack's grid and MOLA blocks, lit by the scene's sun (its irradiance at Mars near it).
             s->terrainMaterial=MeshStandardMaterial::create();s->terrainMaterial->map=s->day;s->terrainMaterial->roughness=1;s->terrainMaterial->metalness=0;
             TerrainBody body;body.radius=definition->radiusMeters;body.scale=core::surfaceRadius(asset.body)/core::earthRadiusMeters;
             body.flattening=definition->polarRadiusMeters/definition->radiusMeters;body.maxLevel=8;body.relief=25e3;body.heights=marsTerrainHeights(s->height->image());
@@ -274,6 +276,8 @@ void albert::SolidBodies::update(GLRenderer* renderer,PerspectiveCamera& camera,
         s.patchMaterial=material(s.region[0].get(),s.region[3].get(),s.mask.get());s.patchMaterial->uniforms.at("baseMap").setValue(s.day.get());s.patchMaterial->uniforms.at("baseHeightMap").setValue(s.height.get());s.patchMaterial->uniforms.at("isPatch").setValue(1.f);s.patchMaterial->uniforms.at("baseRadius").setValue(static_cast<float>(core::surfaceRadius(images.body)/core::earthRadiusMeters));
         const auto& r=images.region;s.patchMaterial->uniforms.at("bounds").setValue(Vector4(static_cast<float>((r.west+180.)/360.),static_cast<float>((r.south+90.)/180.),static_cast<float>((r.east-r.west)/360.),static_cast<float>((r.north-r.south)/180.)));
         s.patchMaterial->uniforms.at("displacement").setValue(0.f);s.patch=Mesh::create(std::move(images.geometry),s.patchMaterial);s.mesh->add(s.patch);s.blend=0;
+        if(s.terrain){s.terrainDetail=MeshStandardMaterial::create();s.terrainDetail->map=s.region[0];s.terrainDetail->roughness=1;s.terrainDetail->metalness=0;
+            s.terrainBounds=Vector4(static_cast<float>((r.west+180.)/360.),static_cast<float>((r.south+90.)/180.),static_cast<float>((r.east-r.west)/360.),static_cast<float>((r.north-r.south)/180.));}
         s.material->uniforms.at("surfaceMask").setValue(s.region[4].get());s.material->uniforms.at("masked").setValue(1.f);
         }
     }
@@ -296,9 +300,9 @@ void albert::SolidBodies::update(GLRenderer* renderer,PerspectiveCamera& camera,
         if(s.terrain){ // Within three radii the terrain replaces the surface program's sphere and patch.
             s.mesh->updateMatrixWorld();Vector3 local=camera.position;s.mesh->worldToLocal(local);const float radius=static_cast<float>(core::surfaceRadius(id)/core::earthRadiusMeters);
             Matrix4 m;m.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);m.multiply(*s.mesh->matrixWorld);Frustum view;view.setFromProjectionMatrix(m);
+            s.terrain->detail(details?s.terrainDetail:nullptr,s.terrainBounds); // The region's imagery on its nodes.
             const bool covers=terrain&&local.length()<3*radius&&s.terrain->update(local,&view);if(!covers)s.terrain->hide();
             s.material->visible=!covers;if(s.patch)s.patch->visible=!covers;
-            s.terrainMaterial->color.setScalar(intensity/2.4f); // The sun's irradiance there, relative to the scene's light.
         }
         const auto aid=auxiliary.find(id);s.fill=animateValue(s.fill,aid!=auxiliary.end()&&aid->second.enabled?std::clamp(aid->second.intensity,0.f,1.5f):0.f,dt);
         if(s.shell){

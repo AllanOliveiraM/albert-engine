@@ -430,6 +430,16 @@ void graphics(Target& renderer) {
     require(pixels[3*(96*192+96)]>lit+30,"Solid detail crossfade did not settle");
     solids.update(renderer.gl(),*solidCamera,Vector3(0,0,23455),2451545.,"earth",true,4.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
     require(std::abs(int(pixels[3*(96*192+96)])-lit)<4,"Solid detail eviction damaged the global surface");
+    { // Review: Mars's terrain carries the regional imagery it hides the patch for (here the whole globe).
+        auto marsScene=Scene::create();std::vector<albert::SurfaceAssets> marsAssets;marsAssets.push_back({"mars",rgba(120),height(0)});
+        albert::SolidBodies marsBodies(*marsScene,std::move(marsAssets));const float r=static_cast<float>(albert::core::surfaceRadius("mars")/albert::core::earthRadiusMeters);
+        auto marsCamera=PerspectiveCamera::create(45,1,1e-7f,10.f);marsCamera->position.set(0,0,r*1.002f);marsCamera->lookAt(Vector3());
+        albert::RegionalImages region;region.body="mars";region.day=rgba(230);region.height=height(0);albert::prepareRegionalImages(region);marsBodies.stage(std::move(region));
+        const auto* terrain=marsBodies.terrain("mars");require(terrain,"Mars terrain");
+        for(int i=0;i<20000&&(marsBodies.uploading()||terrain->drawn()==0||terrain->pending()>0);++i){marsBodies.update(renderer.gl(),*marsCamera,Vector3(0,0,23455),2451545.,"mars",true,0.f);std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+        marsBodies.update(renderer.gl(),*marsCamera,Vector3(0,0,23455),2451545.,"mars",true,0.f);
+        require(terrain->drawn()>0&&terrain->detailed()==terrain->drawn(),"Mars terrain nodes did not take the regional imagery");
+    }
     require(solids.takeEviction()&&!solids.takeEviction(),"Regional loader was not notified of eviction exactly once");
     // Local moons share surface LOD/lighting while retaining their local registry
     // ownership and category; their mesh radius must not be scaled twice.

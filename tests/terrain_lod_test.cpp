@@ -2,6 +2,8 @@
 // to the finest level under the camera, culls the far side, and nodes carry the source's heights.
 #include "terrain.hpp"
 #include "threepp/core/Object3D.hpp"
+#include "threepp/math/Frustum.hpp"
+#include "threepp/math/Plane.hpp"
 #include "threepp/materials/MeshBasicMaterial.hpp"
 #include "threepp/objects/Mesh.hpp"
 #include "threepp/textures/Image.hpp"
@@ -11,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <numbers>
+#include <stdexcept>
 #include <thread>
 using namespace threepp;
 namespace {
@@ -107,6 +110,24 @@ int main(){
         const bool done=risen>=4&&std::all_of(last.begin(),last.end(),[](double h){return std::abs(h)<1||std::abs(h-500)<1;});
         std::printf("morph: %zu nodes on the parents' surface when shown, %ld risen to their own after it\n",first.size(),static_cast<long>(risen));
         check(started&&done,"Split children morph from the parent's surface to their own heights");
+    }
+    { // Review: frustum culling against each node's true bound: a root face's corner lies 0.919 from its
+      // centre, beyond sin(angular radius) = 0.857. A view bounded by a plane just past the cube corner,
+      // facing away from the +x face's centre, still shows that face's corner, so a +x node is drawn.
+        Object3D other;albert::TerrainBody b=body;b.maxLevel=3;albert::Terrain t(other,material,b);
+        const Vector3 corner=Vector3(1,1,1).normalize(),eye=corner.clone().multiplyScalar(1.0001f),n=corner.clone().sub(Vector3(1,0,0)).normalize();
+        Frustum frustum(Plane(n,-n.dot(corner)+.02f),Plane(Vector3(1,0,0),10),Plane(Vector3(-1,0,0),10),Plane(Vector3(0,1,0),10),Plane(Vector3(0,-1,0),10),Plane(Vector3(0,0,1),10));
+        std::size_t last=~0u;int stable=0;for(int i=0;i<20000&&stable<5;++i){t.update(eye,&frustum,true);stable=(t.drawn()==last&&t.pending()==0)?stable+1:0;last=t.drawn();std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+        bool face=false;for(const auto& child:other.children)if(auto* m=dynamic_cast<Mesh*>(child);m&&m->visible&&m->position.x>std::max(m->position.y,m->position.z))face=true;
+        std::printf("past a cube corner: %zu nodes drawn, +x face %s\n",t.drawn(),face?"drawn":"culled");
+        check(face,"A face whose corner is in view is not culled (conservative node bounds)");
+    }
+    { // Review: a height source that throws (a corrupt cache piece) must not terminate the worker: the
+      // nodes are built without its heights, provisional.
+        Object3D other;albert::TerrainBody b=body;b.maxLevel=1;
+        b.heights=[](const std::vector<double>&,const std::vector<double>&,int,std::vector<float>&)->bool{throw std::runtime_error("corrupt piece");};
+        albert::Terrain t(other,material,b);settle(t,Vector3(0,0,10),false);
+        check(t.drawn()==6&&std::abs(t.coveredSolidAngle()-sphere)<1e-9,"A throwing height source leaves the body covered");
     }
     { // Mars nodes straddling 88°: MOLA stops there and the grid alone completes them (review: only the
       // first point was checked, so such nodes stayed provisional and were rebuilt on every download).
