@@ -9,6 +9,8 @@
 #include "providers/space_weather.hpp"
 #include <algorithm>
 #include <chrono>
+#include <deque>
+#include <thread>
 #include <cstring>
 #include <cmath>
 #include <mutex>
@@ -58,6 +60,35 @@ struct FlightServices::Impl {
     }
     // Replay log: the creation and every committed step (u32 ticks, u32 count, then per command u32 kind and three doubles).
     api::FlightLog log;std::string record;
+    // Real time: the pacing thread, its settings, delayed commands and samples.
+    struct Realtime {double rate=1;std::uint32_t sensor=0,actuator=0,every=10;double timeout=0;int missing=0;
+        std::deque<std::pair<std::uint64_t,std::vector<Command>>> queue;std::deque<wire::Response> samples;
+        std::chrono::steady_clock::time_point command;bool policyApplied=false;std::uint64_t late=0,policies=0;double worst=0;};
+    Realtime realtime;std::thread pacer;std::atomic_bool pacing{false};
+    void status(api::RealtimeStatus* o){o->set_running(pacing);o->set_tick(tick);o->set_late_ticks(realtime.late);o->set_worst_lag_seconds(realtime.worst);o->set_policy_events(realtime.policies);}
+    void stopPacing(){pacing=false;if(pacer.joinable())pacer.join();} // Without the mutex held.
+    void pace(){
+        const auto begin=std::chrono::steady_clock::now();std::uint64_t n=0;
+        while(pacing){
+            const auto deadline=begin+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(static_cast<double>(++n)*ph::secondsSinceJ2000(step)/realtime.rate));
+            std::this_thread::sleep_until(deadline);
+            std::optional<wire::Response> out; // Pushed after unlocking: a slow client never holds the flight.
+            {std::lock_guard lock(mutex);if(!flight||!pacing)break;
+            auto& rt=realtime;const auto now=std::chrono::steady_clock::now();
+            const double lag=std::chrono::duration<double>(now-deadline).count();rt.worst=std::max(rt.worst,lag);if(lag>ph::secondsSinceJ2000(step)/rt.rate)++rt.late;
+            if(rt.timeout>0&&!rt.policyApplied&&std::chrono::duration<double>(now-rt.command).count()>rt.timeout){
+                rt.policyApplied=true;
+                if(rt.missing==api::RealtimeRequest::NEUTRAL)rt.queue.push_front({tick,{{wire::gimbal},{wire::torque}}});
+                else if(rt.missing==api::RealtimeRequest::CUTOFF)rt.queue.push_front({tick,{{wire::cutoff}}});
+                if(rt.missing!=api::RealtimeRequest::HOLD)++rt.policies;
+            }
+            std::vector<Command> due;while(!rt.queue.empty()&&rt.queue.front().first<=tick){for(auto& c:rt.queue.front().second)due.push_back(c);rt.queue.pop_front();}
+            if(!run(due,1,[]{return false;}).ok())(void)run({},1,[]{return false;}); // A refused command must not stop the clock.
+            wire::Response r;fill(r);r.reserved=rt.sensor;rt.samples.push_back(r);while(rt.samples.size()>rt.sensor+1)rt.samples.pop_front();
+            if(tick%rt.every==0&&rt.samples.size()==rt.sensor+1)out=rt.samples.front();}
+            if(out)(void)data->push(*out);
+        }
+    }
     void note(const std::vector<Command>& commands,std::uint32_t ticks){
         auto put=[&](const void* p,std::size_t n){record.append(static_cast<const char*>(p),n);};
         const auto count=static_cast<std::uint32_t>(commands.size());put(&ticks,4);put(&count,4);
@@ -162,12 +193,14 @@ FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(st
         if(q.commands&wire::gimbal)commands.push_back({wire::gimbal,q.gimbalPitch,q.gimbalYaw});
         if(q.commands&wire::torque)commands.push_back({wire::torque,q.torqueValue[0],q.torqueValue[1],q.torqueValue[2]});
         std::lock_guard lock(impl_->mutex);
-        if(!impl_->flight){r=wire::Response{};r.status=wire::noFlight;return;}
+        if(!impl_->flight){r=wire::Response{};r.status=wire::noFlight;return true;}
+        if(impl_->pacing){auto& rt=impl_->realtime;rt.queue.push_back({impl_->tick+rt.actuator,std::move(commands)});rt.command=std::chrono::steady_clock::now();rt.policyApplied=false;return false;}
         const auto s=impl_->run(commands,q.ticks,[]{return false;});impl_->fill(r);
         r.status=s.ok()?wire::ok:s.error_code()==grpc::StatusCode::INVALID_ARGUMENT?wire::invalid:wire::precondition;
+        return true;
     });
 }
-FlightServices::~FlightServices()=default;
+FlightServices::~FlightServices(){impl_->stopPacing();impl_->data.reset();}
 grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
     std::vector<std::string> grib,std::vector<ph::SpaceWeatherDay> days,const std::function<bool()>& cancelled,api::FlightSample* out){
     const auto& site=r.site();const ph::Tt t=ph::ttFromUtc(p.utc),stepNs=static_cast<ph::Tt>(std::llround(p.seconds*1e9));
@@ -177,7 +210,7 @@ grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,cons
     catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     made->steps(stepNs,static_cast<ph::Tt>(std::llround(p.coast*1e9)));
     if(cancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
-    std::lock_guard lock(mutex);
+    stopPacing();std::lock_guard lock(mutex);
     flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;this->atmosphere=atmosphere;
     { // The IMU starts with one sample at the pad.
         const auto g=r.imu().grade();imu.emplace(ph::imuModel(g==api::ImuSettings::TACTICAL?ph::ImuGrade::tactical:g==api::ImuSettings::INDUSTRIAL?ph::ImuGrade::industrial:ph::ImuGrade::ideal),r.imu().seed());
@@ -264,6 +297,7 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
         default:return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
     }
     std::lock_guard lock(impl_->mutex);
+    if(impl_->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
     if(auto s=impl_->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok())return s;
     impl_->fill(out);return grpc::Status::OK;
 }
@@ -271,8 +305,20 @@ grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::Empty*,ap
     std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};impl_->fill(out);return grpc::Status::OK;
 }
 grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::Empty*,api::Applied* out){
-    std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+    impl_->stopPacing();std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     impl_->flight.reset();(void)impl_->bridge.submit(core::FlightTelemetry{});const auto reply=wait(impl_->bridge.submit(core::Remove{objectId}));out->set_revision(reply.revision);
     return reply.code==core::Code::Ok||reply.code==core::Code::NotFound?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,reply.message};
+}
+grpc::Status FlightServices::StartRealtime(grpc::ServerContext*,const api::RealtimeRequest* r,api::RealtimeStatus* out){
+    const double rate=r->rate()==0?1.:r->rate();
+    if(!(rate>0&&rate<=100)||!(r->command_timeout_seconds()>=0)||r->sensor_delay_ticks()>100000||r->actuator_delay_ticks()>100000)return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid real-time settings"};
+    impl_->stopPacing();std::lock_guard lock(impl_->mutex);
+    if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+    auto& rt=impl_->realtime;rt=Impl::Realtime{};rt.rate=rate;rt.sensor=r->sensor_delay_ticks();rt.actuator=r->actuator_delay_ticks();rt.every=r->sample_every_ticks()?r->sample_every_ticks():10;
+    rt.timeout=r->command_timeout_seconds();rt.missing=r->missing();rt.command=std::chrono::steady_clock::now();
+    impl_->pacing=true;impl_->pacer=std::thread([this]{impl_->pace();});impl_->status(out);return grpc::Status::OK;
+}
+grpc::Status FlightServices::StopRealtime(grpc::ServerContext*,const api::Empty*,api::RealtimeStatus* out){
+    impl_->stopPacing();std::lock_guard lock(impl_->mutex);impl_->status(out);return grpc::Status::OK;
 }
 }

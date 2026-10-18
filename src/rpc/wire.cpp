@@ -34,16 +34,16 @@ void noDelay(Socket s){int one=1;setsockopt(s,IPPROTO_TCP,TCP_NODELAY,reinterpre
 sockaddr_in loopback(unsigned port){sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(static_cast<unsigned short>(port));a.sin_addr.s_addr=htonl(INADDR_LOOPBACK);return a;}
 }
 struct Server::Impl {
-    Handler handler;Socket listener=invalidSocket;std::atomic<Socket> client{invalidSocket};std::atomic_bool stopping{false};unsigned port=0;std::thread thread;
+    Handler handler;Socket listener=invalidSocket;std::atomic<Socket> client{invalidSocket};std::atomic_bool stopping{false};unsigned port=0;std::thread thread;std::mutex sending;
     void serve(){
         while(!stopping){
             const Socket c=::accept(listener,nullptr,nullptr);if(c==invalidSocket){if(stopping)return;continue;}
             noDelay(c);client=c;Request q;Response r;
             while(!stopping&&exact(c,reinterpret_cast<char*>(&q),sizeof q,false)){
                 if(std::memcmp(q.magic,"ALBQ",4)!=0)break; // Unknown framing: drop the client.
-                handler(q,r);if(!exact(c,reinterpret_cast<char*>(&r),sizeof r,true))break;
+                if(handler(q,r)){std::lock_guard lock(sending);if(!exact(c,reinterpret_cast<char*>(&r),sizeof r,true))break;}
             }
-            client=invalidSocket;closeSocket(c);
+            {std::lock_guard lock(sending);client=invalidSocket;}closeSocket(c);
         }
     }
 };
@@ -65,6 +65,10 @@ Server::~Server(){
     impl_->thread.join();
 }
 unsigned Server::port()const{return impl_->port;}
+bool Server::push(const Response& r){
+    std::lock_guard lock(impl_->sending);const Socket c=impl_->client;
+    return c!=invalidSocket&&exact(c,const_cast<char*>(reinterpret_cast<const char*>(&r)),sizeof r,true);
+}
 struct Connection::Impl {Socket s=invalidSocket;};
 Connection::Connection(unsigned port):impl_(std::make_unique<Impl>()){
     startSockets();impl_->s=::socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);auto a=loopback(port);
@@ -72,6 +76,12 @@ Connection::Connection(unsigned port):impl_(std::make_unique<Impl>()){
     noDelay(impl_->s);
 }
 Connection::~Connection(){closeSocket(impl_->s);}
+void Connection::send(const Request& q){if(!exact(impl_->s,const_cast<char*>(reinterpret_cast<const char*>(&q)),sizeof q,true))throw std::runtime_error("Flight data plane closed");}
+Response Connection::receive(){
+    Response r;if(!exact(impl_->s,reinterpret_cast<char*>(&r),sizeof r,false))throw std::runtime_error("Flight data plane closed");
+    if(std::memcmp(r.magic,"ALBR",4)!=0)throw std::runtime_error("Unexpected flight data frame");
+    return r;
+}
 Response Connection::exchange(const Request& q){
     Response r;
     if(!exact(impl_->s,const_cast<char*>(reinterpret_cast<const char*>(&q)),sizeof q,true)||!exact(impl_->s,reinterpret_cast<char*>(&r),sizeof r,false))throw std::runtime_error("Flight data plane closed");

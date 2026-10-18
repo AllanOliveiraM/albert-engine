@@ -306,6 +306,14 @@ em [wire.hpp](../src/rpc/wire.hpp) é um cliente pronto. Medido: ~30 µs por tro
 1 ms no teste e, no aplicativo com clima ao vivo, 600 mil trocas a 1 kHz (10 min de voo) em 46 s
 sem perda (`albert_flight_client --wire`).
 
+**Tempo real.** `StartRealtime` passa a avançar o voo pelo relógio de parede (`rate` vezes o
+tempo real, até 100) e a empurrar pelo plano de dados uma amostra a cada `sample_every_ticks`,
+descrevendo o voo `sensor_delay_ticks` antes. Quadros de comando (sem resposta; `ticks` ignorado)
+valem `actuator_delay_ticks` depois de chegarem. Sem comandos por `command_timeout_seconds`, a
+política `missing` age uma vez: `HOLD` mantém, `NEUTRAL` zera cardã e torque, `CUTOFF` desliga o
+motor. `Step` é recusado enquanto isso; `StopRealtime` informa ticks, ticks atrasados e o maior
+atraso. Os passos entram no log de replay e o voo se reproduz exatamente.
+
 **Replay.** `ExportFlight` devolve, em pedaços de até 1 MiB, um `FlightLog` com o pedido de
 criação (instante resolvido, semente do IMU), os dados de ar usados (GRIB2 das duas horas do GFS e
 os dias de clima espacial) e cada passo com seus comandos na ordem em que chegaram, pelo gRPC ou

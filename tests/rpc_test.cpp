@@ -157,6 +157,26 @@ int main(int argc,char** argv){try{
             std::printf("data plane: %.1f us per 1 ms tick (%.0fx real time), tick %llu\n",each,1000/each,static_cast<unsigned long long>(r.tick));
             require(r.status==albert::wire::ok&&r.tick==3000+n&&each<500,"Data plane throughput");
         }
+        { // Real time: paced ticks, delayed samples and commands, missing-command policy.
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,create,&s).ok(),"Real-time flight");}
+            albert::wire::Connection link(s.data_port());api::RealtimeStatus st;
+            api::RealtimeRequest rq;rq.set_rate(5);rq.set_sensor_delay_ticks(5);rq.set_actuator_delay_ticks(20);rq.set_sample_every_ticks(10);rq.set_command_timeout_seconds(.1);rq.set_missing(api::RealtimeRequest::NEUTRAL);
+            {grpc::ClientContext c;require(flight->StartRealtime(&c,rq,&st).ok()&&st.running(),"StartRealtime");}
+            albert::wire::Response r{};for(int i=0;i<30;++i){r=link.receive();require(r.tick%10==5&&r.reserved==5,"Delayed samples every 10 ticks");}
+            {grpc::ClientContext c;api::StepRequest q;q.set_ticks(1);require(flight->Step(&c,q,&s).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Step during real time");}
+            const std::uint64_t before=r.tick;albert::wire::Request ignite;ignite.commands=albert::wire::ignite|albert::wire::gimbal;ignite.gimbalPitch=.02;link.send(ignite);
+            do r=link.receive();while(!(r.flags&albert::wire::burning));
+            std::printf("real time: ignition commanded after sample %llu, first burning sample %llu\n",static_cast<unsigned long long>(before),static_cast<unsigned long long>(r.tick));
+            require(r.tick>=before+25,"Actuator and sensor delays");
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&s.gimbal().pitch_radians()==0&&s.burning(),"Missing commands: neutral gimbal, engine kept");}
+            {grpc::ClientContext c;require(flight->StopRealtime(&c,{},&st).ok()&&!st.running()&&st.policy_events()==1&&st.tick()>before,"StopRealtime");}
+            std::printf("real time: %llu ticks, %llu late, worst lag %.2f ms\n",static_cast<unsigned long long>(st.tick()),static_cast<unsigned long long>(st.late_ticks()),st.worst_lag_seconds()*1e3);
+            {grpc::ClientContext c;api::StepRequest q;q.set_ticks(1);require(flight->Step(&c,q,&s).ok(),"Step after real time");}
+            std::vector<api::FlightLogChunk> chunks;{grpc::ClientContext c;auto reader=flight->ExportFlight(&c,{});api::FlightLogChunk k;while(reader->Read(&k))chunks.push_back(k);require(reader->Finish().ok(),"Export real time");}
+            api::FlightSample replayed;{grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&replayed);for(const auto& k:chunks)writer->Write(k);writer->WritesDone();
+                require(writer->Finish().ok()&&replayed.state_hash()==s.state_hash(),"A real-time flight replays exactly");}
+        }
         { // Replay: export, recreate without network, same hash; air data travels inside the log.
             auto exported=[&]{grpc::ClientContext c;auto reader=flight->ExportFlight(&c,{});api::FlightLogChunk k;std::vector<api::FlightLogChunk> v;while(reader->Read(&k))v.push_back(k);require(reader->Finish().ok(),"ExportFlight");return v;};
             auto replay=[&](const std::vector<api::FlightLogChunk>& v,api::FlightSample& out){grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&out);for(const auto& k:v)writer->Write(k);writer->WritesDone();return writer->Finish();};

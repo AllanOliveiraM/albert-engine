@@ -240,6 +240,17 @@ message FlightLog {
   bytes steps=5; uint64 state_hash=6; uint64 tick=7; string atmosphere=8;
 }
 message FlightLogChunk { bytes data=1; } // A serialised FlightLog in pieces of up to 1 MiB.
+// Real time: Albert advances the flight on the wall clock (rate × real time) and pushes one
+// sample every sample_every_ticks over the data plane, describing the flight sensor_delay_ticks
+// earlier. Command frames (ticks ignored, no reply) take effect actuator_delay_ticks after they
+// arrive. Without commands for command_timeout_seconds the missing-command policy applies once.
+// Step is refused meanwhile; steps stay in the replay log.
+message RealtimeRequest {
+  double rate=1; uint32 sensor_delay_ticks=2; uint32 actuator_delay_ticks=3; double command_timeout_seconds=4;
+  enum Missing { HOLD=0; NEUTRAL=1; CUTOFF=2; } // NEUTRAL: gimbal and torque to zero; CUTOFF: engine off.
+  Missing missing=5; uint32 sample_every_ticks=6;  // Defaults: rate 1, every 10 ticks.
+}
+message RealtimeStatus { bool running=1; uint64 tick=2; uint64 late_ticks=3; double worst_lag_seconds=4; uint64 policy_events=5; }
 service FlightService {
   rpc CreateFlight(CreateFlightRequest) returns (FlightSample); // Replaces any current flight.
   rpc Step(StepRequest) returns (FlightSample);
@@ -247,4 +258,6 @@ service FlightService {
   rpc EndFlight(Empty) returns (Applied);                       // Removes the vehicle from the scene.
   rpc ExportFlight(Empty) returns (stream FlightLogChunk);
   rpc ReplayFlight(stream FlightLogChunk) returns (FlightSample); // Becomes the current flight.
+  rpc StartRealtime(RealtimeRequest) returns (RealtimeStatus);
+  rpc StopRealtime(Empty) returns (RealtimeStatus);
 }

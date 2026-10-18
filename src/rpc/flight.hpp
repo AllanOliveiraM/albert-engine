@@ -16,6 +16,8 @@ public:
     grpc::Status EndFlight(grpc::ServerContext*,const ::albert::v1::Empty*,::albert::v1::Applied*) override;
     grpc::Status ExportFlight(grpc::ServerContext*,const ::albert::v1::Empty*,grpc::ServerWriter<::albert::v1::FlightLogChunk>*) override;
     grpc::Status ReplayFlight(grpc::ServerContext*,grpc::ServerReader<::albert::v1::FlightLogChunk>*,::albert::v1::FlightSample*) override;
+    grpc::Status StartRealtime(grpc::ServerContext*,const ::albert::v1::RealtimeRequest*,::albert::v1::RealtimeStatus*) override;
+    grpc::Status StopRealtime(grpc::ServerContext*,const ::albert::v1::Empty*,::albert::v1::RealtimeStatus*) override;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };
