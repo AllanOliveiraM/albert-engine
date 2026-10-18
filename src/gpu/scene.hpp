@@ -18,6 +18,8 @@ public:
     // Clears target (scene background) and depth, then draws, recording into encoder.
     void render(threepp::Scene& scene,threepp::Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder);
     [[nodiscard]] unsigned drawn()const; // Draw calls in the last render.
+    [[nodiscard]] double gpuMilliseconds()const; // GPU time of a recent scene pass (timestamp queries), or -1.
+    void submitted(); // Call once the encoder given to render() has been submitted.
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

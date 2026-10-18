@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 namespace albert::gpu {
 namespace {std::atomic<unsigned> errorCount{0};}
 unsigned errors(){return errorCount.load();}
@@ -44,8 +45,10 @@ Context::Context(GLFWwindow* window){
     if(!(adapter_=static_cast<WGPUAdapter>(adapter.handle)))throw std::runtime_error("No WebGPU adapter: "+adapter.message);
     WGPUAdapterInfo info{};if(wgpuAdapterGetInfo(adapter_,&info)==WGPUStatus_Success){adapterName_=text(info.device);wgpuAdapterInfoFreeMembers(info);}
     WGPUDeviceDescriptor dd{};dd.label=view("Albert");
-    const WGPUFeatureName filterable=WGPUFeatureName_Float32Filterable; // Linear filtering of float textures (heights, LUTs).
-    if(wgpuAdapterHasFeature(adapter_,filterable)){dd.requiredFeatureCount=1;dd.requiredFeatures=&filterable;}
+    // Linear filtering of float textures (heights, LUTs); GPU timestamps for frame statistics.
+    std::vector<WGPUFeatureName> features;
+    for(auto f:{WGPUFeatureName_Float32Filterable,WGPUFeatureName_TimestampQuery})if(wgpuAdapterHasFeature(adapter_,f))features.push_back(f);
+    dd.requiredFeatureCount=features.size();dd.requiredFeatures=features.data();
     // Called from inside wgpu: never throw across it. Validation errors are bugs; they are counted and logged.
     dd.uncapturedErrorCallbackInfo.callback=[](const WGPUDevice*,WGPUErrorType,WGPUStringView m,void*,void*){++errorCount;std::fprintf(stderr,"WebGPU: %s\n",text(m).c_str());};
     WGPURequestDeviceCallbackInfo dc{};dc.mode=WGPUCallbackMode_AllowProcessEvents;dc.userdata1=&device;

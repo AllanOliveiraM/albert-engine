@@ -8,6 +8,11 @@
 #include "threepp/canvas/Monitor.hpp"
 #include "threepp/extras/imgui/ImguiContext.hpp"
 #include <GLFW/glfw3.h>
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
 #include <imgui_impl_wgpu.h>
 using namespace threepp;
 struct albert::Display::Impl {
@@ -59,17 +64,35 @@ float albert::Display::aspect()const{return impl_->canvas?impl_->canvas->aspect(
 void albert::Display::onResize(std::function<void(WindowSize)> f){if(impl_->canvas)impl_->canvas->onWindowResize(std::move(f));else impl_->window->onResize(std::move(f));}
 void albert::Display::setExposure(float value){if(impl_->renderer)impl_->renderer->toneMappingExposure=value;else impl_->scene->exposure=value;}
 float albert::Display::exposure()const{return impl_->renderer?impl_->renderer->toneMappingExposure:impl_->scene->exposure;}
+namespace {
+// ALBERT_FRAME_STATS=1: mean, p99 and worst frame time every 300 frames (stdout).
+double workMs=0,presentMs=0,gpuMs=-1; // Per-frame parts on WebGPU: app work and recording; acquire, submit and present; scene pass on the GPU.
+void frameStats(){
+    static const bool on=std::getenv("ALBERT_FRAME_STATS")!=nullptr;if(!on)return;
+    static std::vector<double> times,gpu;static double work=0,present=0;static auto last=std::chrono::steady_clock::now();if(gpuMs>=0)gpu.push_back(gpuMs);
+    const auto now=std::chrono::steady_clock::now();times.push_back(std::chrono::duration<double,std::milli>(now-last).count());last=now;work+=workMs;present+=presentMs;
+    if(times.size()<300)return;
+    std::sort(times.begin(),times.end());double sum=0;for(double t:times)sum+=t;const double n=static_cast<double>(times.size());
+    std::sort(gpu.begin(),gpu.end());const double g50=gpu.empty()?-1:gpu[gpu.size()/2],g99=gpu.empty()?-1:gpu[gpu.size()*99/100];
+    std::printf("frames: mean %.2f ms, p99 %.2f ms, worst %.2f ms (work %.2f, present %.2f; GPU scene median %.2f, p99 %.2f)\n",sum/n,times[times.size()*99/100],times.back(),work/n,present/n,g50,g99);std::fflush(stdout);times.clear();gpu.clear();work=present=0;
+}
+}
 bool albert::Display::frame(const std::function<void()>& work){
-    auto& d=*impl_;
+    auto& d=*impl_;frameStats();
     if(d.canvas)return d.canvas->animateOnce(work);
     if(!d.window->isOpen())return false;
     d.window->poll();
+    const auto t0=std::chrono::steady_clock::now();
     if(!(d.target=d.context->acquire())){unsigned w,h;d.framebuffer(w,h);d.context->resize(static_cast<int>(w),static_cast<int>(h));return d.window->isOpen();}
+    const auto t1=std::chrono::steady_clock::now();
     d.encoder=wgpuDeviceCreateCommandEncoder(d.context->device(),nullptr);d.drawnTarget=false;
     work();
     if(!d.drawnTarget)d.pass(WGPULoadOp_Clear);
-    WGPUCommandBuffer commands=wgpuCommandEncoderFinish(d.encoder,nullptr);wgpuQueueSubmit(d.context->queue(),1,&commands);
-    wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(d.encoder);d.encoder=nullptr;d.context->present();d.target=nullptr;
+    const auto t2=std::chrono::steady_clock::now();
+    WGPUCommandBuffer commands=wgpuCommandEncoderFinish(d.encoder,nullptr);wgpuQueueSubmit(d.context->queue(),1,&commands);d.scene->submitted();
+    wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(d.encoder);d.encoder=nullptr;d.context->present();d.target=nullptr;gpuMs=d.scene->gpuMilliseconds();
+    const auto t3=std::chrono::steady_clock::now();
+    workMs=std::chrono::duration<double,std::milli>(t2-t1).count();presentMs=std::chrono::duration<double,std::milli>((t1-t0)+(t3-t2)).count();
     return d.window->isOpen();
 }
 void albert::Display::clear(){auto& d=*impl_;if(d.renderer)d.renderer->clear();else if(d.encoder)d.pass(WGPULoadOp_Clear);}
