@@ -188,7 +188,11 @@ message CreateFlightRequest {
   // 2 h of now, else (or if GFS is unreachable) the 1976 standard atmosphere.
   enum Weather { WEATHER_AUTOMATIC=0; STANDARD_ATMOSPHERE=1; LIVE_GFS=2; }
   Weather weather=11;
+  ImuSettings imu=12;
 }
+// Inertial measurement unit and barometer errors (IEEE 952 terms, representative grades);
+// the seed makes the noise reproducible.
+message ImuSettings { enum Grade { IDEAL=0; TACTICAL=1; INDUSTRIAL=2; } Grade grade=1; uint64 seed=2; }
 message Gimbal { double pitch_radians=1; double yaw_radians=2; } // + pitch: nose up; + yaw: nose right.
 message FlightCommand {
   oneof command {
@@ -220,6 +224,11 @@ message FlightSample {
   uint64 state_hash=32;                 // Same commands and steps reproduce it.
   string vehicle=33; double step_seconds=34;
   string atmosphere=35; Vector3 wind_ned_meters_per_second=36; // Source of air data; wind toward NED at the vehicle.
+  // Measured by the configured IMU over the last Step (body axes): mean specific force and
+  // rate, velocity and angle increments; static pressure with barometer errors. Equal to the
+  // ideal values for IDEAL.
+  Vector3 measured_specific_force_meters_per_second2=37; Vector3 measured_angular_rate_radians_per_second=38;
+  Vector3 delta_velocity_meters_per_second=39; Vector3 delta_angle_radians=40; double measured_static_pressure_pascals=41;
 }
 service FlightService {
   rpc CreateFlight(CreateFlightRequest) returns (FlightSample); // Replaces any current flight.

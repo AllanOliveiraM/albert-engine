@@ -1,5 +1,6 @@
 #include "physics/vehicles.hpp"
 #include "physics/msis.hpp"
+#include "physics/sensors.hpp"
 #include "gravity_turn.hpp"
 #include <erfa.h>
 #include <chrono>
@@ -250,8 +251,13 @@ int main(){try{
         require(a.state().propellant==0&&!a.state().burning&&b.state().propellant==0&&!b.state().burning,"Depleted at the step boundary");
         std::printf("rocket equation: one 10 s step %.6f, 10 ms steps %.9f, exact %.9f m/s\n",norm(a.state().velocity),norm(b.state().velocity),1e3*std::log(2.));
         near(norm(a.state().velocity),1e3*std::log(2.),2,"Rocket equation, one RK4 step"); // Simpson error 1.3 m/s; thrust lost in k4 would cost ~140.near(norm(b.state().velocity),1e3*std::log(2.),1e-7,"Rocket equation");
-        const Flight c=run(second/1000,.1);const double h0=2000*.1,i1=1000,expected=h0*std::pow(i1/2000.,10*16./100); // ṁ l²/|İ| = 1.6
+        Flight c=run(second/1000,.1);const double h0=2000*.1,i1=1000,expected=h0*std::pow(i1/2000.,10*16./100); // ṁ l²/|İ| = 1.6
         near(i1*c.state().rate.y,expected,1e-9*h0,"Jet damping and inertia loss");
+        // IMU increments: the whole burn's specific-force integral (no gravity) and the angle
+        // swept by the damped rate, ∫ω dt = H0/(1.6 |İ| I0^1.6) (I0^1.6 - I1^1.6).
+        const auto inc=c.increments();near(inc.seconds,10,1e-12,"Increment span");near(inc.velocity.x,1e3*std::log(2.),1e-7,"Velocity increment");
+        near(inc.angle.y,h0/(1.6*100*std::pow(2000.,1.6))*(std::pow(2000.,1.6)-std::pow(1000.,1.6)),1e-9,"Angle increment");
+        require(c.increments().seconds==0,"Increments reset when read");
     }
     // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
     // against 10 ms steps.
@@ -263,6 +269,33 @@ int main(){try{
         const double gap=norm(fine.state().position-coarse.state().position);
         std::printf("coast: 1 s steps differ %.4f m from 10 ms after one orbit, %.0fx faster\n",gap,std::chrono::duration<double>(t1-t0).count()/std::chrono::duration<double>(t2-t1).count());
         near(gap,0,.01,"Coast steps");
+        Flight spinFine(l,e,s),spinCoarse(l,e,s);spinFine.steps(second/1000);spinCoarse.steps(second/1000,second);spinFine.torque({0,2e5,0});spinCoarse.torque({0,2e5,0});
+        run(spinFine,10*second);run(spinCoarse,10*second);
+        require(spinFine.hash()==spinCoarse.hash(),"Commanded torque keeps the fixed step");
+    }
+    // IMU noise: overlapping Allan variance of a still gyro (10 Hz, 20000 s) fitted with
+    // σ²(τ) = N²/τ + K²τ/3 returns the configured angle random walk and rate random walk
+    // within 5%; the Gauss-Markov bias has its configured spread and correlation time.
+    {
+        ImuModel m;m.gyroscope.white=1e-3;m.gyroscope.walk=1e-5;Imu imu(m,42);constexpr double dt=.1;constexpr std::size_t n=200000;
+        std::vector<double> angle(n+1);for(std::size_t i=0;i<n;++i)angle[i+1]=angle[i]+imu.measure(dt,{},{},{},{},0).rate.x*dt;
+        double saa=0,sab=0,sbb=0,sya=0,syb=0; // Least squares on the relative error.
+        for(std::size_t k=1;k<n/10;k=std::max(k+1,k*5/4)){
+            const double tau=k*dt;double sum=0;for(std::size_t i=0;i+2*k<=n;++i){const double d=angle[i+2*k]-2*angle[i+k]+angle[i];sum+=d*d;}
+            const double v=sum/(2*tau*tau*static_cast<double>(n+1-2*k)),fa=1/tau/v,fb=tau/v;saa+=fa*fa;sab+=fa*fb;sbb+=fb*fb;sya+=fa;syb+=fb;
+        }
+        const double det=saa*sbb-sab*sab,a=(sya*sbb-syb*sab)/det,b=(syb*saa-sya*sab)/det;
+        std::printf("Allan: angle random walk %.4g (1e-3), rate random walk %.4g (1e-5)\n",std::sqrt(a),std::sqrt(3*b));
+        near(std::sqrt(a)/1e-3,1,.05,"Angle random walk from the Allan variance");near(std::sqrt(3*b)/1e-5,1,.05,"Rate random walk from the Allan variance");
+        ImuModel g;g.gyroscope.instability=1e-3;g.gyroscope.correlation=10;Imu markov(g,7);std::vector<double> x(n);
+        for(auto& v:x)v=markov.measure(dt,{},{},{},{},0).rate.y;
+        double mean=0,var=0,lag=0;for(double v:x)mean+=v/n;for(double v:x)var+=(v-mean)*(v-mean)/n;for(std::size_t i=0;i+100<n;++i)lag+=(x[i]-mean)*(x[i+100]-mean)/(n-100);
+        std::printf("Gauss-Markov: sigma %.4g (1e-3), correlation at 10 s %.3f (%.3f)\n",std::sqrt(var),lag/var,std::exp(-1.));
+        near(std::sqrt(var)/1e-3,1,.05,"Gauss-Markov spread");near(lag/var,std::exp(-1.),.05,"Gauss-Markov correlation time");
+        Imu again(m,42),other(m,43);const auto first=Imu(m,42).measure(dt,{1,2,3},{},{},{},1e5);
+        require(again.measure(dt,{1,2,3},{},{},{},1e5).specificForce.x==first.specificForce.x&&other.measure(dt,{1,2,3},{},{},{},1e5).rate.x!=first.rate.x,"Seeded noise");
+        Imu ideal(imuModel(ImuGrade::ideal),1);const auto r=ideal.measure(dt,{1,2,3},{.1,.2,.3},{.1,.2,.3},{.01,.02,.03},101325);
+        require(r.specificForce.z==3&&r.rate.y==.2&&r.deltaVelocity.x==.1&&r.deltaAngle.z==.03&&r.pressure==101325,"Ideal IMU is exact");
     }
     // The example flight computer (examples/gravity_turn.hpp) flies the generic launcher to orbit at 50 Hz.
     {

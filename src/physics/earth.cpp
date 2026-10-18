@@ -44,12 +44,13 @@ M3 nedFromFixed(double lat,double lon){
 namespace {
 #include "egm2008.inc"
 constexpr std::size_t packed(int n,int m){return static_cast<std::size_t>(n*(n+1)/2+m);}
-struct Field {std::array<double,packed(egm2008Degree+1,0)> c{},s{};}; // De-normalised.
+struct Field {std::array<double,packed(egm2008Degree+1,0)> c{},s{};std::array<double,packed(egm2008Degree+2,0)> ka{},kb{};}; // De-normalised; recursion factors.
 const Field& field(){
     static const Field f=[]{Field r;
         for(int n=0;n<=egm2008Degree;++n)for(int m=0;m<=n;++m){
             double q=(m?2.:1.)*(2*n+1);for(int k=n-m+1;k<=n+m;++k)q/=k;const double k=std::sqrt(q);
             r.c[packed(n,m)]=egm2008[packed(n,m)][0]*k;r.s[packed(n,m)]=egm2008[packed(n,m)][1]*k;}
+        for(int n=2;n<=egm2008Degree+1;++n)for(int m=0;m<=n-2;++m){r.ka[packed(n,m)]=(2.*n-1)/(n-m);r.kb[packed(n,m)]=(n+m-1.)/(n-m);}
         r.c[0]=1;return r;}();
     return f;
 }
@@ -58,14 +59,14 @@ V3 harmonics(int degree,V3 r){ // Montenbruck & Gill, Satellite Orbits §3.2.
     if(degree<0||degree>egm2008Degree)throw std::invalid_argument("EGM2008 degree out of range");
     constexpr double gm=3.986004415e14,a=6378136.3;const Field& f=field();
     const int top=degree+1;const double r2=dot(r,r),rho=a*a/r2,x0=a*r.x/r2,y0=a*r.y/r2,z0=a*r.z/r2;
-    std::array<double,packed(egm2008Degree+2,0)> v{},w{};
-    v[0]=a/std::sqrt(r2);
+    std::array<double,packed(egm2008Degree+2,0)> v,w; // Every entry read is written first.
+    v[0]=a/std::sqrt(r2);w[0]=0;
     for(int m=0;m<=top;++m){
         if(m){const double vm=v[packed(m-1,m-1)],wm=w[packed(m-1,m-1)];v[packed(m,m)]=(2*m-1)*(x0*vm-y0*wm);w[packed(m,m)]=(2*m-1)*(x0*wm+y0*vm);}
         if(m<top){v[packed(m+1,m)]=(2*m+1)*z0*v[packed(m,m)];w[packed(m+1,m)]=(2*m+1)*z0*w[packed(m,m)];}
         for(int n=m+2;n<=top;++n){
-            v[packed(n,m)]=((2*n-1)*z0*v[packed(n-1,m)]-(n+m-1)*rho*v[packed(n-2,m)])/(n-m);
-            w[packed(n,m)]=((2*n-1)*z0*w[packed(n-1,m)]-(n+m-1)*rho*w[packed(n-2,m)])/(n-m);
+            const std::size_t i=packed(n,m),i1=packed(n-1,m),i2=packed(n-2,m);const double ka=f.ka[i]*z0,kb=f.kb[i]*rho;
+            v[i]=ka*v[i1]-kb*v[i2];w[i]=ka*w[i1]-kb*w[i2];
         }
     }
     V3 acc;

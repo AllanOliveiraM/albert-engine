@@ -41,7 +41,9 @@ std::vector<GribField> decodeGrib2(std::string_view b){
             }else if(number==5){
                 if(be(b,s+9,2)!=0)throw std::runtime_error("Unsupported GRIB2 packing (template 5.0 only)");
                 if(be(b,s+5,4)!=static_cast<std::uint64_t>(f.ni)*static_cast<std::uint64_t>(f.nj))throw std::runtime_error("GRIB2 point count mismatch");
+                if(static_cast<std::uint64_t>(f.ni)*static_cast<std::uint64_t>(f.nj)>(1u<<22))throw std::runtime_error("GRIB2 grid too large"); // A global 0.25° grid has 1.04 M points.
                 r=std::bit_cast<float>(static_cast<std::uint32_t>(be(b,s+11,4)));e=std::ldexp(1.,static_cast<int>(signedValue(b,s+15,2)));d=std::pow(10.,-static_cast<double>(signedValue(b,s+17,2)));bits=static_cast<unsigned char>(b[s+19]);packing=true;
+                if(bits>32)throw std::runtime_error("Unsupported GRIB2 bit width");
             }else if(number==6){if(static_cast<unsigned char>(b[s+5])!=255)throw std::runtime_error("GRIB2 bitmaps are not supported");}
             else if(number==7){
                 if(!grid||!product||!packing)throw std::runtime_error("GRIB2 data before its definition");
@@ -98,29 +100,30 @@ std::shared_ptr<const physics::Weather> Gfs::around(double lat,double lon,double
     const double south=std::max(-90.,clat-6),north=std::min(90.,clat+6),west=clon-6,east=clon+6;
     auto stamp=[](double t,bool hour){const auto c=time::civil(t);char s[16];std::snprintf(s,sizeof s,hour?"%04d%02d%02d%02d":"%04d%02d%02d",c.year,c.month,c.day,c.hour);return std::string(s);};
     const double cycle0=std::floor(utc/21600.)*21600.;std::string last;
+    auto complete=[](const std::vector<GribField>& f){try{return !f.empty()&&!gfsGrid({f},{}).times.empty();}catch(const std::exception&){return false;}};
     for(int back=0;back<5;++back){
         const double cycle=cycle0-back*21600.;const int k=static_cast<int>(std::floor((utc-cycle)/3600.));
         if(k<0||k+1>120)continue;
         const std::string day=stamp(cycle,false),hh=stamp(cycle,true).substr(8,2);
-        char name[64];std::snprintf(name,sizeof name,"gfs.t%sz.pgrb2.0p25.f%03d",hh.c_str(),k+1);
-        try{transport_("https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs."+day+"/"+hh+"/atmos/"+name+".idx",progress);}catch(const std::exception& e){last=e.what();continue;} // Not published yet.
-        std::vector<std::vector<GribField>> hours;
-        for(int f=k;f<=k+1;++f){
-            char file[64];std::snprintf(file,sizeof file,"gfs.t%sz.pgrb2.0p25.f%03d",hh.c_str(),f);
-            std::ostringstream key;key<<"gfs-"<<day<<hh<<"-f"<<f<<"-"<<south<<"_"<<west<<".grb2";const auto path=cache_/key.str();
-            std::string bytes;
-            if(std::ifstream in{path,std::ios::binary})bytes.assign(std::istreambuf_iterator<char>(in),{});
-            std::vector<GribField> fields;
-            try{fields=decodeGrib2(bytes);}catch(const std::exception&){fields.clear();}
-            if(fields.empty()){
+        auto path=[&](int f){std::ostringstream key;key<<"gfs-"<<day<<hh<<"-f"<<f<<"-"<<south<<"_"<<west<<".grb2";return cache_/key.str();};
+        std::vector<std::vector<GribField>> hours(2);
+        for(int i=0;i<2;++i){std::string bytes;if(std::ifstream in{path(k+i),std::ios::binary})bytes.assign(std::istreambuf_iterator<char>(in),{});
+            try{hours[static_cast<std::size_t>(i)]=decodeGrib2(bytes);}catch(const std::exception&){}
+            if(!complete(hours[static_cast<std::size_t>(i)]))hours[static_cast<std::size_t>(i)].clear();}
+        if(hours[0].empty()||hours[1].empty()){ // Not cached completely: needs the cycle published.
+            char name[64];std::snprintf(name,sizeof name,"gfs.t%sz.pgrb2.0p25.f%03d",hh.c_str(),k+1);
+            try{transport_("https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs."+day+"/"+hh+"/atmos/"+name+".idx",progress);}catch(const std::exception& e){last=e.what();continue;}
+            for(int i=0;i<2;++i){if(!hours[static_cast<std::size_t>(i)].empty())continue;
+                char file[64];std::snprintf(file,sizeof file,"gfs.t%sz.pgrb2.0p25.f%03d",hh.c_str(),k+i);
                 std::ostringstream url;url<<"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?dir=%2Fgfs."<<day<<"%2F"<<hh<<"%2Fatmos&file="<<file<<"&var_HGT=on&var_TMP=on&var_UGRD=on&var_VGRD=on&var_SPFH=on";
                 for(const char* l:levels)url<<"&lev_"<<l<<"_mb=on";
                 url<<"&subregion=&toplat="<<north<<"&leftlon="<<west<<"&rightlon="<<east<<"&bottomlat="<<south;
-                bytes=transport_(url.str(),progress);fields=decodeGrib2(bytes); // Throws on an error page.
+                const std::string bytes=transport_(url.str(),progress);auto fields=decodeGrib2(bytes); // Throws on an error page.
+                if(!complete(fields))throw std::runtime_error("Incomplete GFS response");
                 std::error_code ec;std::filesystem::create_directories(cache_,ec);
-                if(!ec){const auto partial=path.string()+".tmp";{std::ofstream o{partial,std::ios::binary};o.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));}std::filesystem::rename(partial,path,ec);}
+                if(!ec){const auto partial=path(k+i).string()+".tmp";{std::ofstream o{partial,std::ios::binary};o.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));}std::filesystem::rename(partial,path(k+i),ec);}
+                hours[static_cast<std::size_t>(i)]=std::move(fields);
             }
-            hours.push_back(std::move(fields));
         }
         std::error_code ec; // Drop downloads older than two days.
         for(const auto& entry:std::filesystem::directory_iterator(cache_,ec))

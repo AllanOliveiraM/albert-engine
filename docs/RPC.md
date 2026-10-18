@@ -264,7 +264,12 @@ NOAA GFS ao vivo quando o Albert segue o relógio real e o instante está a até
 (ou a US Standard Atmosphere 1976 sem índices solares); `LIVE_GFS` exige o GFS e falha com `UNAVAILABLE` sem ele;
 `STANDARD_ATMOSPHERE` força a de 1976. Fora desse caso, acima do GFS e sem ele, o ar vem do
 NRLMSISE-00 com os índices solares e geomagnéticos da CelesTrak para o instante do voo. A amostra informa a fonte (`atmosphere`) e o vento
-no veículo, e o painel **Voo** no canto inferior direito mostra estado, vento e fonte. Cada `Step` aplica os
+no veículo, e o painel **Voo** no canto inferior direito mostra estado, vento e fonte.
+
+`imu` escolhe os erros do IMU e do barômetro (`IDEAL`, `TACTICAL`, `INDUSTRIAL`) e a semente do
+ruído. A amostra traz, além dos valores ideais, os medidos sobre o último `Step`: força específica
+e taxa médias, incrementos de velocidade e ângulo e pressão estática; com `IDEAL` coincidem com os
+ideais. Os índices solares do NRLMSISE-00 acompanham o instante do voo. Cada `Step` aplica os
 comandos — todos ou nenhum — e avança `ticks` passos (até 600 mil; uma chamada cancelada ou
 vencida não altera o voo); a resposta traz a
 amostra do novo tick. Assim, comandos do tick *k* produzem os sensores do tick *k+1*,

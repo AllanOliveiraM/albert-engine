@@ -74,7 +74,7 @@ public:
     // body rates relative to Earth (rad/s).
     static State free(const Environment& e,const Vehicle& v,Tt time,Geodetic g,V3 nedVelocity,V3 euler,V3 earthRelativeRate={});
     // RK4 over dt: one step, or steps of at most `fixed` once steps() is set, lengthened up
-    // to `coast` while ballistic above the atmosphere. Stops right after release from the
+    // to `coast` while ballistic and torque-free above the atmosphere. Stops right after release from the
     // pad, propellant depletion or touchdown and returns the time advanced (0 at release).
     Tt advance(Tt dt);
     void steps(Tt fixed,Tt coast=0){step_=fixed;coast_=coast;}
@@ -86,13 +86,17 @@ public:
     Sample sample()const;
     double massFlow()const; // Current propellant consumption (kg/s).
     std::uint64_t hash()const;
+    // Body-axis integrals of specific force and angular rate since the last call (what a
+    // strapdown IMU reports as velocity and angle increments), RK4-weighted.
+    struct Increments {V3 velocity,angle;double seconds=0;};
+    Increments increments(){const Increments r=increments_;increments_={};return r;}
 private:
-    struct Rate {V3 v,a;Q q;V3 w;double m;};
+    struct Rate {V3 v,a;Q q;V3 w;double m;V3 f;}; // f: specific force, body axes.
     Rate rate(const State& s,Sample* out)const;
     void integrate(Tt h);
     void hold(State& s)const; // Clamped pose rides the rotating Earth.
     V3 tidal(const State& s)const;
-    Vehicle vehicle_;Environment env_;State s_;Tt step_=0,coast_=0;
+    Vehicle vehicle_;Environment env_;State s_;Tt step_=0,coast_=0;Increments increments_;
     V3 padPosition_;Q padAttitude_; // ECEF and body→ECEF while clamped/landed.
     mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable Perturbers p0_{},p1_{};
 };

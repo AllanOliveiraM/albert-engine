@@ -36,6 +36,14 @@ int main(int argc,char** argv){try{
         near(f->la1,26.75,1e-9,"Grid latitude");near(f->lo1,276.5,1e-9,"Grid longitude");require(f->reference==1792238400.&&f->forecastMinutes==0,"Reference time");
     }
     bool rejected=false;try{providers::decodeGrib2("<html>error</html>");}catch(const std::runtime_error&){rejected=true;}require(rejected,"Error page accepted as GRIB2");
+    { // A forged header asking for 65535² constant points is refused before any allocation.
+        std::size_t total=0;for(int i=0;i<8;++i)total=total<<8|static_cast<unsigned char>(bytes[8+static_cast<std::size_t>(i)]);std::string forged=bytes.substr(0,total);
+        for(std::size_t sct=16;sct+5<total-4;){std::size_t length=0;for(int i=0;i<4;++i)length=length<<8|static_cast<unsigned char>(forged[sct+static_cast<std::size_t>(i)]);
+            if(forged[sct+4]==3)for(std::size_t o:{sct+30,sct+34}){forged[o]=forged[o+1]=0;forged[o+2]=forged[o+3]=static_cast<char>(0xff);}
+            if(forged[sct+4]==5){const std::uint64_t n=65535ull*65535ull;for(int i=0;i<4;++i)forged[sct+5+static_cast<std::size_t>(i)]=static_cast<char>(n>>(24-8*i));forged[sct+19]=0;}
+            sct+=length;}
+        bool refused=false;try{providers::decodeGrib2(forged);}catch(const std::runtime_error&){refused=true;}require(refused,"Oversized GRIB2 grid accepted");
+    }
     const physics::Weather w(providers::gfsGrid({fields},"fixture"));const auto& g=w.grid();
     require(g.rows==9&&g.columns==10&&g.pressure.size()==41&&g.pressure.front()==100000&&g.pressure.back()==1&&std::abs(g.west+83.5)<1e-9&&std::abs(g.south-26.75)<1e-9,"Grid layout");
     // Against the radiosonde at its own heights (geopotential to ellipsoidal height).
@@ -82,6 +90,14 @@ int main(int argc,char** argv){try{
     require(live->grid().times.size()==2&&live->grid().times[1].valid-live->grid().times[0].valid==3600*physics::second&&downloads==2,"Two forecast hours");
     require(live->source().find("NOAA GFS 0.25° 2026-10-17 12Z (+0/+1 h)")!=std::string::npos,"Source names the cycle");
     gfs.around(27.7,-82.4,now);require(downloads==2,"Cached hours reused");
+    providers::Gfs offline(cache,[](const std::string&,DownloadProgress*)->std::string{throw std::runtime_error("offline");});
+    require(offline.around(27.7,-82.4,now)->grid().times.size()==2,"Complete cache used without network");
+    { // A cached file holding only its first message is incomplete: downloaded again.
+        std::filesystem::path first;for(const auto& e:std::filesystem::directory_iterator(cache))if(e.path().string().find("-f0-")!=std::string::npos)first=e.path();
+        std::size_t total=0;for(int i=0;i<8;++i)total=total<<8|static_cast<unsigned char>(bytes[8+static_cast<std::size_t>(i)]);
+        {std::ofstream o{first,std::ios::binary|std::ios::trunc};o.write(bytes.data(),static_cast<std::streamsize>(total));}
+        gfs.around(27.7,-82.4,now);require(downloads==3,"Incomplete cache downloaded again");
+    }
     std::printf("provider: %d index probes, %d downloads\n",index,downloads);
     // CelesTrak SW-Last5Years.csv (2026-10-18 00 UTC download), 2026-10-12 to 22: observed then predicted.
     const std::string csv=
@@ -105,6 +121,13 @@ int main(int argc,char** argv){try{
     near(sw->ap[5],81./8,1e-9,"Mean ap 12-33 h before");near(sw->ap[6],85./8,1e-9,"Mean ap 36-57 h before");
     require(!providers::spaceWeatherAt(days,1792238400.+30*86400.),"Outside the table");
     const auto predicted=providers::spaceWeatherAt(days,1792238400.+3*86400.);require(predicted&&predicted->history&&predicted->ap[1]==22,"Predicted days carry flat 3-hour values");
+    { // Indices follow the flight: the current 3-hour ap goes from 3 to 12 at 15 UTC on 2026-10-17.
+        const auto table=std::make_shared<const physics::SpaceWeatherTable>(days);const physics::Msis live(*sw,"live",table),frozen(*sw,"frozen");
+        const auto before=physics::ttFromUtc(1792249140.),after=physics::ttFromUtc(1792249260.); // 14:59 and 15:01 UTC.
+        near(live.at(before,lat,lon,400e3).density,frozen.at(before,lat,lon,400e3).density,0,"Same 3-hour interval as the fixed indices");
+        const double ratio=live.at(after,lat,lon,400e3).density/frozen.at(after,lat,lon,400e3).density;std::printf("ap 3 -> 12 at 15 UTC: density x%.4f at 400 km\n",ratio);
+        require(table->at(1792249260.)->ap[1]==12&&ratio>1.002,"Indices follow the instant");
+    }
     // NRLMSISE-00 above the weather: the thermosphere instead of vacuum.
     const auto upper=std::make_shared<const physics::Msis>(*sw,"NRLMSISE-00");const auto layered=w.above(upper);
     const auto thermosphere=layered->at(static_cast<std::int64_t>(t),lat,lon,300e3);

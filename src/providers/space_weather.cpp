@@ -28,22 +28,7 @@ std::vector<SpaceWeatherDay> parseSpaceWeather(const std::string& csv){
     }
     return days;
 }
-std::optional<physics::SpaceWeather> spaceWeatherAt(const std::vector<SpaceWeatherDay>& days,double utc,std::string* note){
-    std::map<double,const SpaceWeatherDay*> byDay;for(const auto& d:days)byDay[d.day]=&d;
-    const double day=std::floor(utc/86400.);const auto today=byDay.find(day),yesterday=byDay.find(day-1);
-    if(today==byDay.end()||yesterday==byDay.end())return std::nullopt;
-    physics::SpaceWeather w;w.f107=yesterday->second->f107;w.f107a=today->second->f107a;
-    const double daily=today->second->apAverage;w.ap.fill(std::isnan(daily)?15.:daily);
-    bool history=true;for(int k=0;k<4;++k){const auto d=byDay.find(day-k);if(d==byDay.end()||!d->second->hasAp)history=false;}
-    if(history){ // Interval 0 is the current 3-hour period; older ones count backwards.
-        const int current=static_cast<int>((utc-day*86400.)/10800.);
-        auto ap=[&](int back){const int k=current-back;const int dayOffset=k>=0?0:(-k+7)/8;return byDay.at(day-dayOffset)->ap[static_cast<std::size_t>(k+8*dayOffset)];};
-        w.ap[1]=ap(0);w.ap[2]=ap(1);w.ap[3]=ap(2);w.ap[4]=ap(3);
-        double a=0,b=0;for(int i=4;i<12;++i)a+=ap(i);for(int i=12;i<20;++i)b+=ap(i);w.ap[5]=a/8;w.ap[6]=b/8;w.history=true;
-    }
-    if(note){char s[160];std::snprintf(s,sizeof s,"F10.7 %.1f, 81-day %.1f, Ap %.0f (%s)",w.f107,w.f107a,w.ap[0],today->second->type.c_str());*note=s;}
-    return w;
-}
+std::optional<physics::SpaceWeather> spaceWeatherAt(const std::vector<SpaceWeatherDay>& days,double utc,std::string* note){return physics::SpaceWeatherTable(days).at(utc,note);}
 SpaceWeatherService::SpaceWeatherService(std::filesystem::path cache,Transport transport,Now now):cache_(std::move(cache)),transport_(std::move(transport)),now_(std::move(now)){
     if(!transport_)transport_=[](const std::string& url,DownloadProgress* p){return httpGet(url,p,{16*1024*1024,90});};
     if(!now_)now_=[]{return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();};
@@ -61,10 +46,10 @@ std::vector<SpaceWeatherDay> SpaceWeatherService::table(const std::string& name,
 }
 std::shared_ptr<const physics::Msis> SpaceWeatherService::msis(double utc){
     std::lock_guard lock(mutex_);std::string note;
-    auto w=spaceWeatherAt(table("SW-Last5Years.csv",12*3600.),utc,&note);
-    if(!w)w=spaceWeatherAt(table("SW-All.csv",7*86400.),utc,&note);
+    auto t=std::make_shared<const physics::SpaceWeatherTable>(table("SW-Last5Years.csv",12*3600.));auto w=t->at(utc,&note);
+    if(!w){t=std::make_shared<const physics::SpaceWeatherTable>(table("SW-All.csv",7*86400.));w=t->at(utc,&note);}
     if(!w)return nullptr;
-    return std::make_shared<const physics::Msis>(*w,"NRLMSISE-00 ("+note+", CelesTrak)");
+    return std::make_shared<const physics::Msis>(*w,"NRLMSISE-00 (at start: "+note+", CelesTrak)",std::move(t));
 }
 SpaceWeatherService& spaceWeather(){static SpaceWeatherService value(dataDirectory()/"spaceweather");return value;}
 }

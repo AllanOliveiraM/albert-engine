@@ -1,6 +1,7 @@
 #include "flight.hpp"
 #include "core/simulation.hpp"
 #include "physics/vehicles.hpp"
+#include "physics/sensors.hpp"
 #include "physics/weather.hpp"
 #include "providers/gfs.hpp"
 #include "providers/space_weather.hpp"
@@ -24,7 +25,7 @@ core::Reply wait(core::Ticket t){
 grpc::Status failed(const core::Reply& r){return r.code==core::Code::Ok?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,r.message};}
 }
 struct FlightServices::Impl {
-    core::Bridge& bridge;AirSources sources;std::mutex mutex;std::optional<ph::Flight> flight;std::string atmosphere;
+    core::Bridge& bridge;AirSources sources;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
     ph::Tt step=ph::second/1000,start=0;std::uint64_t tick=0;int shown=0;std::vector<api::FlightEvent> events;
     std::chrono::steady_clock::time_point published{};
     Impl(core::Bridge& b,AirSources s):bridge(b),sources(std::move(s)){
@@ -76,11 +77,13 @@ struct FlightServices::Impl {
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
         o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());
+        put(reading.specificForce,o->mutable_measured_specific_force_meters_per_second2());put(reading.rate,o->mutable_measured_angular_rate_radians_per_second());
+        put(reading.deltaVelocity,o->mutable_delta_velocity_meters_per_second());put(reading.deltaAngle,o->mutable_delta_angle_radians());o->set_measured_static_pressure_pascals(reading.pressure);
     }
 };
 FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(std::make_unique<Impl>(bridge,std::move(sources))){}
 FlightServices::~FlightServices()=default;
-grpc::Status FlightServices::CreateFlight(grpc::ServerContext*,const api::CreateFlightRequest* r,api::FlightSample* out){
+grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api::CreateFlightRequest* r,api::FlightSample* out){
     std::optional<ph::Flight> made;ph::Tt step=0,t=0;std::string atmosphere="U.S. Standard Atmosphere 1976";
     try{
         ph::Vehicle vehicle;
@@ -117,8 +120,14 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext*,const api::Create
         made.emplace(vehicle,env,ph::Flight::pad(env,vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r->heading_degrees()*deg,pitch*deg));
         made->steps(step,static_cast<ph::Tt>(std::llround(coast*1e9)));
     }catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    if(context->IsCancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
     std::lock_guard lock(impl_->mutex);auto& m=*impl_;
     m.flight=std::move(made);m.step=step;m.start=t;m.tick=0;m.events.clear();m.atmosphere=atmosphere;
+    { // The IMU starts with one sample at the pad.
+        const auto g=r->imu().grade();m.imu.emplace(ph::imuModel(g==api::ImuSettings::TACTICAL?ph::ImuGrade::tactical:g==api::ImuSettings::INDUSTRIAL?ph::ImuGrade::industrial:ph::ImuGrade::ideal),r->imu().seed());
+        const ph::Sample x=m.flight->sample();const double dt=ph::secondsSinceJ2000(step);
+        m.reading=m.imu->measure(dt,x.specificForce,m.flight->state().rate,x.specificForce*dt,m.flight->state().rate*dt,x.air.pressure);
+    }
     m.shown=0;(void)wait(m.bridge.submit(core::Remove{objectId}));
     if(auto s=failed(wait(m.bridge.submit(core::Create{m.object()})));!s.ok())return s;
     if(auto s=failed(wait(m.bridge.submit(core::SetTime{ph::utcFromTt(t),0.,false})));!s.ok())return s;
@@ -155,7 +164,10 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
         if(!before.landed&&after.landed)event(api::FlightEvent::TOUCHDOWN,next);
     }
     tick+=r->ticks();
-    *m.flight=std::move(next);m.tick=tick;
+    if(context->IsCancelled()){m.events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
+    ph::Imu imu=*m.imu;const auto inc=next.increments();
+    if(inc.seconds>0)m.reading=imu.measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,next.sample().air.pressure);
+    *m.flight=std::move(next);*m.imu=std::move(imu);m.tick=tick;
     if(r->ticks())m.publish(changed||m.flight->state().stage!=m.shown);
     m.fill(out);return grpc::Status::OK;
 }

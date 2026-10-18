@@ -94,7 +94,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     const V3 iw{ms.inertia.x*s.rate.x,ms.inertia.y*s.rate.y,ms.inertia.z*s.rate.z};V3 rhs=moment-cross(s.rate,iw);
     if(flow>0){const V3 di=(st.inertiaFull-st.inertiaEmpty)*(vehicle_.inertiaRate*flow/st.propellant);rhs+=V3{di.x*s.rate.x,di.y*s.rate.y,di.z*s.rate.z};
         if(vehicle_.jetDamping){const double l=ms.cg-st.nozzle;rhs+=-flow*l*l*V3{0,s.rate.y,s.rate.z};}}
-    Rate r{s.velocity,g+b*(force/ms.m),spin(s.attitude,s.rate),{rhs.x/ms.inertia.x,rhs.y/ms.inertia.y,rhs.z/ms.inertia.z},-flow};
+    Rate r{s.velocity,g+b*(force/ms.m),spin(s.attitude,s.rate),{rhs.x/ms.inertia.x,rhs.y/ms.inertia.y,rhs.z/ms.inertia.z},-flow,force/ms.m};
     if(out){
         Sample& x=*out;x.mass=ms.m;x.mach=mach;x.dynamicPressure=q;x.alpha=alpha;x.beta=beta;x.thrust=thrust;x.massFlow=flow;x.air=atm;x.geodetic=geo;
         x.fixedPosition=rf;x.fixedVelocity=o.fixed*relative;x.nedVelocity=ned*x.fixedVelocity;
@@ -112,15 +112,17 @@ void Flight::hold(State& s)const{
 }
 void Flight::integrate(Tt h){
     const double dt=static_cast<double>(h)*1e-9;
-    if(s_.clamped||s_.landed){s_.propellant=std::max(0.,s_.propellant-massFlow()*dt);s_.time+=h;hold(s_);return;}
+    if(s_.clamped||s_.landed){const Sample x=sample();increments_.velocity+=x.specificForce*dt;increments_.angle+=s_.rate*dt;increments_.seconds+=dt;
+        s_.propellant=std::max(0.,s_.propellant-massFlow()*dt);s_.time+=h;hold(s_);return;}
     auto at=[](const State& s,const Rate& k,double d,Tt t){State r=s;r.time=t;r.position+=k.v*d;r.velocity+=k.a*d;
         r.attitude={s.attitude.w+k.q.w*d,s.attitude.x+k.q.x*d,s.attitude.y+k.q.y*d,s.attitude.z+k.q.z*d};r.rate+=k.w*d;r.propellant+=k.m*d;return r;};
     const Tt t0=s_.time,mid=t0+h/2;
     const Rate k1=rate(s_,nullptr),k2=rate(at(s_,k1,dt/2,mid),nullptr),k3=rate(at(s_,k2,dt/2,mid),nullptr),k4=rate(at(s_,k3,dt,t0+h),nullptr);
-    const double w=dt/6;
+    const double w=dt/6;const V3 rate0=s_.rate;
     s_.position+=(k1.v+2*k2.v+2*k3.v+k4.v)*w;s_.velocity+=(k1.a+2*k2.a+2*k3.a+k4.a)*w;s_.rate+=(k1.w+2*k2.w+2*k3.w+k4.w)*w;
     s_.attitude=normalized({s_.attitude.w+(k1.q.w+2*k2.q.w+2*k3.q.w+k4.q.w)*w,s_.attitude.x+(k1.q.x+2*k2.q.x+2*k3.q.x+k4.q.x)*w,
         s_.attitude.y+(k1.q.y+2*k2.q.y+2*k3.q.y+k4.q.y)*w,s_.attitude.z+(k1.q.z+2*k2.q.z+2*k3.q.z+k4.q.z)*w});
+    increments_.velocity+=(k1.f+2*k2.f+2*k3.f+k4.f)*w;increments_.angle+=(rate0+(k1.w+k2.w+k3.w)*w)*dt;increments_.seconds+=dt; // Stage rates, Simpson-weighted.
     s_.propellant=std::max(0.,s_.propellant+(k1.m+2*k2.m+2*k3.m+k4.m)*w);s_.time=t0+h;
 }
 Tt Flight::advance(Tt dt){
@@ -134,7 +136,7 @@ Tt Flight::advance(Tt dt){
         Tt h=left;bool depleted=false;const double flow=massFlow();
         if(step_>0){
             Tt limit=step_;
-            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed){ // Ballistic above the atmosphere: smooth, longer steps.
+            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0){ // Ballistic, torque-free, above the atmosphere.
                 const double speed=norm(s_.velocity),spin=norm(s_.rate),c=secondsSinceJ2000(coast_);
                 if(geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height>standardTop+speed*c)
                     limit=std::max(step_,std::min(coast_,spin>0?static_cast<Tt>(.05/spin*1e9):coast_)); // ≤0.05 rad per step.

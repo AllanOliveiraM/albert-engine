@@ -10,7 +10,7 @@
 #include <vector>
 namespace albert::providers {
 // CelesTrak space-weather days (SW-*.csv): observed, daily predicted or monthly predicted.
-struct SpaceWeatherDay {double day=0;double f107=0,f107a=0,apAverage=0;std::array<double,8> ap{};bool hasAp=false;std::string type;};
+using SpaceWeatherDay=physics::SpaceWeatherDay;
 std::vector<SpaceWeatherDay> parseSpaceWeather(const std::string& csv);
 // NRLMSISE-00 inputs at an instant (Unix UTC): previous-day F10.7, 81-day centred mean, daily
 // Ap and, when the last four days have 3-hourly values, the ap history.

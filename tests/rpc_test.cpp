@@ -38,7 +38,7 @@ int main(){try{
         albert::physics::Air at(std::int64_t,double,double,double h)const override{auto a=albert::physics::standardAtmosphere(h);a.wind={0,10,0};return a;}
         std::string source()const override{return "test breeze";}
     };
-    albert::rpc::Server server(bridge,0,nullptr,{[](double lat,double,double)->std::shared_ptr<const albert::physics::AirModel>{if(lat<0)throw std::runtime_error("offline");return std::make_shared<Breeze>();},
+    albert::rpc::Server server(bridge,0,nullptr,{[](double lat,double,double)->std::shared_ptr<const albert::physics::AirModel>{if(lat<0)throw std::runtime_error("offline");if(lat==1)std::this_thread::sleep_for(std::chrono::milliseconds(300));return std::make_shared<Breeze>();},
         [](double)->std::shared_ptr<const albert::physics::AirModel>{return nullptr;}}); // No network in tests.
     auto channel=grpc::CreateChannel("127.0.0.1:"+std::to_string(server.port()),grpc::InsecureChannelCredentials());
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
@@ -108,6 +108,7 @@ int main(){try{
         {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&!s.burning()&&s.tick()==0,"A rejected step changed the flight");}
         {grpc::ClientContext c;api::StepRequest r;r.set_ticks(3000);r.add_commands()->set_ignite(true);require(flight->Step(&c,r,&s).ok(),"Step failed");}
         require(s.tick()==3000&&std::abs(s.elapsed_seconds()-3)<1e-9&&!s.clamped()&&s.geodetic().height_meters()>10&&s.events_size()==1&&s.events(0).kind()==api::FlightEvent::LIFTOFF,"Liftoff");
+        require(std::abs(s.delta_velocity_meters_per_second().x()-s.measured_specific_force_meters_per_second2().x()*3)<1e-9&&s.measured_static_pressure_pascals()==s.static_pressure_pascals(),"Ideal IMU over the step");
         {grpc::ClientContext c;c.set_deadline(std::chrono::system_clock::now()+std::chrono::milliseconds(30));api::StepRequest r;r.set_ticks(600000);
             require(!flight->Step(&c,r,&s).ok(),"Long step finished before its deadline");}
         {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&s.tick()==3000,"A cancelled step changed the flight");}
@@ -122,10 +123,17 @@ int main(){try{
         {const auto snap=bridge.snapshot();const auto o=std::find_if(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";});
             require(o!=snap->objects.end()&&o->appearance.sizeMeters.y==27,"Upper stack shown after separation");}
         require(s.atmosphere()=="U.S. Standard Atmosphere 1976","A distant instant uses the standard atmosphere");
+        {grpc::ClientContext c;api::CreateFlightRequest noisy=create;noisy.mutable_imu()->set_grade(api::ImuSettings::TACTICAL);noisy.mutable_imu()->set_seed(5);require(flight->CreateFlight(&c,noisy,&s).ok(),"Tactical IMU");}
+        {const double f=s.measured_specific_force_meters_per_second2().x(),ideal=s.specific_force_meters_per_second2().x();
+            require(f!=ideal&&std::abs(f-ideal)<.05&&std::abs(s.measured_static_pressure_pascals()-s.static_pressure_pascals())<200,"Tactical IMU errors");}
         {grpc::ClientContext c;api::CreateFlightRequest live=create;live.set_weather(api::CreateFlightRequest::LIVE_GFS);require(flight->CreateFlight(&c,live,&s).ok(),"Live flight");}
         require(s.atmosphere()=="test breeze"&&std::abs(s.wind_ned_meters_per_second().y()-10)<1e-12,"Live weather in the sample");
         {grpc::ClientContext c;api::CreateFlightRequest south=create;south.set_weather(api::CreateFlightRequest::LIVE_GFS);south.mutable_site()->set_latitude_degrees(-5);
             require(flight->CreateFlight(&c,south,&s).error_code()==grpc::StatusCode::UNAVAILABLE,"Unavailable live weather accepted");}
+        {grpc::ClientContext c;c.set_deadline(std::chrono::system_clock::now()+std::chrono::milliseconds(100));api::CreateFlightRequest slow=create;slow.set_weather(api::CreateFlightRequest::LIVE_GFS);slow.mutable_site()->set_latitude_degrees(1);
+            require(!flight->CreateFlight(&c,slow,&s).ok(),"Slow creation finished before its deadline");}
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&s.atmosphere()=="test breeze"&&std::abs(s.geodetic().latitude_degrees()-28.6082)<1e-6,"A cancelled creation replaced the flight");}
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         {const auto snap=bridge.snapshot();require(std::none_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Vehicle left in the scene");}

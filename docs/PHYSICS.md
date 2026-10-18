@@ -22,12 +22,19 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 
 Integração RK4 com passo fixo (1 ms por padrão); `advance` divide o passo no instante
 exato do fim do propelente e para ali (e também na liberação do pad e no toque), para que
-estagiamentos programados sejam exatos. Em voo balístico acima da atmosfera (sem empuxo,
-fora do pad, com margem de altura para o passo) o passo cresce até 1 s, limitado a 0,05 rad
+estagiamentos programados sejam exatos. Em voo balístico acima da atmosfera (sem empuxo nem torque
+comandado, fora do pad, com margem de altura para o passo) o passo cresce até 1 s, limitado a 0,05 rad
 de rotação por passo: uma volta em órbita fica a <1 mm do resultado com 10 ms e roda dezenas
 de vezes mais rápido.
 A mesma sequência de passos reproduz o estado bit a bit (`Flight::hash`); igualdade
 entre plataformas e compiladores não é prometida.
+
+Sensores: `Flight::increments()` integra no RK4 a força específica e a taxa angular no corpo
+(incrementos de velocidade e ângulo de um IMU strapdown). `Imu` aplica os erros da IEEE 952 por
+eixo — ruído branco (VRW/ARW), instabilidade de viés como Gauss-Markov, passeio aleatório da
+taxa, viés e fator de escala sorteados uma vez — e erros de barômetro, com ruído determinístico
+e portátil (xoshiro256** + Box-Muller); graus `ideal`, `tactical` e `industrial` com valores
+representativos de catálogo, não de um produto.
 
 Sensores ideais em `Flight::sample()`: força específica no corpo (o que um IMU mede:
 zero em queda livre, +g no pad), taxas angulares, pressão estática, ar, Mach, pressão
@@ -64,6 +71,10 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
 - Taxa secular do nodo por J2 a 51,6° e 98° (heliossíncrona): <0,1% da teoria de primeira ordem (Vallado).
 - Esgotamento exatamente no fim do passo; equação do foguete (Tsiolkovsky) a 1e-7 m/s;
   amortecimento por jato e perda de inércia contra a solução fechada `Iω = H0 (I/I0)^(ṁ l²/|İ|)`.
+- IMU: variância de Allan sobreposta de um giro parado (10 Hz, 20 mil s) ajustada por
+  σ²(τ) = N²/τ + K²τ/3 devolve ARW e RRW configurados a ±5% (1,008e-3 e 9,80e-6 para 1e-3 e
+  1e-5); Gauss-Markov com dispersão e correlação configuradas a ±5%; incrementos de Δv e Δθ
+  contra as soluções fechadas do caso com amortecimento por jato.
 - Pad (base no solo), liberação no empuxo, acelerômetro e pouso.
 - O guiamento de exemplo leva o lançador genérico a uma órbita ~182 × 212 km.
 - Coast de uma volta com passos de 1 s contra 10 ms: diferença <1 mm.

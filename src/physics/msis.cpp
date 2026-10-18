@@ -4,6 +4,7 @@
 #include "physics/earth.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 namespace albert::physics {
 namespace {
@@ -222,11 +223,35 @@ MsisOutput nrlmsise00(int doy,double sec,double alt,double lat,double lon,double
     MsisOutput o{m.d,m.t[0],m.t[1]};if(anomalous)o.density[MASS]+=AMU*MO*m.d[ANO];
     return o;
 }
+SpaceWeatherTable::SpaceWeatherTable(const std::vector<SpaceWeatherDay>& days){
+    if(days.empty())return;
+    double lo=days[0].day,hi=lo;for(const auto& d:days){lo=std::min(lo,d.day);hi=std::max(hi,d.day);}
+    first_=lo;const auto n=static_cast<std::size_t>(hi-lo)+1;days_.resize(n);present_.assign(n,false);
+    for(const auto& d:days){const auto i=static_cast<std::size_t>(d.day-lo);days_[i]=d;present_[i]=true;}
+}
+const SpaceWeatherDay* SpaceWeatherTable::day(double d)const{
+    const double i=d-first_;return i>=0&&i<static_cast<double>(days_.size())&&present_[static_cast<std::size_t>(i)]?&days_[static_cast<std::size_t>(i)]:nullptr;
+}
+std::optional<SpaceWeather> SpaceWeatherTable::at(double utc,std::string* note)const{
+    const double d=std::floor(utc/86400.);const auto* today=day(d);const auto* yesterday=day(d-1);
+    if(!today||!yesterday)return std::nullopt;
+    SpaceWeather w;w.f107=yesterday->f107;w.f107a=today->f107a;w.ap.fill(std::isnan(today->apAverage)?15.:today->apAverage);
+    bool history=true;for(int k=0;k<4;++k){const auto* x=day(d-k);if(!x||!x->hasAp)history=false;}
+    if(history){ // Interval 0 is the current 3-hour period; older ones count backwards.
+        const int current=static_cast<int>((utc-d*86400.)/10800.);
+        auto ap=[&](int back){const int k=current-back,offset=k>=0?0:(-k+7)/8;return day(d-offset)->ap[static_cast<std::size_t>(k+8*offset)];};
+        w.ap[1]=ap(0);w.ap[2]=ap(1);w.ap[3]=ap(2);w.ap[4]=ap(3);
+        double a=0,b=0;for(int i=4;i<12;++i)a+=ap(i);for(int i=12;i<20;++i)b+=ap(i);w.ap[5]=a/8;w.ap[6]=b/8;w.history=true;
+    }
+    if(note){char s[160];std::snprintf(s,sizeof s,"F10.7 %.1f, 81-day %.1f, Ap %.0f (%s)",w.f107,w.f107a,w.ap[0],today->type.c_str());*note=s;}
+    return w;
+}
 Air Msis::at(std::int64_t tt,double latitude,double longitude,double height)const{
     if(height>1e6)return{};
     const double unix=utcFromTt(tt),sec=unix-86400.*static_cast<double>(floorDays(unix)),lon=longitude*180/3.14159265358979323846;
     double lst=sec/3600+lon/15;lst-=24*std::floor(lst/24);
-    const auto o=nrlmsise00(dayOfYear(floorDays(unix)),sec,std::max(height,-5000.)/1000,latitude*180/3.14159265358979323846,lon,lst,weather_);
+    const auto now=table_?table_->at(unix):std::nullopt;
+    const auto o=nrlmsise00(dayOfYear(floorDays(unix)),sec,std::max(height,-5000.)/1000,latitude*180/3.14159265358979323846,lon,lst,now?*now:weather_);
     double n=0;for(int i:{HE,O,N2,O2,AR,H,N})n+=o.density[static_cast<std::size_t>(i)];
     const double k=1.380649e-23,p=n*k*o.temperature,rho=o.density[MASS],mean=rho/n;
     return{o.temperature,p,rho,std::sqrt(1.4*k*o.temperature/mean),{}};
