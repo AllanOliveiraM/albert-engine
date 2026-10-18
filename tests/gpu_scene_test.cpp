@@ -119,6 +119,12 @@ struct Material { size: f32 };
             require(during[0]>during[1]+80,"An update larger than the frame budget keeps the old copy while it streams");
             require(after[1]>after[0]+50&&albert::gpu::errors()==0,"The streamed copy replaces the old one");
         }
+        { // A 1x1 placeholder (TextureUploads) replaced by a large image: the image shows at once, not the placeholder.
+            Scene sc;OrthographicCamera cam(-1,1,1,-1,.1f,10);cam.position.set(0,0,5);
+            auto tex=DataTexture::create(ImageData(std::vector<unsigned char>{0,0,0,255}),1,1);auto mat=MeshBasicMaterial::create();mat->map=tex;sc.add(Mesh::create(PlaneGeometry::create(4,4),mat));
+            frameOf(sc,cam);tex->image()=Image(std::vector<unsigned char>(2048*2048*4,255),2048,2048);tex->needsUpdate();
+            const auto p=frameOf(sc,cam);std::printf("placeholder replaced: %d %d %d\n",p[0],p[1],p[2]);require(p[0]>200&&p[1]>200,"A replaced placeholder shows the new image at once");
+        }
         { // Chunks sharing one attribute (as the border lines do) share one GPU copy.
             Scene sc;OrthographicCamera cam(-1,1,1,-1,.1f,10);cam.position.set(0,0,5);
             std::vector<float> triangles;for(int i=0;i<20000;++i)for(float v:{-.5f,-.5f,0.f,.5f,-.5f,0.f,0.f,.5f,0.f})triangles.push_back(v);
@@ -126,7 +132,7 @@ struct Material { size: f32 };
             for(int i=0;i<8;++i){auto g=BufferGeometry::create();g->setAttribute("position",shared);g->setDrawRange(i*3000,3000);sc.add(Mesh::create(g,MeshBasicMaterial::create()));}
             const std::size_t before=renderer.vertexBytes();frameOf(sc,cam);const std::size_t added=renderer.vertexBytes()-before;
             std::printf("shared attribute: %zu bytes resident for %zu\n",added,bytes);
-            require(added>=bytes&&added<bytes*3/2&&renderer.drawn()==8,"One GPU copy for a shared attribute");
+            require(added>bytes/2&&added<bytes*3/2&&renderer.drawn()==8,"One GPU copy for a shared attribute"); // Not eight; other buffers may go meanwhile.
         }
         { // Multisampling resolves into the target: the first scene's flat colours survive it.
             renderer.samples=4;const auto p=frameOf(scene,camera);renderer.samples=1;

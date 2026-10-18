@@ -139,7 +139,7 @@ struct SceneRenderer::Impl {
     // A texture's GPU copy. Large images stream in row slices (~8 MB a frame) into `pending` while
     // the previous copy (or nothing) keeps drawing; mipmaps are rendered on the GPU at the end.
     struct Texture {WGPUTexture texture=nullptr;WGPUTextureView view=nullptr;WGPUSampler sampler=nullptr;unsigned version=~0u,used=0;
-        WGPUTexture pending=nullptr;unsigned pendingVersion=~0u,row=0,width=0,height=0,levels=1;std::size_t texel=0;std::vector<std::byte> converted;std::uint64_t serial=0;};
+        WGPUTexture pending=nullptr;unsigned pendingVersion=~0u,row=0,width=0,height=0,levels=1;std::size_t texel=0;std::vector<std::byte> converted;std::uint64_t serial=0;unsigned shownWidth=0,shownHeight=0;};
     // Bind groups are keyed by view serials: a released view's address may come back for a new one.
     struct MaterialState {Buffer uniforms;WGPUBindGroup group=nullptr;std::vector<std::uint64_t> serials;std::string program;unsigned used=0;};
     struct Compiled {WGPUShaderModule module=nullptr;WGPUBindGroupLayout layout=nullptr;WGPUPipelineLayout pipelineLayout=nullptr;Program program;};
@@ -329,8 +329,9 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         else{const auto& v=image.data<unsigned char>();expand([&](std::size_t i){return i<v.size()?v[i]:static_cast<unsigned char>(0);},static_cast<unsigned char>(255));}
         return out.data();
     }
-    // The texture's GPU view and its serial. A first copy, or a small image, uploads at once; a new
-    // version of a large one streams within the frame budget while the previous copy keeps drawing.
+    // The texture's GPU view and its serial. A first copy, a small image or one of another size (a
+    // placeholder being replaced) uploads at once; a new version of a large one streams within the
+    // frame budget while the previous copy, a valid stand-in, keeps drawing.
     WGPUTextureView view(threepp::Texture* source,bool blank,std::uint64_t& serial){ // blank: black instead of white when absent.
         serial=blank?2:1;if(!source)return blank?black:white;
         auto& t=textures[source->id];t.used=frame;if(t.view)serial=t.serial;
@@ -347,7 +348,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
             d.mipLevelCount=t.levels;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;t.pending=wgpuDeviceCreateTexture(device,&d);
         }
         const std::byte* data=rgba(*source,t.converted);const std::size_t rowBytes=static_cast<std::size_t>(t.width)*t.texel;
-        const bool whole=!t.view||rowBytes*t.height<=(4u<<20);
+        const bool whole=!t.view||rowBytes*t.height<=(4u<<20)||t.shownWidth!=t.width||t.shownHeight!=t.height;
         while(t.row<t.height){
             std::size_t rows=whole?t.height-t.row:std::min<std::size_t>(t.height-t.row,streamBudget/rowBytes);
             if(!rows&&!whole&&streamBudget==streamLimit)rows=1; // A row larger than the whole budget.
@@ -358,7 +359,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         }
         mipmaps(t.pending,f,t.levels);
         if(t.view)wgpuTextureViewRelease(t.view);if(t.texture)wgpuTextureRelease(t.texture);if(t.sampler)wgpuSamplerRelease(t.sampler);
-        t.texture=t.pending;t.pending=nullptr;t.version=t.pendingVersion;t.converted.clear();t.converted.shrink_to_fit();t.view=wgpuTextureCreateView(t.texture,nullptr);serial=t.serial=++serials;
+        t.texture=t.pending;t.pending=nullptr;t.version=t.pendingVersion;t.converted.clear();t.converted.shrink_to_fit();t.view=wgpuTextureCreateView(t.texture,nullptr);serial=t.serial=++serials;t.shownWidth=t.width;t.shownHeight=t.height;
         auto address=[](TextureWrapping m){return m==TextureWrapping::Repeat?WGPUAddressMode_Repeat:m==TextureWrapping::MirroredRepeat?WGPUAddressMode_MirrorRepeat:WGPUAddressMode_ClampToEdge;};
         WGPUSamplerDescriptor s{};s.addressModeU=address(source->wrapS);s.addressModeV=address(source->wrapT);s.addressModeW=WGPUAddressMode_ClampToEdge;
         s.magFilter=source->magFilter!=Filter::Nearest?WGPUFilterMode_Linear:WGPUFilterMode_Nearest;
