@@ -19,10 +19,10 @@ Weather::Weather(WeatherGrid source,std::shared_ptr<const AirModel> upper):upper
     grid_=std::make_shared<const WeatherGrid>(std::move(source));geoid_=std::make_shared<const std::vector<double>>(std::move(geoid));
 }
 Air Weather::at(std::int64_t tt,double latitude,double longitude,double height)const{
-    const Air upper=upper_?upper_->at(tt,latitude,longitude,height):standardAtmosphere(height);const WeatherGrid& grid_=*this->grid_;
+    auto above=[&]{return upper_?upper_->at(tt,latitude,longitude,height):standardAtmosphere(height);};const WeatherGrid& grid_=*this->grid_; // Upper air only where it weighs.
     const double x=std::remainder(longitude/deg-grid_.west,360.)/grid_.step,y=(latitude/deg-grid_.south)/grid_.step;
     const double edge=std::min({x,grid_.columns-1-x,y,grid_.rows-1-y})*grid_.step/.5;
-    if(!(edge>0))return upper;
+    if(!(edge>0))return above();
     const int c0=std::min(static_cast<int>(x),grid_.columns-2),r0=std::min(static_cast<int>(y),grid_.rows-2);const double fx=x-c0,fy=y-r0;
     const std::size_t nodes=static_cast<std::size_t>(grid_.rows*grid_.columns),levels=grid_.pressure.size();
     auto node=[&](int r,int c){return static_cast<std::size_t>(r*grid_.columns+c);};
@@ -48,10 +48,11 @@ Air Weather::at(std::int64_t tt,double latitude,double longitude,double height)c
         for(int i=0;i<4;++i){const Column v=column(ts[tIndex?t1:t0],corners[i]);const double w=wt*weights[i];
             m.temperature+=w*v.temperature;m.logPressure+=w*v.logPressure;m.east+=w*v.east;m.north+=w*v.north;m.humidity+=w*v.humidity;m.top+=w*v.top;}}
     const double w=std::min(edge,1.)*std::clamp((m.top-h)/8000.,0.,1.);
-    if(w<=0)return upper;
+    if(w<=0)return above();
     const double p=std::exp(m.logPressure),tv=m.temperature*(1+.6078*m.humidity);
     const Air g{m.temperature,p,p/(dryGas*tv),std::sqrt(1.4*dryGas*tv),{m.north,m.east,0}};
-    auto mix=[&](double a,double b){return w*a+(1-w)*b;};
+    if(w>=1)return g;
+    const Air upper=above();auto mix=[&](double a,double b){return w*a+(1-w)*b;};
     return{mix(g.temperature,upper.temperature),mix(g.pressure,upper.pressure),mix(g.density,upper.density),mix(g.sound,upper.sound),g.wind*w};
 }
 }

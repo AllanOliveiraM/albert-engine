@@ -295,6 +295,17 @@ comprimento do conjunto atual) e o relógio simulado acompanha o tempo de voo, p
 entre passos; ao voltar ao horário ao vivo, o voo continua, mas a cena deixa de
 segui-lo. `EndFlight` remove o veículo.
 
+**Plano de dados binário.** Para laços de controle de alta taxa, `data_port` na amostra é uma
+porta TCP local (127.0.0.1) com quadros fixos little-endian definidos em
+[flight_wire.hpp](../src/rpc/flight_wire.hpp): um pedido de 64 bytes (bits de comando — corte,
+separação, liberação, ignição, aceleração, cardã, torque, aplicados nessa ordem e de forma
+atômica — e `ticks`) e uma resposta de 376 bytes (IMU medido, pressão, estado verdadeiro, atitude
+em GCRF e NED, dados de ar, massa, eventos e hash). O mesmo núcleo do `Step` atende os dois
+caminhos; o gRPC fica para criar, consultar e encerrar. Um cliente por vez; `wire::Connection`
+em [wire.hpp](../src/rpc/wire.hpp) é um cliente pronto. Medido: ~30 µs por troca de um tick de
+1 ms no teste e, no aplicativo com clima ao vivo, 600 mil trocas a 1 kHz (10 min de voo) em 46 s
+sem perda (`albert_flight_client --wire`).
+
 O exemplo [flight_client.cpp](../examples/flight_client.cpp) leva o lançador genérico
 de Kennedy (LC-39A) à órbita com a lógica de [gravity_turn.hpp](../examples/gravity_turn.hpp):
 subida vertical, pitch kick, gravity turn sem incidência, controle da taxa vertical no

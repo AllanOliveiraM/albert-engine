@@ -1,4 +1,5 @@
 #include "rpc/server.hpp"
+#include "rpc/wire.hpp"
 #include "model_fixture.hpp"
 #include "albert/v1/engine.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
@@ -134,6 +135,19 @@ int main(){try{
             require(!flight->CreateFlight(&c,slow,&s).ok(),"Slow creation finished before its deadline");}
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
         {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&s.atmosphere()=="test breeze"&&std::abs(s.geodetic().latitude_degrees()-28.6082)<1e-6,"A cancelled creation replaced the flight");}
+        { // Binary data plane: same flight, same core as Step; atomic commands; throughput.
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,create,&s).ok()&&s.data_port()>0,"Data port");}
+            albert::wire::Connection wire(s.data_port());albert::wire::Request q;q.ticks=3000;q.commands=albert::wire::ignite;
+            auto r=wire.exchange(q);
+            require(r.status==albert::wire::ok&&r.tick==3000&&(r.events&albert::wire::liftoff)&&!(r.flags&albert::wire::clamped)&&r.geodetic[2]>10,"Data plane liftoff");
+            {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&s.state_hash()==r.hash&&s.tick()==3000,"Data plane and gRPC share the flight");}
+            q.ticks=5;q.commands=albert::wire::throttle;q.throttleValue=std::nan("");r=wire.exchange(q);require(r.status==albert::wire::invalid&&r.tick==3000,"Rejected frame changed the flight");
+            q.ticks=1;q.commands=albert::wire::gimbal;q.gimbalPitch=.01;const auto t0=std::chrono::steady_clock::now();constexpr int n=20000;
+            for(int i=0;i<n;++i)r=wire.exchange(q);
+            const double each=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-t0).count()/n;
+            std::printf("data plane: %.1f us per 1 ms tick (%.0fx real time), tick %llu\n",each,1000/each,static_cast<unsigned long long>(r.tick));
+            require(r.status==albert::wire::ok&&r.tick==3000+n&&each<500,"Data plane throughput");
+        }
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         {const auto snap=bridge.snapshot();require(std::none_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Vehicle left in the scene");}

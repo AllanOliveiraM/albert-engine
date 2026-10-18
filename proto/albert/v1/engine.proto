@@ -229,6 +229,7 @@ message FlightSample {
   // ideal values for IDEAL.
   Vector3 measured_specific_force_meters_per_second2=37; Vector3 measured_angular_rate_radians_per_second=38;
   Vector3 delta_velocity_meters_per_second=39; Vector3 delta_angle_radians=40; double measured_static_pressure_pascals=41;
+  uint32 data_port=42; // Binary lockstep data plane on 127.0.0.1 (src/rpc/flight_wire.hpp).
 }
 service FlightService {
   rpc CreateFlight(CreateFlightRequest) returns (FlightSample); // Replaces any current flight.

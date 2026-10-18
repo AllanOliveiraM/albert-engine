@@ -1,9 +1,11 @@
 // External flight computer: drives Albert's generic launcher from the pad to orbit in
 // lockstep, reading only the simulated sensors and truth the flight API reports.
-// Usage: albert_flight_client [address] [--fast] [--utc=UNIX_SECONDS]
-// Defaults: 127.0.0.1:50051, real time, the instant shown by Albert.
+// Usage: albert_flight_client [address] [--fast] [--wire] [--utc=UNIX_SECONDS]
+// Defaults: 127.0.0.1:50051, real time, the instant shown by Albert. --wire flies over the
+// binary data plane at 1 kHz (one exchange per tick) and then coasts to 10 minutes.
 #include "albert/v1/engine.grpc.pb.h"
 #include "gravity_turn.hpp"
+#include "wire.hpp"
 #include <grpcpp/grpcpp.h>
 #include <chrono>
 #include <cmath>
@@ -22,8 +24,8 @@ ex::Reading reading(const api::FlightSample& s){
     r.stage=static_cast<int>(s.stage());r.burning=s.burning();r.clamped=s.clamped();r.propellant=s.propellant_kilograms();return r;
 }
 int main(int argc,char** argv){try{
-    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051";bool fast=false;double utc=0;bool chosen=false;
-    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}else address=a;}
+    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051";bool fast=false,binary=false;double utc=0;bool chosen=false;
+    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}else address=a;}
     auto channel=grpc::CreateChannel(address,grpc::InsecureChannelCredentials());
     if(!channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(30)))throw std::runtime_error("Abra AlbertEngine --rpc antes de executar o exemplo");
     auto flight=api::FlightService::NewStub(channel);
@@ -32,6 +34,26 @@ int main(int argc,char** argv){try{
     api::FlightSample s;{grpc::ClientContext c;check(flight->CreateFlight(&c,create,&s));}
     std::printf("%s, passo %.0f ms, %s\n",s.vehicle().c_str(),s.step_seconds()*1e3,fast?"o mais rápido possível":"tempo real");
     constexpr double pi=3.14159265358979323846;constexpr std::uint32_t ticks=20; // Guidance at 50 Hz.
+    if(binary){ // 1 kHz lockstep: one tick per frame, guidance every 20 frames, then a coast to 600 s.
+        albert::wire::Connection link(s.data_port());ex::GravityTurn g(pi/2);albert::wire::Request q;q.ticks=1;albert::wire::Response r{};
+        ex::Reading rd=reading(s);const auto t0=std::chrono::steady_clock::now();std::uint64_t frames=0,lost=0,last=s.tick();bool orbit=false;
+        while(last<600000){
+            q.commands=0;
+            if(frames%20==0&&!orbit){const ex::Commands c=g.step(rd);
+                q.commands=albert::wire::gimbal|albert::wire::torque|(c.ignite?albert::wire::ignite:0u)|(c.separate?albert::wire::separate:0u)|(c.cutoff?albert::wire::cutoff:0u);
+                q.gimbalPitch=c.gimbalPitch;q.gimbalYaw=c.gimbalYaw;q.torqueValue[0]=c.torque.x;q.torqueValue[1]=c.torque.y;q.torqueValue[2]=c.torque.z;
+                if(g.phase()==ex::GravityTurn::Phase::orbit){orbit=true;q.torqueValue[0]=q.torqueValue[1]=q.torqueValue[2]=0;}}
+            r=link.exchange(q);++frames;if(r.status!=albert::wire::ok||r.tick!=last+1)++lost;last=r.tick;
+            rd.elapsed=r.elapsed;rd.height=r.geodetic[2];rd.nedVelocity={r.nedVelocity[0],r.nedVelocity[1],r.nedVelocity[2]};rd.qx=r.attitudeNed[0];rd.qy=r.attitudeNed[1];rd.qz=r.attitudeNed[2];rd.qw=r.attitudeNed[3];
+            rd.rate={r.rate[0],r.rate[1],r.rate[2]};rd.specificForce={r.specificForce[0],r.specificForce[1],r.specificForce[2]};rd.position={r.position[0],r.position[1],r.position[2]};
+            rd.velocity={r.velocity[0],r.velocity[1],r.velocity[2]};rd.stage=static_cast<int>(r.stage);rd.burning=r.flags&albert::wire::burning;rd.clamped=r.flags&albert::wire::clamped;rd.propellant=r.propellant;
+            if(r.events)std::printf("%7.2f s  eventos 0x%x\n",r.elapsed,r.events);
+        }
+        const double wall=std::chrono::duration<double>(std::chrono::steady_clock::now()-t0).count();
+        std::printf("%llu quadros a 1 kHz em %.1f s (%.1f us cada, %.0fx tempo real), %llu perdidos; perigeu %.1f km\n",static_cast<unsigned long long>(frames),wall,wall/frames*1e6,600/wall,
+            static_cast<unsigned long long>(lost),ex::GravityTurn::perigee(rd.position,rd.velocity)/1e3);
+        return lost==0&&orbit?0:1;
+    }
     ex::GravityTurn guidance(pi/2);auto phase=guidance.phase();const auto wall=std::chrono::steady_clock::now();double report=0;
     const char* names[]{"pad","subida vertical","pitch kick","gravity turn","MECO","separação","segundo estágio","órbita"};
     for(;;){

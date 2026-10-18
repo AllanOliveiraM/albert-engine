@@ -1,4 +1,6 @@
 #include "flight.hpp"
+#include "flight_wire.hpp"
+#include "wire.hpp"
 #include "core/simulation.hpp"
 #include "physics/vehicles.hpp"
 #include "physics/sensors.hpp"
@@ -25,7 +27,7 @@ core::Reply wait(core::Ticket t){
 grpc::Status failed(const core::Reply& r){return r.code==core::Code::Ok?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,r.message};}
 }
 struct FlightServices::Impl {
-    core::Bridge& bridge;AirSources sources;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
+    core::Bridge& bridge;AirSources sources;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
     ph::Tt step=ph::second/1000,start=0;std::uint64_t tick=0;int shown=0;std::vector<api::FlightEvent> events;
     std::chrono::steady_clock::time_point published{};
     Impl(core::Bridge& b,AirSources s):bridge(b),sources(std::move(s)){
@@ -62,6 +64,47 @@ struct FlightServices::Impl {
         const ph::Sample x=flight->sample();const auto& st=flight->state();
         return{true,st.burning,st.clamped,st.landed,flight->vehicle().name,atmosphere,elapsed(),x.geodetic.height,ph::norm(x.nedVelocity),x.mach,x.dynamicPressure,x.mass,st.propellant,x.air.wind.x,x.air.wind.y,st.stage,static_cast<int>(flight->vehicle().stages.size())};
     }
+    struct Command {std::uint32_t kind;double a=0,b=0,c=0;};
+    std::uint32_t eventBits=0; // For the data plane, since its last response.
+    grpc::Status run(const std::vector<Command>& commands,std::uint32_t ticks,const std::function<bool()>& cancelled){
+        if(!flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+        if(ticks>600000)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 600000 ticks per step"};
+        ph::Flight next=*flight; // Commands apply atomically.
+        try{for(const auto& c:commands)switch(c.kind){
+            case wire::ignite:next.ignite();break;case wire::cutoff:next.cutoff();break;case wire::separate:next.separate();break;case wire::release:next.release();break;
+            case wire::throttle:next.throttle(c.a);break;case wire::gimbal:next.gimbal(c.a,c.b);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
+            default:throw std::invalid_argument("Unknown command");}}
+        catch(const std::invalid_argument& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}catch(const std::logic_error& e){return{grpc::StatusCode::FAILED_PRECONDITION,e.what()};}
+        // Integrated on the copy and committed whole: a cancelled call leaves the flight untouched.
+        bool changed=std::any_of(commands.begin(),commands.end(),[](const Command& c){return c.kind<=wire::release;});
+        const std::size_t pending=events.size();std::uint32_t bits=0;
+        auto event=[&](api::FlightEvent::Kind kind,std::uint32_t bit){api::FlightEvent e;e.set_kind(kind);e.set_elapsed_seconds(ph::secondsSinceJ2000(next.state().time-start));e.set_stage(static_cast<unsigned>(next.state().stage));events.push_back(std::move(e));bits|=bit;changed=true;};
+        const ph::Tt total=step*static_cast<ph::Tt>(ticks),chunk=step*4096;
+        for(ph::Tt left=total;left>0;){
+            if(cancelled()){events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
+            const auto before=next.state();left-=next.advance(std::min(left,chunk));const auto& after=next.state();
+            if(before.clamped&&!after.clamped)event(api::FlightEvent::LIFTOFF,wire::liftoff);
+            if(before.burning&&!after.burning&&after.propellant<=0)event(api::FlightEvent::DEPLETED,wire::depleted);
+            if(!before.landed&&after.landed)event(api::FlightEvent::TOUCHDOWN,wire::touchdown);
+        }
+        if(cancelled()){events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
+        ph::Imu sensor=*imu;const auto inc=next.increments();
+        if(inc.seconds>0)reading=sensor.measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,next.sample().air.pressure);
+        *flight=std::move(next);*imu=std::move(sensor);tick+=ticks;eventBits|=bits;
+        if(ticks)publish(changed||flight->state().stage!=shown);
+        return grpc::Status::OK;
+    }
+    void fill(wire::Response& o){
+        const ph::Sample x=flight->sample();const auto& s=flight->state();
+        auto put3=[](double* d,ph::V3 v){d[0]=v.x;d[1]=v.y;d[2]=v.z;};
+        o=wire::Response{};o.tick=tick;o.elapsed=elapsed();o.utc=ph::utcFromTt(s.time);
+        put3(o.specificForce,reading.specificForce);put3(o.rate,reading.rate);put3(o.deltaVelocity,reading.deltaVelocity);put3(o.deltaAngle,reading.deltaAngle);o.pressure=reading.pressure;
+        put3(o.position,s.position);put3(o.velocity,s.velocity);o.attitude[0]=s.attitude.x;o.attitude[1]=s.attitude.y;o.attitude[2]=s.attitude.z;o.attitude[3]=s.attitude.w;
+        o.geodetic[0]=x.geodetic.latitude/deg;o.geodetic[1]=x.geodetic.longitude/deg;o.geodetic[2]=x.geodetic.height;put3(o.nedVelocity,x.nedVelocity);
+        o.attitudeNed[0]=x.nedAttitude.x;o.attitudeNed[1]=x.nedAttitude.y;o.attitudeNed[2]=x.nedAttitude.z;o.attitudeNed[3]=x.nedAttitude.w;
+        o.mach=x.mach;o.dynamicPressure=x.dynamicPressure;o.alpha=x.alpha;o.beta=x.beta;o.mass=x.mass;o.propellant=s.propellant;o.thrust=x.thrust;
+        o.stage=static_cast<std::uint32_t>(s.stage);o.flags=(s.burning?wire::burning:0u)|(s.clamped?wire::clamped:0u)|(s.landed?wire::landed:0u);o.events=eventBits;eventBits=0;o.hash=flight->hash();
+    }
     void fill(api::FlightSample* o){
         const ph::Sample x=flight->sample();const auto& s=flight->state();const auto& v=flight->vehicle();
         o->set_tick(tick);o->set_elapsed_seconds(elapsed());o->set_utc_unix_seconds(ph::utcFromTt(s.time));
@@ -76,12 +119,24 @@ struct FlightServices::Impl {
         o->set_burning(s.burning);o->set_clamped(s.clamped);o->set_landed(s.landed);o->set_throttle(s.throttle);
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
-        o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());
+        o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());o->set_data_port(data?data->port():0);
         put(reading.specificForce,o->mutable_measured_specific_force_meters_per_second2());put(reading.rate,o->mutable_measured_angular_rate_radians_per_second());
         put(reading.deltaVelocity,o->mutable_delta_velocity_meters_per_second());put(reading.deltaAngle,o->mutable_delta_angle_radians());o->set_measured_static_pressure_pascals(reading.pressure);
     }
 };
-FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(std::make_unique<Impl>(bridge,std::move(sources))){}
+FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(std::make_unique<Impl>(bridge,std::move(sources))){
+    impl_->data=std::make_unique<wire::Server>([this](const wire::Request& q,wire::Response& r){
+        std::vector<Impl::Command> commands; // Fixed order: cutoff, separate, release, ignite, throttle, gimbal, torque.
+        for(const std::uint32_t k:{wire::cutoff,wire::separate,wire::release,wire::ignite})if(q.commands&k)commands.push_back({k});
+        if(q.commands&wire::throttle)commands.push_back({wire::throttle,q.throttleValue});
+        if(q.commands&wire::gimbal)commands.push_back({wire::gimbal,q.gimbalPitch,q.gimbalYaw});
+        if(q.commands&wire::torque)commands.push_back({wire::torque,q.torqueValue[0],q.torqueValue[1],q.torqueValue[2]});
+        std::lock_guard lock(impl_->mutex);
+        if(!impl_->flight){r=wire::Response{};r.status=wire::noFlight;return;}
+        const auto s=impl_->run(commands,q.ticks,[]{return false;});impl_->fill(r);
+        r.status=s.ok()?wire::ok:s.error_code()==grpc::StatusCode::INVALID_ARGUMENT?wire::invalid:wire::precondition;
+    });
+}
 FlightServices::~FlightServices()=default;
 grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api::CreateFlightRequest* r,api::FlightSample* out){
     std::optional<ph::Flight> made;ph::Tt step=0,t=0;std::string atmosphere="U.S. Standard Atmosphere 1976";
@@ -122,7 +177,7 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api
     }catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     if(context->IsCancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
     std::lock_guard lock(impl_->mutex);auto& m=*impl_;
-    m.flight=std::move(made);m.step=step;m.start=t;m.tick=0;m.events.clear();m.atmosphere=atmosphere;
+    m.flight=std::move(made);m.step=step;m.start=t;m.tick=0;m.events.clear();m.eventBits=0;m.atmosphere=atmosphere;
     { // The IMU starts with one sample at the pad.
         const auto g=r->imu().grade();m.imu.emplace(ph::imuModel(g==api::ImuSettings::TACTICAL?ph::ImuGrade::tactical:g==api::ImuSettings::INDUSTRIAL?ph::ImuGrade::industrial:ph::ImuGrade::ideal),r->imu().seed());
         const ph::Sample x=m.flight->sample();const double dt=ph::secondsSinceJ2000(step);
@@ -135,41 +190,20 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api
     m.published=std::chrono::steady_clock::now();m.fill(out);return grpc::Status::OK;
 }
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
-    std::lock_guard lock(impl_->mutex);auto& m=*impl_;
-    if(!m.flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
-    if(r->ticks()>600000)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 600000 ticks per step"};
-    ph::Flight next=*m.flight; // Commands apply atomically.
-    try{
-        for(const auto& c:r->commands())switch(c.command_case()){
-            case api::FlightCommand::kIgnite:if(c.ignite())next.ignite();break;
-            case api::FlightCommand::kCutoff:if(c.cutoff())next.cutoff();break;
-            case api::FlightCommand::kSeparate:if(c.separate())next.separate();break;
-            case api::FlightCommand::kRelease:if(c.release())next.release();break;
-            case api::FlightCommand::kThrottle:next.throttle(c.throttle());break;
-            case api::FlightCommand::kGimbal:next.gimbal(c.gimbal().pitch_radians(),c.gimbal().yaw_radians());break;
-            case api::FlightCommand::kTorqueNewtonMeters:next.torque({c.torque_newton_meters().x(),c.torque_newton_meters().y(),c.torque_newton_meters().z()});break;
-            default:throw std::invalid_argument("Empty command");
-        }
-    }catch(const std::invalid_argument& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}catch(const std::logic_error& e){return{grpc::StatusCode::FAILED_PRECONDITION,e.what()};}
-    // Integrated on the copy and committed whole: a cancelled call leaves the flight untouched.
-    bool changed=std::any_of(r->commands().begin(),r->commands().end(),[](const auto& c){return c.command_case()<=api::FlightCommand::kRelease;});
-    const std::size_t pending=m.events.size();std::uint64_t tick=m.tick;
-    auto event=[&](api::FlightEvent::Kind kind,const ph::Flight& f){api::FlightEvent e;e.set_kind(kind);e.set_elapsed_seconds(ph::secondsSinceJ2000(f.state().time-m.start));e.set_stage(static_cast<unsigned>(f.state().stage));m.events.push_back(std::move(e));changed=true;};
-    const ph::Tt total=m.step*static_cast<ph::Tt>(r->ticks()),chunk=m.step*4096;
-    for(ph::Tt left=total;left>0;){
-        if(context->IsCancelled()){m.events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
-        const auto before=next.state();left-=next.advance(std::min(left,chunk));const auto& after=next.state();
-        if(before.clamped&&!after.clamped)event(api::FlightEvent::LIFTOFF,next);
-        if(before.burning&&!after.burning&&after.propellant<=0)event(api::FlightEvent::DEPLETED,next);
-        if(!before.landed&&after.landed)event(api::FlightEvent::TOUCHDOWN,next);
+    std::vector<Impl::Command> commands;
+    for(const auto& c:r->commands())switch(c.command_case()){
+        case api::FlightCommand::kIgnite:if(c.ignite())commands.push_back({wire::ignite});break;
+        case api::FlightCommand::kCutoff:if(c.cutoff())commands.push_back({wire::cutoff});break;
+        case api::FlightCommand::kSeparate:if(c.separate())commands.push_back({wire::separate});break;
+        case api::FlightCommand::kRelease:if(c.release())commands.push_back({wire::release});break;
+        case api::FlightCommand::kThrottle:commands.push_back({wire::throttle,c.throttle()});break;
+        case api::FlightCommand::kGimbal:commands.push_back({wire::gimbal,c.gimbal().pitch_radians(),c.gimbal().yaw_radians()});break;
+        case api::FlightCommand::kTorqueNewtonMeters:commands.push_back({wire::torque,c.torque_newton_meters().x(),c.torque_newton_meters().y(),c.torque_newton_meters().z()});break;
+        default:return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
     }
-    tick+=r->ticks();
-    if(context->IsCancelled()){m.events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
-    ph::Imu imu=*m.imu;const auto inc=next.increments();
-    if(inc.seconds>0)m.reading=imu.measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,next.sample().air.pressure);
-    *m.flight=std::move(next);*m.imu=std::move(imu);m.tick=tick;
-    if(r->ticks())m.publish(changed||m.flight->state().stage!=m.shown);
-    m.fill(out);return grpc::Status::OK;
+    std::lock_guard lock(impl_->mutex);
+    if(auto s=impl_->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok())return s;
+    impl_->fill(out);return grpc::Status::OK;
 }
 grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::Empty*,api::FlightSample* out){
     std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};impl_->fill(out);return grpc::Status::OK;
