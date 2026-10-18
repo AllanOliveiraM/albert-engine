@@ -310,6 +310,9 @@ int main(){try{
         near(x.heatFlux/expected,1,1e-12,"Stagnation heating");std::printf("heating: %.1f W/cm² at 60 km and 7 km/s, Rn %.2f m\n",x.heatFlux*1e-4,v.stages[0].noseRadius);
         f.steps(second/1000);f.advance(second);near(f.state().heatLoad/x.heatFlux,1,.05,"Heat load over one second");
         Flight pad(v,e,Flight::pad(e,v,t,{.3,-1.4,0},0,pi/2));require(pad.sample().heatFlux==0,"No heating on the pad");
+        struct Windy:AirModel{Air at(std::int64_t,double,double,double h)const override{Air a=standardAtmosphere(h);a.wind={60,0,0};return a;}std::string source()const override{return "wind";}};
+        Environment windy=e;windy.air=std::make_shared<Windy>();Flight gust(v,windy,Flight::pad(windy,v,t,{.3,-1.4,0},0,pi/2));gust.steps(second/1000); // Review regression.
+        const double q=gust.sample().heatFlux;gust.advance(second);require(q>0,"Wind heats the pad");near(gust.state().heatLoad/q,1,1e-6,"Heat load accrues on the pad");
         Environment moon=environment(Center::moon);Flight vacuum(v,moon,Flight::free(moon,v,t,{0,0,6e4},{1500,0,0},{0,0,0}));require(vacuum.sample().heatFlux==0,"No heating in vacuum");
     }
     // Landing legs on the Moon: rest at the static deflection m g / 4k, a 2 m drop dissipates and
@@ -329,7 +332,16 @@ int main(){try{
         const V3 start=slide.sample().fixedPosition;run(slide,6);const double distance=norm(slide.sample().fixedPosition-start);
         std::printf("lander: rests %.2f mm down, slides %.3f m from 1 m/s (v²/2μg %.3f m)\n",sag*1e3,distance,1/(2*st.friction*g));
         near(distance,1/(2*st.friction*g),.03,"Friction stops the slide");
-        pad.ignite();run(pad,3);require(!pad.state().contact&&pad.sample().geodetic.height>rest+1,"Lift-off from the legs");
+        pad.ignite();const Tt off=pad.advance(10*second); // Review regression: lift-off ends the call at its instant.
+        require(!pad.state().contact&&off<2*second,"Lift-off keeps its instant");run(pad,2);require(pad.sample().geodetic.height>rest+1,"Lift-off from the legs");
+        // Review regressions: a 10 s coast cannot tunnel a hop's apex through the ground, and 100 ms
+        // ticks on the legs stay stable (contact sub-steps).
+        Flight hop(v,e,Flight::free(e,v,t,{.2,.4,rest+20},{},{0,pi/2,0}));hop.steps(second/1000,10*second);
+        double top=0;for(Tt done=0;done<40*second;){done+=hop.advance(40*second-done);top=std::max(top,hop.sample().geodetic.height);}
+        require(top<rest+21&&hop.state().contact,"Coast near the ground");near(hop.sample().geodetic.height,rest,2e-4,"The hop settles");
+        Flight coarse(v,e,Flight::pad(e,v,t,{.2,.4,0},0,pi/2));coarse.steps(second/10);coarse.release();
+        for(Tt done=0;done<10*second;)done+=coarse.advance(10*second-done);
+        near(coarse.sample().geodetic.height,rest,1e-3,"100 ms ticks on the legs");near(norm(coarse.sample().nedVelocity),0,1e-3,"Coarse ticks at rest");
     }
     // IMU noise: overlapping Allan variance of a still gyro (10 Hz, 20000 s) fitted with
     // σ²(τ) = N²/τ + K²τ/3 returns the configured angle random walk and rate random walk

@@ -256,7 +256,7 @@ int main(int argc,char** argv){try{
                 bool down=false;for(const auto& e:s.events())down=down||e.kind()==api::FlightEvent::TOUCHDOWN;
                 require(down&&s.leg_contact()&&!s.landed()&&std::abs(s.specific_force_meters_per_second2().x()-1.63)<.02,"Lander on its legs");
                 {grpc::ClientContext d;api::StepRequest q;q.set_ticks(3000);q.add_commands()->set_ignite(true);require(flight->Step(&d,q,&s).ok()&&!s.leg_contact(),"Lander hop");}
-                bool up=false;for(const auto& e:s.events())up=up||e.kind()==api::FlightEvent::LIFTOFF;require(up,"Hop lift-off event");}
+                bool up=false;for(const auto& e:s.events())up=up||(e.kind()==api::FlightEvent::LIFTOFF&&e.elapsed_seconds()<s.elapsed_seconds()-1);require(up,"Hop lift-off event at its instant");}
             api::CreateFlightRequest mars=moon;mars.set_body(api::CreateFlightRequest::MARS);mars.mutable_site()->set_latitude_degrees(18.4);mars.mutable_site()->set_longitude_degrees(77.5);mars.mutable_site()->set_height_meters(-2500);
             {grpc::ClientContext c;require(flight->CreateFlight(&c,mars,&s).ok(),"Martian flight");}
             require(std::abs(s.specific_force_meters_per_second2().x()-3.71)<.03&&std::abs(s.static_pressure_pascals()-albert::physics::marsAtmosphere(s.geodetic().height_meters()).pressure)<1e-6&&s.atmosphere()=="NASA Glenn Mars mean atmosphere","Martian pad");

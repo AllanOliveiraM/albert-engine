@@ -6,7 +6,10 @@ regularizado, força e momento por pé; `genericLander` do porte do LM; `leg_con
 `TOUCHDOWN`/`LIFTOFF` por contato; passo longo desligado perto do solo); aquecimento de
 Sutton-Graves com carga térmica (`heat_flux`, `heat_load`); termo de Schwarzschild do corpo
 central (`Environment::relativity`, precessão igual à teoria em 5 algarismos). Som (atenuação ISO
-9613-1, Doppler) adiado até existir áudio no app. Progresso geral ~72%.
+9613-1, Doppler) adiado até existir áudio no app. Revisão do Codex (4 achados: coast atravessando
+o solo, passo de 100 ms instável nas pernas, eventos de contato perdidos, carga térmica parada no
+pad) corrigida com regressões: queda por gravidade na guarda do coast, subpassos de contato pela
+rigidez/amortecimento/atrito, `advance` para nas duas transições. Progresso geral ~72%.
 
 **Fase 5 (Lua e Marte) — marco entregue em 18/10/2026; revisão do Codex (1 P1, 2 P2) corrigida com
 regressões:** tabela de gravidade limitada pelo grau antes de copiar (replay forjado, cache),

@@ -160,7 +160,7 @@ void Flight::hold(State& s)const{
 void Flight::integrate(Tt h){
     const double dt=static_cast<double>(h)*1e-9;
     if(s_.clamped||s_.landed){const Sample x=sample();increments_.velocity+=x.specificForce*dt;increments_.angle+=s_.rate*dt;increments_.seconds+=dt;
-        s_.propellant=std::max(0.,s_.propellant-massFlow()*dt);s_.time+=h;hold(s_);return;}
+        s_.propellant=std::max(0.,s_.propellant-massFlow()*dt);s_.heatLoad+=x.heatFlux*dt;s_.time+=h;hold(s_);return;}
     auto at=[](const State& s,const Rate& k,double d,Tt t){State r=s;r.time=t;r.position+=k.v*d;r.velocity+=k.a*d;
         r.attitude={s.attitude.w+k.q.w*d,s.attitude.x+k.q.x*d,s.attitude.y+k.q.y*d,s.attitude.z+k.q.z*d};r.rate+=k.w*d;r.propellant+=k.m*d;return r;};
     const Tt t0=s_.time,mid=t0+h/2;
@@ -185,10 +185,22 @@ Tt Flight::advance(Tt dt){
             Tt limit=step_;
             if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&!s_.contact&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0){ // Ballistic, torque-free, above the atmosphere and the ground.
                 const double speed=norm(s_.velocity),spin=norm(s_.rate),c=secondsSinceJ2000(coast_),h=geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height;
-                if(h>airTop(env_.center)+speed*c&&!(h-env_.ground<=speed*c+vehicle_.stages[s_.stage].length))
+                const double r=norm(s_.position),fall=.5*env_.planet.gm/(r*r)*c*c; // Gravity can close the gap as fast as speed.
+                if(h>airTop(env_.center)+speed*c&&!(h-env_.ground<=speed*c+fall+vehicle_.stages[s_.stage].length))
                     limit=std::max(step_,std::min(coast_,spin>0?static_cast<Tt>(.05/spin*1e9):coast_)); // ≤0.05 rad per step.
             }
             h=std::min(h,limit);
+        }
+        if(const Stage& st=vehicle_.stages[s_.stage];!st.legs.empty()&&!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
+            // Legs on or near the ground: steps the springs, damping and regularised friction keep stable.
+            const Orientation o=env_.rotation.at(s_.time);const Mass ms=mass(st,s_.propellant);double reach=0;
+            for(const V3& leg:st.legs)reach=std::max(reach,norm(V3{ms.cg-leg.x,leg.y,leg.z}));
+            const double r=norm(s_.position),g=env_.planet.gm/(r*r),t=static_cast<double>(h)*1e-9,speed=norm(s_.velocity-cross(o.omega,s_.position));
+            const double clearance=geodetic(env_.planet,o.fixed*s_.position).height-env_.ground-reach;
+            if(s_.contact||clearance<speed*t+.5*g*t*t+1){
+                const double n=static_cast<double>(st.legs.size()),rate=std::max({std::sqrt(n*st.legStiffness/ms.m),n*st.legDamping/ms.m,st.friction*g/.05,1.});
+                h=std::min(h,std::max<Tt>(1000,static_cast<Tt>(.5/rate*1e9))); // Half the RK4 bound on the stiffest mode.
+            }
         }
         if(flow>0){const double t=s_.propellant/flow*1e9;if(t<=static_cast<double>(h)+1){h=std::clamp<Tt>(static_cast<Tt>(t),1,h);depleted=true;}} // Within 1 ns.
         integrate(h);left-=h;
@@ -198,7 +210,7 @@ Tt Flight::advance(Tt dt){
             if(const Stage& st=vehicle_.stages[s_.stage];!st.legs.empty()){ // Contact state of the legs for events and telemetry.
                 const double c=mass(st,s_.propellant).cg;const M3 b=matrix(s_.attitude);bool touching=false;
                 for(const V3& leg:st.legs)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-leg.x,leg.y,leg.z})).height<env_.ground;
-                if(touching!=s_.contact){s_.contact=touching;if(touching)return dt-left;} // Touchdown ends the call, like the CG test below.
+                if(touching!=s_.contact){s_.contact=touching;return dt-left;} // Touchdown and lift-off end the call, so each transition keeps its instant.
             }
             if(g.height<env_.ground){g.height=env_.ground;s_.landed=true;s_.burning=false;padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
         }
