@@ -769,7 +769,7 @@ std::shared_ptr<Points> albert::makeStarField(const std::filesystem::path& catal
     geometry->setAttribute("motion", FloatBufferAttribute::create(std::move(motions), 3));
     geometry->setAttribute("color", FloatBufferAttribute::create(std::move(colors), 3));
     geometry->setAttribute("pointSize", FloatBufferAttribute::create(std::move(sizes), 1));
-    auto material = ShaderMaterial::create();
+    auto material = ShaderMaterial::create();material->name="albert:stars"; // WGSL in webgpu_programs.cpp.
     material->vertexColors = true;
     material->transparent = true;
     material->depthWrite = false;

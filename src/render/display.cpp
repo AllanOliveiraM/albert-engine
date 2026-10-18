@@ -1,5 +1,6 @@
 #include "display.hpp"
 #include "window_icon.hpp"
+#include "webgpu_programs.hpp"
 #include "gpu/context.hpp"
 #include "gpu/scene.hpp"
 #include "gpu/window.hpp"
@@ -37,6 +38,7 @@ albert::Display::Display(Backend backend,const std::string& title,WindowSize siz
         return;
     }
     d.window=std::make_unique<gpu::Window>(title,size.width(),size.height());setWindowIcon(d.window->handle(),icon);
+    defineWebGpuPrograms();
     d.context=std::make_unique<gpu::Context>(d.window->handle());d.scene=std::make_unique<gpu::SceneRenderer>(*d.context);d.scene->exposure=1.05f;
     std::printf("WebGPU: %s\n",d.context->adapter().c_str());
     d.window->onResize([this](WindowSize){unsigned w,h;impl_->framebuffer(w,h);impl_->context->resize(static_cast<int>(w),static_cast<int>(h));});
