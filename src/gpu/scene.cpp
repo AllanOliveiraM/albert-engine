@@ -522,6 +522,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     if(air.atmosphere&&air.body&&air.strength>0&&air.atmosphere->advance(encoder,airSteps)){
         airTables=air.atmosphere;Matrix4 planet;planet.copy(*air.body->matrixWorld).invert();Matrix4 scale;scale.makeScale(air.kmPerUnit,air.kmPerUnit,air.kmPerUnit);planet.premultiply(scale);
         std::memcpy(f+76,planet.elements.data(),64);Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);eye.applyMatrix4(planet);
+        const float ground=std::min(air.groundKm,0.f);eye.multiplyScalar(1-ground/std::max(eye.length(),1.f));f[99]=ground; // Radii shifted by -ground (airPoint too).
         Vector3 toward=sun;toward.transformDirection(planet); // Linear part, normalised: the ellipsoid maps to the model's sphere.
         f[92]=eye.x;f[93]=eye.y;f[94]=eye.z;f[95]=std::min(air.strength,1.f);f[96]=toward.x;f[97]=toward.y;f[98]=toward.z;
     }

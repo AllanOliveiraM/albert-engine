@@ -21,7 +21,7 @@ struct Frame {
     shadow: vec4f,           // Enabled, bias, normal bias, texel size.
     planet: mat4x4f,         // World to the air's planet frame (km from its centre).
     air: vec4f,              // Camera in the planet frame; w: strength (0: no air this frame).
-    airSun: vec4f,           // Towards the sun in the planet frame.
+    airSun: vec4f,           // Towards the sun in the planet frame; w: the model's ground offset (km, <= 0).
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -101,7 +101,7 @@ fn skyRadianceToPoint(camera: vec3f, point: vec3f, sun: vec3f, onGround: bool) -
     let rayleigh = max(a.rayleigh - t * b.rayleigh, vec3f(0.0)); let mie = max(a.mie - t * b.mie, vec3f(0.0)) * smoothstep(0.0, 0.01, muS); // Bruneton's twilight fix.
     return Sky(rayleigh * rayleighPhase(nu) + mie * miePhase(nu), t);
 }
-fn airPoint(world: vec3f) -> vec3f { return (frame.planet * vec4f(world, 1.0)).xyz; }
+fn airPoint(world: vec3f) -> vec3f { let p = (frame.planet * vec4f(world, 1.0)).xyz; return p * (1.0 - frame.airSun.w / max(length(p), 1.0)); } // Radii raised by the lowered ground.
 fn horizonPoint(c: vec3f, toward: vec3f) -> vec3f { // The model sphere's horizon seen from c, in the azimuth of `toward`.
     let b0 = bottomRadius(); let rc = max(length(c), b0 + 0.001); let rho = sqrt((rc - b0) * (rc + b0)); let up = c / length(c);
     let h = toward - dot(toward, up) * up; let hl = max(length(h), 1e-9);

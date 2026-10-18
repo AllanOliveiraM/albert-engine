@@ -65,10 +65,10 @@ float albert::Display::aspect()const{return impl_->canvas?impl_->canvas->aspect(
 void albert::Display::onResize(std::function<void(WindowSize)> f){if(impl_->canvas)impl_->canvas->onWindowResize(std::move(f));else impl_->window->onResize(std::move(f));}
 void albert::Display::setShadows(bool enabled){if(impl_->renderer)impl_->renderer->shadowMap().enabled=enabled;else impl_->scene->shadows=enabled;}
 void albert::Display::setExposure(float value){if(impl_->renderer)impl_->renderer->toneMappingExposure=value;else impl_->scene->exposure=value;}
-void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength){
+void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength,float groundKm){
     auto& d=*impl_;if(!d.scene)return;
     if(!d.earthAir&&body&&strength>0){d.earthAir=std::make_unique<gpu::Atmosphere>(*d.context,gpu::earthAtmosphere());d.scene->airSteps=d.context->software()?1:4;}
-    d.scene->air={d.earthAir.get(),body,kmPerUnit,strength};
+    d.scene->air={d.earthAir.get(),body,kmPerUnit,strength,groundKm};
 }
 float albert::Display::exposure()const{return impl_->renderer?impl_->renderer->toneMappingExposure:impl_->scene->exposure;}
 namespace {

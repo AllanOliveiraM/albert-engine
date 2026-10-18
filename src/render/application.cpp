@@ -2352,17 +2352,14 @@ int albert::runRenderer(int argc, char** argv) {
             // orbit offset can point below a pad).
             if(!transition.active&&focus.front()!='@'&&objects.nodes().contains(focus)&&!registry.get(focus).builtin){
                 const float base=static_cast<float>(registry.get(focus).radiusMeters/albert::core::earthRadiusMeters),margin=static_cast<float>(10./albert::core::earthRadiusMeters);
-                // Over the drawn relief under the eye (else the reference sphere); on the Earth also over the
-                // ellipsoid, the air model's ground: an eye below it (the Cape's ground is ~27 m under it)
-                // speckles the aerial perspective.
-                auto keepAbove=[&](Object3D& body,float radius,const albert::Terrain* terrain,bool air=false){
+                auto keepAbove=[&](Object3D& body,float radius,const albert::Terrain* terrain){
                     body.updateMatrixWorld();Vector3 eye=camera->position,aim=controls.target;body.worldToLocal(eye);body.worldToLocal(aim);
-                    const auto ground=terrain?terrain->ground(eye):std::nullopt;
-                    const float floor=std::max({ground?static_cast<float>(*ground):radius,air?radius:0.f,aim.length()-base})+margin;
+                    const auto ground=terrain?terrain->ground(eye):std::nullopt; // The drawn relief under the eye, else the reference sphere.
+                    const float floor=std::max(ground?static_cast<float>(*ground):radius,aim.length()-base)+margin;
                     if(aim.length()>radius*1.05f||eye.length()>=floor)return;
                     eye.multiplyScalar(floor/std::max(eye.length(),1e-12f));body.localToWorld(eye);camera->position.copy(eye);camera->lookAt(controls.target);
                 };
-                keepAbove(*earth,1.f,planets.earthTerrain(),true);keepAbove(*moon,static_cast<float>(1737.4/6378.137),planets.moonTerrain());
+                keepAbove(*earth,1.f,planets.earthTerrain());keepAbove(*moon,static_cast<float>(1737.4/6378.137),planets.moonTerrain());
                 for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id))keepAbove(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters),solids.terrain(id));
             }
 
@@ -2584,7 +2581,10 @@ int albert::runRenderer(int argc, char** argv) {
                 snapshot.clock=frameTime;snapshot.simulation=moment;snapshot.simulation.utcSeconds=simulatedUtc;snapshot.approximatePositions=approximatePositions;commands.publish(std::move(snapshot));
             }
             eclipses.update(visualSettings.shadows);
-            graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility());
+            { // The air's ground: the terrain under the camera where it lies below the ellipsoid (an eye under
+              // the model's ground, as 10 m over the Cape's, ~27 m below it, speckled the aerial perspective).
+                Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
+                graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}
             graphics.render(*scene, *camera);
             graphics.ui();
 #ifdef ALBERT_HAS_RPC

@@ -17,15 +17,12 @@ LON=77.4508 UTC=1792541700`); voo republicado por Remove+Create quando a origem 
 o segmento vem do mundo relativo à câmera. Revisão Fable do diff: P2 (o `keep` republicava quando o
 relógio andava, pela deriva Horizons−ERFA, e puxava o relógio de volta) e 4 P3 (origem gravada antes
 do Create, thread antes do servidor de dados, segmento nulo perto do solo, nó marciano cruzando 88°
-sempre provisório), corrigidos com testes que falham no código antigo. Pendência: com o olho abaixo
-do elipsoide (o chão do Cabo fica ~27 m abaixo) a perspectiva aérea sai salpicada em faixas; os
-testes de compute e de cena não reproduziram, então na Terra a câmera do voo fica acima do elipsoide
-(como antes) e o certo é baixar o chão do modelo de ar ao relevo local. Imagem regional nos nós do
+sempre provisório), corrigidos com testes que falham no código antigo. Com o olho abaixo do
+elipsoide (o chão do Cabo fica ~27 m abaixo) a perspectiva aérea saía salpicada em faixas: o chão do
+modelo de ar agora desce ao relevo sob a câmera (`Air::groundKm`), conferido em duas capturas. Imagem regional nos nós do
 terreno (`Terrain::detail`) e o detalhe do sítio não é mais liberado em laço com um veículo em foco.
-Morph entre níveis na CPU (filhos sobem da superfície do pai em 0,4 s). Pista do salpicado do Cabo:
-não são buracos (fundo magenta não aparece); fica nas áreas de água (rugosidade lisa da máscara de
-oceano), provável aliasing especular rasante com alturas ruidosas do DEM sobre água. Próximo: chão do
-ar no relevo local, AA especular na água, nuvens ao vivo no ar.
+Morph entre níveis na CPU (filhos sobem da superfície do pai em 0,4 s). Próximo: nuvens ao vivo no
+ar, oceano, atmosfera de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

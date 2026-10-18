@@ -143,7 +143,11 @@ int main(){
             // The frame (far module only): camera at the world origin, the planet frame's origin ~1.4e8 km away.
             float frame[128]{};frame[76]=frame[81]=frame[86]=frame[91]=1;frame[88]=frame[92]=1.21e8f;frame[89]=frame[93]=3.4e7f;frame[90]=frame[94]=-6.3e7f;frame[95]=1;frame[96]=.57f;frame[98]=.82f;frame[35]=1;
             WGPUBufferDescriptor fd{};fd.size=sizeof frame;fd.usage=WGPUBufferUsage_Uniform|WGPUBufferUsage_CopyDst;WGPUBuffer frameBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),frameBuffer,0,frame,sizeof frame);
-            auto run=[&](const std::string& source,bool withFrame){ // One dispatch; the 64 floats of its probes.
+            // A frame at the Earth whose air ground is lowered 27 m (the Cape's terrain): identity planet frame.
+            float lowered[128]{};lowered[76]=lowered[81]=lowered[86]=lowered[91]=1;lowered[95]=1;lowered[96]=.57f;lowered[98]=.82f;lowered[99]=-.027f;lowered[35]=1;
+            WGPUBuffer loweredBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),loweredBuffer,0,lowered,sizeof lowered);
+            auto run=[&](const std::string& source,WGPUBuffer frameIn){ // One dispatch (with a frame, if given); the 64 floats of its probes.
+                const bool withFrame=frameIn!=nullptr;
                 WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code={source.data(),source.size()};WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;
                 WGPUShaderModule module=wgpuDeviceCreateShaderModule(gpu->device(),&md);
                 WGPUComputePipelineDescriptor pd{};pd.compute.module=module;pd.compute.entryPoint={"main",4};WGPUComputePipeline pipe=wgpuDeviceCreateComputePipeline(gpu->device(),&pd);
@@ -151,7 +155,7 @@ int main(){
                 bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;WGPUBuffer back=wgpuDeviceCreateBuffer(gpu->device(),&bd);
                 WGPUBindGroupEntry e0[6]{};e0[0].binding=3;e0[0].buffer=air.parameters();e0[0].size=Atmosphere::parameterBytes; // skyRadiance: no irradiance table.
                 const WGPUTextureView views[3]{air.transmittance(),air.scattering(),air.mie()};for(std::uint32_t i=0;i<3;++i){e0[1+i].binding=4+i;e0[1+i].textureView=views[i];}
-                e0[4].binding=8;e0[4].sampler=sampler;e0[5].binding=0;e0[5].buffer=frameBuffer;e0[5].size=sizeof frame;
+                e0[4].binding=8;e0[4].sampler=sampler;e0[5].binding=0;e0[5].buffer=frameIn;e0[5].size=sizeof frame;
                 WGPUBindGroupLayout l0=wgpuComputePipelineGetBindGroupLayout(pipe,0),l2=wgpuComputePipelineGetBindGroupLayout(pipe,2);
                 WGPUBindGroupDescriptor g0{};g0.layout=l0;g0.entryCount=withFrame?6:5;g0.entries=e0;WGPUBindGroup group0=wgpuDeviceCreateBindGroup(gpu->device(),&g0);
                 WGPUBindGroupEntry e2{};e2.binding=0;e2.buffer=out;e2.size=256;WGPUBindGroupDescriptor g2{};g2.layout=l2;g2.entryCount=1;g2.entries=&e2;WGPUBindGroup group2=wgpuDeviceCreateBindGroup(gpu->device(),&g2);
@@ -165,7 +169,18 @@ int main(){
                 for(auto g:{group0,group2})wgpuBindGroupRelease(g);for(auto l:{l0,l2})wgpuBindGroupLayoutRelease(l);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);wgpuComputePassEncoderRelease(cp);
                 for(auto x:{out,back})wgpuBufferRelease(x);wgpuComputePipelineRelease(pipe);wgpuShaderModuleRelease(module);
                 return values;};
-            const auto values=run(code,false),farValues=run(farCode,true);const float* v=values.data();const char* names[]{"zenith","25 deg","2 deg","-2 deg"};
+            const std::string groundCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(1) fn main() { // Radii raised by the lowered ground: the terrain 27 m under the sphere sits on the model's ground.
+    let b = bottomRadius(); let up = normalize(vec3f(0.48, -0.61, 0.63));
+    probe[0] = vec4f(length(airPoint(up * (b - 0.027))) - b, length(airPoint(up * (b + 1.0))) - b, 0.0, 0.0);
+    probe[1] = vec4f(skyRadiance(up * (b + 0.01), up, up).transmittance, 0.0); // The tables bound as in the other modules.
+}
+)";
+            const auto values=run(code,nullptr),farValues=run(farCode,frameBuffer),groundValues=run(groundCode,loweredBuffer);const float* v=values.data();
+            std::printf("lowered air ground: terrain 27 m under the sphere at %.4f km, 1 km above it at %.4f km\n",groundValues[0],groundValues[1]);
+            near("Lowered air ground: the terrain under the camera on the model's ground",groundValues[0],0,1e-3);
+            near("... and every radius raised alike",groundValues[1],1.027,1e-3);const char* names[]{"zenith","25 deg","2 deg","-2 deg"};
             for(int i=0;i<4;++i)std::printf("sky %-7s radiance %.4f %.4f %.4f  transmittance %.3f %.3f %.3f\n",names[i],v[8*i],v[8*i+1],v[8*i+2],v[8*i+4],v[8*i+5],v[8*i+6]);
             std::printf("craft before the air: radiance %.4f transmittance %.3f; body below the horizon at sunset: transmittance %.3g %.3g %.3g\n",v[33],v[37],v[44],v[45],v[46]);
             near("No air between a camera in space and a craft in front of the air",v[37]+v[33],1,1e-6);

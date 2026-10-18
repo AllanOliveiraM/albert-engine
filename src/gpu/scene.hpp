@@ -22,7 +22,9 @@ public:
     // The air this frame: aerial perspective, sunlight and sky light through `atmosphere` around
     // `body`, whose local frame times kmPerUnit is the atmosphere's planet frame; strength 0-1. Its
     // precomputation advances `airSteps` dispatches a frame and the air shows once it is complete.
-    struct Air {Atmosphere* atmosphere=nullptr;const threepp::Object3D* body=nullptr;float kmPerUnit=1,strength=0;} air;
+    // groundKm (<= 0): the model's ground lowered to the terrain under the camera where that lies below
+    // the body's reference surface (the Cape: ~-0.027), so the eye never sits under the model's ground.
+    struct Air {Atmosphere* atmosphere=nullptr;const threepp::Object3D* body=nullptr;float kmPerUnit=1,strength=0,groundKm=0;} air;
     unsigned airSteps=4;
     // Clears target (scene background) and depth, then draws, recording into encoder. Uniforms are
     // written through the queue: submit this encoder before the next render().

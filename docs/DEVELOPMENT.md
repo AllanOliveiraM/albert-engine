@@ -338,9 +338,8 @@ dentro da região (`Terrain::detail`: o material do remendo sem bump, coordenada
 global. Um veículo perto do solo terrestre mantém o detalhe do sítio (antes era liberado 3 s depois de
 cada carga e baixado de novo).
 `Terrain::ground` dá o raio do relevo desenhado sob um ponto (nó mais fino construído, bilinear
-entre postes): a câmera fica acima dele perto de um veículo (na Terra também acima do elipsoide, o
-chão do modelo de ar) e o plano próximo respeita a altura sobre ele (uma órbita longa arrastada até
-o horizonte de um módulo cortava o chão inteiro).
+entre postes): a câmera fica acima dele perto de um veículo e o plano próximo respeita a altura
+sobre ele (uma órbita longa arrastada até o horizonte de um módulo cortava o chão inteiro).
 `ALBERT_TERRAIN_DEBUG=1` imprime nós, fila e custo da seleção e do render.
 `terrain_lod_test` confere a cobertura exata da esfera (4π), o refinamento, o corte por horizonte,
 as alturas, a reconstrução dos nós provisórios, `ground` contra um relevo analítico nas seis faces e
@@ -365,7 +364,9 @@ mundo relativas à câmera, não da diferença de dois pontos no referencial da 
 (~1e8 km) o f32 tem passos de ~8 km e a diferença zerava (direção NaN, chão preto); um segmento
 menor que um passo (~0,5 m no solo) não tem ar. Limite conhecido: raios quase horizontais até o solo
 usam a razão de duas transmitâncias pequenas da tabela, e 250 m de solo saem com T ≈ 0,92 (≈ 0,97
-integrando). Abaixo de 30 km a exposição fotográfica sobe até um
+integrando). O chão do modelo desce ao relevo sob a câmera quando ele fica abaixo do elipsoide
+(`Air::groundKm`, os raios sobem por igual): um olho abaixo do chão do modelo, como a 10 m sobre o
+Cabo (~27 m abaixo do elipsoide), salpicava a perspectiva aérea em faixas. Abaixo de 30 km a exposição fotográfica sobe até um
 ponto (como numa câmera no solo); a iluminação física não muda. `atmosphere_test` confere a
 transmitância zenital e o espalhamento simples vertical com formas fechadas, segmentos curtos perto
 da Lua e de Marte (`airBetween` e `airSky` com o referencial da Terra a 1,4e8 km) e desenha uma cena
