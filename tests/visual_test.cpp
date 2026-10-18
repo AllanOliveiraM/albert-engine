@@ -465,7 +465,9 @@ void graphics(Target& renderer) {
         auto world=Scene::create();world->background=Color(0x000000);auto shape=albert::decodeShape(albert::visualAssetPack()->payload("v1/"+id+"/shape.bin"));auto geometry=shape.geometry;
         std::vector<albert::SurfaceAssets> maps;maps.push_back({id,rgba(140),height(0),{},std::move(shape)});albert::SolidBodies measured(*world,std::move(maps));
         albert::core::Scene registry;registry.include(*albert::core::localOrbit(id));albert::SceneObjects objects(*world);objects.bind(id,measured.nodes().at(id),measured.picker(id));objects.sync(registry,0,{});
-        auto camera=PerspectiveCamera::create(45,1,.00001f,30000.f);camera->position.set(0,0,float(albert::core::surfaceBody(id)->shapeRadiusMeters*4/albert::core::earthRadiusMeters));camera->lookAt(Vector3());
+        // Within 2.4 radii, as the app keeps a body's detail resident (farther it is released after 3 s of
+        // wall time, which a slow adapter spent before the fade: WARP lost Mimas's detail).
+        auto camera=PerspectiveCamera::create(45,1,.00001f,30000.f);camera->position.set(0,0,float(albert::core::surfaceRadius(id)*2.2/albert::core::earthRadiusMeters));camera->lookAt(Vector3());
         measured.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);const auto before=renderer.readRGBPixels();require(before[3*(96*192+96)]>10,"Observed shape failed to render");
         Raycaster ray;ray.setFromCamera(Vector2(0,0),*camera);require(objects.pick(registry,ray)==id,"Measured BVH picking failed");
         albert::RegionalImages detail;detail.body=id;detail.day=rgba(230);detail.textureOnly=true;albert::prepareRegionalImages(detail);require(!detail.geometry&&!detail.surfaceMask,"Measured imagery allocated a replacement sphere or mask");measured.stage(std::move(detail));
