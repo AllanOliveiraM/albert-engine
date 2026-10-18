@@ -598,9 +598,17 @@ void orbitPaths() {
 }
 // No argument: controls and paths. "webgpu": also the graphics offscreen on WebGPU (exit 77 without
 // an adapter). Any other argument: the graphics on OpenGL (a window) and on WebGPU.
+// The launch sites' Landsat imagery brought to the global map's tone over the region (it was darker,
+// and its seam showed): per-channel means, transparent pixels aside, gains within 0.5-3.
+void regionalTone(){
+    Image detail(std::vector<unsigned char>{40,60,30,255,50,70,40,255,0,0,0,0},3,1);const Image reference(std::vector<unsigned char>{120,130,90,255},1,1);
+    albert::matchTone(detail,reference);const auto& d=detail.data();
+    require(std::abs((d[0]+d[4])/2.-120)<=1&&std::abs((d[1]+d[5])/2.-130)<=1&&std::abs((d[2]+d[6])/2.-90)<=1&&d[8]==0,"Regional imagery takes the base map's mean colour");
+    Image dark(std::vector<unsigned char>{10,10,10,255},1,1);albert::matchTone(dark,reference);require(dark.data()[0]==30,"Tone gains stay within 0.5-3");
+}
 int main(int argc,char** argv) {
     try {
-        controls();orbitPaths();
+        controls();orbitPaths();regionalTone();
         if(argc>1){
             const bool gpuOnly=std::string_view(argv[1])=="webgpu";
             if(!gpuOnly){GlTarget gl;graphics(gl);}

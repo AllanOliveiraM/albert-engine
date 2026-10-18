@@ -1,4 +1,5 @@
 #include "regional.hpp"
+#include <array>
 #include "wms.hpp"
 #include "physics/earth.hpp"
 #include "providers/terrain.hpp"
@@ -56,11 +57,14 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
                     "&LAYERS=Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual&CRS=EPSG:4326&BBOX="<<r.south<<","<<r.west<<","<<r.north<<","<<r.east<<"&WIDTH="<<w<<"&HEIGHT="<<h<<"&FORMAT=image/jpeg&TIME=2000-12-01";return u.str();},region,2048,2048,progress);
                 int w=0,h=0;std::unique_ptr<stbi_uc,decltype(&stbi_image_free)> rgba(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(jpeg.data()),static_cast<int>(jpeg.size()),&w,&h,nullptr,4),stbi_image_free);
                 if(!rgba)throw std::runtime_error("Unreadable Landsat image");
+                Image landsat(std::vector<unsigned char>(rgba.get(),rgba.get()+static_cast<std::size_t>(w)*h*4),static_cast<unsigned>(w),static_cast<unsigned>(h));
+                // Landsat's corrected reflectance is darker than the global map: brought to its tone there (the seam showed).
+                if(pack->contains(body+"-day"))matchTone(landsat,pack->image(body+"-day",region,128,progress));
                 progress.stage("Baixando relevo Copernicus",0);constexpr unsigned posts=385;
                 const auto heights=providers::copernicusDem().heights(region.west,region.south,region.east,region.north,posts,posts,progress);
                 const float geoid=static_cast<float>(physics::geoidHeight((region.south+region.north)*std::numbers::pi/360.,(region.west+region.east)*std::numbers::pi/360.));
                 std::vector<float> relief(static_cast<std::size_t>(posts)*posts*4,1.f);for(std::size_t i=0;i<heights.size();++i)relief[4*i]=heights[i]+geoid; // Ellipsoidal.
-                result.day=Image(std::vector<unsigned char>(rgba.get(),rgba.get()+static_cast<std::size_t>(w)*h*4),static_cast<unsigned>(w),static_cast<unsigned>(h));
+                result.day=std::move(landsat);
                 result.height=Image(std::move(relief),posts,posts);result.lift=.5f;result.segments=posts-1;site=true;
             }catch(const std::exception& e){if(progress.cancelled)throw;std::cerr<<"Terreno do sitio indisponivel: "<<e.what()<<std::endl;}
             if(!site)result.day=pack->image(body+"-day",region,4096,progress);
@@ -93,6 +97,15 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
     return std::nullopt;
 }
 
+void albert::matchTone(Image& detail,const Image& reference){
+    std::array<double,3> sum{},base{};double count=0,baseCount=0;
+    const auto& d=detail.data();const auto& r=reference.data();
+    for(std::size_t i=0;i+3<d.size();i+=4)if(d[i+3]){for(std::size_t c=0;c<3;++c)sum[c]+=d[i+c];++count;}
+    for(std::size_t i=0;i+3<r.size();i+=4)if(r[i+3]){for(std::size_t c=0;c<3;++c)base[c]+=r[i+c];++baseCount;}
+    if(!count||!baseCount)return;std::array<double,3> gain{};
+    for(std::size_t c=0;c<3;++c)gain[c]=std::clamp(base[c]/baseCount/std::max(sum[c]/count,1.),.5,3.);
+    auto& out=detail.data();for(std::size_t i=0;i+3<out.size();i+=4)for(std::size_t c=0;c<3;++c)out[i+c]=static_cast<unsigned char>(std::min(255.,out[i+c]*gain[c]+.5));
+}
 void albert::prepareRegionalImages(RegionalImages& images) {
     if(!images.day || images.geometry || images.textureOnly) return;
     constexpr double pi=std::numbers::pi;

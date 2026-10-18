@@ -38,7 +38,8 @@ veículos perto do solo da Lua e de Marte (`detailFocus`). Perfil na MX350 a 192
 `build/perf-1080.py`, `ALBERT_FRAME_STATS`): cena na GPU 9,4–10,6 ms (p99 10,7) no Cabo, Alpes e
 Jezero; trabalho de CPU 3,5–5,3 ms; o "present" de ~40 ms é a cópia do Xvfb (sem DRI3; 23 ms a
 1280×800, escala com os pixels), então o p99 < 25 ms em tela nativa não foi medido aqui (o desktop
-pessoal fica fora). Próximo: solo regional mais escuro que o global (Terra e Marte).
+pessoal fica fora). Landsat dos sítios no tom médio do mapa global da região (`matchTone`). Próximo:
+medir o quadro em tela nativa quando o Allan puder, nuvens volumétricas.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

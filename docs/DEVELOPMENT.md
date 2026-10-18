@@ -339,7 +339,9 @@ terreno ativo os remendos regionais ficam ocultos e a imagem regional vai para o
 dentro da região (`Terrain::detail`: o material do remendo sem bump, coordenadas sobre a região em
 `uv`, as globais em `uv2` para o mapa de preenchimento); nós que cruzam a borda ficam com o mapa
 global. Um veículo perto do solo de um corpo (Terra, Lua, Marte) pede o detalhe regional dele e o
-mantém (antes só a Terra, e era liberado 3 s depois de cada carga e baixado de novo).
+mantém (antes só a Terra, e era liberado 3 s depois de cada carga e baixado de novo). A imagem Landsat
+dos sítios (refletância corrigida, mais escura que o mapa global) é levada ao tom médio do mapa global
+na mesma região, por canal (`matchTone`, ganhos entre 0,5 e 3), antes da máscara de água.
 `Terrain::ground` dá o raio do relevo desenhado sob um ponto (nó mais fino construído, bilinear
 entre postes): a câmera fica acima dele perto de um veículo e o plano próximo respeita a altura
 sobre ele (uma órbita longa arrastada até o horizonte de um módulo cortava o chão inteiro).

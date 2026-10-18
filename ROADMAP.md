@@ -50,8 +50,8 @@ nós, morph entre níveis, o chão do ar no relevo sob a câmera e a atmosfera d
 assimetria da poeira por canal), reflexo do céu na água lisa e sombra das nuvens no solo e nos
 veículos, rugosidade do mar pelo vento (Cox-Munk). Perfil na MX350 a 1080p: cena na GPU ≤ 10,7 ms
 (p99) e CPU ≤ 5,3 ms no Cabo, Alpes e Jezero; o quadro completo em tela nativa ainda não foi medido
-(no Xvfb a apresentação copia o quadro pela CPU). Faltam nuvens volumétricas, ondas geométricas e o
-solo regional mais claro (hoje escuro também no OpenGL).
+(no Xvfb a apresentação copia o quadro pela CPU). A imagem Landsat dos sítios toma o tom do mapa
+global na região. Faltam nuvens volumétricas e ondas geométricas.
 
 Estado em 18/10/2026: etapas 1–5 entregues. Os 22 programas e os materiais embutidos rodam em WGSL;
 o `visual_test` passa nos dois renderizadores (llvmpipe e MX350); sombra PCF, MSAA 4×, texturas em
