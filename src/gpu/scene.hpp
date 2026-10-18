@@ -18,9 +18,11 @@ public:
     bool toneMapping=true; // ACES filmic (threepp's ACESFilmic); false: none, as threepp's default.
     bool shadows=false; // Sun shadow map for castShadow meshes on receiveShadow ones.
     unsigned samples=4; // Multisampling: 4 (resolved into the target) or 1.
-    // Clears target (scene background) and depth, then draws, recording into encoder.
+    // Clears target (scene background) and depth, then draws, recording into encoder. Uniforms are
+    // written through the queue: submit this encoder before the next render().
     void render(threepp::Scene& scene,threepp::Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder);
     [[nodiscard]] unsigned drawn()const; // Draw calls in the last render.
+    [[nodiscard]] std::size_t vertexBytes()const; // Vertex buffers resident on the GPU.
     [[nodiscard]] double gpuMilliseconds()const; // GPU time of a recent scene pass (timestamp queries), or -1.
     void submitted(); // Call once the encoder given to render() has been submitted.
 private:

@@ -90,6 +90,47 @@ struct Material { size: f32 };
             // seen at u 0.48-0.64 where the blocker itself (u 0.65-0.93) does not cover it.
             const int lit=lum(.20f,.5f),shaded=lum(.56f,.5f);std::printf("shadow: lit %d, shaded %d\n",lit,shaded);
             require(lit>200&&shaded<lit/3&&albert::gpu::errors()==0,"Sun shadow on the receiver");
+            // A new map size recreates the map: the frame bind group must sample the new one (the
+            // moved blocker now shades x in [-2.2, -0.2], seen at u 0.29-0.36 beside its own image).
+            sunlight->shadow->mapSize.set(1024,1024);blocker->position.set(0,2,0);
+            WGPUCommandEncoder e3=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);renderer.render(world,eye,view,w,h,e3);
+            WGPUCommandBuffer c3=wgpuCommandEncoderFinish(e3,nullptr);wgpuQueueSubmit(gpu->queue(),1,&c3);wgpuCommandBufferRelease(c3);wgpuCommandEncoderRelease(e3);
+            const auto moved=read(*gpu,target,w,h);auto lum2=[&](float u,float v){const auto* p=&moved[(static_cast<std::size_t>(v*(h-1))*w+static_cast<unsigned>(u*(w-1)))*4];return p[0]+p[1]+p[2];};
+            std::printf("resized shadow map: lit %d, shaded %d\n",lum2(.20f,.5f),lum2(.32f,.5f));
+            require(lum2(.20f,.5f)>200&&lum2(.32f,.5f)<lum2(.20f,.5f)/3&&albert::gpu::errors()==0,"Shadow after the map is recreated");
+            renderer.shadows=false;
+        }
+        auto frameOf=[&](Scene& sc,Camera& cam){WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);renderer.render(sc,cam,view,w,h,en);
+            WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);
+            const auto shot=read(*gpu,target,w,h);const auto* p=&shot[(static_cast<std::size_t>(h/2)*w+w/2)*4];return std::array<int,3>{p[0],p[1],p[2]};};
+        { // Textures: a small one replaced every frame (bind groups follow each new view), then a 16 MB
+          // one whose update streams over two frames while the old copy keeps drawing.
+            Scene sc;OrthographicCamera cam(-1,1,1,-1,.1f,10);cam.position.set(0,0,5);
+            auto small=DataTexture::create(ImageData(std::vector<unsigned char>(16,255)),2,2);auto mat=MeshBasicMaterial::create();mat->map=small;
+            sc.add(Mesh::create(PlaneGeometry::create(4,4),mat));
+            for(int i=0;i<4;++i){auto& d=small->image().data();for(std::size_t k=0;k<d.size();k+=4){d[k]=i%2?255:0;d[k+1]=i%2?0:255;d[k+2]=0;d[k+3]=255;}small->needsUpdate();
+                const auto p=frameOf(sc,cam);std::printf("replaced texture %d: %d %d %d\n",i,p[0],p[1],p[2]);require(i%2?p[0]>p[1]+80:p[1]>p[0]+50,"Replaced texture drawn in its frame");}
+            auto big=DataTexture::create(ImageData(std::vector<unsigned char>(2048*2048*4,0)),2048,2048);
+            auto paint=[&](int c){auto& d=big->image().data();for(std::size_t k=0;k<d.size();k+=4){d[k]=c==0?255:0;d[k+1]=c==1?255:0;d[k+2]=0;d[k+3]=255;}big->needsUpdate();};
+            paint(0);mat->map=big;mat->needsUpdate();
+            const auto first=frameOf(sc,cam);paint(1);const auto during=frameOf(sc,cam),after=frameOf(sc,cam);
+            std::printf("streamed texture: first %d %d, during %d %d, after %d %d\n",first[0],first[1],during[0],during[1],after[0],after[1]);
+            require(first[0]>first[1]+80,"A first copy uploads at once");
+            require(during[0]>during[1]+80,"An update larger than the frame budget keeps the old copy while it streams");
+            require(after[1]>after[0]+50&&albert::gpu::errors()==0,"The streamed copy replaces the old one");
+        }
+        { // Chunks sharing one attribute (as the border lines do) share one GPU copy.
+            Scene sc;OrthographicCamera cam(-1,1,1,-1,.1f,10);cam.position.set(0,0,5);
+            std::vector<float> triangles;for(int i=0;i<20000;++i)for(float v:{-.5f,-.5f,0.f,.5f,-.5f,0.f,0.f,.5f,0.f})triangles.push_back(v);
+            const std::shared_ptr<BufferAttribute> shared=FloatBufferAttribute::create(std::move(triangles),3);const std::size_t bytes=20000*9*4;
+            for(int i=0;i<8;++i){auto g=BufferGeometry::create();g->setAttribute("position",shared);g->setDrawRange(i*3000,3000);sc.add(Mesh::create(g,MeshBasicMaterial::create()));}
+            const std::size_t before=renderer.vertexBytes();frameOf(sc,cam);const std::size_t added=renderer.vertexBytes()-before;
+            std::printf("shared attribute: %zu bytes resident for %zu\n",added,bytes);
+            require(added>=bytes&&added<bytes*3/2&&renderer.drawn()==8,"One GPU copy for a shared attribute");
+        }
+        { // Multisampling resolves into the target: the first scene's flat colours survive it.
+            renderer.samples=4;const auto p=frameOf(scene,camera);renderer.samples=1;
+            std::printf("msaa centre %d %d %d\n",p[0],p[1],p[2]);require(albert::gpu::errors()==0,"MSAA pass without errors");
         }
         wgpuTextureViewRelease(view);wgpuTextureRelease(target);
         std::printf("gpu_scene_test: ok\n");return 0;

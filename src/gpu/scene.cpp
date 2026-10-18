@@ -1,5 +1,6 @@
 #include "gpu/scene.hpp"
 #include "gpu/programs.hpp"
+#include <webgpu/wgpu.h>
 #include <threepp/threepp.hpp>
 #include <threepp/materials/ShaderMaterial.hpp>
 #include <algorithm>
@@ -39,6 +40,13 @@ bool blend(const Material& m,WGPUBlendState& b){
     return true;
 }
 std::size_t align(std::size_t v,std::size_t a){return (v+a-1)/a*a;}
+std::uint16_t toHalf(float f){ // Round to nearest; overflow to infinity, tiny values to subnormals or zero.
+    std::uint32_t x;std::memcpy(&x,&f,4);const std::uint32_t sign=(x>>16)&0x8000u;const int e=static_cast<int>((x>>23)&255)-112;std::uint32_t m=x&0x7fffffu;
+    if(((x>>23)&255)==255)return static_cast<std::uint16_t>(sign|0x7c00u|(m?0x200u:0u));
+    if(e>=31)return static_cast<std::uint16_t>(sign|0x7c00u);
+    if(e<=0){if(e<-10)return static_cast<std::uint16_t>(sign);m|=0x800000u;const int shift=14-e;return static_cast<std::uint16_t>(sign|((m+(1u<<(shift-1)))>>shift));}
+    const std::uint32_t h=(static_cast<std::uint32_t>(e)<<10)|(m>>13);return static_cast<std::uint16_t>(sign|(h+((m>>12)&1u)));
+}
 // WGSL uniform layout: f32 4, vec2 8, vec3 16 (size 12), vec4 16, mat3 16 (48), mat4 16 (64).
 std::pair<std::size_t,std::size_t> layout(Uniform u){
     switch(u){case Uniform::f32:return{4,4};case Uniform::vec2:return{8,8};case Uniform::vec3:return{16,12};case Uniform::vec4:return{16,16};case Uniform::mat3:return{16,48};case Uniform::mat4:return{16,64};}
@@ -68,7 +76,7 @@ const char* const builtinWgsl=R"(
 struct Material { colour: vec4f, emissive: vec4f, params: vec4f, flags: vec4f, specular: vec4f, more: vec4f };
 // params: roughness, metalness or shininess, alphaTest, lightMapIntensity
 // flags: map sRGB, kind (0 basic, 1 phong, 2 standard, 3 lambert), has alphaMap, has lightMap
-// specular: Phong specular colour, bumpScale; more: has bumpMap, has roughnessMap, double sided, flat shading
+// specular: Phong specular colour, bumpScale; more: has bumpMap, has roughnessMap, double sided, flat shading; emissive.w: bumpMap wraps
 @group(2) @binding(0) var<uniform> material: Material;
 @group(2) @binding(1) var map: texture_2d<f32>;
 @group(2) @binding(2) var mapSampler: sampler;
@@ -96,8 +104,8 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
     let lightTexel = textureSample(lightMap, lightSampler, v.uv2).rgb;
     let roughTexel = textureSample(roughnessMap, roughnessSampler, v.uv);
     let dx = dpdx(v.uv); let dy = dpdy(v.uv); let scale = material.specular.w;
-    let h = scale * heightAt(bumpMap, v.uv);
-    let dBx = scale * heightAt(bumpMap, v.uv + dx) - h; let dBy = scale * heightAt(bumpMap, v.uv + dy) - h;
+    let wraps = material.emissive.w > 0.5; let h = scale * heightAt(bumpMap, v.uv, wraps);
+    let dBx = scale * heightAt(bumpMap, v.uv + dx, wraps) - h; let dBy = scale * heightAt(bumpMap, v.uv + dy, wraps) - h;
     var geometryNormal = normalize(v.normal); if (material.more.z > 0.5) { geometryNormal = geometryNormal * face; }
     if (material.more.w > 0.5) { geometryNormal = flatNormal(v.position); }
     var n = geometryNormal; if (material.more.x > 0.5) { n = bumpNormal(v.position, geometryNormal, dBx, dBy, face); }
@@ -111,7 +119,7 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
     else if (kind > 1.5 && kind < 2.5) {
         let roughness = material.params.x * select(1.0, roughTexel.g, material.more.y > 0.5);
         colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra, shadow);
-    } else if (kind > 2.5) { colour = phongLight(base.rgb, vec3f(0.0), 1.0, n, v.position, extra, shadow); }
+    } else if (kind > 2.5) { colour = lambertLight(base.rgb, n, extra * PI_L, shadow); } // threepp keeps π on Lambert light maps.
     else { colour = phongLight(base.rgb, material.specular.rgb, material.params.y, n, v.position, extra, shadow); }
     return vec4f(finish(colour + material.emissive.rgb), base.a);
 }
@@ -124,18 +132,20 @@ struct SceneRenderer::Impl {
     WGPUBindGroupLayout frameLayout=nullptr,objectLayout=nullptr;WGPUBindGroup frameGroup=nullptr,objectGroup=nullptr;
     WGPUBuffer zeros=nullptr;WGPUTexture whiteTexture=nullptr,blackTexture=nullptr;WGPUTextureView white=nullptr,black=nullptr;WGPUSampler linear=nullptr;
     struct Buffer {WGPUBuffer buffer=nullptr;std::size_t bytes=0;unsigned version=~0u;};
-    struct Geometry {std::unordered_map<std::string,Buffer> attributes;Buffer index;unsigned used=0;};
+    struct Geometry {Buffer index;unsigned used=0;}; // Index buffers belong to one geometry; attributes may be shared.
+    struct Attribute {std::weak_ptr<BufferAttribute> owner;Buffer buffer;unsigned used=0;};
     // A texture's GPU copy. Large images stream in row slices (~8 MB a frame) into `pending` while
     // the previous copy (or nothing) keeps drawing; mipmaps are rendered on the GPU at the end.
     struct Texture {WGPUTexture texture=nullptr;WGPUTextureView view=nullptr;WGPUSampler sampler=nullptr;unsigned version=~0u,used=0;
-        WGPUTexture pending=nullptr;unsigned pendingVersion=~0u,row=0,width=0,height=0,levels=1;std::size_t texel=0;std::vector<std::byte> converted;};
-    struct MaterialState {Buffer uniforms;WGPUBindGroup group=nullptr;std::vector<WGPUTextureView> views;std::string program;unsigned used=0;};
+        WGPUTexture pending=nullptr;unsigned pendingVersion=~0u,row=0,width=0,height=0,levels=1;std::size_t texel=0;std::vector<std::byte> converted;std::uint64_t serial=0;};
+    // Bind groups are keyed by view serials: a released view's address may come back for a new one.
+    struct MaterialState {Buffer uniforms;WGPUBindGroup group=nullptr;std::vector<std::uint64_t> serials;std::string program;unsigned used=0;};
     struct Compiled {WGPUShaderModule module=nullptr;WGPUBindGroupLayout layout=nullptr;WGPUPipelineLayout pipelineLayout=nullptr;Program program;};
-    std::unordered_map<unsigned,Geometry> geometries;std::unordered_map<unsigned,Texture> textures;std::unordered_map<unsigned,MaterialState> materials;
+    std::unordered_map<unsigned,Geometry> geometries;std::unordered_map<const BufferAttribute*,Attribute> attributes;std::unordered_map<unsigned,Texture> textures;std::uint64_t serials=2;std::unordered_map<unsigned,MaterialState> materials; // Serials 1, 2: white, black.
     std::unordered_map<std::string,Compiled> compiled;std::unordered_map<std::string,WGPURenderPipeline> pipelines;std::set<std::string> reported;
-    unsigned frame=0,drawn=0;bool floatFilterable=false;
+    unsigned frame=0,drawn=0;bool floatFilterable=false;float tickNanoseconds=1;
     // Sun shadow map: depth from the light's orthographic camera, compared with PCF in the receivers.
-    WGPUTexture shadowTexture=nullptr,dummyShadow=nullptr;WGPUTextureView shadowView=nullptr,dummyShadowView=nullptr,boundShadow=nullptr;unsigned shadowSize=0;
+    WGPUTexture shadowTexture=nullptr,dummyShadow=nullptr;WGPUTextureView shadowView=nullptr,dummyShadowView=nullptr;unsigned shadowSize=0;std::uint64_t shadowSerial=0,boundFrame=~0ull; // boundFrame: the shadow map serial in frameGroup (0: the dummy).
     WGPUSampler shadowSampler=nullptr;WGPUBindGroup casterFrame=nullptr;WGPURenderPipeline shadowPipeline=nullptr;WGPUPipelineLayout shadowLayout=nullptr;WGPUShaderModule shadowModule=nullptr;
     // Scene-pass GPU time: two timestamps resolved into a buffer, read back a few frames later.
     WGPUQuerySet timestamps=nullptr;WGPUBuffer resolved=nullptr,readback=nullptr;bool mapping=false,mapPending=false;double gpuMs=-1;WGPUBufferMapCallbackInfo pendingMap{};
@@ -163,7 +173,7 @@ struct SceneRenderer::Impl {
         solid(0xffffffffu,whiteTexture,white);solid(0xff000000u,blackTexture,black); // Black: GL's empty texture for ShaderMaterials.
         WGPUSamplerDescriptor s{};s.addressModeU=s.addressModeV=s.addressModeW=WGPUAddressMode_ClampToEdge;s.magFilter=s.minFilter=WGPUFilterMode_Linear;s.mipmapFilter=WGPUMipmapFilterMode_Linear;s.lodMaxClamp=32;s.maxAnisotropy=1;
         linear=wgpuDeviceCreateSampler(device,&s);
-        floatFilterable=wgpuDeviceHasFeature(device,WGPUFeatureName_Float32Filterable);
+        floatFilterable=wgpuDeviceHasFeature(device,WGPUFeatureName_Float32Filterable);tickNanoseconds=wgpuQueueGetTimestampPeriod(queue);
         if(wgpuDeviceHasFeature(device,WGPUFeatureName_TimestampQuery)){
             WGPUQuerySetDescriptor q{};q.type=WGPUQueryType_Timestamp;q.count=2;timestamps=wgpuDeviceCreateQuerySet(device,&q);
             WGPUBufferDescriptor b{};b.size=16;b.usage=WGPUBufferUsage_QueryResolve|WGPUBufferUsage_CopySrc;resolved=wgpuDeviceCreateBuffer(device,&b);
@@ -175,7 +185,7 @@ struct SceneRenderer::Impl {
         for(auto& [k,p]:pipelines)wgpuRenderPipelineRelease(p);for(auto& [k,p]:mipPipelines)wgpuRenderPipelineRelease(p);
         if(mipModule){wgpuShaderModuleRelease(mipModule);wgpuBindGroupLayoutRelease(mipLayout);wgpuPipelineLayoutRelease(mipPipelineLayout);}
         for(auto& [k,c]:compiled){wgpuShaderModuleRelease(c.module);wgpuBindGroupLayoutRelease(c.layout);wgpuPipelineLayoutRelease(c.pipelineLayout);}
-        for(auto& [k,g]:geometries)release(g);for(auto& [k,t]:textures)release(t);for(auto& [k,m]:materials)release(m);
+        for(auto& [k,g]:geometries)release(g);for(auto& [k,a]:attributes)release(a);for(auto& [k,t]:textures)release(t);for(auto& [k,m]:materials)release(m);
         for(auto b:{frameBuffer,objectBuffer,zeros,resolved,readback})if(b)wgpuBufferRelease(b);if(timestamps)wgpuQuerySetRelease(timestamps);
         if(frameGroup)wgpuBindGroupRelease(frameGroup);if(casterFrame)wgpuBindGroupRelease(casterFrame);if(objectGroup)wgpuBindGroupRelease(objectGroup);
         if(shadowView)wgpuTextureViewRelease(shadowView);if(shadowTexture)wgpuTextureRelease(shadowTexture);wgpuTextureViewRelease(dummyShadowView);wgpuTextureRelease(dummyShadow);wgpuSamplerRelease(shadowSampler);
@@ -190,7 +200,7 @@ struct SceneRenderer::Impl {
     }
     void bindFrame(WGPUTextureView shadow){
         if(!casterFrame)casterFrame=frameWith(dummyShadowView); // The shadow pass cannot sample the map it writes.
-        if(frameGroup&&boundShadow==shadow)return;if(frameGroup)wgpuBindGroupRelease(frameGroup);boundShadow=shadow;frameGroup=frameWith(shadow);
+        const std::uint64_t key=shadow==dummyShadowView?0:shadowSerial;if(frameGroup&&boundFrame==key)return;if(frameGroup)wgpuBindGroupRelease(frameGroup);boundFrame=key;frameGroup=frameWith(shadow);
     }
     WGPURenderPipeline shadowCaster(){ // Depth only, positions through the sun's view-projection.
         if(shadowPipeline)return shadowPipeline;
@@ -205,7 +215,17 @@ struct SceneRenderer::Impl {
         return shadowPipeline=wgpuDeviceCreateRenderPipeline(device,&d);
     }
     WGPUBuffer buffer(std::size_t bytes,WGPUBufferUsage usage){WGPUBufferDescriptor d{};d.size=align(std::max<std::size_t>(bytes,16),4);d.usage=usage|WGPUBufferUsage_CopyDst;return wgpuDeviceCreateBuffer(device,&d);}
-    void release(Geometry& g){for(auto& [k,b]:g.attributes)if(b.buffer)wgpuBufferRelease(b.buffer);if(g.index.buffer)wgpuBufferRelease(g.index.buffer);}
+    void release(Geometry& g){if(g.index.buffer)wgpuBufferRelease(g.index.buffer);}
+    void release(Attribute& a){if(a.buffer.buffer)wgpuBufferRelease(a.buffer.buffer);}
+    // The GPU copy of a float attribute, one per threepp attribute however many geometries share it
+    // (the border chunks share theirs and differ in draw range); nullptr when absent or of another size.
+    WGPUBuffer vertices(BufferGeometry& geometry,const std::string& name,int components){
+        const auto& all=geometry.getAttributes();const auto it=all.find(name);if(it==all.end())return nullptr;
+        const auto* a=dynamic_cast<const TypedBufferAttribute<float>*>(it->second.get());if(!a||a->itemSize()!=components)return nullptr;
+        auto& slot=attributes[it->second.get()];
+        if(slot.owner.lock()!=it->second){release(slot);slot=Attribute{};slot.owner=it->second;} // New, or another attribute at a reused address.
+        slot.used=frame;upload(slot.buffer,a->array().data(),a->array().size()*4,WGPUBufferUsage_Vertex,a->version);return slot.buffer.buffer;
+    }
     void release(Texture& t){if(t.view)wgpuTextureViewRelease(t.view);if(t.texture)wgpuTextureRelease(t.texture);if(t.sampler)wgpuSamplerRelease(t.sampler);if(t.pending)wgpuTextureRelease(t.pending);}
     void release(MaterialState& m){if(m.uniforms.buffer)wgpuBufferRelease(m.uniforms.buffer);if(m.group)wgpuBindGroupRelease(m.group);}
     void report(const std::string& what){if(reported.insert(what).second)std::fprintf(stderr,"WebGPU renderer: %s\n",what.c_str());}
@@ -226,8 +246,8 @@ struct SceneRenderer::Impl {
         entries[0].binding=0;entries[0].visibility=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;entries[0].buffer.type=WGPUBufferBindingType_Uniform;
         for(std::size_t i=0;i<p->textures.size();++i){
             auto& t=entries[1+2*i];t.binding=static_cast<std::uint32_t>(1+2*i);t.visibility=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;
-            t.texture.sampleType=floatFilterable?WGPUTextureSampleType_Float:WGPUTextureSampleType_UnfilterableFloat;t.texture.viewDimension=WGPUTextureViewDimension_2D;
-            auto& s=entries[2+2*i];s.binding=static_cast<std::uint32_t>(2+2*i);s.visibility=t.visibility;s.sampler.type=floatFilterable?WGPUSamplerBindingType_Filtering:WGPUSamplerBindingType_NonFiltering;
+            t.texture.sampleType=WGPUTextureSampleType_Float;t.texture.viewDimension=WGPUTextureViewDimension_2D;
+            auto& s=entries[2+2*i];s.binding=static_cast<std::uint32_t>(2+2*i);s.visibility=t.visibility;s.sampler.type=WGPUSamplerBindingType_Filtering;
         }
         WGPUBindGroupLayoutDescriptor ld{};ld.entryCount=entries.size();ld.entries=entries.data();c.layout=wgpuDeviceCreateBindGroupLayout(device,&ld);
         WGPUBindGroupLayout layouts[]{frameLayout,objectLayout,c.layout};WGPUPipelineLayoutDescriptor pd{};pd.bindGroupLayoutCount=3;pd.bindGroupLayouts=layouts;
@@ -235,7 +255,7 @@ struct SceneRenderer::Impl {
         return &compiled.emplace(name,std::move(c)).first->second;
     }
     std::unordered_map<int,WGPURenderPipeline> mipPipelines;WGPUBindGroupLayout mipLayout=nullptr;WGPUPipelineLayout mipPipelineLayout=nullptr;WGPUShaderModule mipModule=nullptr;
-    std::size_t streamBudget=0; // Bytes still allowed this frame.
+    static constexpr std::size_t streamLimit=8u<<20;std::size_t streamBudget=0; // Bytes a frame for streamed updates; still allowed this frame.
     // Box-filtered mip chain rendered level by level (a full-screen triangle sampling the level above).
     void mipmaps(WGPUTexture texture,WGPUTextureFormat format,unsigned levels){
         if(levels<2)return;
@@ -248,8 +268,8 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
 @fragment fn fs_main(v: V) -> @location(0) vec4f { return textureSampleLevel(source, smp, v.uv, 0.0); }
 )";
             WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code=sv(code);WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;mipModule=wgpuDeviceCreateShaderModule(device,&md);
-            WGPUBindGroupLayoutEntry e[2]{};e[0].binding=0;e[0].visibility=WGPUShaderStage_Fragment;e[0].texture.sampleType=floatFilterable?WGPUTextureSampleType_Float:WGPUTextureSampleType_UnfilterableFloat;e[0].texture.viewDimension=WGPUTextureViewDimension_2D;
-            e[1].binding=1;e[1].visibility=WGPUShaderStage_Fragment;e[1].sampler.type=floatFilterable?WGPUSamplerBindingType_Filtering:WGPUSamplerBindingType_NonFiltering;
+            WGPUBindGroupLayoutEntry e[2]{};e[0].binding=0;e[0].visibility=WGPUShaderStage_Fragment;e[0].texture.sampleType=WGPUTextureSampleType_Float;e[0].texture.viewDimension=WGPUTextureViewDimension_2D;
+            e[1].binding=1;e[1].visibility=WGPUShaderStage_Fragment;e[1].sampler.type=WGPUSamplerBindingType_Filtering;
             WGPUBindGroupLayoutDescriptor ld{};ld.entryCount=2;ld.entries=e;mipLayout=wgpuDeviceCreateBindGroupLayout(device,&ld);
             WGPUPipelineLayoutDescriptor pd{};pd.bindGroupLayoutCount=1;pd.bindGroupLayouts=&mipLayout;mipPipelineLayout=wgpuDeviceCreatePipelineLayout(device,&pd);
         }
@@ -272,56 +292,63 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         }
         WGPUCommandBuffer commands=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(queue,1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(encoder);
     }
-    // RGBA bytes or floats of a threepp image: the image's own buffer when it already is RGBA
-    // (Albert's large textures), else a converted copy kept in `out`.
-    const std::byte* rgba(const threepp::Texture& source,std::vector<std::byte>& out,bool& floats){
+    // RGBA bytes, floats (or half floats without float32 filtering) of a threepp image: the
+    // image's own buffer when it already has that layout (Albert's large textures), else a converted
+    // copy kept in `out` for the rest of the upload.
+    WGPUTextureFormat format(const Image& image)const{return image.isFloat()||image.isHalfFloat()?(floatFilterable?WGPUTextureFormat_RGBA32Float:WGPUTextureFormat_RGBA16Float):WGPUTextureFormat_RGBA8Unorm;}
+    const std::byte* rgba(const threepp::Texture& source,std::vector<std::byte>& out){
         const Image& image=source.image();const std::size_t pixels=static_cast<std::size_t>(image.width())*std::max(1u,image.height());
-        const int channels=std::max(1,image.channels());floats=image.isFloat()||image.isHalfFloat();
-        if(channels==4&&image.isFloat())return reinterpret_cast<const std::byte*>(image.data<float>().data());
-        if(channels==4&&!floats)return reinterpret_cast<const std::byte*>(image.data<unsigned char>().data());
+        const int channels=std::max(1,image.channels());const auto f=format(image);
+        if(channels==4&&f==WGPUTextureFormat_RGBA32Float&&image.isFloat())return reinterpret_cast<const std::byte*>(image.data<float>().data());
+        if(channels==4&&f==WGPUTextureFormat_RGBA16Float&&image.isHalfFloat())return reinterpret_cast<const std::byte*>(image.data<std::uint16_t>().data());
+        if(channels==4&&f==WGPUTextureFormat_RGBA8Unorm)return reinterpret_cast<const std::byte*>(image.data<unsigned char>().data());
+        if(!out.empty())return out.data();
         auto expand=[&](auto read,auto one){using T=decltype(one);out.resize(pixels*4*sizeof(T));auto* d=reinterpret_cast<T*>(out.data());
             for(std::size_t i=0;i<pixels;++i)for(int c=0;c<4;++c)d[i*4+c]=c<channels?read(i*channels+c):c==3?one:(channels==1?read(i):T(0));};
-        if(image.isFloat()){const auto& v=image.data<float>();expand([&](std::size_t i){return i<v.size()?v[i]:0.f;},1.f);}
-        else if(image.isHalfFloat()){const auto& v=image.data<std::uint16_t>();expand([&](std::size_t i){
-            if(i>=v.size())return 0.f;const unsigned h16=v[i],e=(h16>>10)&31,m=h16&1023;const float sgn=(h16&0x8000)?-1.f:1.f;
-            return e==0?sgn*std::ldexp(static_cast<float>(m),-24):e==31?sgn*1e30f:sgn*std::ldexp(static_cast<float>(m|1024),static_cast<int>(e)-25);},1.f);}
+        auto decoded=[&](std::size_t i)->float{
+            if(image.isFloat()){const auto& v=image.data<float>();return i<v.size()?v[i]:0.f;}
+            const auto& v=image.data<std::uint16_t>();if(i>=v.size())return 0.f;const unsigned h16=v[i],e=(h16>>10)&31,m=h16&1023;const float sgn=(h16&0x8000)?-1.f:1.f;
+            return e==0?sgn*std::ldexp(static_cast<float>(m),-24):e==31?sgn*1e30f:sgn*std::ldexp(static_cast<float>(m|1024),static_cast<int>(e)-25);};
+        if(f==WGPUTextureFormat_RGBA32Float)expand(decoded,1.f);
+        else if(f==WGPUTextureFormat_RGBA16Float){const std::uint16_t one=toHalf(1.f);expand([&](std::size_t i){return image.isHalfFloat()?(i<image.data<std::uint16_t>().size()?image.data<std::uint16_t>()[i]:std::uint16_t{0}):toHalf(decoded(i));},one);}
         else{const auto& v=image.data<unsigned char>();expand([&](std::size_t i){return i<v.size()?v[i]:static_cast<unsigned char>(0);},static_cast<unsigned char>(255));}
         return out.data();
     }
-    WGPUTextureView view(threepp::Texture* source,bool blank=false){ // blank: black instead of white when absent.
-        if(!source)return blank?black:white;
-        auto& t=textures[source->id];t.used=frame;
+    // The texture's GPU view and its serial. A first copy, or a small image, uploads at once; a new
+    // version of a large one streams within the frame budget while the previous copy keeps drawing.
+    WGPUTextureView view(threepp::Texture* source,bool blank,std::uint64_t& serial){ // blank: black instead of white when absent.
+        serial=blank?2:1;if(!source)return blank?black:white;
+        auto& t=textures[source->id];t.used=frame;if(t.view)serial=t.serial;
         if(t.version==source->version()&&t.view)return t.view;
         const Image& image=source->image();const unsigned w=image.width(),h=std::max(1u,image.height());
         if(!w)return t.view?t.view:blank?black:white;
-        if(t.pendingVersion!=source->version()){ // Start (or restart) a copy of the new version.
-            if(t.pending)wgpuTextureRelease(t.pending);t.converted.clear();t.row=0;t.width=w;t.height=h;t.pendingVersion=source->version();
+        const WGPUTextureFormat f=format(image);const std::size_t texel=f==WGPUTextureFormat_RGBA32Float?16:f==WGPUTextureFormat_RGBA16Float?8:4;
+        if(t.pendingVersion!=source->version()||t.width!=w||t.height!=h||t.texel!=texel){ // Start (or restart: new version or a replaced image) a copy.
+            if(t.pending)wgpuTextureRelease(t.pending);t.converted.clear();t.row=0;t.width=w;t.height=h;t.texel=texel;t.pendingVersion=source->version();
             const bool mips=source->generateMipmaps&&source->minFilter!=Filter::Linear&&source->minFilter!=Filter::Nearest;
             t.levels=mips?1+static_cast<unsigned>(std::floor(std::log2(std::max(w,h)))):1;
-            const bool floats=image.isFloat()||image.isHalfFloat();t.texel=floats?16:4;
-            WGPUTextureDescriptor d{};d.size={w,h,1};d.format=floats?WGPUTextureFormat_RGBA32Float:WGPUTextureFormat_RGBA8Unorm;
+            WGPUTextureDescriptor d{};d.size={w,h,1};d.format=f;
             d.usage=WGPUTextureUsage_TextureBinding|WGPUTextureUsage_CopyDst|(t.levels>1?WGPUTextureUsage_RenderAttachment:WGPUTextureUsage_None);
             d.mipLevelCount=t.levels;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;t.pending=wgpuDeviceCreateTexture(device,&d);
         }
-        bool floats=false;const std::byte* data=rgba(*source,t.converted,floats);const std::size_t rowBytes=static_cast<std::size_t>(t.width)*t.texel;
-        // Small images (and the first copy of anything shown blank) go in one call; large ones in slices.
+        const std::byte* data=rgba(*source,t.converted);const std::size_t rowBytes=static_cast<std::size_t>(t.width)*t.texel;
+        const bool whole=!t.view||rowBytes*t.height<=(4u<<20);
         while(t.row<t.height){
-            const bool whole=rowBytes*t.height<=(4u<<20);
-            const unsigned rows=whole?t.height-t.row:static_cast<unsigned>(std::min<std::size_t>(t.height-t.row,std::max<std::size_t>(1,streamBudget/rowBytes)));
-            if(!rows)return t.view?t.view:blank?black:white;
-            WGPUTexelCopyTextureInfo dst{};dst.texture=t.pending;dst.origin={0,t.row,0};WGPUTexelCopyBufferLayout l{};l.bytesPerRow=static_cast<std::uint32_t>(rowBytes);l.rowsPerImage=rows;
-            const WGPUExtent3D e{t.width,rows,1};wgpuQueueWriteTexture(queue,&dst,data+rowBytes*t.row,rowBytes*rows,&l,&e);
-            t.row+=rows;if(!whole)streamBudget-=std::min(streamBudget,rowBytes*rows);
+            std::size_t rows=whole?t.height-t.row:std::min<std::size_t>(t.height-t.row,streamBudget/rowBytes);
+            if(!rows&&!whole&&streamBudget==streamLimit)rows=1; // A row larger than the whole budget.
+            if(!rows)return t.view;
+            WGPUTexelCopyTextureInfo dst{};dst.texture=t.pending;dst.origin={0,t.row,0};WGPUTexelCopyBufferLayout l{};l.bytesPerRow=static_cast<std::uint32_t>(rowBytes);l.rowsPerImage=static_cast<std::uint32_t>(rows);
+            const WGPUExtent3D e{t.width,static_cast<std::uint32_t>(rows),1};wgpuQueueWriteTexture(queue,&dst,data+rowBytes*t.row,rowBytes*rows,&l,&e);
+            t.row+=static_cast<unsigned>(rows);if(!whole)streamBudget-=std::min(streamBudget,rowBytes*rows);
         }
-        mipmaps(t.pending,floats?WGPUTextureFormat_RGBA32Float:WGPUTextureFormat_RGBA8Unorm,t.levels);
+        mipmaps(t.pending,f,t.levels);
         if(t.view)wgpuTextureViewRelease(t.view);if(t.texture)wgpuTextureRelease(t.texture);if(t.sampler)wgpuSamplerRelease(t.sampler);
-        t.texture=t.pending;t.pending=nullptr;t.version=t.pendingVersion;t.converted.clear();t.converted.shrink_to_fit();t.view=wgpuTextureCreateView(t.texture,nullptr);
+        t.texture=t.pending;t.pending=nullptr;t.version=t.pendingVersion;t.converted.clear();t.converted.shrink_to_fit();t.view=wgpuTextureCreateView(t.texture,nullptr);serial=t.serial=++serials;
         auto address=[](TextureWrapping m){return m==TextureWrapping::Repeat?WGPUAddressMode_Repeat:m==TextureWrapping::MirroredRepeat?WGPUAddressMode_MirrorRepeat:WGPUAddressMode_ClampToEdge;};
-        const bool filtered=!floats||floatFilterable;
         WGPUSamplerDescriptor s{};s.addressModeU=address(source->wrapS);s.addressModeV=address(source->wrapT);s.addressModeW=WGPUAddressMode_ClampToEdge;
-        s.magFilter=filtered&&source->magFilter!=Filter::Nearest?WGPUFilterMode_Linear:WGPUFilterMode_Nearest;
-        s.minFilter=filtered&&source->minFilter!=Filter::Nearest&&source->minFilter!=Filter::NearestMipmapNearest?WGPUFilterMode_Linear:WGPUFilterMode_Nearest;
-        s.mipmapFilter=filtered&&(source->minFilter==Filter::LinearMipmapLinear||source->minFilter==Filter::NearestMipmapLinear)?WGPUMipmapFilterMode_Linear:WGPUMipmapFilterMode_Nearest;
+        s.magFilter=source->magFilter!=Filter::Nearest?WGPUFilterMode_Linear:WGPUFilterMode_Nearest;
+        s.minFilter=source->minFilter!=Filter::Nearest&&source->minFilter!=Filter::NearestMipmapNearest?WGPUFilterMode_Linear:WGPUFilterMode_Nearest;
+        s.mipmapFilter=source->minFilter==Filter::LinearMipmapLinear||source->minFilter==Filter::NearestMipmapLinear?WGPUMipmapFilterMode_Linear:WGPUMipmapFilterMode_Nearest;
         s.lodMaxClamp=static_cast<float>(t.levels);
         s.maxAnisotropy=static_cast<std::uint16_t>(s.magFilter==WGPUFilterMode_Linear&&s.minFilter==WGPUFilterMode_Linear&&s.mipmapFilter==WGPUMipmapFilterMode_Linear?std::clamp(source->anisotropy,1,16):1);
         t.sampler=wgpuDeviceCreateSampler(device,&s);
@@ -356,16 +383,17 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
             if(auto* w=dynamic_cast<MaterialWithMap*>(&m))map=w->map.get();
             if(auto* w=dynamic_cast<MaterialWithAlphaMap*>(&m))alpha=w->alphaMap.get();
             if(auto* w=dynamic_cast<MaterialWithLightMap*>(&m)){light=w->lightMap.get();f[11]=w->lightMapIntensity;}
-            if(auto* w=dynamic_cast<MaterialWithBumpMap*>(&m)){bump=w->bumpMap.get();f[19]=w->bumpScale;}
+            if(auto* w=dynamic_cast<MaterialWithBumpMap*>(&m)){bump=w->bumpMap.get();f[19]=w->bumpScale;f[7]=bump&&bump->wrapS==TextureWrapping::Repeat?1.f:0.f;}
             if(auto* w=dynamic_cast<MaterialWithRoughness*>(&m))rough=w->roughnessMap.get();
             f[12]=map&&map->colorSpace==ColorSpace::sRGB?1.f:0.f;f[14]=alpha?1.f:0.f;f[15]=light?1.f:0.f;f[20]=bump?1.f:0.f;f[21]=rough?1.f:0.f;
             bytes.resize(sizeof f);std::memcpy(bytes.data(),f,sizeof f);maps={map,alpha,light,bump,rough};
         }
         if(!state.uniforms.buffer||state.uniforms.bytes<bytes.size()){if(state.uniforms.buffer)wgpuBufferRelease(state.uniforms.buffer);state.uniforms.buffer=buffer(bytes.size(),WGPUBufferUsage_Uniform);state.uniforms.bytes=bytes.size();if(state.group){wgpuBindGroupRelease(state.group);state.group=nullptr;}}
         wgpuQueueWriteBuffer(queue,state.uniforms.buffer,0,bytes.data(),bytes.size());
-        const bool shader=dynamic_cast<ShaderMaterial*>(&m)!=nullptr;std::vector<WGPUTextureView> views;for(std::size_t i=0;i<maps.size();++i)views.push_back(view(maps[i],shader||i>0));
-        if(state.group&&views==state.views&&state.program==m.name)return state.group;
-        if(state.group)wgpuBindGroupRelease(state.group);state.views=views;state.program=m.name;
+        const bool shader=dynamic_cast<ShaderMaterial*>(&m)!=nullptr;std::vector<WGPUTextureView> views;std::vector<std::uint64_t> serials(maps.size());
+        for(std::size_t i=0;i<maps.size();++i)views.push_back(view(maps[i],shader||i>0,serials[i]));
+        if(state.group&&serials==state.serials&&state.program==m.name)return state.group;
+        if(state.group)wgpuBindGroupRelease(state.group);state.serials=serials;state.program=m.name;
         std::vector<WGPUBindGroupEntry> e(1+2*maps.size());e[0].binding=0;e[0].buffer=state.uniforms.buffer;e[0].size=state.uniforms.bytes;
         for(std::size_t i=0;i<maps.size();++i){e[1+2*i].binding=static_cast<std::uint32_t>(1+2*i);e[1+2*i].textureView=views[i];e[2+2*i].binding=static_cast<std::uint32_t>(2+2*i);e[2+2*i].sampler=sampler(maps[i]);}
         WGPUBindGroupDescriptor d{};d.layout=c.layout;d.entryCount=e.size();d.entries=e.data();state.group=wgpuDeviceCreateBindGroup(device,&d);
@@ -374,9 +402,10 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
     WGPURenderPipeline pipeline(const std::string& name,const Compiled& c,const Material& m,const std::vector<int>& strides,unsigned samples){
         WGPUBlendState b{};const bool blended=blend(m,b);
         const auto cull=m.side==Side::Double?WGPUCullMode_None:m.side==Side::Back?WGPUCullMode_Front:WGPUCullMode_Back;
-        std::string key=name+'|'+std::to_string(blended?static_cast<int>(b.color.srcFactor)*1000+static_cast<int>(b.color.dstFactor)*10+static_cast<int>(b.color.operation):0)+'|'
-            +std::to_string(static_cast<int>(b.alpha.srcFactor))+std::to_string(static_cast<int>(b.alpha.dstFactor))+'|'+std::to_string(m.depthTest)+std::to_string(m.depthWrite)+std::to_string(static_cast<int>(cull))
-            +'|'+std::to_string(m.polygonOffset?m.polygonOffsetUnits:0.f)+'|'+std::to_string(m.colorWrite)+'|'+std::to_string(samples);
+        std::string key=name;
+        for(int v:{blended?1:0,static_cast<int>(b.color.srcFactor),static_cast<int>(b.color.dstFactor),static_cast<int>(b.color.operation),static_cast<int>(b.alpha.srcFactor),static_cast<int>(b.alpha.dstFactor),
+            static_cast<int>(b.alpha.operation),m.depthTest?1:0,m.depthWrite?1:0,static_cast<int>(cull),m.colorWrite?1:0,static_cast<int>(samples)})key+='|'+std::to_string(v);
+        if(m.polygonOffset)key+='|'+std::to_string(m.polygonOffsetFactor)+'/'+std::to_string(m.polygonOffsetUnits);
         for(int s:strides)key+=','+std::to_string(s);
         if(const auto it=pipelines.find(key);it!=pipelines.end())return it->second;
         std::vector<WGPUVertexAttribute> attributes(1+c.program.attributes.size());std::vector<WGPUVertexBufferLayout> buffers(attributes.size());
@@ -406,6 +435,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
     }
     void evict(){
         for(auto it=geometries.begin();it!=geometries.end();)if(frame-it->second.used>evictAfter){release(it->second);it=geometries.erase(it);}else ++it;
+        for(auto it=attributes.begin();it!=attributes.end();)if(frame-it->second.used>evictAfter||it->second.owner.expired()){release(it->second);it=attributes.erase(it);}else ++it;
         for(auto it=textures.begin();it!=textures.end();)if(frame-it->second.used>evictAfter){release(it->second);it=textures.erase(it);}else ++it;
         for(auto it=materials.begin();it!=materials.end();)if(frame-it->second.used>evictAfter){release(it->second);it=materials.erase(it);}else ++it;
     }
@@ -413,10 +443,11 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
 SceneRenderer::SceneRenderer(Context& context):impl_(std::make_unique<Impl>(context)){}
 SceneRenderer::~SceneRenderer()=default;
 unsigned SceneRenderer::drawn()const{return impl_->drawn;}
+std::size_t SceneRenderer::vertexBytes()const{std::size_t n=0;for(const auto& [k,a]:impl_->attributes)n+=a.buffer.bytes;return n;}
 double SceneRenderer::gpuMilliseconds()const{return impl_->gpuMs;}
 void SceneRenderer::submitted(){auto& g=*impl_;if(g.mapPending){wgpuBufferMapAsync(g.readback,WGPUMapMode_Read,0,16,g.pendingMap);g.mapPending=false;}}
 void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder){
-    auto& g=*impl_;++g.frame;g.drawn=0;const unsigned msaa=samples>1?4u:1u;g.ensureDepth(width,height,msaa);g.streamBudget=8u<<20;
+    auto& g=*impl_;++g.frame;g.drawn=0;const unsigned msaa=samples>1?4u:1u;g.ensureDepth(width,height,msaa);g.streamBudget=Impl::streamLimit;
     scene.updateMatrixWorld();if(!camera.parent)camera.updateMatrixWorld();
     // Reversed-Z infinite perspective: depth = near / -z, 1 at the near plane, 0 at infinity.
     // Orthographic: depth = (far + z) / (far - near), 1 at the near plane and 0 at the far one.
@@ -458,7 +489,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         const unsigned size=static_cast<unsigned>(std::clamp(sh.mapSize.x,256.f,4096.f));
         if(size!=g.shadowSize){if(g.shadowView)wgpuTextureViewRelease(g.shadowView);if(g.shadowTexture)wgpuTextureRelease(g.shadowTexture);
             WGPUTextureDescriptor d{};d.size={size,size,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_TextureBinding;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
-            g.shadowTexture=wgpuDeviceCreateTexture(g.device,&d);g.shadowView=wgpuTextureCreateView(g.shadowTexture,nullptr);g.shadowSize=size;}
+            g.shadowTexture=wgpuDeviceCreateTexture(g.device,&d);g.shadowView=wgpuTextureCreateView(g.shadowTexture,nullptr);g.shadowSize=size;g.shadowSerial=++g.serials;}
         f[72]=1;f[73]=sh.bias;f[74]=sh.normalBias;f[75]=1.f/static_cast<float>(size);
     }
     g.bindFrame(shadowing?g.shadowView:g.dummyShadowView);
@@ -490,9 +521,9 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         WGPURenderPassDescriptor spd{};spd.depthStencilAttachment=&sd;WGPURenderPassEncoder sp=wgpuCommandEncoderBeginRenderPass(encoder,&spd);
         wgpuRenderPassEncoderSetPipeline(sp,g.shadowCaster());wgpuRenderPassEncoderSetBindGroup(sp,0,g.casterFrame,0,nullptr);
         for(std::size_t i=0;i<casters.size();++i){
-            auto* geometry=casters[i]->geometry().get();auto* positions=geometry->getAttribute<float>("position");if(!positions||positions->itemSize()!=3)continue;
-            auto& geo=g.geometries[geometry->id];geo.used=g.frame;auto& b=geo.attributes["position"];g.upload(b,positions->array().data(),positions->array().size()*4,WGPUBufferUsage_Vertex,positions->version);
-            wgpuRenderPassEncoderSetBindGroup(sp,1,g.objectGroup,1,&casterOffsets[i]);wgpuRenderPassEncoderSetVertexBuffer(sp,0,b.buffer,0,WGPU_WHOLE_SIZE);
+            auto* geometry=casters[i]->geometry().get();auto* positions=geometry->getAttribute<float>("position");WGPUBuffer b=g.vertices(*geometry,"position",3);if(!b)continue;
+            auto& geo=g.geometries[geometry->id];geo.used=g.frame;
+            wgpuRenderPassEncoderSetBindGroup(sp,1,g.objectGroup,1,&casterOffsets[i]);wgpuRenderPassEncoderSetVertexBuffer(sp,0,b,0,WGPU_WHOLE_SIZE);
             if(auto* idx=geometry->getIndex()){g.upload(geo.index,idx->array().data(),idx->array().size()*4,WGPUBufferUsage_Index,idx->version);
                 wgpuRenderPassEncoderSetIndexBuffer(sp,geo.index.buffer,WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE);wgpuRenderPassEncoderDrawIndexed(sp,static_cast<std::uint32_t>(idx->array().size()),1,0,0,0);}
             else wgpuRenderPassEncoderDraw(sp,static_cast<std::uint32_t>(positions->count()),1,0,0);
@@ -516,8 +547,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         const unsigned vertices=static_cast<unsigned>(positions->count());
         std::vector<WGPUBuffer> buffers;std::vector<int> strides;
         auto bind=[&](const std::string& name,int components){
-            if(auto* a=item.geometry->getAttribute<float>(name);a&&a->itemSize()==components){auto& b=geo.attributes[name];g.upload(b,a->array().data(),a->array().size()*4,WGPUBufferUsage_Vertex,a->version);buffers.push_back(b.buffer);strides.push_back(components*4);}
-            else{buffers.push_back(g.zeros);strides.push_back(0);}};
+            if(WGPUBuffer b=g.vertices(*item.geometry,name,components)){buffers.push_back(b);strides.push_back(components*4);}else{buffers.push_back(g.zeros);strides.push_back(0);}};
         bind("position",3);for(const auto& [n,c]:item.program->program.attributes)bind(n,c);
         WGPURenderPipeline pipe=g.pipeline(g.programName(*item.material),*item.program,*item.material,strides,msaa);
         WGPUBindGroup group=g.materialGroup(*item.material,*item.program);
@@ -537,7 +567,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         wgpuCommandEncoderResolveQuerySet(encoder,g.timestamps,0,2,g.resolved,0);wgpuCommandEncoderCopyBufferToBuffer(encoder,g.resolved,0,g.readback,0,16);g.mapping=true;
         WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&g;
         cb.callback=[](WGPUMapAsyncStatus status,WGPUStringView,void* u,void*){auto& r=*static_cast<Impl*>(u);
-            if(status==WGPUMapAsyncStatus_Success){const auto* t=static_cast<const std::uint64_t*>(wgpuBufferGetConstMappedRange(r.readback,0,16));if(t[1]>t[0])r.gpuMs=static_cast<double>(t[1]-t[0])*1e-6;wgpuBufferUnmap(r.readback);}
+            if(status==WGPUMapAsyncStatus_Success){const auto* t=static_cast<const std::uint64_t*>(wgpuBufferGetConstMappedRange(r.readback,0,16));if(t[1]>t[0])r.gpuMs=static_cast<double>(t[1]-t[0])*r.tickNanoseconds*1e-6;wgpuBufferUnmap(r.readback);}
             r.mapping=false;};
         g.pendingMap=cb;g.mapPending=true;
     }

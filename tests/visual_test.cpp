@@ -16,6 +16,7 @@
 #include "gpu/context.hpp"
 #include "gpu/scene.hpp"
 #include "webgpu_programs.hpp"
+#include <string_view>
 #include <memory>
 #include <algorithm>
 #include <array>
@@ -582,13 +583,16 @@ void orbitPaths() {
     require(albert::pathPresent(3,6,10)==3&&std::abs(albert::pathPresent(7,6,10)+3)<1e-12&&std::abs(albert::pathPresent(-26,6,10)-4)<1e-12&&albert::pathPresent(100,6,0)==100,"Folded path time");
     require(albert::pathPresent(37,6,10)==1e7&&albert::pathPresent(-20000,6,10)==1e7,"Highlight shown far from its samples");
 }
-int main(int argc,char**) {
+// No argument: controls and paths. "webgpu": also the graphics offscreen on WebGPU (exit 77 without
+// an adapter). Any other argument: the graphics on OpenGL (a window) and on WebGPU.
+int main(int argc,char** argv) {
     try {
         controls();orbitPaths();
         if(argc>1){
-            {GlTarget gl;graphics(gl);}
-            std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';}
-            if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";graphics(*gpu);}
+            const bool gpuOnly=std::string_view(argv[1])=="webgpu";
+            if(!gpuOnly){GlTarget gl;graphics(gl);}
+            std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';if(gpuOnly)return 77;}
+            if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";graphics(*gpu);require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}
         }
         return 0;
     }

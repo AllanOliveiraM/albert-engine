@@ -86,13 +86,18 @@ fn bumpNormal(position: vec3f, normal: vec3f, dBx: f32, dBy: f32, face: f32) -> 
 }
 // Bilinear height in f32: hardware filtering quantises the sub-texel position (~1/256), which
 // becomes stair steps under derivative bump mapping when a relief texel spans many pixels.
-fn heightAt(image: texture_2d<f32>, uv: vec2f) -> f32 {
+fn heightAt(image: texture_2d<f32>, uv: vec2f, wraps: bool) -> f32 { // wraps: longitude repeats (global maps), else clamps (patches).
     let size = vec2i(textureDimensions(image)); let p = uv * vec2f(size) - 0.5; let base = floor(p); let f = p - base;
-    let x0 = (i32(base.x) % size.x + size.x) % size.x; let x1 = (x0 + 1) % size.x; // Longitude wraps.
+    var x0 = (i32(base.x) % size.x + size.x) % size.x; var x1 = (x0 + 1) % size.x;
+    if (!wraps) { x0 = clamp(i32(base.x), 0, size.x - 1); x1 = clamp(i32(base.x) + 1, 0, size.x - 1); }
     let y0 = clamp(i32(base.y), 0, size.y - 1); let y1 = clamp(i32(base.y) + 1, 0, size.y - 1);
     let a = textureLoad(image, vec2i(x0, y0), 0).r; let b = textureLoad(image, vec2i(x1, y0), 0).r;
     let c = textureLoad(image, vec2i(x0, y1), 0).r; let d = textureLoad(image, vec2i(x1, y1), 0).r;
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+fn lambertLight(albedo: vec3f, n: vec3f, extra: vec3f, shadow: f32) -> vec3f {
+    let nl = clamp(dot(n, sunView()), 0.0, 1.0) * frame.sun.w * shadow;
+    return (nl * frame.sunColor.rgb + frame.ambient.rgb + extra) * albedo / PI_L;
 }
 fn flatNormal(position: vec3f) -> vec3f { return normalize(cross(dpdy(position), dpdx(position))); } // GL's cross(dFdx, dFdy) with y flipped.
 )";
