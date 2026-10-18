@@ -362,7 +362,7 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @locat
 }
 const PI = 3.141592653589793;
 fn terrain(local: vec2f, global: vec2f) -> f32 {
-    return mix(textureSample(baseHeightMap, baseHeightSampler, global).r, textureSample(heightMap, heightSampler, local).r, material.detailBlend) / 6378137.0;
+    return mix(heightAt(baseHeightMap, global), heightAt(heightMap, local), material.detailBlend) / 6378137.0; // f32 bilinear: no stair steps.
 }
 @fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
     let mask = textureSample(surfaceMask, maskSampler, v.globalUv).g;

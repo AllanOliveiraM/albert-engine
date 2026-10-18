@@ -67,6 +67,16 @@ fn bumpNormal(position: vec3f, normal: vec3f, dBx: f32, dBy: f32, face: f32) -> 
     let r1 = cross(sigmaY, normal); let r2 = cross(normal, sigmaX); let det = dot(sigmaX, r1) * face;
     return normalize(abs(det) * normal - sign(det) * (dBx * r1 + dBy * r2));
 }
+// Bilinear height in f32: hardware filtering quantises the sub-texel position (~1/256), which
+// becomes stair steps under derivative bump mapping when a relief texel spans many pixels.
+fn heightAt(image: texture_2d<f32>, uv: vec2f) -> f32 {
+    let size = vec2i(textureDimensions(image)); let p = uv * vec2f(size) - 0.5; let base = floor(p); let f = p - base;
+    let x0 = (i32(base.x) % size.x + size.x) % size.x; let x1 = (x0 + 1) % size.x; // Longitude wraps.
+    let y0 = clamp(i32(base.y), 0, size.y - 1); let y1 = clamp(i32(base.y) + 1, 0, size.y - 1);
+    let a = textureLoad(image, vec2i(x0, y0), 0).r; let b = textureLoad(image, vec2i(x1, y0), 0).r;
+    let c = textureLoad(image, vec2i(x0, y1), 0).r; let d = textureLoad(image, vec2i(x1, y1), 0).r;
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
 fn flatNormal(position: vec3f) -> vec3f { return normalize(cross(dpdy(position), dpdx(position))); } // GL's cross(dFdx, dFdy) with y flipped.
 )";
 }

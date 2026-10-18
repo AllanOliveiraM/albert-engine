@@ -95,8 +95,8 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
     let lightTexel = textureSample(lightMap, lightSampler, v.uv2).rgb;
     let roughTexel = textureSample(roughnessMap, roughnessSampler, v.uv);
     let dx = dpdx(v.uv); let dy = dpdy(v.uv); let scale = material.specular.w;
-    let h = scale * textureSample(bumpMap, bumpSampler, v.uv).x;
-    let dBx = scale * textureSample(bumpMap, bumpSampler, v.uv + dx).x - h; let dBy = scale * textureSample(bumpMap, bumpSampler, v.uv + dy).x - h;
+    let h = scale * heightAt(bumpMap, v.uv);
+    let dBx = scale * heightAt(bumpMap, v.uv + dx) - h; let dBy = scale * heightAt(bumpMap, v.uv + dy) - h;
     var geometryNormal = normalize(v.normal); if (material.more.z > 0.5) { geometryNormal = geometryNormal * face; }
     if (material.more.w > 0.5) { geometryNormal = flatNormal(v.position); }
     var n = geometryNormal; if (material.more.x > 0.5) { n = bumpNormal(v.position, geometryNormal, dBx, dBy, face); }
