@@ -16,7 +16,9 @@ o foco fica em **Terra, Lua e Marte**. Clima: a Terra **como está agora**, só 
 vivo (nada estilo Ventusky, sem clima histórico/futuro). Adiados: validação no Windows
 nativo; descartados: eclipses de outras luas. Plano consolidado com pareceres do Codex e
 do Fable (convergentes); "fidelidade máxima" = **orçamento de erro por subsistema**,
-validado contra referências publicadas.
+validado contra referências publicadas. **Em 18/10/2026 o Allan adiou o refinamento de Marte**
+(GRAM Suite, atmosfera sazonal e termosfera, densidade contra as Viking < 20%) para atualizações
+futuras: o foco agora é **Terra e Lua**; o que Marte já tem fica como está.
 
 **Decisão do Allan em 18/10/2026: migrar já para WebGPU (wgpu-native).** Máquina de referência:
 o notebook de desenvolvimento (i7-1165G7, Iris Xe + GeForce MX350, 14 GB, Ubuntu 26.04), meta
@@ -55,9 +57,8 @@ global na região. Faltam nuvens volumétricas e ondas geométricas.
 
 Estado em 18/10/2026: etapas 1–5 entregues. Os 22 programas e os materiais embutidos rodam em WGSL;
 o `visual_test` passa nos dois renderizadores (llvmpipe e MX350); sombra PCF, MSAA 4×, texturas em
-fatias com mipmaps na GPU; passada da cena ~3 ms de GPU na MX350 a 1280×800. WebGPU é o padrão,
-com `--renderer=opengl` e recuo automático. Próximo: etapa 6 (ganhos visuais da fase 4) e a
-remoção do caminho OpenGL quando não for mais preciso como recuo.
+fatias com mipmaps na GPU; passada da cena ~3 ms de GPU na MX350 a 1280×800. O caminho OpenGL foi
+removido em 18/10/2026: o WebGPU é o único renderizador.
 
 Histórico: **API gráfica: manter OpenGL/threepp agora.** O valor novo está no núcleo físico, que é
 independente do render; a cena tem poucos draws e os limites atuais (precisão, shaders) não
@@ -77,7 +78,7 @@ Esta fila prevalece sobre a ordem histórica do backlog abaixo.
 | **2** (entregue em 18/10/2026: GFS ao vivo na física e no painel, validado contra radiossondas — análise e previsão +6 h; NRLMSISE-00 com índices CelesTrak, pois o NRLMSIS 2.x tem licença só acadêmica; adiado: HWM14 para ventos acima de 80 km, de pouco efeito na subida) | Terra ao vivo: análise GFS (NOMADS, ventos 3D, T, p, umidade) na física e na tela, com fonte e idade; NRLMSIS 2.0 acima de ~80 km com F10.7/Ap atuais; HWM14 | vs. METAR/radiossondas (viés e RMSE publicados; mediana \|ΔT\| < 2 K); decodificação e interpolação contra os arquivos originais |
 | **3** (entregue em 18/10/2026: IMU IEEE 952 com Allan a ±5%, plano de dados binário — 600 mil quadros a 1 kHz sem perda —, tempo real com atrasos e política de comando ausente, replay com dados embutidos; memória compartilhada não foi necessária) | Interface de voo de alta taxa: plano de dados em memória compartilhada/UDS (gRPC fica como controle), ruído de IMU por variância de Allan (IEEE 952), latências e política de comando ausente, replay com sementes e versões de dados | lockstep a 1 kHz por 10 min sem perda; Allan medido ±5% do configurado |
 | **4** | Terra fotorrealista nos sítios de lançamento: terreno CDLOD (Copernicus DEM 30 m, geoide EGM2008), espalhamento atmosférico (Bruneton), nuvens dos dados ao vivo, oceano; perfil de desempenho e decisão da API gráfica | metas de quadro (1080p/60, p99 < 25 ms) no hardware de referência |
-| **5** (marco em 18/10/2026: GRGM1200A/GMM-3 por faixa do PDS, rotação IAU contra CSPICE, voos com `body`, LOLA/MOLA nos sítios, LRO 35 m/dia; faltam atmosfera sazonal e termosfera de Marte — MRO 458 m/dia por arrasto — e Viking < 20%) | Lua e Marte: GRGM1200A/LOLA; GMM-3/MOLA e Mars-GRAM ou MCD (licenças pedidas cedo) | órbitas de LRO/MRO vs. SPK do NAIF < 100 m/dia; densidade de Marte vs. entradas Viking < 20% |
+| **5** (marco em 18/10/2026: GRGM1200A/GMM-3 por faixa do PDS, rotação IAU contra CSPICE, voos com `body`, LOLA/MOLA nos sítios, LRO 35 m/dia; adiados em 18/10/2026 para atualizações futuras: atmosfera sazonal e termosfera de Marte — MRO 458 m/dia por arrasto — e Viking < 20%) | Lua e Marte: GRGM1200A/LOLA; GMM-3/MOLA e Mars-GRAM ou MCD (licenças pedidas cedo) | órbitas de LRO/MRO vs. SPK do NAIF < 100 m/dia; densidade de Marte vs. entradas Viking < 20% |
 | **6** (18/10/2026: radiação solar, aquecimento de Sutton-Graves, pernas de pouso com atrito, Schwarzschild entregues e validados; som adiado até haver áudio; subidas até a órbita na Lua — Apollo 11: 435 s, 17 × 88 km, aqui 434 s e 18 × 85 km — e em Marte, em duas queimas, pelo software de voo externo) | Física secundária: pressão de radiação, aquecimento, som (c(T), Doppler, atenuação), contato/atrito no pouso, relatividade quando acima do orçamento de erro | por caso, contra referência publicada |
 | **Manutenção** | Sistema solar congelado como cenário: só correções; Alta 2/4 antigas (formas, materiais, resolução), anéis (arcos de Adams), NTS/leap seconds, API de modelos (GLB texturizado), camadas geográficas, satélites/OMM | — |
 

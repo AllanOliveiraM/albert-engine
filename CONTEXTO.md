@@ -58,6 +58,8 @@ desempenho fica para quando o Allan parar o resto do PC (os números acima tinha
 CPU estrangulada). Revisão do Codex de 7e95e29..e6fbfab: um P2 (cabeçalho COG com blocos absurdos
 dimensionava a decodificação: 65535² = 16 GiB) corrigido com teste; veículos, uniforms e remoção do
 OpenGL sem regressões. Próximo: passo de desempenho depois dessa medição.
+**Escopo (18/10/2026):** o Allan adiou o refinamento de Marte (GRAM Suite, atmosfera sazonal e
+termosfera, Viking < 20%) para atualizações futuras; o foco é Terra e Lua. Não puxar itens de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`
@@ -77,8 +79,8 @@ os materiais em `src/render/webgpu_programs.cpp`; `Display` escolhe o caminho; `
 os dois; o OpenGL foi removido em 18/10/2026, só WebGPU, sem recuo). Máquina de referência: este notebook (i7-1165G7, Iris Xe + MX350, 14 GB, Ubuntu
 26.04), 1080p/60 e p99 < 25 ms. Etapa 1 entregue (`src/gpu/context.*`, `tests/gpu_smoke.cpp`:
 `DISPLAY=172.17.0.2:100 build/linux/tests/gpu_smoke`, `ALBERT_GPU=software` para llvmpipe; no
-Xvfb o Iris Xe não apresenta por falta de DRI3, então a MX350 é usada). Mars-GRAM: o Allan vai
-pedir o GRAM Suite; integrar quando ele trouxer o pacote.
+Xvfb o Iris Xe não apresenta por falta de DRI3, então a MX350 é usada). Mars-GRAM/GRAM Suite:
+adiado com o resto do refinamento de Marte (18/10/2026).
 
 **Fase 6 (física secundária) quase toda entregue em 18/10/2026:** pressão de radiação solar com
 sombra cônica; pernas de pouso (`Stage::legs`, molas-amortecedores com atrito de Coulomb
