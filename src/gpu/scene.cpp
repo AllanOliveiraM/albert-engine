@@ -122,7 +122,8 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
     if (kind < 0.5) { colour = base.rgb * select(vec3f(1.0), mapped / PI_L, material.flags.w > 0.5); return vec4f(finish(colour + material.emissive.rgb), base.a); } // Unlit, no air.
     else if (kind > 1.5 && kind < 2.5) {
         let roughness = material.params.x * select(1.0, roughTexel.g, material.more.y > 0.5);
-        colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra, shadow);
+        colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra, shadow)
+            + airReflection(v.world, n, v.position, roughness, mix(vec3f(0.04), base.rgb, material.params.y)); // The sky on smooth water.
     } else if (kind > 2.5) { colour = lambertLight(base.rgb, n, mapped * PI_L + light.sky * frame.sunColor.rgb, shadow); } // threepp keeps π on Lambert light maps.
     else { colour = phongLight(base.rgb, material.specular.rgb, material.params.y, n, v.position, extra, shadow); }
     return vec4f(finish(airApply(v.world, colour + material.emissive.rgb)), base.a);

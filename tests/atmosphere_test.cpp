@@ -249,6 +249,11 @@ struct V { @builtin(position) clip: vec4f, @location(0) world: vec3f };
             check(boxPixel[0]>boxPixel[2]+60,"An object in front of the sky keeps its colour");
             // Near ground (tens of metres): the same order of brightness, warmer (sunlight through the air), not the sky.
             check(groundHazy!=groundPlain&&groundHazy[0]>groundPlain[0]/2&&groundHazy[0]<groundPlain[0]*3/2&&groundHazy[0]>=groundHazy[2],"Ground lit through the air, not covered by the sky");
+            // Smooth ground (water) mirrors the sky near the horizon: bluer and brighter than rough ground.
+            globeMaterial->roughness=.05f;const auto smooth=frameOf(1);globeMaterial->roughness=1;const auto rough=frameOf(1);
+            const auto water=px(smooth,48,36),soil=px(rough,48,36);
+            std::printf("near the horizon: smooth %d %d %d, rough %d %d %d\n",water[0],water[1],water[2],soil[0],soil[1],soil[2]);
+            check(water[2]>soil[2]+10&&water[2]-water[0]>soil[2]-soil[0],"Smooth water mirrors the sky (bluer, brighter)");
             wgpuTextureViewRelease(view);wgpuTextureRelease(target);
         }
         if(albert::gpu::errors()){std::printf("FAIL WebGPU errors: %u\n",albert::gpu::errors());++failures;}

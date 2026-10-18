@@ -146,6 +146,17 @@ fn airApply(world: vec3f, colour: vec3f) -> vec3f { // Aerial perspective: an op
     if (frame.air.w <= 0.0) { return colour; }
     let sky = airSky(world); return mix(colour, colour * sky.transmittance + sky.radiance * frame.sunColor.rgb, frame.air.w);
 }
+// Sky light mirrored by a smooth surface (the ocean): the sky along the reflected ray from the point,
+// by Schlick's Fresnel with roughness; it fades out on rough ones, whose sky light is the diffuse
+// irradiance. View-space normal and position; f0: reflectance at normal incidence.
+fn airReflection(world: vec3f, viewNormal: vec3f, viewPosition: vec3f, roughness: f32, f0: vec3f) -> vec3f {
+    if (frame.air.w <= 0.0 || roughness >= 0.6) { return vec3f(0.0); }
+    let v = normalize(-viewPosition); let nv = clamp(dot(viewNormal, v), 0.0, 1.0);
+    let toWorld = transpose(mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz)); // The view's rotation inverted.
+    let ray = normalize((frame.planet * vec4f(toWorld * reflect(-v, viewNormal), 0.0)).xyz);
+    let f = f0 + (max(vec3f(1.0 - roughness), f0) - f0) * pow(1.0 - nv, 5.0);
+    return f * skyRadiance(airPoint(world), ray, frame.airSun.xyz).radiance * frame.sunColor.rgb * (1.0 - smoothstep(0.2, 0.6, roughness)) * frame.air.w;
+}
 fn airFilter(world: vec3f) -> vec3f { // Transmittance only: light added over what is behind it.
     if (frame.air.w <= 0.0) { return vec3f(1.0); }
     return mix(vec3f(1.0), airSky(world).transmittance, frame.air.w);

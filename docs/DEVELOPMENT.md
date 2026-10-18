@@ -356,7 +356,9 @@ pré-cômputo roda em compute, em fatias de uma camada, 4 por quadro (1 em adapt
 0,5 s na MX350, 23 s no llvmpipe; o ar aparece quando as tabelas ficam prontas. Uso nos shaders
 (`air` em `src/gpu/programs.cpp`): o céu é desenhado como fundo, antes de tudo e sem profundidade;
 cada material opaco aplica a perspectiva aérea até o seu ponto (`airApply`), e os embutidos e os
-objetos recebem a luz do Sol filtrada e a luz do céu (`airLight`); nuvens, luzes noturnas, Sol e
+objetos recebem a luz do Sol filtrada e a luz do céu (`airLight`); superfícies lisas (a água pela
+máscara de oceano ou a rugosidade regional) espelham o céu no raio refletido (`airReflection`,
+Fresnel de Schlick com rugosidade, some até a rugosidade 0,6); nuvens, luzes noturnas, Sol e
 estrelas atravessam o ar (estrelas somem quando o céu as ofusca). Solo abaixo da esfera do modelo
 (as cordas da malha do globo afundam até ~1 km) é levado à esfera, e o que a malha mostra além do
 horizonte da esfera usa o ponto do horizonte. O segmento câmera→ponto vem das coordenadas do
@@ -378,7 +380,7 @@ ponto (como numa câmera no solo); a iluminação física não muda. `atmosphere
 transmitância zenital e o espalhamento simples vertical com formas fechadas, segmentos curtos perto
 da Lua e de Marte (`airBetween` e `airSky` com o referencial da Terra a 1,4e8 km), o chão do ar
 rebaixado, a profundidade óptica de Marte acima do datum, o brilho azul junto ao Sol poente em Marte
-e desenha uma cena
+e desenha uma cena (com a água lisa espelhando o céu perto do horizonte)
 com céu, objeto à frente do céu e solo.
 
 Terra elipsoidal WGS84, base global até 4K e blocos regionais de um mosaico 86400×43200, filtragem
