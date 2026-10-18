@@ -42,7 +42,7 @@ Aerodynamics slender(double area){
 Vehicle nescSphere(){
     Stage s;s.name="NESC sphere";s.massFull=s.massEmpty=slug;s.inertiaFull=s.inertiaEmpty={3.6*slugft2,3.6*slugft2,3.6*slugft2};
     s.aero.area=.1963495*ft*ft;s.aero.length=s.aero.span=.5*ft;s.aero.lift=s.aero.side=s.aero.roll=s.aero.pitch=s.aero.yaw=constant(0);s.aero.drag=constant(.1);
-    s.length=.5*ft;s.cgFull=s.cgEmpty=s.reference=.25*ft;return{"NESC sphere",{s},0,1,true,.5*ft};
+    s.length=.5*ft;s.cgFull=s.cgEmpty=s.reference=.25*ft;s.noseRadius=.25*ft;return{"NESC sphere",{s},0,1,true,.5*ft};
 }
 Vehicle nescTwoStage(){
     Stage a;a.name="NESC first stage";a.propellant=180000;a.massFull=314000;a.massEmpty=134000;a.cgFull=16.91879;a.cgEmpty=9.421642;a.reference=16.91879;
@@ -62,10 +62,10 @@ Vehicle genericLauncher(double payload){
     const auto s1full=props(with(lower,{{92670,15,26,r,true},{395700,31,66,r,true}})),s1empty=props(with(lower,{{92670,15,26,r,true}}));
     Stage a;a.name="first stage";a.propellant=395700;a.massFull=s1full.mass;a.massEmpty=s1empty.mass;a.cgFull=s1full.cg;a.cgEmpty=s1empty.cg;
     a.inertiaFull=s1full.inertia;a.inertiaEmpty=s1empty.inertia;a.reference=8;
-    a.thrust=8.227e6;a.exhaust=311*g0;a.exitArea=6.12;a.nozzle=68;a.gimbal=5*pi/180;a.minThrottle=.6;a.length=70;a.aero=slender(area);
+    a.thrust=8.227e6;a.exhaust=311*g0;a.exitArea=6.12;a.nozzle=68;a.gimbal=5*pi/180;a.minThrottle=.6;a.length=70;a.aero=slender(area);a.noseRadius=r;
     Stage b;b.name="second stage";b.propellant=92670;b.massFull=s2full.mass;b.massEmpty=s2empty.mass;b.cgFull=s2full.cg;b.cgEmpty=s2empty.cg;
     b.inertiaFull=s2full.inertia;b.inertiaEmpty=s2empty.inertia;b.reference=8;
-    b.thrust=981e3;b.exhaust=348*g0;b.exitArea=4.9;b.nozzle=26;b.gimbal=5*pi/180;b.minThrottle=.39;b.length=27;b.aero=slender(area);
+    b.thrust=981e3;b.exhaust=348*g0;b.exitArea=4.9;b.nozzle=26;b.gimbal=5*pi/180;b.minThrottle=.39;b.length=27;b.aero=slender(area);b.noseRadius=r;
     return{"Generic two-stage launcher (approximate)",{a,b},2e5,1,true,2*r};
 }
 Vehicle genericLander(){
@@ -73,7 +73,7 @@ Vehicle genericLander(){
     auto inertia=[&](double m){return V3{m*r*r/2,m*(3*r*r+h*h)/12,m*(3*r*r+h*h)/12};};
     Stage s;s.name="lander";s.propellant=full-empty;s.massFull=full;s.massEmpty=empty;s.cgFull=4.2;s.cgEmpty=3.8;s.reference=3.5;
     s.inertiaFull=inertia(full);s.inertiaEmpty=inertia(empty);
-    s.thrust=45040;s.exhaust=311*g0;s.exitArea=1.77;s.nozzle=6.3;s.gimbal=6*pi/180;s.minThrottle=.1;s.length=h;s.aero=slender(pi*r*r);
+    s.thrust=45040;s.exhaust=311*g0;s.exitArea=1.77;s.nozzle=6.3;s.gimbal=6*pi/180;s.minThrottle=.1;s.length=h;s.aero=slender(pi*r*r);s.noseRadius=r;
     constexpr double pad=4.7/1.4142135623730951; // Footpads 4.7 m from the axis at the base.
     s.legs={{h,pad,pad},{h,-pad,pad},{h,pad,-pad},{h,-pad,-pad}};s.legStiffness=8.9e5;s.legDamping=5.7e4;s.friction=.6;
     return{"Generic lander (approximate)",{s},5e3,1,true,2*r};

@@ -291,6 +291,17 @@ int main(){try{
         near(norm(x.specificForce)/expected,1,1e-9,"Radiation pressure magnitude");
         near(dot(matrix(f.state().attitude)*x.specificForce,d)/(norm(x.specificForce)*norm(d)),-1,1e-12,"Radiation pressure points away from the Sun");
     }
+    // Aerodynamic heating: Sutton-Graves at 60 km and 7 km/s (≈ k √(ρ/Rn) v³), integrated into the
+    // heat load; none on the pad and none in vacuum.
+    {
+        Environment e;e.sunMoon=false;const Vehicle v=genericLauncher();const Tt t=ttFromUtc(1792238400.);
+        Flight f(v,e,Flight::free(e,v,t,{.3,-1.4,6e4},{7000,0,0},{0,0,0}));const Sample x=f.sample();
+        const double expected=1.7415e-4*std::sqrt(x.air.density/v.stages[0].noseRadius)*std::pow(norm(x.nedVelocity),3);
+        near(x.heatFlux/expected,1,1e-12,"Stagnation heating");std::printf("heating: %.1f W/cm² at 60 km and 7 km/s, Rn %.2f m\n",x.heatFlux*1e-4,v.stages[0].noseRadius);
+        f.steps(second/1000);f.advance(second);near(f.state().heatLoad/x.heatFlux,1,.05,"Heat load over one second");
+        Flight pad(v,e,Flight::pad(e,v,t,{.3,-1.4,0},0,pi/2));require(pad.sample().heatFlux==0,"No heating on the pad");
+        Environment moon=environment(Center::moon);Flight vacuum(v,moon,Flight::free(moon,v,t,{0,0,6e4},{1500,0,0},{0,0,0}));require(vacuum.sample().heatFlux==0,"No heating in vacuum");
+    }
     // Landing legs on the Moon: rest at the static deflection m g / 4k, a 2 m drop dissipates and
     // settles there, a 1 m/s slide stops after v²/(2 μ g), and the engine lifts it off again.
     {

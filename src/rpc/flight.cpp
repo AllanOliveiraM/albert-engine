@@ -208,7 +208,7 @@ struct FlightServices::Impl {
         put(x.nedVelocity,o->mutable_velocity_ned_meters_per_second());put(x.nedAttitude,o->mutable_attitude_ned());
         o->set_mach(x.mach);o->set_dynamic_pressure_pascals(x.dynamicPressure);o->set_alpha_radians(x.alpha);o->set_beta_radians(x.beta);o->set_air_density_kilograms_per_meter3(x.air.density);
         o->set_stage(static_cast<unsigned>(s.stage));o->set_stages(static_cast<unsigned>(v.stages.size()));o->set_propellant_kilograms(s.propellant);o->set_mass_kilograms(x.mass);o->set_thrust_newtons(x.thrust);
-        o->set_burning(s.burning);o->set_clamped(s.clamped);o->set_landed(s.landed);o->set_leg_contact(s.contact);o->set_throttle(s.throttle);
+        o->set_burning(s.burning);o->set_clamped(s.clamped);o->set_landed(s.landed);o->set_leg_contact(s.contact);o->set_heat_load_joules_per_meter2(s.heatLoad);o->set_heat_flux_watts_per_meter2(x.heatFlux);o->set_throttle(s.throttle);
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
         o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());o->set_data_port(data?data->port():0);

@@ -138,6 +138,7 @@ int main(int argc,char** argv){try{
         {const auto snap=bridge.snapshot();const auto o=std::find_if(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";});
             require(o!=snap->objects.end()&&o->appearance.sizeMeters.y==27,"Upper stack shown after separation");}
         require(s.atmosphere()=="U.S. Standard Atmosphere 1976","A distant instant uses the standard atmosphere");
+        require(s.heat_flux_watts_per_meter2()>0&&s.heat_load_joules_per_meter2()>0,"Ascent heating reported");
         {grpc::ClientContext c;api::CreateFlightRequest noisy=create;noisy.mutable_imu()->set_grade(api::ImuSettings::TACTICAL);noisy.mutable_imu()->set_seed(5);require(flight->CreateFlight(&c,noisy,&s).ok(),"Tactical IMU");}
         {const double f=s.measured_specific_force_meters_per_second2().x(),ideal=s.specific_force_meters_per_second2().x();
             require(f!=ideal&&std::abs(f-ideal)<.05&&std::abs(s.measured_static_pressure_pascals()-s.static_pressure_pascals())<200,"Tactical IMU errors");}

@@ -137,12 +137,14 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     const V3 iw{ms.inertia.x*s.rate.x,ms.inertia.y*s.rate.y,ms.inertia.z*s.rate.z};V3 rhs=moment-cross(s.rate,iw);
     if(flow>0){const V3 di=(st.inertiaFull-st.inertiaEmpty)*(vehicle_.inertiaRate*flow/st.propellant);rhs+=V3{di.x*s.rate.x,di.y*s.rate.y,di.z*s.rate.z};
         if(vehicle_.jetDamping){const double l=ms.cg-st.nozzle;rhs+=-flow*l*l*V3{0,s.rate.y,s.rate.z};}}
-    Rate r{s.velocity,g+b*(force/ms.m),spin(s.attitude,s.rate),{rhs.x/ms.inertia.x,rhs.y/ms.inertia.y,rhs.z/ms.inertia.z},-flow,force/ms.m};
+    // Sutton-Graves convective stagnation heating, k for air and for the Martian CO2 mix (kg^½/m).
+    const double heat=atm.density>0?(env_.center==Center::mars?1.9027e-4:1.7415e-4)*std::sqrt(atm.density/st.noseRadius)*speed*speed*speed:0.;
+    Rate r{s.velocity,g+b*(force/ms.m),spin(s.attitude,s.rate),{rhs.x/ms.inertia.x,rhs.y/ms.inertia.y,rhs.z/ms.inertia.z},-flow,force/ms.m,heat};
     if(out){
         Sample& x=*out;x.mass=ms.m;x.mach=mach;x.dynamicPressure=q;x.alpha=alpha;x.beta=beta;x.thrust=thrust;x.massFlow=flow;x.air=atm;x.geodetic=geo;
         x.fixedPosition=rf;x.fixedVelocity=o.fixed*relative;x.nedVelocity=ned*x.fixedVelocity;
         const M3 c=ned*o.fixed*b;x.nedAttitude=quaternion(c);x.euler={std::atan2(c.m[1][0],c.m[0][0]),-std::asin(std::clamp(c.m[2][0],-1.,1.)),std::atan2(c.m[2][1],c.m[2][2])};
-        x.aeroForce=fa;x.aeroMoment=ma;x.thrustForce=ft;x.gravity=g;x.acceleration=r.a;x.specificForce=force/ms.m;
+        x.aeroForce=fa;x.aeroMoment=ma;x.thrustForce=ft;x.gravity=g;x.acceleration=r.a;x.specificForce=force/ms.m;x.heatFlux=heat;
         if(s.clamped||s.landed){x.acceleration=cross(o.omega,cross(o.omega,s.position));x.specificForce=bt*(x.acceleration-g);}
     }
     return r;
@@ -166,7 +168,7 @@ void Flight::integrate(Tt h){
     s_.attitude=normalized({s_.attitude.w+(k1.q.w+2*k2.q.w+2*k3.q.w+k4.q.w)*w,s_.attitude.x+(k1.q.x+2*k2.q.x+2*k3.q.x+k4.q.x)*w,
         s_.attitude.y+(k1.q.y+2*k2.q.y+2*k3.q.y+k4.q.y)*w,s_.attitude.z+(k1.q.z+2*k2.q.z+2*k3.q.z+k4.q.z)*w});
     increments_.velocity+=(k1.f+2*k2.f+2*k3.f+k4.f)*w;increments_.angle+=(rate0+(k1.w+k2.w+k3.w)*w)*dt;increments_.seconds+=dt; // Stage rates, Simpson-weighted.
-    s_.propellant=std::max(0.,s_.propellant+(k1.m+2*k2.m+2*k3.m+k4.m)*w);s_.time=t0+h;
+    s_.propellant=std::max(0.,s_.propellant+(k1.m+2*k2.m+2*k3.m+k4.m)*w);s_.heatLoad+=(k1.heat+2*k2.heat+2*k3.heat+k4.heat)*w;s_.time=t0+h;
 }
 Tt Flight::advance(Tt dt){
     if(dt<=0)throw std::invalid_argument("Non-positive step");
@@ -234,7 +236,7 @@ std::uint64_t Flight::hash()const{
     std::uint64_t h=1469598103934665603ull;
     auto mix=[&](const void* p,std::size_t n){const auto* c=static_cast<const unsigned char*>(p);for(std::size_t i=0;i<n;++i){h^=c[i];h*=1099511628211ull;}};
     const double d[]{s_.position.x,s_.position.y,s_.position.z,s_.velocity.x,s_.velocity.y,s_.velocity.z,s_.attitude.w,s_.attitude.x,s_.attitude.y,s_.attitude.z,
-        s_.rate.x,s_.rate.y,s_.rate.z,s_.propellant,s_.throttle,s_.gimbalPitch,s_.gimbalYaw,s_.torque.x,s_.torque.y,s_.torque.z,padPosition_.x,padPosition_.y,padPosition_.z};
+        s_.rate.x,s_.rate.y,s_.rate.z,s_.propellant,s_.heatLoad,s_.throttle,s_.gimbalPitch,s_.gimbalYaw,s_.torque.x,s_.torque.y,s_.torque.z,padPosition_.x,padPosition_.y,padPosition_.z};
     mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
     return h;
 }

@@ -269,6 +269,9 @@ no veículo, e o painel **Voo** no canto inferior direito mostra estado, vento e
 `terrain_height` põe a base no relevo medido: a altura do sítio vira Copernicus DEM 30 m mais o
 geoide EGM2008 (altura elipsoidal), resolvida na criação e gravada no log de replay.
 
+A amostra traz também o aquecimento convectivo no ponto de estagnação (Sutton-Graves, raio de nariz
+do estágio) e a carga térmica acumulada.
+
 O `GENERIC_LANDER` tem pernas com molas e atrito: `leg_contact` (bit `contact` no plano binário)
 diz se alguma perna toca o solo, e `TOUCHDOWN`/`LIFTOFF` marcam o primeiro pé no chão e o último a
 sair (quiques incluídos); ele pode reacender e saltar. Veículos sem pernas param no toque (`landed`).

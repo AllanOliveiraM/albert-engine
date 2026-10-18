@@ -19,6 +19,7 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Massa | propriedades do conjunto lineares no propelente restante; estagiamento move o CG | inércia principal (sem produtos) |
 | Rotação | `I ω̇ = M − ω×Iω − İω − ṁ l² ω⊥` (perda de inércia do propelente e amortecimento por jato) | — |
 | Lua e Marte | `Environment environment(Center, campo, grau)`: centro inercial no corpo com eixos ICRF; GRAIL GRGM1200A (Lua, eixos principais DE440) e MRO GMM-3 (Marte) baixados até o grau pedido (≤1200 e ≤120); rotação IAU de `pck00011` com ω analítico (Lua: referencial médio da Terra com librações, o dos mapas; o campo é avaliado nos eixos principais DE440, 67,8526″/78,6944″/0,2785″ adiante; Marte: IAU 2015); terceiros corpos Terra+Sol (Lua) e Sol por `plan94` (Marte); Marte com atmosfera média hidrostática sobre as temperaturas da NASA Glenn até 140 K perto de 50 km, isotérmica acima e vácuo acima de 150 km; Lua sem ar | série IAU da Lua a ≤155 m da libração do DE na superfície; Marte sem estações, poeira nem vento; alturas sobre elipsoide (esfera de 1737,4 km na Lua; 3396,19 × 3376,20 km em Marte), não sobre o areoide |
+| Aquecimento | convectivo no ponto de estagnação, Sutton-Graves (k do ar e do CO2 marciano, `Stage::noseRadius`), carga térmica integrada no RK4 | sem radiação do choque (>10 km/s), sem ablação nem condução |
 | Radiação solar | pressão de esfera (`Vehicle::sunArea`, `reflectivity`; 1361 W/m² a 1 au) com umbra e penumbra cônicas do corpo central | desligada por padrão; sem albedo nem infravermelho do planeta; atitude ignorada |
 | Solo | pad com a base do conjunto no solo, preso girando com o corpo até empuxo > peso; solo a uma altura elipsoidal fixa (do relevo medido com `terrain_height`); pernas de pouso (`Stage::legs`) como molas-amortecedores com atrito de Coulomb regularizado (linear abaixo de 5 cm/s), força e momento em cada pé; sem pernas, toque detectado no CG e o veículo para | solo plano em torno do sítio; sem deformação do regolito nem rebote do corpo |
 
@@ -110,6 +111,8 @@ propagação de 6 h com passos de 1 s, sem arrasto nem radiação solar):
   ao longo da trajetória e em degraus a cada volta. A pressão de radiação solar com sombra
   (Cr·A/m de 0,02 a 0,06 m²/kg) muda o resultado em menos de 1 m; o degrau por volta é arrasto
   no periapsis (~255 km), na termosfera que o modelo não tem acima de 150 km.
+- Aquecimento: fórmula de Sutton-Graves exata na amostra (77,7 W/cm² a 60 km e 7 km/s com raio de
+  1,83 m), carga térmica de 1 s a 5%, nula no pad e no vácuo.
 - Pernas de pouso (`genericLander` na Lua): repouso com a deflexão estática m g/4k (6,84 mm,
   <0,2 mm), queda de 2 m que perde energia e assenta no mesmo ponto, deslizamento a 1 m/s que
   para em 0,511 m (v²/2μg = 0,513 m) e decolagem com o motor.

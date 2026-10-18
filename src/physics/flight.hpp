@@ -30,7 +30,7 @@ struct Stage {
     double thrust=0,exhaust=0,exitArea=0;             // Vacuum N, effective exhaust m/s, nozzle exit m².
     double nozzle=0,gimbal=0,minThrottle=1;           // Pivot (m aft), max deflection (rad), deepest throttle.
     double length=1;                                  // Stack length (m), for display.
-    Aerodynamics aero;
+    Aerodynamics aero;double noseRadius=1; // Stagnation-point radius for heating (m).
     // Landing legs: contact points (x m aft of the nose, y, z) on spring-dampers against the
     // ground (N/m and N s/m per leg) with regularised Coulomb friction. Without legs touchdown
     // is detected at the CG and the vehicle stops.
@@ -63,6 +63,7 @@ struct State {
     Q attitude;                // Body (x forward, y right, z down) to inertial.
     V3 rate;                   // Body angular velocity relative to inertial (rad/s).
     double propellant=0;       // Remaining in the active stage (kg).
+    double heatLoad=0;         // Stagnation-point heat absorbed since the start (J/m²).
     int stage=0;
     bool burning=false,clamped=false,landed=false,contact=false; // contact: a leg on the ground.
     double throttle=1,gimbalPitch=0,gimbalYaw=0; // Gimbal + pitch: nose up; + yaw: nose right.
@@ -77,6 +78,7 @@ struct Sample {
     Q nedAttitude;             // Body to local NED.
     V3 specificForce;          // Non-gravitational acceleration, body axes (what an ideal IMU measures).
     V3 aeroForce,aeroMoment,thrustForce,acceleration,gravity; // Body N, N m about the CG; inertial m/s².
+    double heatFlux=0;         // Convective stagnation-point heating, Sutton-Graves (W/m²).
 };
 class Flight {
 public:
@@ -105,7 +107,7 @@ public:
     struct Increments {V3 velocity,angle;double seconds=0;};
     Increments increments(){const Increments r=increments_;increments_={};return r;}
 private:
-    struct Rate {V3 v,a;Q q;V3 w;double m;V3 f;}; // f: specific force, body axes.
+    struct Rate {V3 v,a;Q q;V3 w;double m;V3 f;double heat;}; // f: specific force, body axes; heat: W/m².
     Rate rate(const State& s,Sample* out)const;
     void integrate(Tt h);
     void hold(State& s)const; // Clamped pose rides the rotating Earth.

@@ -243,6 +243,8 @@ message FlightSample {
   Vector3 delta_velocity_meters_per_second=39; Vector3 delta_angle_radians=40; double measured_static_pressure_pascals=41;
   uint32 data_port=42; // Binary lockstep data plane on 127.0.0.1 (src/rpc/flight_wire.hpp).
   bool leg_contact=43; // A landing leg on the ground (landed: stopped at the CG, vehicles without legs).
+  // Convective stagnation-point heating (Sutton-Graves, stage nose radius) and its integral.
+  double heat_flux_watts_per_meter2=44; double heat_load_joules_per_meter2=45;
 }
 // Replay: the creation request (instant resolved), the air inputs (GFS GRIB2 of both hours,
 // space-weather days) and every step with its commands in order. Replaying needs no network
