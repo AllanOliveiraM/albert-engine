@@ -40,6 +40,12 @@ int main(int argc,char** argv){try{
         bool threw=false;try{providers::GravityModels(cache,serve).mars(121);}catch(const std::invalid_argument&){threw=true;}require(threw,"Degree above the model");
         std::string bad=moonTable;bad.replace(bad.find("-9.0884"),7,"    nan");threw=false;try{providers::parseShadr(bad,8,"x");}catch(const std::runtime_error&){threw=true;}require(threw,"Non-finite coefficient");
         threw=false;try{providers::parseShadr(moonTable.substr(0,moonTable.size()-122*5),8,"x");}catch(const std::runtime_error&){threw=true;}require(threw,"Truncated table");
+        // Review regressions: a duplicate row cannot hide a missing coefficient; tables and caches
+        // longer than their degree allows are refused before parsing.
+        const std::string duplicate=moonTable.substr(0,moonTable.size()-122)+moonTable.substr(moonTable.size()-244,122);
+        threw=false;try{providers::parseShadr(duplicate,8,"x");}catch(const std::runtime_error&){threw=true;}require(threw,"Duplicate row accepted");
+        threw=false;try{providers::gravityModel(Center::moon,moonTable+std::string(1<<20,' '),8);}catch(const std::runtime_error&){threw=true;}require(threw,"Oversized table accepted");
+        std::ofstream(cache/"GRGM1200A-8.tab")<<moonTable<<std::string(1<<20,' ');const int before=calls;providers::GravityModels(cache,serve).moon(8);require(calls==before+1,"Oversized cache refetched");
     }
     // Surface attraction: GM/R² with the J2 term at the equator; the field tends to the point mass.
     {

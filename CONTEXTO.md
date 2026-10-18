@@ -1,6 +1,8 @@
 # Albert Engine — contexto para continuidade
 
-**Fase 5 (Lua e Marte) — marco entregue em 18/10/2026, revisão do Codex em andamento:**
+**Fase 5 (Lua e Marte) — marco entregue em 18/10/2026; revisão do Codex (1 P1, 2 P2) corrigida com
+regressões:** tabela de gravidade limitada pelo grau antes de copiar (replay forjado, cache),
+cada (n, m) exatamente uma vez, sombra abaixo do raio de referência pelo horizonte local.
 gravidade por recursão de Cunningham normalizada (`src/physics/gravity.*`, qualquer grau);
 GRAIL GRGM1200A (≤600) e MRO GMM-3 (≤120) lidos do PDS por faixa até o grau e guardados
 (`src/providers/gravity_models.*`); rotação IAU de `pck00011` com ω analítico (Lua no referencial

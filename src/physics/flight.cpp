@@ -75,8 +75,10 @@ V3 Flight::tidal(const State& s)const{
 V3 Flight::sun(Tt t)const{const double w=bodies(t);const int i=env_.center==Center::moon?1:0;return p0_[i].position+(p1_[i].position-p0_[i].position)*w;}
 double sunlight(V3 r,V3 sun,double bodyRadius){
     constexpr double sunRadius=6.957e8;const V3 d=sun-r;const double dn=norm(d),rn=norm(r);
-    if(!(rn>bodyRadius))return 1; // At or below the surface: the ground handles it.
-    const double a=std::asin(std::min(1.,sunRadius/dn)),b=std::asin(bodyRadius/rn),c=std::acos(std::clamp(-dot(r,d)/(rn*dn),-1.,1.));
+    if(!(rn>0))return 1;
+    // Below the reference radius (low ground, oblate poles) the body is taken as a sphere just
+    // under the point, so the local horizon still decides.
+    const double a=std::asin(std::min(1.,sunRadius/dn)),b=std::asin(std::min(bodyRadius,rn*(1-1e-9))/rn),c=std::acos(std::clamp(-dot(r,d)/(rn*dn),-1.,1.));
     if(c>=a+b)return 1;
     if(c<=b-a)return 0;
     if(c<=a-b)return 1-b*b/(a*a);

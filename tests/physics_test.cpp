@@ -280,6 +280,9 @@ int main(){try{
         require(sunlight({7e6,0,0},sun,6378137.)==1&&sunlight({-7e6,0,0},sun,6378137.)==0,"Sunlit and umbra");
         double last=0;for(double y=6.30e6;y<6.46e6;y+=1e4){const double nu=sunlight({-7e6,y,0},sun,6378137.);require(nu>=last&&nu>=0&&nu<=1,"Penumbra");last=nu;}
         require(last==1&&sunlight({-7e6,6.37e6,0},sun,6378137.)>0&&sunlight({-7e6,6.37e6,0},sun,6378137.)<1,"Penumbra limits");
+        // Below the reference radius (review regression): night side dark, noon lit, the terminator partial.
+        require(sunlight({-6.37e6,0,0},sun,6378137.)==0&&sunlight({6.37e6,0,0},sun,6378137.)==1,"Low ground follows the Sun");
+        const double dusk=sunlight({0,6.37e6,0},sun,6378137.);require(dusk>.3&&dusk<.7,"Low ground at the terminator");
         Environment e;const Tt t=ttFromUtc(1792238400.);const V3 s=perturbers(t).sun,side=cross(s,V3{0,0,1});
         State st;st.time=t;st.position=side*(4.2e7/norm(side));st.velocity={};st.propellant=0;
         Vehicle v=nescSphere();v.sunArea=10;v.reflectivity=1.5;const Flight f(v,e,st);const Sample x=f.sample();const V3 d=s-st.position;

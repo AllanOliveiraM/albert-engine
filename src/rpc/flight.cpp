@@ -310,7 +310,9 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
     for(const auto& d:log.space_weather()){ph::SpaceWeatherDay x;x.day=d.day();x.f107=d.f107();x.f107a=d.f107a();x.apAverage=d.ap_average();x.type=d.type();x.hasAp=d.ap_size()==8;for(int i=0;i<d.ap_size()&&i<8;++i)x.ap[static_cast<std::size_t>(i)]=d.ap(i);days.push_back(x);}
     providers::GravityModel gravity;
     try{
-        if(p.body!=ph::Center::earth)gravity=providers::gravityModel(p.body,log.gravity(),static_cast<int>(p.degree));
+        if(p.body!=ph::Center::earth){ // Bounded before any copy: a forged log must not inflate memory.
+            if(log.gravity().size()>providers::gravityTableBytes(static_cast<int>(p.degree)))throw std::runtime_error("Gravity table longer than its degree allows");
+            gravity=providers::gravityModel(p.body,log.gravity(),static_cast<int>(p.degree));}
         if(!days.empty())air=providers::msisFrom(days,p.utc);
         if(!grib.empty()){std::vector<std::vector<providers::GribField>> hours;for(const auto& b:grib)hours.push_back(providers::decodeGrib2(b));
             const auto grid=std::make_shared<const physics::Weather>(providers::gfsGrid(hours,log.atmosphere().substr(0,log.atmosphere().find(" + "))));air=grid->above(air);}

@@ -37,7 +37,8 @@ struct Stage {
 // sunArea, reflectivity: cannonball solar radiation pressure (m², Cr); 0 area disables it.
 struct Vehicle {std::string name;std::vector<Stage> stages;double torque=0,inertiaRate=1;bool jetDamping=true;double diameter=1,sunArea=0,reflectivity=1.3;};
 // Fraction of the solar disc seen from r past a spherical body of the given radius at the
-// origin (conical umbra and penumbra, Montenbruck and Gill 3.4.2); sun relative to the body.
+// origin (conical umbra and penumbra, Montenbruck and Gill 3.4.2), or a sphere just under r
+// when r is inside it; sun relative to the body.
 double sunlight(V3 r,V3 sun,double bodyRadius);
 
 struct Environment {

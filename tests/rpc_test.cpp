@@ -242,6 +242,11 @@ int main(int argc,char** argv){try{
                 const auto& p=o->samples.front().positionMeters;require(std::abs(albert::physics::norm(albert::physics::V3{p.x-pv[0][0]*au,p.y-pv[0][1]*au,p.z-pv[0][2]*au})-(1737400.+s.geodetic().height_meters()))<100,"Vehicle drawn at the Moon");}
             const std::uint64_t hash=s.state_hash();const auto log=exported();
             {api::FlightSample again;grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&again);for(const auto& k:log)writer->Write(k);writer->WritesDone();require(writer->Finish().ok()&&again.state_hash()==hash,"Lunar replay from the embedded field");}
+            { // Review regression: a forged log cannot carry a gravity table longer than its degree allows.
+                std::string bytes;for(const auto& k:log)bytes+=k.data();api::FlightLog forged;require(forged.ParseFromString(bytes),"Lunar log");forged.mutable_gravity()->append(1<<20,' ');
+                const std::string data=forged.SerializeAsString();api::FlightSample out;grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&out);
+                for(std::size_t at=0;at<data.size();at+=1u<<19){api::FlightLogChunk k;k.set_data(data.substr(at,1u<<19));writer->Write(k);}writer->WritesDone();
+                require(writer->Finish().error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Oversized gravity table replayed");}
             {api::CreateFlightRequest ground=moon;ground.set_terrain_height(true);grpc::ClientContext c;
                 require(flight->CreateFlight(&c,ground,&s).ok()&&std::abs(s.geodetic().height_meters()-(-1000-85.4+.0312))<30,"Lunar site on the LOLA ground");}
             api::CreateFlightRequest mars=moon;mars.set_body(api::CreateFlightRequest::MARS);mars.mutable_site()->set_latitude_degrees(18.4);mars.mutable_site()->set_longitude_degrees(77.5);mars.mutable_site()->set_height_meters(-2500);

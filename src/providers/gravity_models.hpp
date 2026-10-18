@@ -14,6 +14,7 @@ struct GravityModel {std::shared_ptr<const physics::Gravity> gravity;std::string
 // GRAIL GRGM1200A (Moon, DE440 principal axes) or MRO GMM-3 (Mars) from a table excerpt.
 GravityModel gravityModel(physics::Center body,std::string table,int degree);
 int gravityMaximum(physics::Center body); // Highest degree offered: 600 (Moon), 120 (Mars).
+std::size_t gravityTableBytes(int degree); // Longest excerpt accepted (fixed rows, CRLF allowed).
 // The same fields from the PDS Geosciences Node, read only up to the requested degree and cached.
 class GravityModels {
 public:
