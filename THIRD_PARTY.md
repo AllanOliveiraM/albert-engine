@@ -55,6 +55,10 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   tabelas SHADR lidas em uso por faixas de bytes até o grau pedido
   (https://pds-geosciences.wustl.edu); excertos até o grau 8 em `tests/*_gravity_degree8.tab`.
   Dados do governo dos EUA.
+- NASA PDS Geosciences Node: relevo LRO LOLA `LDEM_128` (Lua, GSFC) e MGS MOLA MEGDR 128 px/°
+  (raios de Marte), lidos em uso por faixas de bytes. Dados do governo dos EUA.
+- NASA PDS Atmospheres Node: perfis de entrada das Viking 1 e 2 (Seiff e Kirk 1977), níveis de
+  densidade em `tests/central_bodies_test.cpp`.
 - NAIF/JPL: elementos rotacionais IAU da Lua e de Marte como em `pck00011.tpc` e a rotação
   entre os eixos principais DE440 e o referencial médio da Terra de `moon_de440_250416.tf`
   (https://naif.jpl.nasa.gov), transcritos em `src/physics/earth.cpp`.

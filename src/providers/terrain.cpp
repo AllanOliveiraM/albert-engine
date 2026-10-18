@@ -96,4 +96,41 @@ std::vector<float> CopernicusDem::heights(double west,double south,double east,d
     return out;
 }
 CopernicusDem& copernicusDem(){static CopernicusDem value(dataDirectory()/"terrain");return value;}
+PlanetaryRelief::PlanetaryRelief(Transport transport):transport_(std::move(transport)){
+    if(!transport_)transport_=[](const std::string& url,const std::string& range,DownloadProgress* p){return httpGet(url,p,{4096,60,range});};
+}
+double PlanetaryRelief::pixel(physics::Center body,int row,int column,DownloadProgress& progress){
+    if(const auto it=pixels_.find({static_cast<int>(body),row,column});it!=pixels_.end())return it->second;
+    const bool moon=body==physics::Center::moon;std::string url;std::size_t offset;
+    if(moon){url="https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/ldem_128.img";offset=(static_cast<std::size_t>(row)*46080+static_cast<std::size_t>(column))*2;}
+    else{ // 44° × 90° tiles named by their northern edge and western longitude.
+        static constexpr const char* bands[]{"88n","44n","00n","44s"};static constexpr const char* sectors[]{"000","090","180","270"};
+        url=std::string("https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg128/megr")+bands[row/5632]+sectors[column/11520]+"hb.img";
+        offset=(static_cast<std::size_t>(row%5632)*11520+static_cast<std::size_t>(column%11520))*2;
+    }
+    const bool pair=moon?column+1<46080:(column+1)%11520!=0; // The next pixel in the same request.
+    const std::string b=transport_(url,std::to_string(offset)+"-"+std::to_string(offset+(pair?3:1)),&progress);
+    if(b.size()!=(pair?4u:2u))throw std::runtime_error("Truncated relief sample");
+    auto value=[&](std::size_t k){const auto lo=static_cast<unsigned char>(b[moon?k:k+1]),hi=static_cast<unsigned char>(b[moon?k+1:k]);
+        const auto dn=static_cast<std::int16_t>(static_cast<std::uint16_t>(hi<<8|lo));return moon?dn*.5:dn+3396000.;};
+    pixels_[{static_cast<int>(body),row,column}]=value(0);if(pair)pixels_[{static_cast<int>(body),row,column+1}]=value(2);
+    return value(0);
+}
+double PlanetaryRelief::bilinear(physics::Center body,double latitude,double longitude,DownloadProgress& progress){
+    const bool moon=body==physics::Center::moon;const double top=moon?90:88;const int rows=moon?23040:22528,columns=46080;
+    if(!(std::abs(latitude)<=top))throw std::invalid_argument(moon?"Invalid latitude":"MOLA covers latitudes up to 88°");
+    const double y=std::clamp((top-latitude)*128-.5,0.,rows-1.),x=(longitude-360*std::floor(longitude/360))*128-.5;
+    const int i=std::min(static_cast<int>(y),rows-2);const double fy=y-i,fx0=x-std::floor(x);const int j=static_cast<int>(std::floor(x));
+    auto at=[&](int r,int c){return pixel(body,r,(c%columns+columns)%columns,progress);};
+    return(1-fy)*((1-fx0)*at(i,j)+fx0*at(i,j+1))+fy*((1-fx0)*at(i+1,j)+fx0*at(i+1,j+1));
+}
+double PlanetaryRelief::height(physics::Center body,double latitude,double longitude,DownloadProgress& progress){
+    if(body==physics::Center::earth)throw std::invalid_argument("Earth relief comes from Copernicus");
+    std::lock_guard lock(mutex_);
+    if(body==physics::Center::moon)return bilinear(body,latitude,longitude,progress);
+    // MOLA radii are planetocentric: sample under the ellipsoid point and subtract its radius.
+    constexpr double deg=3.14159265358979323846/180;const physics::V3 p=physics::fixedPosition(physics::planet(physics::Center::mars),{latitude*deg,longitude*deg,0});
+    const double r=physics::norm(p);return bilinear(body,std::asin(p.z/r)/deg,longitude,progress)-r;
+}
+PlanetaryRelief& planetaryRelief(){static PlanetaryRelief value;return value;}
 }

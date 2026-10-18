@@ -191,7 +191,9 @@ message CreateFlightRequest {
   enum Weather { WEATHER_AUTOMATIC=0; STANDARD_ATMOSPHERE=1; LIVE_GFS=2; }
   Weather weather=11;
   ImuSettings imu=12;
-  bool terrain_height=13; // Earth: site height from Copernicus DEM 30 m + EGM2008 geoid (ellipsoidal), resolved at creation.
+  // Site height from the measured ground, resolved at creation: Earth Copernicus DEM 30 m +
+  // EGM2008 geoid (ellipsoidal); Moon LRO LOLA; Mars MGS MOLA (to ±88°), both ~237 m posts.
+  bool terrain_height=13;
   // Central body. Coordinates (sites and samples): Earth WGS 84; Moon mean-Earth frame over the
   // 1737.4 km sphere; Mars IAU 2015 frame, east longitude and ellipsoid-normal (planetographic)
   // latitude over the 3396.19 x 3376.20 km ellipsoid. Site heights -10 to 25 km off Earth.

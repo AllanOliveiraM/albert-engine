@@ -54,5 +54,36 @@ int main(int argc,char** argv){try{
     const auto grid=dem.heights(20.25,10.25,20.75,10.75,3,3,p);require(std::abs(grid[4]-expected(10.5,20.5))<1e-3&&std::abs(grid[0]-expected(10.25,20.25))<1e-3,"Height grid");
     const int before=requests;albert::providers::CopernicusDem again(cache,[&](const std::string&,const std::string&,albert::DownloadProgress*)->std::string{throw std::runtime_error("offline");});
     require(std::abs(again.height(10.5,20.5,p)-expected(10.5,20.5))<1e-3&&requests==before,"Cached header and tiles reused offline");
+    { // LOLA and MOLA by byte range: pixel-is-area centres, endianness, scaling, tile seams and the 360° wrap.
+        auto dn=[](int row,int column){return static_cast<std::int16_t>((row*7+column*3)%20000-10000);};
+        int pdsRequests=0;
+        albert::providers::PlanetaryRelief relief([&](const std::string& url,const std::string& range,albert::DownloadProgress*){
+            ++pdsRequests;const std::size_t dash=range.find('-'),first=std::stoull(range.substr(0,dash)),last=std::stoull(range.substr(dash+1));
+            const bool moon=url.find("ldem_128")!=std::string::npos;std::string out;
+            for(std::size_t at=first;at<=last;at+=2){
+                int row,column;
+                if(moon){row=static_cast<int>(at/2/46080);column=static_cast<int>(at/2%46080);}
+                else{const std::string tile=url.substr(url.find("megr")+4,6);const int band=tile=="88n000"||tile.rfind("88n",0)==0?0:tile.rfind("44n",0)==0?1:tile.rfind("00n",0)==0?2:3;
+                    row=band*5632+static_cast<int>(at/2/11520);column=std::stoi(tile.substr(3))*128+static_cast<int>(at/2%11520);}
+                const auto v=static_cast<std::uint16_t>(dn(row,column));
+                if(moon){out+=static_cast<char>(v&255);out+=static_cast<char>(v>>8);}else{out+=static_cast<char>(v>>8);out+=static_cast<char>(v&255);}
+            }
+            return out;});
+        albert::DownloadProgress progress;
+        auto lunar=[&](int row,int column){return relief.height(albert::physics::Center::moon,90-(row+.5)/128,(column+.5)/128,progress);};
+        require(std::abs(lunar(100,200)-dn(100,200)*.5)<1e-9&&std::abs(lunar(23039,46079)-dn(23039,46079)*.5)<1e-9,"Lunar pixel centres");
+        const double mid=relief.height(albert::physics::Center::moon,90-100.75/128,200.75/128,progress); // A quarter pixel in from (100, 200).
+        require(std::abs(mid-.5*(.75*(.75*dn(100,200)+.25*dn(100,201))+.25*(.75*dn(101,200)+.25*dn(101,201))))<1e-9,"Lunar bilinear");
+        const double wrap=relief.height(albert::physics::Center::moon,90-100.5/128,360-.25/128,progress); // Between the last and the first column.
+        require(std::abs(wrap-.5*(.75*dn(100,46079)+.25*dn(100,0)))<1e-9,"Lunar 360° wrap");
+        constexpr double f=(3396190.-3376200.)/3396190.,deg=3.14159265358979323846/180;
+        auto martian=[&](int row,int column){ // Geodetic latitude whose ellipsoid point lies at the pixel's planetocentric latitude.
+            const double c=(88-(row+.5)/128)*deg,g=std::atan(std::tan(c)/((1-f)*(1-f)));const double lon=(column+.5)/128;
+            const auto p=albert::physics::fixedPosition(albert::physics::planet(albert::physics::Center::mars),{g,lon*deg,0});
+            return relief.height(albert::physics::Center::mars,g/deg,lon,progress)-(dn(row,column)+3396000.-albert::physics::norm(p));};
+        for(auto [r,c]:{std::pair{0,0},{5631,11519},{5632,11520},{11300,23100},{22527,46079},{17000,34600}})require(std::abs(martian(r,c))<1e-6,"Martian radii across MOLA tiles");
+        bool threw=false;try{relief.height(albert::physics::Center::mars,89,0,progress);}catch(const std::invalid_argument&){threw=true;}require(threw,"MOLA polar gap");
+        require(pdsRequests<=30,"Relief requests: two pixels per row");
+    }
     std::cout<<"terrain_test: ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

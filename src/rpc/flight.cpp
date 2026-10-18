@@ -46,7 +46,7 @@ Prepared prepare(const api::CreateFlightRequest& r,double utc){
     }
     if(!api::CreateFlightRequest::Body_IsValid(r.body()))throw std::invalid_argument("Unknown body");
     p.body=r.body()==api::CreateFlightRequest::MOON?ph::Center::moon:r.body()==api::CreateFlightRequest::MARS?ph::Center::mars:ph::Center::earth;const bool earth=p.body==ph::Center::earth;
-    if(!earth&&(r.terrain_height()||r.weather()==api::CreateFlightRequest::LIVE_GFS))throw std::invalid_argument("Terrain heights and live weather exist only on Earth");
+    if(!earth&&r.weather()==api::CreateFlightRequest::LIVE_GFS)throw std::invalid_argument("Live weather exists only on Earth");
     const auto& site=r.site();p.pitch=r.has_pitch_degrees()?r.pitch_degrees():90.;p.seconds=r.has_step_seconds()?r.step_seconds():.001;p.coast=r.has_coast_step_seconds()?r.coast_step_seconds():1.;
     if(!(std::abs(site.latitude_degrees())<=90&&std::abs(site.longitude_degrees())<=360&&site.height_meters()>=(earth?-500:-1e4)&&site.height_meters()<=(earth?1e4:2.5e4)))throw std::invalid_argument("Invalid launch site");
     if(!finite(r.heading_degrees())||!(std::abs(p.pitch)<=90)||!(p.seconds>=1e-5&&p.seconds<=.1)||!(p.coast>=0&&p.coast<=10))throw std::invalid_argument("Invalid heading, pitch, step or coast step");
@@ -65,6 +65,7 @@ struct FlightServices::Impl {
         if(!sources.weather)sources.weather=[](double lat,double lon,double utc){auto d=providers::gfs().fetch(lat,lon,utc);return LiveAir{d.model,std::move(d.grib)};};
         if(!sources.upper)sources.upper=[](double utc){UpperAir a;try{a.model=providers::spaceWeather().msis(utc,&a.days);}catch(const std::exception&){a={};}return a;};
         if(!sources.gravity)sources.gravity=[](ph::Center c,int degree){return providers::gravityModels().load(c,degree);};
+        if(!sources.relief)sources.relief=[](ph::Center c,double lat,double lon){DownloadProgress p;return providers::planetaryRelief().height(c,lat,lon,p);};
     }
     // Replay log: the creation and every committed step (u32 ticks, u32 count, then per command u32 kind and three doubles).
     api::FlightLog log;std::string record;
@@ -259,12 +260,14 @@ grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,cons
 }
 grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api::CreateFlightRequest* request,api::FlightSample* out){
     api::CreateFlightRequest resolved=*request;const api::CreateFlightRequest* r=&resolved;
-    if(r->terrain_height()&&r->body()==api::CreateFlightRequest::EARTH){ // Recorded as an explicit height: replay needs no terrain data.
+    if(r->terrain_height()){ // Recorded as an explicit height: replay needs no terrain data.
         const auto& site=r->site();
-        if(!(std::abs(site.latitude_degrees())<=90)||!finite(site.longitude_degrees()))return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid launch site"};
-        try{DownloadProgress progress;const double lon=site.longitude_degrees()-360.*std::floor((site.longitude_degrees()+180.)/360.);
-            const double h=providers::copernicusDem().height(site.latitude_degrees(),lon,progress)+ph::geoidHeight(site.latitude_degrees()*deg,lon*deg);
+        if(!(std::abs(site.latitude_degrees())<=90)||!finite(site.longitude_degrees())||!api::CreateFlightRequest::Body_IsValid(r->body()))return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid launch site"};
+        try{DownloadProgress progress;const double lon=site.longitude_degrees()-360.*std::floor((site.longitude_degrees()+180.)/360.);double h;
+            if(r->body()==api::CreateFlightRequest::EARTH)h=providers::copernicusDem().height(site.latitude_degrees(),lon,progress)+ph::geoidHeight(site.latitude_degrees()*deg,lon*deg);
+            else h=impl_->sources.relief(r->body()==api::CreateFlightRequest::MOON?ph::Center::moon:ph::Center::mars,site.latitude_degrees(),lon);
             resolved.mutable_site()->set_height_meters(h);resolved.set_terrain_height(false);}
+        catch(const std::invalid_argument& e){return{grpc::StatusCode::INVALID_ARGUMENT,std::string("Terrain: ")+e.what()};}
         catch(const std::exception& e){return{grpc::StatusCode::UNAVAILABLE,std::string("Terrain unavailable: ")+e.what()};}
     }
     Prepared p;

@@ -53,7 +53,8 @@ int main(int argc,char** argv){try{
             if(lat==27.5)return{std::make_shared<albert::physics::Weather>(albert::providers::gfsGrid({albert::providers::decodeGrib2(grib)},"NOAA GFS fixture")),{grib}};return{std::make_shared<Breeze>(),{}};},
         [&](double utc){albert::rpc::UpperAir a;if(std::abs(utc-1796083200.)<86400){a.model=albert::providers::msisFrom(days,utc);a.days=days;}return a;},
         [&](albert::physics::Center body,int degree){std::ifstream in{std::filesystem::path(argc>1?argv[1]:"").parent_path()/(body==albert::physics::Center::moon?"moon_gravity_degree8.tab":"mars_gravity_degree8.tab"),std::ios::binary};
-            return albert::providers::gravityModel(body,{std::istreambuf_iterator<char>(in),{}},degree);}}); // No network in tests.
+            return albert::providers::gravityModel(body,{std::istreambuf_iterator<char>(in),{}},degree);},
+        [](albert::physics::Center body,double lat,double lon){if(lat>88)throw std::invalid_argument("polar gap");return (body==albert::physics::Center::moon?-1000.:-2000.)+lat+lon/1000;}}); // No network in tests.
     auto channel=grpc::CreateChannel("127.0.0.1:"+std::to_string(server.port()),grpc::InsecureChannelCredentials());
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto scene=api::SceneService::NewStub(channel);auto camera=api::CameraService::NewStub(channel);api::Applied applied;
@@ -230,7 +231,7 @@ int main(int argc,char** argv){try{
             api::CreateFlightRequest moon=create;moon.set_body(api::CreateFlightRequest::MOON);moon.mutable_site()->set_latitude_degrees(-85.4);moon.mutable_site()->set_longitude_degrees(31.2);moon.mutable_site()->set_height_meters(-3000);
             {grpc::ClientContext c;require(flight->CreateFlight(&c,moon,&s).error_code()==grpc::StatusCode::UNAVAILABLE,"Lunar degree above the fixture accepted");}
             moon.set_gravity_degree(8);
-            using Edit=void(*)(api::CreateFlightRequest&);for(Edit refused:{+[](api::CreateFlightRequest& r){r.set_terrain_height(true);},+[](api::CreateFlightRequest& r){r.set_weather(api::CreateFlightRequest::LIVE_GFS);},+[](api::CreateFlightRequest& r){r.set_gravity_degree(601);},+[](api::CreateFlightRequest& r){r.set_body(static_cast<api::CreateFlightRequest::Body>(7));}}){
+            using Edit=void(*)(api::CreateFlightRequest&);for(Edit refused:{+[](api::CreateFlightRequest& r){r.mutable_site()->set_latitude_degrees(89);r.set_terrain_height(true);},+[](api::CreateFlightRequest& r){r.set_weather(api::CreateFlightRequest::LIVE_GFS);},+[](api::CreateFlightRequest& r){r.set_gravity_degree(601);},+[](api::CreateFlightRequest& r){r.set_body(static_cast<api::CreateFlightRequest::Body>(7));}}){
                 api::CreateFlightRequest bad=moon;refused(bad);grpc::ClientContext c;require(flight->CreateFlight(&c,bad,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Invalid lunar flight accepted");}
             {grpc::ClientContext c;require(flight->CreateFlight(&c,moon,&s).ok(),"Lunar flight");}
             require(std::abs(s.specific_force_meters_per_second2().x()-1.63)<.02&&s.static_pressure_pascals()==0&&s.atmosphere()=="Vacuum (no lunar atmosphere)"&&s.geodetic().height_meters()>-3000&&s.geodetic().height_meters()<-2950,"Lunar pad"); // The CG, above the base.
@@ -241,6 +242,8 @@ int main(int argc,char** argv){try{
                 const auto& p=o->samples.front().positionMeters;require(std::abs(albert::physics::norm(albert::physics::V3{p.x-pv[0][0]*au,p.y-pv[0][1]*au,p.z-pv[0][2]*au})-(1737400.+s.geodetic().height_meters()))<100,"Vehicle drawn at the Moon");}
             const std::uint64_t hash=s.state_hash();const auto log=exported();
             {api::FlightSample again;grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&again);for(const auto& k:log)writer->Write(k);writer->WritesDone();require(writer->Finish().ok()&&again.state_hash()==hash,"Lunar replay from the embedded field");}
+            {api::CreateFlightRequest ground=moon;ground.set_terrain_height(true);grpc::ClientContext c;
+                require(flight->CreateFlight(&c,ground,&s).ok()&&std::abs(s.geodetic().height_meters()-(-1000-85.4+.0312))<30,"Lunar site on the LOLA ground");}
             api::CreateFlightRequest mars=moon;mars.set_body(api::CreateFlightRequest::MARS);mars.mutable_site()->set_latitude_degrees(18.4);mars.mutable_site()->set_longitude_degrees(77.5);mars.mutable_site()->set_height_meters(-2500);
             {grpc::ClientContext c;require(flight->CreateFlight(&c,mars,&s).ok(),"Martian flight");}
             require(std::abs(s.specific_force_meters_per_second2().x()-3.71)<.03&&std::abs(s.static_pressure_pascals()-albert::physics::marsAtmosphere(s.geodetic().height_meters()).pressure)<1e-6&&s.atmosphere()=="NASA Glenn Mars mean atmosphere","Martian pad");

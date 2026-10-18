@@ -1,8 +1,10 @@
 #pragma once
 #include "net/download.hpp"
+#include "physics/earth.hpp"
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <tuple>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -30,4 +32,19 @@ private:
 // Decodes one DEFLATE + floating-point-predictor (TIFF 3) float32 tile.
 std::vector<float> decodeFloatTile(const std::string& compressed,unsigned width,unsigned height);
 CopernicusDem& copernicusDem(); // Cache in the data directory.
+// LRO LOLA LDEM_128 (Moon: heights above the 1737.4 km sphere) and MGS MOLA MEGDR 128 px/°
+// radii (Mars, planetocentric, ±88°) from the PDS Geosciences Node: pixel-is-area grids read
+// by byte range, two pixels per row, bilinear (~237 m posts).
+class PlanetaryRelief {
+public:
+    using Transport=CopernicusDem::Transport;
+    explicit PlanetaryRelief(Transport transport={});
+    // Height above the flight datum (Moon sphere, Mars ellipsoid) under a geodetic site (degrees).
+    double height(physics::Center body,double latitude,double longitude,DownloadProgress& progress);
+private:
+    double pixel(physics::Center body,int row,int column,DownloadProgress& progress); // Moon: height; Mars: radius (m).
+    double bilinear(physics::Center body,double latitude,double longitude,DownloadProgress& progress);
+    Transport transport_;std::mutex mutex_;std::map<std::tuple<int,int,int>,double> pixels_;
+};
+PlanetaryRelief& planetaryRelief();
 }

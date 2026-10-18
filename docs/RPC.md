@@ -274,8 +274,9 @@ geoide EGM2008 (altura elipsoidal), resolvida na criação e gravada no log de r
 pedido (≈630 kB no grau 100) na primeira vez e guardada; o log de replay leva o trecho usado. O
 sítio está no referencial médio da Terra da Lua (esfera de 1737,4 km) ou no IAU 2015 de Marte
 (longitude leste, latitude normal ao elipsoide de 3396,19 × 3376,20 km), altura de −10 a 25 km.
-Marte tem a atmosfera média da NASA Glenn; a Lua, vácuo. `terrain_height` e `LIVE_GFS` só
-existem na Terra. Posições e velocidades da amostra (inercial e fixo) são relativas ao corpo
+Marte tem uma atmosfera média hidrostática; a Lua, vácuo. `terrain_height` usa o LRO LOLA na Lua
+e o MGS MOLA em Marte (postes de ~237 m, Marte até ±88°), lidos por faixas de bytes; `LIVE_GFS`
+só existe na Terra. Posições e velocidades da amostra (inercial e fixo) são relativas ao corpo
 central; na cena o veículo é desenhado sobre a Lua ou Marte da cena (Horizons, levado ao instante
 pelo movimento do ERFA).
 
