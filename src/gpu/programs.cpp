@@ -22,7 +22,7 @@ struct Frame {
     planet: mat4x4f,         // World to the air's planet frame (km from its centre).
     air: vec4f,              // Camera in the planet frame; w: strength (0: no air this frame).
     airSun: vec4f,           // Towards the sun in the planet frame; w: the model's ground offset (km, <= 0).
-    clouds: vec4f,           // Cloud layer: x its height over the air's ground (km), y its opacity (0: none).
+    weather: vec4f,          // x: cloud layer height over the air's ground (km); y: its opacity (0: none); z: surface wind (m/s, 0: none).
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -113,11 +113,11 @@ fn horizonPoint(c: vec3f, toward: vec3f) -> vec3f { // The model sphere's horizo
 // Sunlight through the cloud layer over a point (planet frame, radius r): the layer's opacity where the
 // ray toward the sun crosses it (1 above it, or without clouds).
 fn cloudShadow(p: vec3f, r: f32) -> f32 {
-    let top = bottomRadius() + frame.clouds.x; let sun = frame.airSun.xyz;
-    if (frame.clouds.y <= 0.0 || r >= top) { return 1.0; }
+    let top = bottomRadius() + frame.weather.x; let sun = frame.airSun.xyz;
+    if (frame.weather.y <= 0.0 || r >= top) { return 1.0; }
     let rmu = dot(p, sun); let crossing = normalize(p + sun * (-rmu + sqrt(max(rmu * rmu - (r - top) * (r + top), 0.0))));
     let uv = vec2f(atan2(crossing.z, -crossing.x) / (2.0 * AIR_PI), asin(clamp(crossing.y, -1.0, 1.0)) / AIR_PI + 0.5);
-    return 1.0 - frame.clouds.y * textureSampleLevel(airClouds, airCloudSampler, uv, 0.0).g;
+    return 1.0 - frame.weather.y * textureSampleLevel(airClouds, airCloudSampler, uv, 0.0).g;
 }
 struct AirLight { sun: vec3f, sky: vec3f }; // Sunlight reaching a point (fraction of the sun's colour); sky irradiance (relative to it).
 fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {
@@ -159,15 +159,15 @@ fn airApply(world: vec3f, colour: vec3f) -> vec3f { // Aerial perspective: an op
     let sky = airSky(world); return mix(colour, colour * sky.transmittance + sky.radiance * frame.sunColor.rgb, frame.air.w);
 }
 // Sky light mirrored by a smooth surface (the ocean): the sky along the reflected ray from the point,
-// by Schlick's Fresnel with roughness; it fades out on rough ones, whose sky light is the diffuse
-// irradiance. View-space normal and position; f0: reflectance at normal incidence.
+// by Schlick's Fresnel with roughness; it fades out on rough ones (land, 0.5-0.8), whose sky light is
+// the diffuse irradiance. View-space normal and position; f0: reflectance at normal incidence.
 fn airReflection(world: vec3f, viewNormal: vec3f, viewPosition: vec3f, roughness: f32, f0: vec3f) -> vec3f {
-    if (frame.air.w <= 0.0 || roughness >= 0.6) { return vec3f(0.0); }
+    if (frame.air.w <= 0.0 || roughness >= 0.8) { return vec3f(0.0); }
     let v = normalize(-viewPosition); let nv = clamp(dot(viewNormal, v), 0.0, 1.0);
     let toWorld = transpose(mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz)); // The view's rotation inverted.
     let ray = normalize((frame.planet * vec4f(toWorld * reflect(-v, viewNormal), 0.0)).xyz);
     let f = f0 + (max(vec3f(1.0 - roughness), f0) - f0) * pow(1.0 - nv, 5.0);
-    return f * skyRadiance(airPoint(world), ray, frame.airSun.xyz).radiance * frame.sunColor.rgb * (1.0 - smoothstep(0.2, 0.6, roughness)) * frame.air.w;
+    return f * skyRadiance(airPoint(world), ray, frame.airSun.xyz).radiance * frame.sunColor.rgb * (1.0 - smoothstep(0.5, 0.8, roughness)) * frame.air.w;
 }
 fn airFilter(world: vec3f) -> vec3f { // Transmittance only: light added over what is behind it.
     if (frame.air.w <= 0.0) { return vec3f(1.0); }

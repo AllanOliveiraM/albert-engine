@@ -35,7 +35,8 @@ public:
     // OpenGL: no effect (the atmosphere shell's own shader).
     // The air this frame (WebGPU): the Earth's, or Mars's when `mars`; groundKm as SceneRenderer::Air.
     void setAir(const threepp::Object3D* body,float kmPerUnit,float strength,float groundKm=0,bool mars=false);
-    void setClouds(threepp::Texture* map,float altitudeKm,float opacity); // Their shadows (WebGPU; SceneRenderer::Air).
+    // The weather the air shows (WebGPU; SceneRenderer::Air): cloud shadows, the sea's wind roughness.
+    void setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind);
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

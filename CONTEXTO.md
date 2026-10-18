@@ -32,8 +32,9 @@ contêm exceções); P2 frustum com raio sin θ (curto para faces: corda 2 sin �
 esquecida (fica em `failed_` e volta quando a fila esvazia); P2 imagem regional de Marte nos nós; P2
 irradiância solar local perto de outro corpo (luz da cena 2,4/d², o céu e veículos na mesma escala).
 Todos com teste que falha no código antigo, exceto a luz local (fiação do aplicativo); CI verde.
-Sombra das nuvens na luz do ar (mapa desenhado no grupo do quadro, bindings 9/10). Próximo: ondas
-do oceano, imagem regional para veículos na Lua/Marte.
+Sombra das nuvens na luz do ar (mapa desenhado no grupo do quadro, bindings 9/10). Mar com
+rugosidade de Cox-Munk pelo vento (GFS do voo ou 7 m/s; `frame.weather.z`). Próximo: imagem regional
+para veículos na Lua/Marte, perfil de desempenho na MX350.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

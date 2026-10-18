@@ -121,7 +121,9 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
     let kind = material.flags.y;
     if (kind < 0.5) { colour = base.rgb * select(vec3f(1.0), mapped / PI_L, material.flags.w > 0.5); return vec4f(finish(colour + material.emissive.rgb), base.a); } // Unlit, no air.
     else if (kind > 1.5 && kind < 2.5) {
-        let roughness = material.params.x * select(1.0, roughTexel.g, material.more.y > 0.5);
+        var roughness = material.params.x * select(1.0, roughTexel.g, material.more.y > 0.5);
+        if (material.more.y > 0.5 && frame.weather.z > 0.0 && frame.air.w > 0.0) { // Water (roughness texels under 0.5): Cox-Munk slopes for the surface wind.
+            roughness = mix(roughness, sqrt(sqrt(0.003 + 0.00512 * frame.weather.z)), 1.0 - smoothstep(0.35, 0.5, roughTexel.g)); }
         colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra, shadow)
             + airReflection(v.world, n, v.position, roughness, mix(vec3f(0.04), base.rgb, material.params.y)); // The sky on smooth water.
     } else if (kind > 2.5) { colour = lambertLight(base.rgb, n, mapped * PI_L + light.sky * frame.sunColor.rgb, shadow); } // threepp keeps π on Lambert light maps.
@@ -533,6 +535,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     // Cloud shadows: the layer's map (its GPU copy is the cloud material's), its height and opacity.
     std::uint64_t cloudSerial=2;WGPUTextureView cloudView=g.black;
     if(airTables&&air.clouds&&air.cloudShadow>0){cloudView=g.view(air.clouds,true,cloudSerial);f[100]=air.cloudKm;f[101]=std::min(air.cloudShadow,1.f);}
+    if(airTables)f[102]=std::max(air.surfaceWind,0.f); // The sea's roughness (Cox-Munk).
     g.bindFrame(shadowing?g.shadowView:g.dummyShadowView,airTables,cloudView,cloudSerial);
     Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);f[32]=eye.x;f[33]=eye.y;f[34]=eye.z;f[35]=1;
     f[36]=static_cast<float>(width);f[37]=static_cast<float>(height);f[38]=camera.nearPlane;

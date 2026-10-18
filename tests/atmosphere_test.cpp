@@ -236,8 +236,8 @@ struct V { @builtin(position) clip: vec4f, @location(0) world: vec3f };
             box->position.set(-1.6e-5f,ground+2e-6f,-3e-5f);scene.add(box);
             auto sunlight=DirectionalLight::create(0xffffff,2.4f);sunlight->position.set(0,std::sin(.5236f),std::cos(.5236f));scene.add(sunlight); // Toward the default target, the origin.
             PerspectiveCamera camera(50,static_cast<float>(iw)/ih,1e-7f,10);camera.position.set(0,ground,0);camera.lookAt(Vector3(0,ground,-1));
-            threepp::Texture* clouds=nullptr;float cloudOpacity=0; // Cloud shadows: a layer at 12 km.
-            auto frameOf=[&](float strength){renderer.air={&earth,globe.get(),6378.137f,strength};renderer.air.clouds=clouds;renderer.air.cloudShadow=cloudOpacity;
+            threepp::Texture* clouds=nullptr;float cloudOpacity=0,wind=0; // Cloud shadows: a layer at 12 km; the sea's wind.
+            auto frameOf=[&](float strength){renderer.air={&earth,globe.get(),6378.137f,strength};renderer.air.clouds=clouds;renderer.air.cloudShadow=cloudOpacity;renderer.air.surfaceWind=wind;
                 WGPUCommandEncoder en2=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);renderer.render(scene,camera,view,iw,ih,en2);
                 WGPUCommandBuffer cb2=wgpuCommandEncoderFinish(en2,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb2);wgpuCommandBufferRelease(cb2);wgpuCommandEncoderRelease(en2);
                 return readPixels(*gpu,target,iw,ih);};
@@ -261,6 +261,19 @@ struct V { @builtin(position) clip: vec4f, @location(0) world: vec3f };
                 clouds=overcast.get();cloudOpacity=.88f;const auto shaded=px(frameOf(1),48,60);clouds=nullptr;cloudOpacity=0;const auto clear=px(frameOf(1),48,60);
                 std::printf("ground under an overcast layer %d %d %d, clear %d %d %d\n",shaded[0],shaded[1],shaded[2],clear[0],clear[1],clear[2]);
                 check(shaded[0]<clear[0]*7/10&&shaded[0]>0,"Clouds shadow the ground (sunlight through the layer)");
+            }
+            { // The sea's glitter (water: roughness texels under 0.5) widens with the wind (Cox-Munk): the sun 5
+              // degrees up ahead; at 15 m/s the glint is dimmer at its peak and spread over more pixels than at 1 m/s.
+                auto water=MeshStandardMaterial::create();water->color=Color(.02f,.05f,.1f);water->roughness=1;
+                auto mask=DataTexture::create(ImageData(std::vector<unsigned char>(8*4*4,50)),8,4);mask->needsUpdate();water->roughnessMap=mask;globe->setMaterial(water);
+                sunlight->position.set(0,std::sin(.0873f),-std::cos(.0873f));
+                const float exposure=renderer.exposure;renderer.exposure=exposure*.02f; // The glint unclipped.
+                auto glint=[&](float w){wind=w;const auto im=frameOf(1);int peak=0,half=0;for(unsigned y=ih/2;y<ih;++y)for(unsigned x=0;x<iw;++x)peak=std::max(peak,px(im,x,y)[0]);
+                    for(unsigned y=ih/2;y<ih;++y)for(unsigned x=0;x<iw;++x)half+=px(im,x,y)[0]*2>peak;return std::pair{peak,half};};
+                const auto [calmPeak,calmArea]=glint(1);const auto [windyPeak,windyArea]=glint(15);wind=0;renderer.exposure=exposure;
+                std::printf("sea glint: 1 m/s peak %d (%d pixels over half), 15 m/s peak %d (%d pixels over half)\n",calmPeak,calmArea,windyPeak,windyArea);
+                check(calmPeak>windyPeak*3/2&&windyArea>calmArea&&windyPeak<255,"The sea's glitter widens and dims with the wind (Cox-Munk)");
+                globe->setMaterial(globeMaterial);sunlight->position.set(0,std::sin(.5236f),std::cos(.5236f));
             }
             wgpuTextureViewRelease(view);wgpuTextureRelease(target);
         }
