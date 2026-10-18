@@ -39,7 +39,9 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
 - GFS: decodificação GRIB2 conferida com decodificador independente; a análise de
   2026-10-17 12 UTC interpolada contra a radiossondagem de Tampa (72210, U. Wyoming) em 14
   níveis de 925 a 10 hPa: mediana de |ΔT| 0,38 K, máximo 2,4 K, vento RMS 3,0 m/s,
-  pressão ≤0,4% (a análise assimila a sondagem; previsões terão erros maiores).
+  pressão ≤0,4% (a análise assimila a sondagem). Independente: a previsão de 18 UTC +6 h contra
+  a sondagem de 2026-10-18 00 UTC em 10 níveis (925 a 100 hPa): viés −0,39 K, mediana de |ΔT|
+  0,64 K, máximo 2,8 K, vento RMS 3,0 m/s, pressão ≤0,23%.
 - NRLMSISE-00: os 17 casos de referência da distribuição do NRL nos 7 algarismos publicados;
   índices da CelesTrak (F10.7 do dia anterior, média de 81 dias, Ap diário e histórico de 3 h).
 - EGM2008 contra o gradiente do potencial somado com funções de Legendre normalizadas diretas

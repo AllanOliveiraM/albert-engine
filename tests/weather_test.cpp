@@ -1,6 +1,7 @@
 #include "providers/gfs.hpp"
 #include "providers/space_weather.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -16,12 +17,15 @@ void near(double a,double b,double tol,const char* m){if(!(std::abs(a-b)<=tol)){
 // University of Wyoming, Tampa Bay (72210) 2026-10-17 12 UTC, mandatory levels:
 // pressure (hPa), geopotential height (m), temperature (°C), wind from (deg), speed (m/s).
 struct Level {double pressure,height,temperature,direction,speed;};
+// And 2026-10-18 00 UTC, against the GFS 18 UTC +6 h forecast (not assimilated).
+constexpr Level evening[]{{925,820,19.1,38,7.7},{850,1546,15.6,357,4.7},{700,3175,7.4,286,7.2},{500,5872,-5.2,298,12.4},{400,7582,-17.4,264,12.2},
+    {300,9682,-31.4,249,19.1},{250,10946,-41.4,231,18.9},{200,12415,-54.2,242,18.6},{150,14215,-64.6,276,16.6},{100,16621,-72.1,291,15.3}};
 constexpr Level sonde[]{{925,815,21.1,356,1.2},{850,1544,17.3,261,3.2},{500,5886,-6.4,247,11.5},{400,7603,-15.9,243,11.2},{300,9703,-31.6,235,12.9},
     {250,10964,-42.3,228,13.6},{200,12430,-54.9,236,18},{150,14221,-64.6,270,16.3},{100,16631,-75,272,8.2},{70,18718,-70.5,216,4.1},{50,20764,-61.6,179,8.2},
     {30,23990,-56.5,26,3.3},{20,26616,-51.4,185,4.2},{10,31164,-47.3,274,7.3}};
 }
 int main(int argc,char** argv){try{
-    if(argc<3)throw std::runtime_error("usage: weather_test fixture.grb2 cache-directory");
+    if(argc<4)throw std::runtime_error("usage: weather_test analysis.grb2 cache-directory forecast.grb2");
     std::ifstream in{argv[1],std::ios::binary};const std::string bytes{std::istreambuf_iterator<char>(in),{}};
     // GFS 0.25° analysis 2026-10-17 12 UTC from the NOMADS filter, 26.75-28.75 N, 83.5-81.25 W.
     const auto fields=providers::decodeGrib2(bytes);require(fields.size()==205,"GRIB2 field count");
@@ -38,16 +42,25 @@ int main(int argc,char** argv){try{
     const double lat=27.705*deg,lon=-82.401*deg,s2=std::sin(lat)*std::sin(lat),gamma=9.7803253359*(1+.00193185265241*s2)/std::sqrt(1-physics::earth.e2()*s2);
     const double n=physics::geoidHeight(lat,lon),t=static_cast<double>(physics::ttFromUtc(1792238400.));
     std::printf("geoid at Tampa %.2f m\n",n);near(n,-27,4,"Geoid at Tampa");
-    std::vector<double> dt;double windSquares=0,worstPressure=0;
-    for(const Level& l:sonde){
-        const double h=l.height*9.80665,z=6371008.8*h/(gamma*6371008.8-h);const physics::Air a=w.at(static_cast<std::int64_t>(t),lat,lon,z+n);
-        const double u=-l.speed*std::sin(l.direction*deg),v=-l.speed*std::cos(l.direction*deg),dT=a.temperature-(l.temperature+273.15),dp=a.pressure/(l.pressure*100)-1;
-        std::printf("%5.0f hPa %6.0f m: GFS %7.2f K %8.2f hPa wind %5.1f %5.1f | sonde %7.2f K wind %5.1f %5.1f\n",l.pressure,l.height,a.temperature,a.pressure/100,a.wind.y,a.wind.x,l.temperature+273.15,u,v);
-        dt.push_back(std::abs(dT));windSquares+=(a.wind.y-u)*(a.wind.y-u)+(a.wind.x-v)*(a.wind.x-v);worstPressure=std::max(worstPressure,std::abs(dp));
+    auto compare=[&](const physics::Weather& model,const Level* levels,std::size_t count,double utc,const char* label){
+        std::vector<double> dt;double windSquares=0,worstPressure=0,bias=0;const auto tt=physics::ttFromUtc(utc);
+        for(std::size_t i=0;i<count;++i){const Level& l=levels[i];
+            const double h=l.height*9.80665,z=6371008.8*h/(gamma*6371008.8-h);const physics::Air a=model.at(tt,lat,lon,z+n);
+            const double u=-l.speed*std::sin(l.direction*deg),v=-l.speed*std::cos(l.direction*deg),dT=a.temperature-(l.temperature+273.15),dp=a.pressure/(l.pressure*100)-1;
+            std::printf("%5.0f hPa %6.0f m: GFS %7.2f K %8.2f hPa wind %5.1f %5.1f | sonde %7.2f K wind %5.1f %5.1f\n",l.pressure,l.height,a.temperature,a.pressure/100,a.wind.y,a.wind.x,l.temperature+273.15,u,v);
+            dt.push_back(std::abs(dT));bias+=dT/static_cast<double>(count);windSquares+=(a.wind.y-u)*(a.wind.y-u)+(a.wind.x-v)*(a.wind.x-v);worstPressure=std::max(worstPressure,std::abs(dp));
+        }
+        std::sort(dt.begin(),dt.end());const double median=dt[dt.size()/2],rms=std::sqrt(windSquares/static_cast<double>(count));
+        std::printf("%s vs sonde: bias %.2f K, median |dT| %.2f K, max %.2f K, wind RMS %.2f m/s, max |dp/p| %.4f\n",label,bias,median,dt.back(),rms,worstPressure);
+        return std::array{median,dt.back(),rms,worstPressure};
+    };
+    const auto analysis=compare(w,sonde,std::size(sonde),1792238400.,"GFS analysis");
+    require(analysis[0]<1.5&&analysis[1]<4&&analysis[2]<4&&analysis[3]<.01,"GFS analysis against the radiosonde");
+    {   std::ifstream f{argv[3],std::ios::binary};const std::string b{std::istreambuf_iterator<char>(f),{}};
+        const physics::Weather forecast(providers::gfsGrid({providers::decodeGrib2(b)},"forecast"));require(forecast.grid().times[0].valid==physics::ttFromUtc(1792281600.),"Forecast valid time");
+        const auto r=compare(forecast,evening,std::size(evening),1792281600.,"GFS +6 h forecast");
+        require(r[0]<2&&r[1]<5&&r[2]<6&&r[3]<.015,"GFS forecast against the radiosonde");
     }
-    std::sort(dt.begin(),dt.end());const double median=dt[dt.size()/2],rms=std::sqrt(windSquares/static_cast<double>(dt.size()));
-    std::printf("GFS analysis vs sonde: median |dT| %.2f K, max %.2f K, wind RMS %.2f m/s, max |dp/p| %.4f\n",median,dt.back(),rms,worstPressure);
-    require(median<1.5&&dt.back()<4&&rms<4&&worstPressure<.01,"GFS analysis against the radiosonde");
     // Above the grid, outside it and between valid times.
     near(w.at(static_cast<std::int64_t>(t),lat,lon,100e3).density,0,0,"Vacuum above the weather and 86 km");
     near(w.at(static_cast<std::int64_t>(t),40*deg,lon,1000).temperature,physics::standardAtmosphere(1000).temperature,1e-9,"Standard atmosphere outside the grid");

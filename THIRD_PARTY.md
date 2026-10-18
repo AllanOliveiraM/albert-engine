@@ -53,9 +53,9 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - NOAA/NCEP: previsões e análises GFS 0,25° baixadas em uso pelo filtro NOMADS
   (https://nomads.ncep.noaa.gov) e índices do NOAA Open Data Dissemination na AWS
   (https://registry.opendata.aws/noaa-gfs-bdp-pds/); recorte da análise de 2026-10-17
-  12 UTC em `tests/gfs_tampa_2026101712_f000.grb2`. Dados do governo dos EUA.
-- University of Wyoming, Department of Atmospheric Science: radiossondagem de Tampa
-  (72210) de 2026-10-17 12 UTC, níveis padrão em `tests/weather_test.cpp`,
+  12 UTC e da previsão de 18 UTC +6 h em `tests/gfs_tampa_*.grb2`. Dados do governo dos EUA.
+- University of Wyoming, Department of Atmospheric Science: radiossondagens de Tampa
+  (72210) de 2026-10-17 12 UTC e 2026-10-18 00 UTC, níveis padrão em `tests/weather_test.cpp`,
   https://weather.uwyo.edu.
 - NRLMSISE-00 (Picone, Hedin e Drob, NRL; obra do governo dos EUA): porte em C++ em
   `src/physics/msis.cpp` e coeficientes em `src/physics/msis_data.inc`, a partir da classe
