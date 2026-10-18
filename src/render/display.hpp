@@ -33,7 +33,8 @@ public:
     // WebGPU: Earth's air around `body` (local frame in units of kmPerUnit km) at strength 0-1 —
     // sky, aerial perspective, sunlight and sky light; its tables build over the first frames.
     // OpenGL: no effect (the atmosphere shell's own shader).
-    void setAir(const threepp::Object3D* body,float kmPerUnit,float strength,float groundKm=0); // groundKm: SceneRenderer::Air.
+    // The air this frame (WebGPU): the Earth's, or Mars's when `mars`; groundKm as SceneRenderer::Air.
+    void setAir(const threepp::Object3D* body,float kmPerUnit,float strength,float groundKm=0,bool mars=false);
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

@@ -81,7 +81,7 @@ int main(){
             }
         }
         { // The render functions (programs.cpp `air`) on known rays: radiance relative to the sun.
-            model.orders=4;Atmosphere air(*gpu,model);air.precompute(*gpu);
+            model.orders=4;Atmosphere earth(*gpu,model);earth.precompute(*gpu);const Atmosphere& air=earth;
             const std::string code=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
 @group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
 @compute @workgroup_size(1) fn main() {
@@ -146,7 +146,8 @@ int main(){
             // A frame at the Earth whose air ground is lowered 27 m (the Cape's terrain): identity planet frame.
             float lowered[128]{};lowered[76]=lowered[81]=lowered[86]=lowered[91]=1;lowered[95]=1;lowered[96]=.57f;lowered[98]=.82f;lowered[99]=-.027f;lowered[35]=1;
             WGPUBuffer loweredBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),loweredBuffer,0,lowered,sizeof lowered);
-            auto run=[&](const std::string& source,WGPUBuffer frameIn){ // One dispatch (with a frame, if given); the 64 floats of its probes.
+            auto run=[&](const std::string& source,WGPUBuffer frameIn,const Atmosphere* tables=nullptr){ // One dispatch (with a frame, if given); the 64 floats of its probes.
+                const Atmosphere& air=tables?*tables:earth;
                 const bool withFrame=frameIn!=nullptr;
                 WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code={source.data(),source.size()};WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;
                 WGPUShaderModule module=wgpuDeviceCreateShaderModule(gpu->device(),&md);
@@ -177,7 +178,19 @@ int main(){
     probe[1] = vec4f(skyRadiance(up * (b + 0.01), up, up).transmittance, 0.0); // The tables bound as in the other modules.
 }
 )";
-            const auto values=run(code,nullptr),farValues=run(farCode,frameBuffer),groundValues=run(groundCode,loweredBuffer);const float* v=values.data();
+            // Mars: the dust's optical depth above the datum is the model's 0.5 (with CO2's ~0.003 at 550 nm).
+            auto marsModel=albert::gpu::marsAtmosphere();marsModel.orders=1;Atmosphere mars(*gpu,marsModel);mars.precompute(*gpu);
+            const std::string marsCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(1) fn main() { // Zenith transmittance from the datum (3396.19 km), and the tables bound as elsewhere.
+    probe[0] = vec4f(transmittanceToTop(airTransmittance, airSampler, 3396.19, 1.0), 0.0);
+    probe[1] = vec4f(skyRadiance(vec3f(0.0, 0.0, 3396.2), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 0.0, 1.0)).radiance, 0.0);
+}
+)";
+            const auto values=run(code,nullptr),farValues=run(farCode,frameBuffer),groundValues=run(groundCode,loweredBuffer),marsValues=run(marsCode,nullptr,&mars);const float* v=values.data();
+            {const double h=11.1,above=marsModel.top-3396.19,column=h*(1-std::exp(-above/h)),depth=.5*(1-std::exp(-above/h))+2.5e-4*column;
+             std::printf("Mars zenith transmittance from the datum %.4f %.4f %.4f (want %.4f at 550 nm)\n",marsValues[0],marsValues[1],marsValues[2],std::exp(-depth));
+             near("Mars: dust optical depth 0.5 above the datum, as the model states",marsValues[1],std::exp(-depth),.003);}
             std::printf("lowered air ground: terrain 27 m under the sphere at %.4f km, 1 km above it at %.4f km\n",groundValues[0],groundValues[1]);
             near("Lowered air ground: the terrain under the camera on the model's ground",groundValues[0],0,1e-3);
             near("... and every radius raised alike",groundValues[1],1.027,1e-3);const char* names[]{"zenith","25 deg","2 deg","-2 deg"};
@@ -215,7 +228,7 @@ struct V { @builtin(position) clip: vec4f, @location(0) world: vec3f };
             box->position.set(-1.6e-5f,ground+2e-6f,-3e-5f);scene.add(box);
             auto sunlight=DirectionalLight::create(0xffffff,2.4f);sunlight->position.set(0,std::sin(.5236f),std::cos(.5236f));scene.add(sunlight); // Toward the default target, the origin.
             PerspectiveCamera camera(50,static_cast<float>(iw)/ih,1e-7f,10);camera.position.set(0,ground,0);camera.lookAt(Vector3(0,ground,-1));
-            auto frameOf=[&](float strength){renderer.air={&air,globe.get(),6378.137f,strength};
+            auto frameOf=[&](float strength){renderer.air={&earth,globe.get(),6378.137f,strength};
                 WGPUCommandEncoder en2=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);renderer.render(scene,camera,view,iw,ih,en2);
                 WGPUCommandBuffer cb2=wgpuCommandEncoderFinish(en2,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb2);wgpuCommandBufferRelease(cb2);wgpuCommandEncoderRelease(en2);
                 return readPixels(*gpu,target,iw,ih);};

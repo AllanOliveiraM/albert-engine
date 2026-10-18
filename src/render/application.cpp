@@ -2581,10 +2581,15 @@ int albert::runRenderer(int argc, char** argv) {
                 snapshot.clock=frameTime;snapshot.simulation=moment;snapshot.simulation.utcSeconds=simulatedUtc;snapshot.approximatePositions=approximatePositions;commands.publish(std::move(snapshot));
             }
             eclipses.update(visualSettings.shadows);
-            { // The air's ground: the terrain under the camera where it lies below the ellipsoid (an eye under
-              // the model's ground, as 10 m over the Cape's, ~27 m below it, speckled the aerial perspective).
-                Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
-                graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}
+            { // The air: Mars's within three of its radii (its model's ground lies under every surface), else
+              // the Earth's, whose ground drops to the terrain under the camera where that lies below the
+              // ellipsoid (an eye under the model's ground, 10 m over the Cape's, speckled the aerial perspective).
+                const auto mars=solids.nodes().find("mars");const bool marsAir=mars!=solids.nodes().end()&&!graphics.gl()
+                    &&camera->position.distanceTo(mars->second->position)<3.f*static_cast<float>(albert::core::surfaceRadius("mars")/albert::core::earthRadiusMeters);
+                solids.showAir("mars",marsAir,planets.atmosphereVisibility());
+                if(marsAir)graphics.setAir(mars->second.get(),6378.137f,planets.atmosphereVisibility(),0.f,true);
+                else{Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
+                    graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}}
             graphics.render(*scene, *camera);
             graphics.ui();
 #ifdef ALBERT_HAS_RPC

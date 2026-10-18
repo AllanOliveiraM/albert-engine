@@ -21,8 +21,11 @@ sempre provisório), corrigidos com testes que falham no código antigo. Com o o
 elipsoide (o chão do Cabo fica ~27 m abaixo) a perspectiva aérea saía salpicada em faixas: o chão do
 modelo de ar agora desce ao relevo sob a câmera (`Air::groundKm`), conferido em duas capturas. Imagem regional nos nós do
 terreno (`Terrain::detail`) e o detalhe do sítio não é mais liberado em laço com um veículo em foco.
-Morph entre níveis na CPU (filhos sobem da superfície do pai em 0,4 s). Próximo: nuvens ao vivo no
-ar, oceano, atmosfera de Marte.
+Morph entre níveis na CPU (filhos sobem da superfície do pai em 0,4 s). Atmosfera de Marte nas
+tabelas de Bruneton (céu caramelo em Jezero conferido; da órbita, limbo com poeira). CI verde no
+Windows de novo: o `visual_test` olhava o detalhe medido de longe demais e o WARP passava de 3 s
+(liberação por tempo de parede). Próximo: assimetria por canal (pôr do sol azul de Marte), nuvens ao
+vivo no ar, oceano.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

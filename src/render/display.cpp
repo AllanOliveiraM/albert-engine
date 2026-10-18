@@ -21,7 +21,7 @@ struct albert::Display::Impl {
     // OpenGL.
     std::unique_ptr<Canvas> canvas;std::unique_ptr<GLRenderer> renderer;std::unique_ptr<ImguiFunctionalContext> imgui;
     // WebGPU.
-    std::unique_ptr<gpu::Window> window;std::unique_ptr<gpu::Context> context;std::unique_ptr<gpu::SceneRenderer> scene;std::unique_ptr<gpu::Atmosphere> earthAir;
+    std::unique_ptr<gpu::Window> window;std::unique_ptr<gpu::Context> context;std::unique_ptr<gpu::SceneRenderer> scene;std::unique_ptr<gpu::Atmosphere> earthAir,marsAir;
     WGPUCommandEncoder encoder=nullptr;WGPUTextureView target=nullptr;bool drawnTarget=false,styled=false;float dpi=1;
     void framebuffer(unsigned& w,unsigned& h)const{int x=0,y=0;glfwGetFramebufferSize(window->handle(),&x,&y);w=static_cast<unsigned>(std::max(x,1));h=static_cast<unsigned>(std::max(y,1));}
     void pass(WGPULoadOp load){ // A colour-only pass on the surface (clear, or ImGui over the scene).
@@ -54,7 +54,7 @@ albert::Display::Display(Backend backend,const std::string& title,WindowSize siz
 }
 albert::Display::~Display(){
     auto& d=*impl_;
-    if(d.backend==Backend::webgpu){ImGui_ImplWGPU_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();d.scene.reset();d.earthAir.reset();d.context.reset();d.window.reset();}
+    if(d.backend==Backend::webgpu){ImGui_ImplWGPU_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();d.scene.reset();d.earthAir.reset();d.marsAir.reset();d.context.reset();d.window.reset();}
 }
 albert::Display::Backend albert::Display::backend()const{return impl_->backend;}
 PeripheralsEventSource& albert::Display::events(){return impl_->canvas?static_cast<PeripheralsEventSource&>(*impl_->canvas):*impl_->window;}
@@ -65,10 +65,10 @@ float albert::Display::aspect()const{return impl_->canvas?impl_->canvas->aspect(
 void albert::Display::onResize(std::function<void(WindowSize)> f){if(impl_->canvas)impl_->canvas->onWindowResize(std::move(f));else impl_->window->onResize(std::move(f));}
 void albert::Display::setShadows(bool enabled){if(impl_->renderer)impl_->renderer->shadowMap().enabled=enabled;else impl_->scene->shadows=enabled;}
 void albert::Display::setExposure(float value){if(impl_->renderer)impl_->renderer->toneMappingExposure=value;else impl_->scene->exposure=value;}
-void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength,float groundKm){
-    auto& d=*impl_;if(!d.scene)return;
-    if(!d.earthAir&&body&&strength>0){d.earthAir=std::make_unique<gpu::Atmosphere>(*d.context,gpu::earthAtmosphere());d.scene->airSteps=d.context->software()?1:4;}
-    d.scene->air={d.earthAir.get(),body,kmPerUnit,strength,groundKm};
+void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength,float groundKm,bool mars){
+    auto& d=*impl_;if(!d.scene)return;auto& air=mars?d.marsAir:d.earthAir; // Each precomputed once, when first needed.
+    if(!air&&body&&strength>0){air=std::make_unique<gpu::Atmosphere>(*d.context,mars?gpu::marsAtmosphere():gpu::earthAtmosphere());d.scene->airSteps=d.context->software()?1:4;}
+    d.scene->air={air.get(),body,kmPerUnit,strength,groundKm};
 }
 float albert::Display::exposure()const{return impl_->renderer?impl_->renderer->toneMappingExposure:impl_->scene->exposure;}
 namespace {

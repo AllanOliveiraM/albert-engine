@@ -253,6 +253,22 @@ AtmosphereModel earthAtmosphere(){ // demo.cc's values at kLambdaR/G/B (aerosols
     m.mieG=.8f;m.sunAngularRadius=.004675f;m.maxSunZenith=static_cast<float>(102./180.*3.14159265358979);
     return m;
 }
+AtmosphereModel marsAtmosphere(){ // Lengths in km; coefficients at the model's ground (8.2 km under the datum).
+    constexpr double datum=3396.19,depth=8.2,height=11.1,denser=2.0928; // exp(depth / height).
+    AtmosphereModel m;m.bottom=static_cast<float>(datum-depth);m.top=m.bottom+110.f;
+    // CO2: ~2.1e23 molecules/m³ at 610 Pa and 210 K, Rayleigh cross-section ~1.2e-30 m² at 532 nm
+    // (Sneep & Ubachs 2005), as λ^-4: 2.5e-4/km at 550 nm on the datum.
+    auto rayleigh=[](double micrometres){return static_cast<float>(2.5e-4*denser*std::pow(micrometres/.55,-4));};
+    m.rayleigh={rayleigh(.68),rayleigh(.55),rayleigh(.44)};
+    // Dust (Wolff et al. 2009): grey extinction, optical depth 0.5 above the datum; single scattering
+    // albedo 0.97, 0.94 and 0.87 at 680, 550 and 440 nm (it absorbs blue); asymmetry 0.7.
+    const double extinction=.5/height*denser;constexpr std::array<double,3> albedo{.97,.94,.87};
+    for(std::size_t c=0;c<3;++c){m.mieExtinction[c]=static_cast<float>(extinction);m.mieScattering[c]=static_cast<float>(extinction*albedo[c]);}
+    m.absorption={0,0,0};m.groundAlbedo={.3f,.2f,.12f};
+    m.rayleighDensity.upper={0,1,static_cast<float>(-1/height),0,0};m.mieDensity.upper={0,1,static_cast<float>(-1/height),0,0};
+    m.mieG=.7f;m.sunAngularRadius=static_cast<float>(.004675/1.524);m.maxSunZenith=static_cast<float>(110./180.*3.14159265358979); // Dusty twilights last.
+    return m;
+}
 // The precomputation as a list of dispatches (each 3D pass in one-layer slices), recorded a few
 // per frame by advance(); the temporaries go once it is all recorded (wgpu keeps them alive for the
 // submitted work).

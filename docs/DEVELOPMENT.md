@@ -366,10 +366,17 @@ menor que um passo (~0,5 m no solo) não tem ar. Limite conhecido: raios quase h
 usam a razão de duas transmitâncias pequenas da tabela, e 250 m de solo saem com T ≈ 0,92 (≈ 0,97
 integrando). O chão do modelo desce ao relevo sob a câmera quando ele fica abaixo do elipsoide
 (`Air::groundKm`, os raios sobem por igual): um olho abaixo do chão do modelo, como a 10 m sobre o
-Cabo (~27 m abaixo do elipsoide), salpicava a perspectiva aérea em faixas. Abaixo de 30 km a exposição fotográfica sobe até um
+Cabo (~27 m abaixo do elipsoide), salpicava a perspectiva aérea em faixas. Marte tem as suas tabelas
+(`marsAtmosphere`, ativas com a câmera a menos de 3 raios, céu numa casca filha da malha): CO2 a
+610 Pa e escala de 11,1 km no datum (seção de choque ~1,2e-30 m² a 532 nm), poeira cinza de
+profundidade óptica 0,5 acima do datum com albedo simples 0,97/0,94/0,87 e assimetria 0,7 (Wolff et
+al. 2009), Sol de raio angular a 1,52 UA; o chão do modelo fica 8,2 km abaixo do raio equatorial
+(sob Hellas), então todo solo está no ar (bacias com ar mais denso que o Olimpo). Uma assimetria só
+para os três canais não dá o pôr do sol azul (a poeira espalha o azul mais à frente). Abaixo de 30 km a exposição fotográfica sobe até um
 ponto (como numa câmera no solo); a iluminação física não muda. `atmosphere_test` confere a
 transmitância zenital e o espalhamento simples vertical com formas fechadas, segmentos curtos perto
-da Lua e de Marte (`airBetween` e `airSky` com o referencial da Terra a 1,4e8 km) e desenha uma cena
+da Lua e de Marte (`airBetween` e `airSky` com o referencial da Terra a 1,4e8 km), o chão do ar
+rebaixado, a profundidade óptica de Marte acima do datum e desenha uma cena
 com céu, objeto à frente do céu e solo.
 
 Terra elipsoidal WGS84, base global até 4K e blocos regionais de um mosaico 86400×43200, filtragem

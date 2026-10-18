@@ -26,6 +26,8 @@ public:
     void enhanceRings(const std::string& id,bool enhanced); // Exposure stretch, off by default.
     std::shared_ptr<const threepp::BVH> picker(const std::string& id) const;
     const Terrain* terrain(const std::string& id) const; // Mars's relief; null elsewhere.
+    // Mars's sky (WebGPU: its air drawn as the background) while its air is the display's.
+    void showAir(const std::string& id,bool shown,float visibility);
     bool takeEviction(){return std::exchange(evicted_,false);}
     bool uploading() const{return uploads_.active();}
     void stage(RegionalImages images);

@@ -44,9 +44,11 @@ Etapa 6, em andamento: espalhamento de Bruneton entregue em 18/10/2026 (tabelas 
 solo e do espaço, perspectiva aérea, luz do Sol filtrada e luz do céu nos materiais; aerossol de dia
 limpo, AOD 0,1). Terreno em quadtree na Terra entregue em 18/10/2026 (Copernicus 30 m perto da
 câmera, baixado em segundo plano; Alpes conferidos) e na Lua (LOLA em blocos de 128×128, Tranquilidade
-conferida). Faltam Marte (MOLA, já lido em blocos pelo provedor), a imagem regional nos nós, transições sem degraus entre níveis (morph), nuvens ao vivo no modelo de ar,
-oceano, atmosfera de Marte nas mesmas tabelas e o solo regional mais claro (hoje escuro também no
-OpenGL).
+conferida). Em 18/10/2026 também: Marte (MOLA em blocos, Jezero conferida), a imagem regional nos
+nós, morph entre níveis, o chão do ar no relevo sob a câmera e a atmosfera de Marte nas mesmas tabelas
+(CO2 e poeira de profundidade óptica 0,5; céu cor de caramelo de dia). Faltam nuvens ao vivo no modelo
+de ar, oceano, o pôr do sol azul de Marte (assimetria da poeira por canal) e o solo regional mais claro
+(hoje escuro também no OpenGL).
 
 Estado em 18/10/2026: etapas 1–5 entregues. Os 22 programas e os materiais embutidos rodam em WGSL;
 o `visual_test` passa nos dois renderizadores (llvmpipe e MX350); sombra PCF, MSAA 4×, texturas em
