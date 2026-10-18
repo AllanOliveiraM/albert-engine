@@ -216,4 +216,114 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) point: vec3f, @lo
     albert::gpu::define("albert:eclipse",eclipse);
 }
 }
-void albert::defineWebGpuPrograms(){stars();earthLayers();}
+namespace {
+// paths.cpp line shaders: segments extruded in screen space, clipped at the near plane in view space.
+const char* const lineExtrusion=R"(
+fn extrude(p0: vec4f, q0: vec4f, side: f32, width: f32, nearClip: f32, viewport: vec2f) -> vec4f {
+    var p = p0; var q = q0;
+    if (p.z > -nearClip && q.z > -nearClip) { return vec4f(2.0, 2.0, 2.0, 1.0); }
+    if (p.z > -nearClip) { p = mix(p, q, (-nearClip - p.z) / (q.z - p.z)); }
+    if (q.z > -nearClip) { q = mix(q, p, (-nearClip - q.z) / (p.z - q.z)); }
+    let clip = frame.projection * p; let other = frame.projection * q;
+    let direction = (other.xy / other.w - clip.xy / clip.w) * viewport;
+    let n = vec2f(-direction.y, direction.x) / max(length(direction), 0.0001);
+    return vec4f(clip.xy + n * side * width / viewport * clip.w, clip.zw);
+}
+)";
+void paths(){
+    Program orbit;orbit.attributes={{"nextPosition",3},{"orbitTime",1},{"nextTime",1},{"lineSide",1}};
+    orbit.uniforms={{"viewport",Uniform::vec2},{"nearClip",Uniform::f32},{"strokeWidth",Uniform::f32},{"present",Uniform::f32},{"horizon",Uniform::f32},{"dashDays",Uniform::f32},{"visibility",Uniform::f32},{"referenceVisibility",Uniform::f32}};
+    orbit.wgsl=std::string(lineExtrusion)+R"(
+struct Material { viewport: vec2f, nearClip: f32, strokeWidth: f32, present: f32, horizon: f32, dashDays: f32, visibility: f32, referenceVisibility: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+struct Varyings { @builtin(position) clip: vec4f, @location(0) time: f32, @location(1) @interpolate(linear) side: f32 };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) next: vec3f, @location(2) time: f32, @location(3) nextTime: f32, @location(4) lineSide: f32) -> Varyings {
+    var o: Varyings; let rotation = mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz); // Positions are camera-relative.
+    let p = vec4f(rotation * position, 1.0); let q = vec4f(rotation * next, 1.0);
+    o.time = time; o.side = lineSide * select(1.0, -1.0, nextTime < time);
+    if (p.z > -material.nearClip && q.z <= -material.nearClip) { o.time = mix(time, nextTime, (-material.nearClip - p.z) / (q.z - p.z)); }
+    o.clip = extrude(p, q, lineSide, material.strokeWidth, material.nearClip, material.viewport);
+    return o;
+}
+fn pulseIntegral(value: f32) -> f32 { return floor(value) * 0.63 + min(fract(value), 0.63); } // Footprint-averaged dashes.
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
+    let age = v.time - material.present;
+    let fade = 1.0 - smoothstep(0.02, 1.0, abs(age) / material.horizon);
+    let future = step(0.0, age);
+    let phase = age / material.dashDays;
+    let footprint = max(fwidth(phase), 0.0001);
+    var dash = (pulseIntegral(phase + footprint * 0.5) - pulseIntegral(phase - footprint * 0.5)) / footprint;
+    dash = mix(clamp(dash, 0.0, 1.0), 0.63, smoothstep(0.12, 0.5, footprint));
+    let colour = mix(vec3f(0.29, 0.67, 0.79), vec3f(0.94, 0.70, 0.40), future);
+    let edge = abs(v.side);
+    var coverage = 1.0 - smoothstep(0.35, 0.75, edge);
+    coverage = max(coverage, 0.12 * (1.0 - smoothstep(0.6, 1.0, edge)));
+    let guide = material.referenceVisibility * 0.42 * (1.0 - smoothstep(0.25, 0.95, edge * material.strokeWidth * 0.5));
+    let highlight = coverage * fade * mix(0.78, 0.92 * dash, future);
+    let alpha = guide + highlight * (1.0 - guide);
+    let ink = mix(vec3f(0.32, 0.48, 0.55), colour, highlight / max(alpha, 0.00001));
+    return vec4f(linearToSrgb(ink), material.visibility * alpha);
+}
+)";
+    albert::gpu::define("albert:orbit",orbit);
+    // Borders and vector layers: lines projected on the ellipsoid plus relief (sampled per vertex).
+    const std::string borderHead=std::string(lineExtrusion)+R"(
+struct Material { viewport: vec2f, nearClip: f32, surfaceOffset: f32, detailEnabled: f32, clampSurface: f32, widthPixels: f32, detailBounds: vec4f, visibility: f32, lineColor: vec3f };
+@group(2) @binding(0) var<uniform> material: Material;
+@group(2) @binding(1) var heightMap: texture_2d<f32>;
+@group(2) @binding(2) var heightSampler: sampler;
+@group(2) @binding(3) var detailHeightMap: texture_2d<f32>;
+@group(2) @binding(4) var detailSampler: sampler;
+fn surface(point: vec3f) -> vec3f {
+    if (material.clampSurface < 0.5) { return point; }
+    let axes = vec3f(1.0, 6356.752314245 / 6378.137, 1.0);
+    let radial = normalize(point / axes);
+    let latitude = atan2(radial.y, axes.y * length(radial.xz));
+    let uv = vec2f(atan2(-radial.z, radial.x) / 6.28318530718 + 0.5, latitude / 3.14159265359 + 0.5);
+    var height = textureSampleLevel(heightMap, heightSampler, uv, 0.0).r;
+    let b = material.detailBounds; let local = vec2f(fract(uv.x - b.x), uv.y - b.y) / b.zw;
+    if (material.detailEnabled > 0.5 && all(local >= vec2f(0.0)) && all(local <= vec2f(1.0))) {
+        let detailed = textureSampleLevel(detailHeightMap, detailSampler, local, 0.0).r;
+        let edge = min(local, 1.0 - local);
+        height = select(max(height, detailed), detailed, min(edge.x, edge.y) > 0.025); // The coarse globe is masked inside the patch core.
+    }
+    return radial * axes * (1.0 + height / 6378137.0 + material.surfaceOffset);
+}
+)";
+    const std::vector<std::pair<std::string,Uniform>> borderUniforms{{"viewport",Uniform::vec2},{"nearClip",Uniform::f32},{"surfaceOffset",Uniform::f32},{"detailEnabled",Uniform::f32},{"clampSurface",Uniform::f32},{"widthPixels",Uniform::f32},{"detailBounds",Uniform::vec4},{"visibility",Uniform::f32},{"lineColor",Uniform::vec3}};
+    Program border;border.attributes={{"nextPosition",3},{"lineSide",1},{"orbitTime",1},{"nextTime",1}};border.uniforms=borderUniforms;border.textures={"heightMap","detailHeightMap"};
+    border.wgsl=borderHead+R"(
+struct Varyings { @builtin(position) clip: vec4f, @location(0) @interpolate(linear) side: f32 };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) next: vec3f, @location(2) lineSide: f32, @location(3) time: f32, @location(4) nextTime: f32) -> Varyings {
+    var o: Varyings;
+    let p = object.modelView * vec4f(surface(position), 1.0); let q = object.modelView * vec4f(surface(next), 1.0);
+    o.side = lineSide * select(1.0, -1.0, nextTime < time);
+    o.clip = extrude(p, q, lineSide, material.widthPixels, material.nearClip, material.viewport);
+    return o;
+}
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
+    return vec4f(linearToSrgb(material.lineColor), (1.0 - smoothstep(0.3, 0.95, abs(v.side))) * 0.75 * material.visibility);
+}
+)";
+    albert::gpu::define("albert:border",border);
+    Program marker=border;marker.attributes.emplace_back("markerCorner",2); // layers.cpp point markers: screen-space discs.
+    marker.wgsl=borderHead+R"(
+struct Varyings { @builtin(position) clip: vec4f, @location(0) @interpolate(linear) marker: vec2f };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) next: vec3f, @location(2) lineSide: f32, @location(3) time: f32, @location(4) nextTime: f32, @location(5) corner: vec2f) -> Varyings {
+    var o: Varyings; o.marker = corner;
+    let p = object.modelView * vec4f(surface(position), 1.0); var clip = frame.projection * p;
+    clip = vec4f(clip.xy + corner * material.widthPixels / material.viewport * clip.w, clip.zw);
+    o.clip = select(clip, vec4f(2.0, 2.0, 2.0, 1.0), p.z > -material.nearClip);
+    return o;
+}
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
+    let radius = length(v.marker); let edge = max(fwidth(radius), 0.01);
+    let coverage = 1.0 - smoothstep(1.0 - edge, 1.0, radius);
+    if (coverage <= 0.0) { discard; }
+    return vec4f(linearToSrgb(material.lineColor), coverage * material.visibility);
+}
+)";
+    albert::gpu::define("albert:marker",marker);
+}
+}
+void albert::defineWebGpuPrograms(){stars();earthLayers();paths();}

@@ -5,7 +5,7 @@
 using namespace threepp;
 
 std::shared_ptr<ShaderMaterial> albert::orbitMaterial(float horizon) {
-    auto material=ShaderMaterial::create();
+    auto material=ShaderMaterial::create();material->name="albert:orbit";
     material->vertexShader = R"(
         attribute float orbitTime, nextTime, lineSide;
         attribute vec3 nextPosition;
@@ -80,7 +80,7 @@ std::shared_ptr<ShaderMaterial> albert::orbitMaterial(float horizon) {
 }
 
 std::shared_ptr<ShaderMaterial> albert::borderMaterial() {
-    auto material=ShaderMaterial::create();
+    auto material=ShaderMaterial::create();material->name="albert:border";
     material->vertexShader=R"(
         attribute vec3 nextPosition;
         attribute float lineSide, orbitTime, nextTime;

@@ -6,7 +6,7 @@ namespace {
 std::shared_ptr<ShaderMaterial> style(bool points,bool surface){
     auto m=albert::borderMaterial();
     if(!surface){auto& shader=m->vertexShader;const auto start=shader.find("        vec3 surface(");const auto end=shader.find("        void main()",start);shader.replace(start,end-start,"        vec3 surface(vec3 point){return point;}\n");}
-    if(points){
+    if(points){m->name="albert:marker";
         auto& shader=m->vertexShader;shader="attribute vec2 markerCorner; noperspective varying vec2 vMarker;\n"+shader;shader.resize(shader.find("        void main()"));shader+=R"(
         void main(){vMarker=markerCorner;vec4 p=modelViewMatrix*vec4(surface(position),1.0);gl_Position=projectionMatrix*p;
             gl_Position.xy+=markerCorner*widthPixels/viewport*gl_Position.w;
