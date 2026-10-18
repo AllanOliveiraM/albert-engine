@@ -23,13 +23,13 @@ Props props(const std::vector<Part>& parts){
         p.inertia+=V3{axial,transverse,transverse};}
     return p;
 }
-Aerodynamics slender(double area){
+Aerodynamics slender(double area,double length=70,double diameter=3.66){
     // Axial coefficient at zero incidence (with base drag) versus Mach; CNα 2/rad;
-    // crossflow drag 1.2 with the 0.6 finite-length factor over the planform.
+    // crossflow drag 1.2 with the 0.6 finite-length factor over the planform (length × diameter).
     const std::vector<double> mach{0,.6,.9,1.05,1.2,1.5,2,3,4,6,10},axial{.30,.31,.38,.58,.60,.55,.47,.37,.31,.26,.23};
     std::vector<double> ang;for(int i=-20;i<=20;i+=2)ang.push_back(i);
-    const double planform=70*3.66/area;
-    Aerodynamics r;r.area=area;r.length=70;r.span=70;
+    const double planform=length*diameter/area;
+    Aerodynamics r;r.area=area;r.length=length;r.span=length;
     Table lift{mach,ang,{}},drag{mach,ang,{}},side{mach,ang,{}};
     for(std::size_t i=0;i<mach.size();++i)for(double d:ang){
         const double a=d*pi/180,s=std::sin(a),c=std::cos(a),cn=2*s*c+.6*1.2*planform*s*std::abs(s),ca=axial[i];
@@ -77,5 +77,28 @@ Vehicle genericLander(){
     constexpr double pad=4.7/1.4142135623730951; // Footpads 4.7 m from the axis at the base.
     s.legs={{h,pad,pad},{h,-pad,pad},{h,pad,-pad},{h,-pad,-pad}};s.legStiffness=8.9e5;s.legDamping=5.7e4;s.friction=.6;
     return{"Generic lander (approximate)",{s},5e3,1,true,2*r};
+}
+Vehicle genericLunarAscent(){
+    constexpr double r=1.7,h=2.8,full=4853,empty=2500; // Effective radius, height (m); masses with crew and samples (kg).
+    auto inertia=[&](double m){return V3{m*r*r/2,m*(3*r*r+h*h)/12,m*(3*r*r+h*h)/12};};
+    Stage s;s.name="ascent stage";s.propellant=full-empty;s.massFull=full;s.massEmpty=empty;s.cgFull=1.6;s.cgEmpty=1.5;s.reference=1.4;
+    s.inertiaFull=inertia(full);s.inertiaEmpty=inertia(empty);
+    s.thrust=15570;s.exhaust=311*g0;s.exitArea=.33;s.nozzle=h;s.gimbal=0;s.minThrottle=1;s.length=h;s.aero=slender(pi*r*r,h,2*r);s.noseRadius=r; // Fixed APS: no gimbal, no throttle.
+    return{"Generic lunar ascent stage (approximate)",{s},1400,1,true,2*r}; // Attitude by RCS (~1.4 kN m).
+}
+Vehicle genericMarsAscent(){
+    constexpr double r=.285,area=pi*r*r;
+    const std::vector<Part> upper{{20,0,.4,.2,true},{50,0,1.2,r,false}}; // Payload (sample container), second-stage structure.
+    auto with=[](std::vector<Part> p,std::initializer_list<Part> more){p.insert(p.end(),more);return p;};
+    const auto s2full=props(with(upper,{{80,.4,1.1,r,true}})),s2empty=props(with(upper,{{0,1.05,1.1,r,true}}));
+    const std::vector<Part> lower=with(upper,{{70,1.2,3,r,false}});
+    const auto s1full=props(with(lower,{{80,.4,1.1,r,true},{230,1.3,2.9,r,true}})),s1empty=props(with(lower,{{80,.4,1.1,r,true}}));
+    Stage a;a.name="first stage";a.propellant=230;a.massFull=s1full.mass;a.massEmpty=s1empty.mass;a.cgFull=s1full.cg;a.cgEmpty=s1empty.cg;
+    a.inertiaFull=s1full.inertia;a.inertiaEmpty=s1empty.inertia;a.reference=.4;
+    a.thrust=8000;a.exhaust=310*g0;a.exitArea=.03;a.nozzle=3;a.gimbal=5*pi/180;a.minThrottle=.5;a.length=3;a.aero=slender(area,3,2*r);a.noseRadius=r;
+    Stage b;b.name="second stage";b.propellant=80;b.massFull=s2full.mass;b.massEmpty=s2empty.mass;b.cgFull=s2full.cg;b.cgEmpty=s2empty.cg;
+    b.inertiaFull=s2full.inertia;b.inertiaEmpty=s2empty.inertia;b.reference=.4;
+    b.thrust=2500;b.exhaust=320*g0;b.exitArea=.02;b.nozzle=1.2;b.gimbal=5*pi/180;b.minThrottle=.5;b.length=1.2;b.aero=slender(area,1.2,2*r);b.noseRadius=r;
+    return{"Generic Mars ascent vehicle (approximate)",{a,b},100,1,true,2*r};
 }
 }

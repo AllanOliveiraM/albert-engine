@@ -1,8 +1,10 @@
-// External flight computer: drives Albert's generic launcher from the pad to orbit in
-// lockstep, reading only the simulated sensors and truth the flight API reports.
-// Usage: albert_flight_client [address] [--fast] [--wire] [--utc=UNIX_SECONDS]
-// Defaults: 127.0.0.1:50051, real time, the instant shown by Albert. --wire flies over the
-// binary data plane at 1 kHz (one exchange per tick) and then coasts to 10 minutes.
+// External flight computer: drives a vehicle from the pad to orbit in lockstep, reading only
+// the simulated sensors and truth the flight API reports. Earth: the generic launcher from
+// Kennedy LC-39A; Moon: the lunar ascent stage from Tranquility Base; Mars: the Mars ascent
+// vehicle from Jezero crater (two burns, circularizing at a 250 km apoapsis).
+// Usage: albert_flight_client [address] [--fast] [--wire] [--utc=UNIX_SECONDS] [--body=moon|mars]
+// Defaults: 127.0.0.1:50051, real time, the instant shown by Albert, the Earth. --wire (Earth)
+// flies over the binary data plane at 1 kHz (one exchange per tick) and then coasts to 10 minutes.
 #include "albert/v1/engine.grpc.pb.h"
 #include "gravity_turn.hpp"
 #include "wire.hpp"
@@ -21,19 +23,32 @@ ex::Reading reading(const api::FlightSample& s){
     const auto& q=s.attitude_ned();r.qw=q.w();r.qx=q.x();r.qy=q.y();r.qz=q.z();
     r.rate=vec(s.angular_rate_radians_per_second());r.specificForce=vec(s.specific_force_meters_per_second2());
     r.position=vec(s.position_meters());r.velocity=vec(s.velocity_meters_per_second());
-    r.stage=static_cast<int>(s.stage());r.burning=s.burning();r.clamped=s.clamped();r.propellant=s.propellant_kilograms();return r;
+    r.stage=static_cast<int>(s.stage());r.stages=static_cast<int>(s.stages());r.burning=s.burning();r.clamped=s.clamped();r.propellant=s.propellant_kilograms();return r;
 }
 int main(int argc,char** argv){try{
-    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051";bool fast=false,binary=false;double utc=0;bool chosen=false;
-    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}else address=a;}
+    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth";bool fast=false,binary=false;double utc=0;bool chosen=false;
+    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
+        else if(a.rfind("--body=",0)==0)world=a.substr(7);else address=a;}
+    if(world!="earth"&&world!="moon"&&world!="mars")throw std::invalid_argument("--body: earth, moon or mars");
+    if(binary&&world!="earth")throw std::invalid_argument("--wire flies the Earth case");
     auto channel=grpc::CreateChannel(address,grpc::InsecureChannelCredentials());
     if(!channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(30)))throw std::runtime_error("Abra AlbertEngine --rpc antes de executar o exemplo");
     auto flight=api::FlightService::NewStub(channel);
-    api::CreateFlightRequest create;create.set_vehicle(api::GENERIC_LAUNCHER);create.set_heading_degrees(90);create.set_focus_camera(true);if(chosen)create.set_utc_unix_seconds(utc);
-    auto* site=create.mutable_site();site->set_latitude_degrees(28.6082);site->set_longitude_degrees(-80.6041);create.set_terrain_height(true); // Kennedy LC-39A, on the measured ground.
+    constexpr double pi=3.14159265358979323846,deg=pi/180;
+    api::CreateFlightRequest create;create.set_focus_camera(true);if(chosen)create.set_utc_unix_seconds(utc);create.set_terrain_height(true); // On the measured ground.
+    auto* site=create.mutable_site();ex::Body body=ex::earth;
+    ex::GravityTurn guidance(pi/2); // Kennedy LC-39A eastward.
+    if(world=="earth"){create.set_vehicle(api::GENERIC_LAUNCHER);create.set_heading_degrees(90);site->set_latitude_degrees(28.6082);site->set_longitude_degrees(-80.6041);}
+    else if(world=="moon"){ // Tranquility Base, westward as Apollo 11: a 50 m rise, then steered to 18 km and a 15 x 85 km orbit.
+        create.set_vehicle(api::GENERIC_LUNAR_ASCENT);create.set_body(api::CreateFlightRequest::MOON);create.set_heading_degrees(270);site->set_latitude_degrees(.67416);site->set_longitude_degrees(23.47314);
+        body=ex::moon;guidance=ex::GravityTurn(270*deg,0,18.3e3,15e3,ex::moon,true,85e3,60,60);
+    }else{ // Jezero crater, eastward: steered to a 250 km apoapsis, coast there, circularize to a 200 km perigee.
+        create.set_vehicle(api::GENERIC_MARS_ASCENT);create.set_body(api::CreateFlightRequest::MARS);create.set_heading_degrees(90);site->set_latitude_degrees(18.4447);site->set_longitude_degrees(77.4508);
+        body=ex::mars;guidance=ex::GravityTurn(90*deg,0,250e3,200e3,ex::mars,true,250e3,200,1000,true);
+    }
     api::FlightSample s;{grpc::ClientContext c;check(flight->CreateFlight(&c,create,&s));}
     std::printf("%s, passo %.0f ms, %s\n",s.vehicle().c_str(),s.step_seconds()*1e3,fast?"o mais rápido possível":"tempo real");
-    constexpr double pi=3.14159265358979323846;constexpr std::uint32_t ticks=20; // Guidance at 50 Hz.
+    constexpr std::uint32_t ticks=20; // Guidance at 50 Hz.
     if(binary){ // 1 kHz lockstep: one tick per frame, guidance every 20 frames, then a coast to 600 s.
         albert::wire::Connection link(s.data_port());ex::GravityTurn g(pi/2);albert::wire::Request q;q.ticks=1;albert::wire::Response r{};
         ex::Reading rd=reading(s);const auto t0=std::chrono::steady_clock::now();std::uint64_t frames=0,lost=0,last=s.tick();bool orbit=false;
@@ -54,8 +69,8 @@ int main(int argc,char** argv){try{
             static_cast<unsigned long long>(lost),ex::GravityTurn::perigee(rd.position,rd.velocity)/1e3);
         return lost==0&&orbit?0:1;
     }
-    ex::GravityTurn guidance(pi/2);auto phase=guidance.phase();const auto wall=std::chrono::steady_clock::now();double report=0;
-    const char* names[]{"pad","subida vertical","pitch kick","gravity turn","MECO","separação","segundo estágio","órbita"};
+    auto phase=guidance.phase();const auto wall=std::chrono::steady_clock::now();double report=0;
+    const char* names[]{"pad","subida vertical","pitch kick","gravity turn","MECO","separação","guiado","órbita","rumo ao apoapsis","circularização"};
     for(;;){
         const ex::Commands c=guidance.step(reading(s));
         api::StepRequest step;step.set_ticks(ticks);
@@ -70,10 +85,12 @@ int main(int argc,char** argv){try{
         if(guidance.phase()!=phase||s.elapsed_seconds()>=report){
             phase=guidance.phase();report=std::floor(s.elapsed_seconds()/10)*10+10;
             std::printf("%7.2f s  %-17s h %7.1f km  v solo %6.0f m/s  q %6.0f Pa  Mach %5.2f  %6.0f kg  perigeu %7.1f km\n",s.elapsed_seconds(),names[static_cast<int>(phase)],h/1e3,v,
-                s.dynamic_pressure_pascals(),s.mach(),s.mass_kilograms(),ex::GravityTurn::perigee(vec(s.position_meters()),vec(s.velocity_meters_per_second()))/1e3);
+                s.dynamic_pressure_pascals(),s.mach(),s.mass_kilograms(),ex::GravityTurn::perigee(vec(s.position_meters()),vec(s.velocity_meters_per_second()),body)/1e3);
         }
         if(guidance.phase()==ex::GravityTurn::Phase::orbit){
-            std::printf("Órbita: perigeu %.1f km, %.0f kg de propelante restante\n",ex::GravityTurn::perigee(vec(s.position_meters()),vec(s.velocity_meters_per_second()))/1e3,s.propellant_kilograms());
+            const ex::Vec rp=vec(s.position_meters()),vp=vec(s.velocity_meters_per_second());
+            std::printf("Órbita: %.1f x %.1f km, %.0f kg de propelante restante\n",ex::GravityTurn::perigee(rp,vp,body)/1e3,ex::GravityTurn::apoapsis(rp,vp,body)/1e3,s.propellant_kilograms());
+            if(world!="earth")return 0;
             // One revolution in nine calls: ballistic above the atmosphere, Albert takes 1 s steps.
             const auto t0=std::chrono::steady_clock::now();
             for(int i=0;i<9;++i){api::StepRequest coast;coast.set_ticks(600000);auto* q=coast.add_commands()->mutable_torque_newton_meters();q->set_x(0);q->set_y(0);q->set_z(0);
@@ -83,7 +100,7 @@ int main(int argc,char** argv){try{
             return 0;
         }
         if(s.landed())throw std::runtime_error("O veículo voltou ao solo");
-        if(s.elapsed_seconds()>900)throw std::runtime_error("Órbita não alcançada em 15 minutos");
+        if(s.elapsed_seconds()>1200)throw std::runtime_error("Órbita não alcançada em 20 minutos");
         if(!fast)std::this_thread::sleep_until(wall+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(s.elapsed_seconds())));
     }
 }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 1;}}

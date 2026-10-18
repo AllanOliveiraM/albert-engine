@@ -263,7 +263,9 @@ passo. O Albert integra o voo (gravidade, atmosfera padrão, rotação da Terra,
 variável) e mostra o veículo na cena:
 
 ```sh
-./build/linux/src/rpc/albert_flight_client
+./build/linux/src/rpc/albert_flight_client               # Kennedy → órbita terrestre
+./build/linux/src/rpc/albert_flight_client --body=moon   # Base da Tranquilidade → órbita lunar
+./build/linux/src/rpc/albert_flight_client --body=mars   # cratera Jezero → órbita de Marte
 ```
 
 `albert_landing_client` faz o mesmo na Lua: o módulo de pouso genérico sai das pernas na Base da

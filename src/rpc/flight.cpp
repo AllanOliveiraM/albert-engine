@@ -44,6 +44,8 @@ Prepared prepare(const api::CreateFlightRequest& r,double utc){
     case api::NESC_TWO_STAGE:p.vehicle=ph::nescTwoStage();break;
     case api::NESC_SPHERE:p.vehicle=ph::nescSphere();break;
     case api::GENERIC_LANDER:p.vehicle=ph::genericLander();break;
+    case api::GENERIC_LUNAR_ASCENT:p.vehicle=ph::genericLunarAscent();break;
+    case api::GENERIC_MARS_ASCENT:p.vehicle=ph::genericMarsAscent();break;
     default:throw std::invalid_argument("Unknown vehicle");
     }
     if(!api::CreateFlightRequest::Body_IsValid(r.body()))throw std::invalid_argument("Unknown body");

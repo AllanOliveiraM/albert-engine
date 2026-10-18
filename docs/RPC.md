@@ -254,7 +254,7 @@ personalizados e camadas raster ainda são próximas entregas.
 `FlightService` controla um veículo de seis graus de liberdade integrado pelo núcleo de
 física do Albert ([PHYSICS.md](PHYSICS.md)); o software externo faz o papel do
 computador de voo. `CreateFlight` põe o veículo preso no pad, com a base no solo, (`GENERIC_LAUNCHER`,
-`GENERIC_LANDER`, `NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
+`GENERIC_LANDER`, `GENERIC_LUNAR_ASCENT`, `GENERIC_MARS_ASCENT`, `NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
 instante exibido), com passo fixo de 1 ms (de 10 µs a 100 ms). Em voo balístico acima
 de 86 km o Albert usa passos internos de até `coast_step_seconds` (padrão 1 s; 0 desliga),
 então chamadas longas propagam órbitas rapidamente; os ticks continuam exatos. A gravidade usa o
@@ -353,7 +353,14 @@ depois propaga uma volta inteira em nove chamadas (~0,1 s de cálculo).
 ./build/linux/bin/AlbertEngine --rpc
 ./build/linux/src/rpc/albert_flight_client            # tempo real
 ./build/linux/src/rpc/albert_flight_client --fast     # o mais rápido possível
+./build/linux/src/rpc/albert_flight_client --body=moon   # Tranquilidade → 18 × 85 km (Apollo 11)
+./build/linux/src/rpc/albert_flight_client --body=mars   # Jezero → ~200 × 250 km, em duas queimas
 ```
+
+Na Lua o `GENERIC_LUNAR_ASCENT` sobe 50 m e segue pela taxa vertical até 18 km, cortando com
+perilúnio ≥ 15 km e apolúnio ≥ 85 km. Em Marte o `GENERIC_MARS_ASCENT` também é guiado desde a
+decolagem (no ar rarefeito o gravity turn deixa a subida íngreme demais com empuxo/peso 4,8),
+estagia, corta com apoapsis de 250 km, plana até ele e circulariza até o perigeu de 200 km.
 
 O exemplo [landing_client.cpp](../examples/landing_client.cpp) usa o `GENERIC_LANDER` na Lua:
 sítio do Apollo 11 com `terrain_height` (LOLA), liberação e ignição, subida a 150 m freando a

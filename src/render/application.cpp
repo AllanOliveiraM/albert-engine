@@ -971,7 +971,9 @@ int albert::runRenderer(int argc, char** argv) {
             albert::assetDirectory() / "countries.geojson";
 
         std::function<void()> drawInterface;
-        auto openDisplay=[&](albert::Display::Backend b){return std::make_unique<albert::Display>(b,"Albert Engine",WindowSize(1280,800),albert::assetDirectory()/"branding/albert.png",[&]{
+        WindowSize initialSize(1280,800); // ALBERT_WINDOW=1920x1080: another first size (frame measurements at a set resolution).
+        if(const char* size=std::getenv("ALBERT_WINDOW")){int w=0,h=0;if(std::sscanf(size,"%dx%d",&w,&h)==2&&w>=320&&h>=240&&w<=7680&&h<=4320)initialSize=WindowSize(w,h);}
+        auto openDisplay=[&](albert::Display::Backend b){return std::make_unique<albert::Display>(b,"Albert Engine",initialSize,albert::assetDirectory()/"branding/albert.png",[&]{
             applyInterfaceTheme();
             if (drawInterface) drawInterface();
         });};

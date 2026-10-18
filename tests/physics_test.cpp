@@ -386,5 +386,30 @@ int main(){try{
         std::printf("example guidance: orbit %.0f x %.0f km after %.0f s, %.0f kg left, max q %.0f Pa\n",perigee/1e3,apogee/1e3,secondsSinceJ2000(f.state().time-t0),f.state().propellant,maxq);
         require(g.phase()==ex::GravityTurn::Phase::orbit&&perigee>=180e3&&apogee<300e3&&f.state().propellant>0&&maxq<6e4,"Example guidance reaches orbit");
     }
+    { // To orbit off the Moon and Mars with the same guidance: an Apollo LM-sized ascent from Tranquility Base
+      // (Apollo 11: 435 s to a 17 x 88 km orbit), and a two-stage Mars ascent from Jezero steered from
+      // liftoff to a 250 km apoapsis, coasting there and circularizing to a 200 km perigee.
+        namespace ex=albert::example;auto vec=[](V3 v){return ex::Vec{v.x,v.y,v.z};};
+        auto fly=[&](Environment e,const Vehicle& v,Geodetic site,double heading,ex::GravityTurn g,ex::Body body,const char* name){
+            Flight f(v,e,Flight::pad(e,v,ttFromUtc(1792238400.),site,heading,90*deg));const Tt t0=f.state().time;double burn=0;
+            while(g.phase()!=ex::GravityTurn::Phase::orbit&&f.state().time-t0<1200*second&&!f.state().landed){
+                const Sample s=f.sample();ex::Reading r;r.elapsed=secondsSinceJ2000(f.state().time-t0);r.height=s.geodetic.height;r.nedVelocity=vec(s.nedVelocity);
+                r.qw=s.nedAttitude.w;r.qx=s.nedAttitude.x;r.qy=s.nedAttitude.y;r.qz=s.nedAttitude.z;r.rate=vec(f.state().rate);r.specificForce=vec(s.specificForce);
+                r.position=vec(f.state().position);r.velocity=vec(f.state().velocity);r.stage=f.state().stage;r.stages=static_cast<int>(v.stages.size());r.burning=f.state().burning;r.clamped=f.state().clamped;r.propellant=f.state().propellant;
+                const auto c=g.step(r);if(c.ignite)f.ignite();if(c.separate)f.separate();if(c.cutoff)f.cutoff();f.gimbal(c.gimbalPitch,c.gimbalYaw);f.torque({c.torque.x,c.torque.y,c.torque.z});
+                if(f.state().burning)burn+=.02;
+                for(Tt left=20*second/1000;left>0;)left-=f.advance(left);
+            }
+            const double peri=ex::GravityTurn::perigee(vec(f.state().position),vec(f.state().velocity),body),rn=norm(f.state().position),v2=dot(f.state().velocity,f.state().velocity);
+            const double a=1/(2/rn-v2/body.mu),apo=2*a-peri-2*body.radius;
+            std::printf("%s: orbit %.1f x %.1f km after %.0f s of burn, %.0f kg left\n",name,peri/1e3,apo/1e3,burn,f.state().propellant);
+            return std::tuple{g.phase()==ex::GravityTurn::Phase::orbit,peri,apo,burn,f.state().propellant};};
+        {Environment e=environment(Center::moon);e.ground=-1900;
+         const auto [orbit,peri,apo,burn,left]=fly(e,genericLunarAscent(),{.67416*deg,23.47314*deg,-1900},270*deg,ex::GravityTurn(270*deg,0,18.3e3,15e3,ex::moon,true,85e3,60,60),ex::moon,"lunar ascent");
+         require(orbit&&peri>=15e3&&apo>50e3&&apo<120e3&&burn>380&&burn<480&&left>0,"Lunar ascent to orbit as Apollo 11's (435 s, 17 x 88 km)");}
+        {Environment e=environment(Center::mars);e.ground=-2500;
+         const auto [orbit,peri,apo,burn,left]=fly(e,genericMarsAscent(),{18.4447*deg,77.4508*deg,-2500},90*deg,ex::GravityTurn(90*deg,0,250e3,200e3,ex::mars,true,250e3,200,1000,true),ex::mars,"Mars ascent");
+         require(orbit&&peri>=200e3&&apo<600e3&&left>0,"Mars ascent to a 200 km perigee");}
+    }
     std::cout<<"physics_test: ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

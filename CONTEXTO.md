@@ -44,8 +44,15 @@ rebaixar sem espera; agora lança e vai a `failed_`, cabeçalho e bloco validado
 bloco de tamanho certo mas corrompido ficava para sempre (apagado e baixado de novo; `.part` por
 processo); P2 luz do Sol saltava na borda de 3 raios enquanto a exposição deslizava (mesmo filtro);
 P3 sombra das nuvens em latitude paramétrica (agora geodética, `weather.w`); P3 vento do mar com
-telemetria velha (10 s); latente: Cox-Munk só em materiais "albert:water". Próximo: medir o quadro
-em tela nativa quando o Allan puder, nuvens volumétricas.
+telemetria velha (10 s); latente: Cox-Munk só em materiais "albert:water". Medição em tela nativa
+(o Allan pediu; `build/perf-native.py`, `ALBERT_WINDOW`, só o app na tela :0 via XWayland, MX350 por
+PRIME): média 17–20 ms, p99 27–43 ms (meta não atingida); GPU 9,4–15,8 ms, "work" 14–17 ms porque
+a CPU fica em ~1 GHz (pacote a 89 °C quase ocioso, horas de estrangulamento térmico). O Allan quer
+remover o OpenGL. Subidas até a órbita na Lua (`genericLunarAscent`: 18 × 85 km em 434 s, Apollo
+11 435 s) e em Marte (`genericMarsAscent`, duas queimas: ~201 × 251 km), guiagem de exemplo por
+corpo (`ex::Body`, `steered`, `climb`, `circularize`) e `albert_flight_client --body=moon|mars`.
+O GRAM Suite: catálogo MFS-33888-1 ("General Public Release"), o Allan vai estudar o pedido.
+Próximo: remover o OpenGL, passo de desempenho (gravação da cena ~7 ms a 1 GHz, GPU no plano aberto).
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

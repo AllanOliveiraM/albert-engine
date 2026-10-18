@@ -130,6 +130,14 @@ cena; ver [RPC.md](RPC.md#voo-físico-em-lockstep).
 
 - `genericLander`: estágio único do porte da descida do módulo lunar Apollo (15 t, 45 kN com
   estrangulamento até 10%, Isp 311 s), quatro pernas a 4,7 m do eixo; aproximado.
+- `genericLunarAscent`: estágio de subida do porte do módulo lunar Apollo (4,85 t com 2.353 kg de
+  propelente, motor fixo de 15,57 kN a Isp 311 s, atitude por RCS ~1,4 kN m); aproximado. Com a
+  guiagem de exemplo sai da Base da Tranquilidade para 18 × 85 km em 434 s (Apollo 11: 435 s,
+  17 × 88 km), com 140 kg de sobra.
+- `genericMarsAscent`: veículo de subida de Marte de dois estágios na massa dos estudos do MAV do
+  Mars Sample Return (~450 kg, 0,57 m, 3 m), com motores líquidos estranguláveis (8 kN a Isp 310 s;
+  2,5 kN a Isp 320 s), ~4,6 km/s; aproximado. De Jezero: guiado desde a decolagem até um apoapsis
+  de 250 km, plana até ele e circulariza a 200 km de perigeu (~201 × 251 km, 12 kg de sobra).
 - `nescSphere`, `nescTwoStage`: modelos DAVE-ML da NESC convertidos para SI. O foguete da
   NESC é conceitual ("provavelmente inviável") e sem guiamento.
 - `genericLauncher`: lançador médio de dois estágios a querosene dimensionado por números
