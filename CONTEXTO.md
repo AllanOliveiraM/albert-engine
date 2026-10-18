@@ -24,8 +24,8 @@ terreno (`Terrain::detail`) e o detalhe do sítio não é mais liberado em laço
 Morph entre níveis na CPU (filhos sobem da superfície do pai em 0,4 s). Atmosfera de Marte nas
 tabelas de Bruneton (céu caramelo em Jezero conferido; da órbita, limbo com poeira). CI verde no
 Windows de novo: o `visual_test` olhava o detalhe medido de longe demais e o WARP passava de 3 s
-(liberação por tempo de parede). Próximo: assimetria por canal (pôr do sol azul de Marte), nuvens ao
-vivo no ar, oceano.
+(liberação por tempo de parede). Assimetria de Mie por canal (pôr do sol azul de Marte conferido em
+compute: azul/vermelho 1,58 junto ao Sol, 0,60 longe dele). Próximo: nuvens ao vivo no ar, oceano.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

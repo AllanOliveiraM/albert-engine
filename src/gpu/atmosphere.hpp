@@ -12,19 +12,20 @@ struct AtmosphereModel {
     float bottom=0,top=0;
     std::array<float,3> rayleigh{},mieScattering{},mieExtinction{},absorption{},groundAlbedo{};
     DensityProfile rayleighDensity,mieDensity,absorptionDensity;
-    float mieG=0,sunAngularRadius=0,maxSunZenith=0; // Radians.
+    std::array<float,3> mieG{}; // Mie phase asymmetry per channel (dust: blue more forward, Mars's blue sunsets).
+    float sunAngularRadius=0,maxSunZenith=0; // Radians.
     int orders=4; // Scattering orders.
 };
 // Bruneton's Earth (Rayleigh, 300 DU of ozone) with clear-day aerosols (optical depth 0.1 at
 // 550 nm), on the WGS84 equatorial radius, 80 km deep.
 AtmosphereModel earthAtmosphere();
 // Mars: CO2 Rayleigh (610 Pa and 11.1 km scale height at the datum) and dust of optical depth 0.5
-// above the datum, absorbing toward blue; the model's ground 8.2 km below the equatorial radius (under
+// above the datum, absorbing toward blue and throwing it farther forward; the model's ground 8.2 km below the equatorial radius (under
 // Hellas), so every surface is in its air and basins get denser air than Olympus Mons.
 AtmosphereModel marsAtmosphere();
 class Atmosphere {
 public:
-    static constexpr unsigned parameterBytes=240; // The WGSL AtmosphereParameters uniform.
+    static constexpr unsigned parameterBytes=256; // The WGSL AtmosphereParameters uniform.
     Atmosphere(Context& context,const AtmosphereModel& model); // Plans the precomputation (nothing runs yet).
     ~Atmosphere();
     Atmosphere(const Atmosphere&)=delete;Atmosphere& operator=(const Atmosphere&)=delete;

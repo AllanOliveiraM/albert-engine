@@ -185,12 +185,19 @@ int main(){
 @compute @workgroup_size(1) fn main() { // Zenith transmittance from the datum (3396.19 km), and the tables bound as elsewhere.
     probe[0] = vec4f(transmittanceToTop(airTransmittance, airSampler, 3396.19, 1.0), 0.0);
     probe[1] = vec4f(skyRadiance(vec3f(0.0, 0.0, 3396.2), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 0.0, 1.0)).radiance, 0.0);
+    // Sunset (the sun 2 degrees up): 2 degrees above the sun, and 90 degrees aside 30 degrees up.
+    let ground = vec3f(0.0, 0.0, 3396.2); let sun = vec3f(cos(0.0349), 0.0, sin(0.0349));
+    probe[2] = vec4f(skyRadiance(ground, vec3f(cos(0.0698), 0.0, sin(0.0698)), sun).radiance, 0.0);
+    probe[3] = vec4f(skyRadiance(ground, vec3f(0.0, cos(0.5236), sin(0.5236)), sun).radiance, 0.0);
 }
 )";
             const auto values=run(code,nullptr),farValues=run(farCode,frameBuffer),groundValues=run(groundCode,loweredBuffer),marsValues=run(marsCode,nullptr,&mars);const float* v=values.data();
             {const double h=11.1,above=marsModel.top-3396.19,column=h*(1-std::exp(-above/h)),depth=.5*(1-std::exp(-above/h))+2.5e-4*column;
              std::printf("Mars zenith transmittance from the datum %.4f %.4f %.4f (want %.4f at 550 nm)\n",marsValues[0],marsValues[1],marsValues[2],std::exp(-depth));
-             near("Mars: dust optical depth 0.5 above the datum, as the model states",marsValues[1],std::exp(-depth),.003);}
+             near("Mars: dust optical depth 0.5 above the datum, as the model states",marsValues[1],std::exp(-depth),.003);
+             const float* a=&marsValues[8];const float* b=&marsValues[12];
+             std::printf("Mars sunset: beside the sun %.3g %.3g %.3g (blue/red %.2f), aside %.3g %.3g %.3g (blue/red %.2f)\n",a[0],a[1],a[2],a[2]/a[0],b[0],b[1],b[2],b[2]/b[0]);
+             near("Mars sunset: blue glow beside the sun (blue over red)",a[2]>a[0]&&b[2]<b[0]?1:0,1,.5);}
             std::printf("lowered air ground: terrain 27 m under the sphere at %.4f km, 1 km above it at %.4f km\n",groundValues[0],groundValues[1]);
             near("Lowered air ground: the terrain under the camera on the model's ground",groundValues[0],0,1e-3);
             near("... and every radius raised alike",groundValues[1],1.027,1e-3);const char* names[]{"zenith","25 deg","2 deg","-2 deg"};

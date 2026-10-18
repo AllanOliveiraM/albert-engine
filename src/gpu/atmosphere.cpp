@@ -12,11 +12,12 @@ const char* const atmosphereWgsl=R"(
 struct Profile { lower: vec4f, upper: vec4f, constants: vec4f }; // Layers: width, exp term, exp scale, linear term; constant terms.
 struct AtmosphereParameters {
     solar: vec4f,         // Solar irradiance; w: sun angular radius.
-    rayleigh: vec4f,      // Rayleigh scattering; w: Mie phase g.
+    rayleigh: vec4f,      // Rayleigh scattering.
     mieScattering: vec4f, // w: cosine of the largest sun zenith angle precomputed.
     mieExtinction: vec4f, // w: bottom radius.
     absorption: vec4f,    // w: top radius.
     groundAlbedo: vec4f,
+    mieG: vec4f,          // Mie phase asymmetry per channel.
     rayleighDensity: Profile, mieDensity: Profile, absorptionDensity: Profile,
 };
 const TW = 256u; const TH = 64u; const SR = 32u; const SMU = 128u; const SMUS = 32u; const SNU = 8u; const IW = 64u; const IH = 16u;
@@ -60,9 +61,9 @@ fn transmittanceToSun(t: texture_2d<f32>, s: sampler, r: f32, muS: f32) -> vec3f
     return transmittanceToTop(t, s, r, muS) * smoothstep(-sinH * a, sinH * a, muS - cosH);
 }
 fn rayleighPhase(nu: f32) -> f32 { return 3.0 / (16.0 * AIR_PI) * (1.0 + nu * nu); }
-fn miePhase(nu: f32) -> f32 {
-    let g = atmosphere.rayleigh.w; let k = 3.0 / (8.0 * AIR_PI) * (1.0 - g * g) / (2.0 + g * g);
-    return k * (1.0 + nu * nu) / pow(1.0 + g * g - 2.0 * g * nu, 1.5);
+fn miePhase(nu: f32) -> vec3f { // Cornette-Shanks, per channel.
+    let g = atmosphere.mieG.xyz; let k = 3.0 / (8.0 * AIR_PI) * (1.0 - g * g) / (2.0 + g * g);
+    return k * (1.0 + nu * nu) / pow(1.0 + g * g - 2.0 * g * nu, vec3f(1.5));
 }
 fn sunZenithRange() -> f32 { // A of the mu_s mapping.
     let dMin = topRadius() - bottomRadius(); return (distanceToTop(bottomRadius(), atmosphere.mieScattering.w) - dMin) / (airHorizon() - dMin);
@@ -250,7 +251,7 @@ AtmosphereModel earthAtmosphere(){ // demo.cc's values at kLambdaR/G/B (aerosols
     m.groundAlbedo={.1f,.1f,.1f};
     m.rayleighDensity.upper={0,1,-1.f/8.f,0,0};m.mieDensity.upper={0,1,-1.f/1.2f,0,0};
     m.absorptionDensity.lower={25,0,0,1.f/15.f,-2.f/3.f};m.absorptionDensity.upper={0,0,0,-1.f/15.f,8.f/3.f};
-    m.mieG=.8f;m.sunAngularRadius=.004675f;m.maxSunZenith=static_cast<float>(102./180.*3.14159265358979);
+    m.mieG={.8f,.8f,.8f};m.sunAngularRadius=.004675f;m.maxSunZenith=static_cast<float>(102./180.*3.14159265358979);
     return m;
 }
 AtmosphereModel marsAtmosphere(){ // Lengths in km; coefficients at the model's ground (8.2 km under the datum).
@@ -261,12 +262,14 @@ AtmosphereModel marsAtmosphere(){ // Lengths in km; coefficients at the model's 
     auto rayleigh=[](double micrometres){return static_cast<float>(2.5e-4*denser*std::pow(micrometres/.55,-4));};
     m.rayleigh={rayleigh(.68),rayleigh(.55),rayleigh(.44)};
     // Dust (Wolff et al. 2009): grey extinction, optical depth 0.5 above the datum; single scattering
-    // albedo 0.97, 0.94 and 0.87 at 680, 550 and 440 nm (it absorbs blue); asymmetry 0.7.
+    // albedo 0.97, 0.94 and 0.87 at 680, 550 and 440 nm (it absorbs blue).
     const double extinction=.5/height*denser;constexpr std::array<double,3> albedo{.97,.94,.87};
     for(std::size_t c=0;c<3;++c){m.mieExtinction[c]=static_cast<float>(extinction);m.mieScattering[c]=static_cast<float>(extinction*albedo[c]);}
     m.absorption={0,0,0};m.groundAlbedo={.3f,.2f,.12f};
     m.rayleighDensity.upper={0,1,static_cast<float>(-1/height),0,0};m.mieDensity.upper={0,1,static_cast<float>(-1/height),0,0};
-    m.mieG=.7f;m.sunAngularRadius=static_cast<float>(.004675/1.524);m.maxSunZenith=static_cast<float>(110./180.*3.14159265358979); // Dusty twilights last.
+    // Asymmetry rising toward blue (Tomasko et al. 1999, Pathfinder; Wolff et al. 2009): the dust
+    // throws blue farther forward, a blue glow around the setting sun under a butterscotch sky.
+    m.mieG={.63f,.67f,.73f};m.sunAngularRadius=static_cast<float>(.004675/1.524);m.maxSunZenith=static_cast<float>(110./180.*3.14159265358979); // Dusty twilights last.
     return m;
 }
 // The precomputation as a list of dispatches (each 3D pass in one-layer slices), recorded a few
@@ -286,9 +289,9 @@ Atmosphere::Atmosphere(Context& context,const AtmosphereModel& model):model_(mod
     const WGPUTextureFormat flat=wide?WGPUTextureFormat_RGBA32Float:WGPUTextureFormat_RGBA16Float;
     float p[parameterBytes/4]{};
     auto put=[&](int at,const std::array<float,3>& v,float w){p[at]=v[0];p[at+1]=v[1];p[at+2]=v[2];p[at+3]=w;};
-    put(0,{1,1,1},model.sunAngularRadius);put(4,model.rayleigh,model.mieG);put(8,model.mieScattering,std::cos(model.maxSunZenith));
-    put(12,model.mieExtinction,model.bottom);put(16,model.absorption,model.top);put(20,model.groundAlbedo,0);
-    pack(p+24,model.rayleighDensity);pack(p+36,model.mieDensity);pack(p+48,model.absorptionDensity);
+    put(0,{1,1,1},model.sunAngularRadius);put(4,model.rayleigh,0);put(8,model.mieScattering,std::cos(model.maxSunZenith));
+    put(12,model.mieExtinction,model.bottom);put(16,model.absorption,model.top);put(20,model.groundAlbedo,0);put(24,model.mieG,0);
+    pack(p+28,model.rayleighDensity);pack(p+40,model.mieDensity);pack(p+52,model.absorptionDensity);
     WGPUBufferDescriptor bd{};bd.size=parameterBytes;bd.usage=WGPUBufferUsage_Uniform|WGPUBufferUsage_CopyDst;parameters_=wgpuDeviceCreateBuffer(device,&bd);
     wgpuQueueWriteBuffer(context.queue(),parameters_,0,p,parameterBytes);
     const unsigned orders=static_cast<unsigned>(std::max(model.orders,1));
