@@ -209,7 +209,7 @@ struct GlTarget final:Target {
 };
 struct GpuTarget final:Target {
     albert::gpu::Context context;albert::gpu::SceneRenderer scene{context};WGPUTexture texture=nullptr;WGPUTextureView view=nullptr;
-    GpuTarget(){albert::defineWebGpuPrograms();scene.toneMapping=false;
+    GpuTarget(){albert::defineWebGpuPrograms();scene.toneMapping=false;scene.samples=1; // As the OpenGL target (antialiasing 0).
         WGPUTextureDescriptor d{};d.size={192,192,1};d.format=context.format();d.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_CopySrc;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
         texture=wgpuDeviceCreateTexture(context.device(),&d);view=wgpuTextureCreateView(texture,nullptr);}
     ~GpuTarget() override{wgpuTextureViewRelease(view);wgpuTextureRelease(texture);}

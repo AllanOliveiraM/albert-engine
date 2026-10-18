@@ -119,7 +119,7 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
 }
 struct SceneRenderer::Impl {
     Context& gpu;WGPUDevice device;WGPUQueue queue;
-    WGPUTexture depth=nullptr;WGPUTextureView depthView=nullptr;unsigned depthWidth=0,depthHeight=0;
+    WGPUTexture depth=nullptr,colour=nullptr;WGPUTextureView depthView=nullptr,colourView=nullptr;unsigned depthWidth=0,depthHeight=0,depthSamples=0; // colour: multisampled, resolved into the target.
     WGPUBuffer frameBuffer=nullptr,objectBuffer=nullptr;std::size_t objectCapacity=0;
     WGPUBindGroupLayout frameLayout=nullptr,objectLayout=nullptr;WGPUBindGroup frameGroup=nullptr,objectGroup=nullptr;
     WGPUBuffer zeros=nullptr;WGPUTexture whiteTexture=nullptr,blackTexture=nullptr;WGPUTextureView white=nullptr,black=nullptr;WGPUSampler linear=nullptr;
@@ -182,7 +182,7 @@ struct SceneRenderer::Impl {
         if(shadowPipeline)wgpuRenderPipelineRelease(shadowPipeline);if(shadowLayout)wgpuPipelineLayoutRelease(shadowLayout);if(shadowModule)wgpuShaderModuleRelease(shadowModule);
         wgpuBindGroupLayoutRelease(frameLayout);wgpuBindGroupLayoutRelease(objectLayout);
         wgpuSamplerRelease(linear);wgpuTextureViewRelease(white);wgpuTextureRelease(whiteTexture);wgpuTextureViewRelease(black);wgpuTextureRelease(blackTexture);
-        if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);
+        if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);if(colourView)wgpuTextureViewRelease(colourView);if(colour)wgpuTextureRelease(colour);
     }
     WGPUBindGroup frameWith(WGPUTextureView shadow){
         WGPUBindGroupEntry e[3]{};e[0].binding=0;e[0].buffer=frameBuffer;e[0].size=512;e[1].binding=1;e[1].textureView=shadow;e[2].binding=2;e[2].sampler=shadowSampler;
@@ -371,12 +371,12 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         WGPUBindGroupDescriptor d{};d.layout=c.layout;d.entryCount=e.size();d.entries=e.data();state.group=wgpuDeviceCreateBindGroup(device,&d);
         return state.group;
     }
-    WGPURenderPipeline pipeline(const std::string& name,const Compiled& c,const Material& m,const std::vector<int>& strides){
+    WGPURenderPipeline pipeline(const std::string& name,const Compiled& c,const Material& m,const std::vector<int>& strides,unsigned samples){
         WGPUBlendState b{};const bool blended=blend(m,b);
         const auto cull=m.side==Side::Double?WGPUCullMode_None:m.side==Side::Back?WGPUCullMode_Front:WGPUCullMode_Back;
         std::string key=name+'|'+std::to_string(blended?static_cast<int>(b.color.srcFactor)*1000+static_cast<int>(b.color.dstFactor)*10+static_cast<int>(b.color.operation):0)+'|'
             +std::to_string(static_cast<int>(b.alpha.srcFactor))+std::to_string(static_cast<int>(b.alpha.dstFactor))+'|'+std::to_string(m.depthTest)+std::to_string(m.depthWrite)+std::to_string(static_cast<int>(cull))
-            +'|'+std::to_string(m.polygonOffset?m.polygonOffsetUnits:0.f)+'|'+std::to_string(m.colorWrite);
+            +'|'+std::to_string(m.polygonOffset?m.polygonOffsetUnits:0.f)+'|'+std::to_string(m.colorWrite)+'|'+std::to_string(samples);
         for(int s:strides)key+=','+std::to_string(s);
         if(const auto it=pipelines.find(key);it!=pipelines.end())return it->second;
         std::vector<WGPUVertexAttribute> attributes(1+c.program.attributes.size());std::vector<WGPUVertexBufferLayout> buffers(attributes.size());
@@ -394,14 +394,15 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         if(m.polygonOffset){ds.depthBias=static_cast<std::int32_t>(-m.polygonOffsetUnits);ds.depthBiasSlopeScale=-m.polygonOffsetFactor;} // Toward the camera, as GL's negative offsets.
         WGPURenderPipelineDescriptor d{};d.label=sv(name);d.layout=c.pipelineLayout;d.vertex.module=c.module;d.vertex.entryPoint=sv("vs_main");d.vertex.bufferCount=buffers.size();d.vertex.buffers=buffers.data();
         d.primitive.topology=WGPUPrimitiveTopology_TriangleList;d.primitive.frontFace=WGPUFrontFace_CCW;d.primitive.cullMode=c.program.points?WGPUCullMode_None:cull;
-        d.depthStencil=&ds;d.multisample.count=1;d.multisample.mask=~0u;d.fragment=&f;
+        d.depthStencil=&ds;d.multisample.count=samples;d.multisample.mask=~0u;d.fragment=&f;
         return pipelines.emplace(key,wgpuDeviceCreateRenderPipeline(device,&d)).first->second;
     }
-    void ensureDepth(unsigned w,unsigned h){
-        if(depth&&depthWidth==w&&depthHeight==h)return;
-        if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);
-        WGPUTextureDescriptor d{};d.size={w,h,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_RenderAttachment;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
-        depth=wgpuDeviceCreateTexture(device,&d);depthView=wgpuTextureCreateView(depth,nullptr);depthWidth=w;depthHeight=h;
+    void ensureDepth(unsigned w,unsigned h,unsigned samples){
+        if(depth&&depthWidth==w&&depthHeight==h&&depthSamples==samples)return;
+        if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);if(colourView)wgpuTextureViewRelease(colourView);if(colour)wgpuTextureRelease(colour);colour=nullptr;colourView=nullptr;
+        WGPUTextureDescriptor d{};d.size={w,h,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_RenderAttachment;d.mipLevelCount=1;d.sampleCount=samples;d.dimension=WGPUTextureDimension_2D;
+        depth=wgpuDeviceCreateTexture(device,&d);depthView=wgpuTextureCreateView(depth,nullptr);depthWidth=w;depthHeight=h;depthSamples=samples;
+        if(samples>1){d.format=gpu.format();colour=wgpuDeviceCreateTexture(device,&d);colourView=wgpuTextureCreateView(colour,nullptr);}
     }
     void evict(){
         for(auto it=geometries.begin();it!=geometries.end();)if(frame-it->second.used>evictAfter){release(it->second);it=geometries.erase(it);}else ++it;
@@ -415,7 +416,7 @@ unsigned SceneRenderer::drawn()const{return impl_->drawn;}
 double SceneRenderer::gpuMilliseconds()const{return impl_->gpuMs;}
 void SceneRenderer::submitted(){auto& g=*impl_;if(g.mapPending){wgpuBufferMapAsync(g.readback,WGPUMapMode_Read,0,16,g.pendingMap);g.mapPending=false;}}
 void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder){
-    auto& g=*impl_;++g.frame;g.drawn=0;g.ensureDepth(width,height);g.streamBudget=8u<<20;
+    auto& g=*impl_;++g.frame;g.drawn=0;const unsigned msaa=samples>1?4u:1u;g.ensureDepth(width,height,msaa);g.streamBudget=8u<<20;
     scene.updateMatrixWorld();if(!camera.parent)camera.updateMatrixWorld();
     // Reversed-Z infinite perspective: depth = near / -z, 1 at the near plane, 0 at infinity.
     // Orthographic: depth = (far + z) / (far - near), 1 at the near plane and 0 at the far one.
@@ -499,9 +500,10 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         wgpuRenderPassEncoderEnd(sp);wgpuRenderPassEncoderRelease(sp);
     }
     // Pass.
-    WGPURenderPassColorAttachment colour{};colour.view=target;colour.depthSlice=WGPU_DEPTH_SLICE_UNDEFINED;colour.loadOp=WGPULoadOp_Clear;colour.storeOp=WGPUStoreOp_Store;
+    WGPURenderPassColorAttachment colour{};colour.view=msaa>1?g.colourView:target;colour.resolveTarget=msaa>1?target:nullptr;colour.depthSlice=WGPU_DEPTH_SLICE_UNDEFINED;colour.loadOp=WGPULoadOp_Clear;
+    colour.storeOp=msaa>1?WGPUStoreOp_Discard:WGPUStoreOp_Store;
     if(scene.background.isColor()){const Color c=scene.background.color();colour.clearValue={c.r,c.g,c.b,1};}else colour.clearValue={0,0,0,1};
-    WGPURenderPassDepthStencilAttachment depth{};depth.view=g.depthView;depth.depthLoadOp=WGPULoadOp_Clear;depth.depthStoreOp=WGPUStoreOp_Store;depth.depthClearValue=0;
+    WGPURenderPassDepthStencilAttachment depth{};depth.view=g.depthView;depth.depthLoadOp=WGPULoadOp_Clear;depth.depthStoreOp=WGPUStoreOp_Discard;depth.depthClearValue=0;
     WGPURenderPassDescriptor pd{};pd.colorAttachmentCount=1;pd.colorAttachments=&colour;pd.depthStencilAttachment=&depth;
     WGPUPassTimestampWrites times{};const bool timing=g.timestamps&&!g.mapping;
     if(timing){times.querySet=g.timestamps;times.beginningOfPassWriteIndex=0;times.endOfPassWriteIndex=1;pd.timestampWrites=&times;}
@@ -517,7 +519,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
             if(auto* a=item.geometry->getAttribute<float>(name);a&&a->itemSize()==components){auto& b=geo.attributes[name];g.upload(b,a->array().data(),a->array().size()*4,WGPUBufferUsage_Vertex,a->version);buffers.push_back(b.buffer);strides.push_back(components*4);}
             else{buffers.push_back(g.zeros);strides.push_back(0);}};
         bind("position",3);for(const auto& [n,c]:item.program->program.attributes)bind(n,c);
-        WGPURenderPipeline pipe=g.pipeline(g.programName(*item.material),*item.program,*item.material,strides);
+        WGPURenderPipeline pipe=g.pipeline(g.programName(*item.material),*item.program,*item.material,strides,msaa);
         WGPUBindGroup group=g.materialGroup(*item.material,*item.program);
         wgpuRenderPassEncoderSetPipeline(pass,pipe);wgpuRenderPassEncoderSetBindGroup(pass,1,g.objectGroup,1,&offset);wgpuRenderPassEncoderSetBindGroup(pass,2,group,0,nullptr);
         for(std::size_t i=0;i<buffers.size();++i)wgpuRenderPassEncoderSetVertexBuffer(pass,static_cast<std::uint32_t>(i),buffers[i],0,WGPU_WHOLE_SIZE);

@@ -1,4 +1,7 @@
 install(TARGETS render RUNTIME DESTINATION . COMPONENT Runtime)
+if(MSVC)
+    install(FILES $<TARGET_FILE:albert_wgpu> DESTINATION . COMPONENT Runtime)
+endif()
 install(FILES
     ${PROJECT_SOURCE_DIR}/assets/countries.geojson
     ${PROJECT_SOURCE_DIR}/assets/stars.csv

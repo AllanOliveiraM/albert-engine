@@ -35,7 +35,7 @@ int main(){
         constexpr unsigned w=96,h=64;
         WGPUTextureDescriptor td{};td.size={w,h,1};td.format=gpu->format();td.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_CopySrc;td.mipLevelCount=1;td.sampleCount=1;td.dimension=WGPUTextureDimension_2D;
         WGPUTexture target=wgpuDeviceCreateTexture(gpu->device(),&td);WGPUTextureView view=wgpuTextureCreateView(target,nullptr);
-        albert::gpu::SceneRenderer renderer(*gpu);
+        albert::gpu::SceneRenderer renderer(*gpu);renderer.samples=1; // Exact pixel checks.
         Scene scene;scene.background=Color(.1f,.2f,.3f);PerspectiveCamera camera(60,static_cast<float>(w)/h,.1f,100);camera.position.set(0,0,5);
         // Opaque red quad at x<0, a blue quad further back, a half-transparent green quad in front at x>0.
         auto quad=[&](const Color& c,float x,float z,bool transparent){auto m=MeshBasicMaterial::create();m->color=c;m->transparent=transparent;m->opacity=transparent?.5f:1;

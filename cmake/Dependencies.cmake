@@ -58,6 +58,12 @@ else()
     set_target_properties(albert_wgpu PROPERTIES IMPORTED_LOCATION ${wgpu_SOURCE_DIR}/lib/libwgpu_native.a)
 endif()
 target_include_directories(albert_wgpu SYSTEM INTERFACE ${wgpu_SOURCE_DIR}/include)
+# MSVC executables load wgpu_native.dll from their own directory.
+function(albert_copy_wgpu target)
+    if(MSVC)
+        add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:albert_wgpu> $<TARGET_FILE_DIR:${target}>)
+    endif()
+endfunction()
 target_link_libraries(albert_wgpu INTERFACE ${albert_wgpu_system})
 set_property(TARGET nlohmann_json PROPERTY SYSTEM TRUE)
 

@@ -301,6 +301,19 @@ não grava arquivos de log.
 
 ## Visualização e precisão
 
+**Renderizador.** O Albert desenha a cena com WebGPU (wgpu-native v29: Vulkan no Linux, D3D12 ou
+Vulkan no Windows) por `src/gpu`, ou com o OpenGL do threepp (`--renderer=opengl`); se não houver
+adaptador WebGPU, cai sozinho para OpenGL. `ALBERT_GPU=high|low|software` escolhe o adaptador
+(padrão: alto desempenho; `software` é o llvmpipe). Os shaders GLSL dos materiais têm equivalentes
+WGSL em `src/render/webgpu_programs.cpp`, achados pelo nome do material (`albert:…`); os materiais
+embutidos (Basic, Phong, Standard) seguem a iluminação física do threepp (sem o π legado), com bump
+interpolado em f32, mapa de rugosidade, light map e sombra PCF do Sol. Profundidade em Z reverso
+(`depth32float`, infinito na perspectiva). Texturas grandes sobem em fatias de ~8 MB por quadro e os
+mipmaps são renderizados na GPU. `ALBERT_FRAME_STATS=1` imprime média, p99 e pior quadro a cada 300
+quadros, com o trabalho da CPU, a apresentação e o tempo da passada da cena na GPU (timestamps).
+`visual_test 1` roda as mesmas cenas nos dois renderizadores; `gpu_scene_test` cobre fundo,
+profundidade, misturas, texturas, pontos instanciados e sombra fora da tela (pulado sem adaptador).
+
 Terra elipsoidal WGS84, base global até 4K e blocos regionais de um mosaico 86400×43200, filtragem
 anisotrópica/mipmaps, antialiasing MSAA 4x, iluminação solar, reflexos oceânicos,
 luzes noturnas, camada de nuvens e atmosfera por espalhamento simples Rayleigh/Mie

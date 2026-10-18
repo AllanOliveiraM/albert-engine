@@ -971,10 +971,17 @@ int albert::runRenderer(int argc, char** argv) {
             albert::assetDirectory() / "countries.geojson";
 
         std::function<void()> drawInterface;
-        albert::Display graphics(backend,"Albert Engine",WindowSize(1280,800),albert::assetDirectory()/"branding/albert.png",[&]{
+        auto openDisplay=[&](albert::Display::Backend b){return std::make_unique<albert::Display>(b,"Albert Engine",WindowSize(1280,800),albert::assetDirectory()/"branding/albert.png",[&]{
             applyInterfaceTheme();
             if (drawInterface) drawInterface();
-        });
+        });};
+        std::unique_ptr<albert::Display> display;
+        try{display=openDisplay(backend);}
+        catch(const std::exception& e){ // No usable WebGPU adapter (old driver, no Vulkan or D3D12): OpenGL still works.
+            if(backend!=albert::Display::Backend::webgpu)throw;
+            std::cerr<<"WebGPU indisponivel ("<<e.what()<<"); usando OpenGL."<<std::endl;display=openDisplay(albert::Display::Backend::opengl);
+        }
+        auto& graphics=*display;
         const float displayPixelRatio = graphics.gl() ? std::min(2.f, graphics.gl()->getTargetPixelRatio()) : 1.f;
         // Light distributions carry only the catalogue: download what is missing,
         // essential first. Complete libraries never start this service.

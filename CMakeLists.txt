@@ -34,6 +34,7 @@ add_subdirectory(src/gpu)
 add_subdirectory(src/render)
 
 add_executable(render WIN32 src/main.cpp)
+albert_copy_wgpu(render)
 if(WIN32)
     enable_language(RC)
     configure_file(cmake/Icon.rc.in ${CMAKE_CURRENT_BINARY_DIR}/albert-icon.rc @ONLY)
