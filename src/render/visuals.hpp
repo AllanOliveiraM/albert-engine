@@ -52,7 +52,7 @@ public:
     bool detailActive() const { return pendingImage_.valid() || uploads_.active(); }
     bool uploading() const { return uploads_.active(); }
     void stageRegionalImages(RegionalImages images);
-    void updateUploads(threepp::GLRenderer& renderer);
+    void updateUploads(threepp::GLRenderer* renderer); // Null on WebGPU.
     void retryDetails() { imageFailed_.fill(false); detailError.clear(); }
     void replaceAssets(DecodedAssets assets);
     void update(const threepp::Vector3& solarDirection, const threepp::Vector3& cameraPosition, const VisualSettings& settings, float seconds);

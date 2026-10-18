@@ -6,9 +6,9 @@
 #include <array>
 #include <cmath>
 #include <vector>
-void albert::setWindowIcon(threepp::Canvas& canvas,const std::filesystem::path& path){
+void albert::setWindowIcon(void* window,const std::filesystem::path& path){
     const auto source=threepp::ImageLoader().load(path,4,false);
-    if(!source||!source->width()||!source->height()||!canvas.windowPtr())return;
+    if(!source||!source->width()||!source->height()||!window)return;
     // Several small native icons avoid oversized X11 property requests, while
     // giving title bars and HiDPI docks a suitably sized, sharp image.
     constexpr std::array<int,3> sizes{32,64,128};
@@ -31,5 +31,5 @@ void albert::setWindowIcon(threepp::Canvas& canvas,const std::filesystem::path& 
         }
         icons[i]={size,size,output.data()};
     }
-    glfwSetWindowIcon(static_cast<GLFWwindow*>(canvas.windowPtr()),int(icons.size()),icons.data());
+    glfwSetWindowIcon(static_cast<GLFWwindow*>(window),int(icons.size()),icons.data());
 }

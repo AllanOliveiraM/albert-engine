@@ -26,6 +26,7 @@
 #include "rocks.hpp"
 #include "eclipses.hpp"
 #include "window_icon.hpp"
+#include "display.hpp"
 #include "layers.hpp"
 #include "asset_pack.hpp"
 #include "asset_downloads.hpp"
@@ -918,12 +919,17 @@ struct CameraTransition {
 
 int albert::runRenderer(int argc, char** argv) {
     bool smokeTest = false,demo=false;
+    auto backend=albert::Display::Backend::opengl; // --renderer=webgpu while the WebGPU port reaches parity.
     std::optional<unsigned> rpcPort;
     try {
         for (int i = 1; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--smoke-test") {
                 smokeTest = true;
+            } else if (argument == "--renderer=webgpu") {
+                backend=albert::Display::Backend::webgpu;
+            } else if (argument == "--renderer=opengl") {
+                backend=albert::Display::Backend::opengl;
             } else if (argument == "--rpc" || argument.starts_with("--rpc-port=")) {
                 size_t consumed=0;const auto text=argument=="--rpc" ? std::string("50051") : argument.substr(11);
                 const auto port=std::stoul(text,&consumed);
@@ -964,19 +970,12 @@ int albert::runRenderer(int argc, char** argv) {
         fs::path countries =
             albert::assetDirectory() / "countries.geojson";
 
-        Canvas::Parameters window;
-        window.title("Albert Engine").antialiasing(4).size(WindowSize(1280,800)).favicon(albert::assetDirectory()/"branding/albert.png");
-        Canvas canvas{window};
-        canvas.exitOnKeyEscape(false);
-        GLRenderer renderer{canvas};
-        albert::setWindowIcon(canvas,albert::assetDirectory()/"branding/albert.png");
-        renderer.toneMapping = ToneMapping::ACESFilmic;
-        renderer.toneMappingExposure = 1.05f;
-        const float displayPixelRatio = std::min(2.f, renderer.getTargetPixelRatio());
-        renderer.setPixelRatio(displayPixelRatio);
-        renderer.shadowMap().enabled = true;
-        renderer.shadowMap().type = ShadowMap::PFC;
-        renderer.shadowMap().autoUpdate = false;
+        std::function<void()> drawInterface;
+        albert::Display graphics(backend,"Albert Engine",WindowSize(1280,800),albert::assetDirectory()/"branding/albert.png",[&]{
+            applyInterfaceTheme();
+            if (drawInterface) drawInterface();
+        });
+        const float displayPixelRatio = graphics.gl() ? std::min(2.f, graphics.gl()->getTargetPixelRatio()) : 1.f;
         // Light distributions carry only the catalogue: download what is missing,
         // essential first. Complete libraries never start this service.
         std::unique_ptr<albert::AssetDownloads> assetDownloads;
@@ -985,13 +984,8 @@ int albert::runRenderer(int argc, char** argv) {
             if(!complete){assetDownloads=std::make_unique<albert::AssetDownloads>(albert::readAssetCatalog(catalog),albert::AssetDownloads::Options{});assetDownloads->start();}
         }
         DataLoader downloads(countries,assetDownloads.get());
-        std::function<void()> drawInterface;
         std::ifstream fontFile(albert::assetDirectory() / "fonts" / "Inter.ttf", std::ios::binary);
         std::vector<char> fontBytes(std::istreambuf_iterator<char>(fontFile), {});
-        ImguiFunctionalContext ui(canvas, [&] {
-            applyInterfaceTheme();
-            if (drawInterface) drawInterface();
-        });
         if (!fontBytes.empty()) {
             ImFontConfig fontConfig;
             fontConfig.FontDataOwnedByAtlas = false;
@@ -1022,16 +1016,15 @@ int albert::runRenderer(int argc, char** argv) {
             drawDownloadStatus(downloads);
             ImGui::Spacing();
             ImGui::TextWrapped("%s",assetDownloads?"Dados visuais essenciais baixados ao abrir; as demais resolucoes continuam em segundo plano. Buscando as posicoes reais dos corpos.":"Imagens incluidas no programa. Buscando as posicoes reais dos corpos disponiveis.");
-            if (ImGui::Button("Sair", ImVec2(-1, 32))) canvas.close();
+            if (ImGui::Button("Sair", ImVec2(-1, 32))) graphics.close();
             ImGui::End();
             ImGui::PopStyleVar();
         };
         drawInterface = [&] { drawLoading(1.f); };
-        canvas.onWindowResize([&](WindowSize size) { renderer.setSize(size); });
         bool initialDownloadsStarted=false;
         const double initialClockWait=albert::time::monotonicSeconds();
         std::optional<LoadedData> loaded;
-        while (canvas.isOpen() && !loaded) {
+        while (graphics.isOpen() && !loaded) {
             if(!initialDownloadsStarted && (!timeService.status().synchronizing || albert::time::monotonicSeconds()-initialClockWait>12.)) {
                 downloads.start(true,true);initialDownloadsStarted=true;
                 const auto timing=timeService.status();
@@ -1040,12 +1033,12 @@ int albert::runRenderer(int argc, char** argv) {
             loaded = downloads.poll();
             if (smokeTest && !downloads.error.empty()) throw std::runtime_error(downloads.error);
             if (loaded) break;
-            if (!canvas.animateOnce([&] {
-                renderer.clear();
-                ui.render();
+            if (!graphics.frame([&] {
+                graphics.clear();
+                graphics.ui();
             })) break;
         }
-        if (!loaded || !canvas.isOpen()) return smokeTest ? 1 : 0;
+        if (!loaded || !graphics.isOpen()) return smokeTest ? 1 : 0;
         auto loadedAssets = std::move(loaded->assets);
         auto borders = std::move(loaded->borders);
         auto ephemerides = std::move(loaded->ephemerides);
@@ -1058,12 +1051,12 @@ int albert::runRenderer(int argc, char** argv) {
         scene->background = Color(0x010208);
 
         auto camera = PerspectiveCamera::create(
-            60, canvas.aspect(), 0.01f, 100000.f
+            60, graphics.aspect(), 0.01f, 100000.f
         );
 
         camera->position.set(0, 0, 3.5f);
 
-        OrbitControls controls{*camera, canvas};
+        OrbitControls controls{*camera, graphics.events()};
 
         controls.enableDamping = true;
         controls.dampingFactor = CAMERA_EASING;
@@ -1896,10 +1889,9 @@ int albert::runRenderer(int argc, char** argv) {
 
         Clock clock;
 
-        canvas.onWindowResize([&](WindowSize size) {
+        graphics.onResize([&](WindowSize size) {
             camera->aspect = size.aspect();
             camera->updateProjectionMatrix();
-            renderer.setSize(size);
         });
 
         using SteadyClock = std::chrono::steady_clock;
@@ -1950,7 +1942,7 @@ int albert::runRenderer(int argc, char** argv) {
         struct CometPath {double jd=std::numeric_limits<double>::quiet_NaN();std::uint64_t generation=0;std::chrono::steady_clock::time_point time{};bool tabulated=false;};
         std::map<std::string,CometPath> cometPaths;
         auto covered=[](const std::vector<State>& table,double tdb){return table.size()>=2&&tdb>=table.front().jd&&tdb<=table.back().jd;};
-        canvas.animate([&] {
+        while (graphics.frame([&] {
             const auto frameTime=timeService.status();
             auto moment=simulation.read();
             const float elapsed = clock.getDelta();
@@ -1972,7 +1964,7 @@ int albert::runRenderer(int argc, char** argv) {
             // Observed clouds belong to the last day; other dates show none.
             cloudsCurrent=std::abs(simulatedUtc-frameTime.utcSeconds)<86400.;
 
-            planets.updateUploads(renderer);
+            planets.updateUploads(graphics.gl());
             if (introductionStart) introductionElapsed = std::min(introductionDuration,
                 std::chrono::duration<float>(steadyNow - *introductionStart).count());
 
@@ -2452,20 +2444,20 @@ int albert::runRenderer(int argc, char** argv) {
             // Photographic exposure adapts to the irradiance at the focused planet;
             // physical solar illumination and geometry remain unchanged.
             const float photographicExposure=focus==targets::Moon?2.1f:solids.contains(focus)?std::clamp(1.05f*std::pow(sunPosition.distanceTo(solids.nodes().at(focus)->position)*6378137.f/149597870700.f,2.f),.25f,1200.f):1.05f;
-            renderer.toneMappingExposure=std::exp(std::lerp(std::log(renderer.toneMappingExposure),std::log(photographicExposure),-std::expm1(-dt/.65f)));
-            solids.update(renderer,*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary);
+            graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
+            solids.update(graphics.gl(),*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary);
             {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
              comets.update(*camera,sunPosition,nuclei,cometStates,tdb,dt);}
             objects.updateLighting(*camera,sunPosition,visualSettings.auxiliary,dt);
 
             if (appliedQuality != visualSettings.quality) {
-                renderer.setPixelRatio(std::min(visualSettings.quality ? 2.f : 1.f, displayPixelRatio));
+                if(auto* gl=graphics.gl()) gl->setPixelRatio(std::min(visualSettings.quality ? 2.f : 1.f, displayPixelRatio));
                 sunlight->shadow->dispose();
                 sunlight->shadow->mapSize.set(visualSettings.quality ? 2048.f : 1024.f, visualSettings.quality ? 2048.f : 1024.f);
-                renderer.shadowMap().needsUpdate = true;
+                if(auto* gl=graphics.gl()) gl->shadowMap().needsUpdate = true;
                 appliedQuality = visualSettings.quality;
             }
-            renderer.shadowMap().enabled = visualSettings.shadows && (focus == targets::Earth || focus == targets::Moon);
+            if(auto* gl=graphics.gl()) gl->shadowMap().enabled = visualSettings.shadows && (focus == targets::Earth || focus == targets::Moon); // WebGPU: no shadow maps yet.
             static auto lastShadow = steadyNow - std::chrono::seconds(1);
             if (steadyNow - lastShadow >= std::chrono::milliseconds(100)) {
                 auto& shadowCamera = static_cast<OrthographicCamera&>(*sunlight->shadow->camera);
@@ -2475,7 +2467,7 @@ int albert::runRenderer(int argc, char** argv) {
                 shadowCamera.nearPlane = 0.1f;
                 shadowCamera.farPlane = 300.f;
                 shadowCamera.updateProjectionMatrix();
-                renderer.shadowMap().needsUpdate = true;
+                if(auto* gl=graphics.gl()) gl->shadowMap().needsUpdate = true;
                 lastShadow = steadyNow;
             }
             Vector3 solarDirection = sunPosition;solarDirection.sub(earthPosition);
@@ -2559,8 +2551,8 @@ int albert::runRenderer(int argc, char** argv) {
                 snapshot.clock=frameTime;snapshot.simulation=moment;snapshot.simulation.utcSeconds=simulatedUtc;snapshot.approximatePositions=approximatePositions;commands.publish(std::move(snapshot));
             }
             eclipses.update(visualSettings.shadows);
-            renderer.render(*scene, *camera);
-            ui.render();
+            graphics.render(*scene, *camera);
+            graphics.ui();
 #ifdef ALBERT_HAS_RPC
             if(rpcPort && !rpc && introductionElapsed>=introductionDuration) {
                 rpc=std::make_unique<albert::rpc::Server>(commands,*rpcPort,&catalog);
@@ -2571,9 +2563,9 @@ int albert::runRenderer(int argc, char** argv) {
             if (smokeTest && ++renderedFrames >= 5) {
                 std::cout << "Smoke test OK: efemerides reais e 5 quadros renderizados."
                           << std::endl;
-                canvas.close();
+                graphics.close();
             }
-        });
+        })) {}
 
         catalog.close();
         commands.close();

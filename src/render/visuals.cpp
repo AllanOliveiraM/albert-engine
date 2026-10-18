@@ -522,7 +522,7 @@ void albert::PlanetVisuals::stageRegionalImages(RegionalImages images) {
     for(const auto& item:images.gpu) if(item) uploads_.add(item);
     uploadingRegion_=std::move(images);
 }
-void albert::PlanetVisuals::updateUploads(GLRenderer& renderer) {
+void albert::PlanetVisuals::updateUploads(GLRenderer* renderer) {
     uploads_.tick(renderer);
     if(!uploads_.active() && uploadingRegion_) {
         auto images=std::move(*uploadingRegion_);uploadingRegion_.reset();setRegionalImages(std::move(images));

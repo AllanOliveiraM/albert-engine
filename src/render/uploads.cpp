@@ -31,9 +31,14 @@ void albert::TextureUploads::add(std::shared_ptr<Texture> texture) {
     texture->image()=image.isFloat() ? Image(std::vector<float>(4,0.f),1,1) : Image(std::vector<unsigned char>(4,0),1,1);
     impl_->jobs.push_back({std::move(texture),std::move(image),0,false,mips});
 }
-void albert::TextureUploads::tick(GLRenderer& renderer) {
+void albert::TextureUploads::tick(GLRenderer* gl) {
     if(!active()) return;
     auto& state=*impl_;auto& job=state.jobs.front();
+    if(!gl){
+        if(job.mipmaps){job.texture->generateMipmaps=true;job.texture->minFilter=Filter::LinearMipmapLinear;}
+        job.texture->image()=std::move(job.image);job.texture->needsUpdate();state.jobs.pop_front();return;
+    }
+    auto& renderer=*gl;
     RenderTarget* previous=renderer.getRenderTarget();
     Vector4 viewport;renderer.getViewport(viewport);
     if(!state.scene) {

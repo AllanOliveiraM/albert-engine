@@ -244,7 +244,7 @@ void albert::SolidBodies::stage(RegionalImages images){
     for(const auto& t:images.gpu)if(t)uploads_.add(t);
     pending_=std::move(images);
 }
-void albert::SolidBodies::update(GLRenderer& renderer,PerspectiveCamera& camera,const Vector3& sun,double jd,const std::string& focus,bool details,float dt,const AuxiliaryLights& auxiliary){
+void albert::SolidBodies::update(GLRenderer* renderer,PerspectiveCamera& camera,const Vector3& sun,double jd,const std::string& focus,bool details,float dt,const AuxiliaryLights& auxiliary){
     uploads_.tick(renderer);
     if(pending_&&!uploads_.active()){
         auto images=std::move(*pending_);pending_.reset();auto& s=*surfaces_.at(images.body);s.release();s.inactive=0;s.region=std::move(images.gpu);

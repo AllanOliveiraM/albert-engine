@@ -9,7 +9,9 @@ public:
     TextureUploads();
     ~TextureUploads();
     void add(std::shared_ptr<threepp::Texture> texture);
-    void tick(threepp::GLRenderer& renderer);
+    // OpenGL: allocates, then streams rows within ~2 ms a frame. Null (WebGPU): publishes the
+    // next texture whole; the scene renderer uploads it on first use.
+    void tick(threepp::GLRenderer* renderer);
     bool active() const;
 private:
     struct Impl;

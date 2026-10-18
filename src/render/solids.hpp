@@ -27,7 +27,7 @@ public:
     bool takeEviction(){return std::exchange(evicted_,false);}
     bool uploading() const{return uploads_.active();}
     void stage(RegionalImages images);
-    void update(threepp::GLRenderer&,threepp::PerspectiveCamera&,const threepp::Vector3& sun,double jdTDB,const std::string& focus,bool details,float seconds,const AuxiliaryLights& auxiliary={});
+    void update(threepp::GLRenderer*,threepp::PerspectiveCamera&,const threepp::Vector3& sun,double jdTDB,const std::string& focus,bool details,float seconds,const AuxiliaryLights& auxiliary={});
 private:
     struct Surface;
     std::map<std::string,std::shared_ptr<threepp::Mesh>> nodes_;
