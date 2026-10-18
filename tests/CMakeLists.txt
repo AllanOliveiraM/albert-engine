@@ -134,3 +134,8 @@ add_test(NAME moon_mars_bodies COMMAND central_bodies_test ${CMAKE_CURRENT_SOURC
 add_executable(terrain_test terrain_test.cpp)
 target_link_libraries(terrain_test PRIVATE albert_providers threepp::threepp)
 add_test(NAME launch_site_terrain COMMAND terrain_test "${CMAKE_CURRENT_BINARY_DIR}/terrain cache")
+add_executable(atmosphere_test atmosphere_test.cpp)
+albert_copy_wgpu(atmosphere_test)
+target_link_libraries(atmosphere_test PRIVATE albert_gpu)
+add_test(NAME webgpu_atmosphere COMMAND atmosphere_test)
+set_tests_properties(webgpu_atmosphere PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "ALBERT_GPU=software")

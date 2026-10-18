@@ -10,6 +10,7 @@ As versões baixadas são fixadas com SHA-256 em `cmake/Dependencies.cmake` e `c
 | nlohmann/json | 3.12.0 | https://github.com/nlohmann/json — MIT |
 | Backend WebGPU do Dear ImGui | 1.92.6, adaptado à wgpu-native v29 em `third_party/imgui-wgpu/` | MIT, como o Dear ImGui |
 | wgpu-native | v29.0.1.1, release estático | https://github.com/gfx-rs/wgpu-native — MIT ou Apache 2.0 (`third_party/wgpu-native/`); embute crates Rust do wgpu/naga sob licenças MIT/Apache — inventário completo antes de qualquer distribuição |
+| Precomputed Atmospheric Scattering (Bruneton) | implementação de referência de 2017, portada para WGSL em `src/gpu/atmosphere.cpp` | https://github.com/ebruneton/precomputed_atmospheric_scattering — BSD 3 cláusulas (`third_party/bruneton/LICENSE`) |
 | ERFA | 2.0.1 | https://github.com/liberfa/erfa — BSD 3 cláusulas, derivada de IAU SOFA |
 | libcurl | 8.22.0 | https://curl.se — curl license |
 | gRPC | 1.71.0 | https://github.com/grpc/grpc — Apache 2.0 |
