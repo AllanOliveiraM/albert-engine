@@ -13,7 +13,7 @@ public:
     WGPUInstance instance()const{return instance_;}
     WGPUDevice device()const{return device_;}
     WGPUQueue queue()const{return queue_;}
-    WGPUTextureFormat format()const{return format_;} // Surface format (sRGB when offered).
+    WGPUTextureFormat format()const{return format_;} // Surface format: 8-bit unorm, not sRGB.
     const std::string& adapter()const{return adapterName_;}
     void resize(int width,int height);
     // The next surface image, or nullptr when it must be reconfigured (resize) or is lost.
@@ -21,7 +21,7 @@ public:
     void present();
 private:
     WGPUInstance instance_=nullptr;WGPUSurface surface_=nullptr;WGPUAdapter adapter_=nullptr;WGPUDevice device_=nullptr;WGPUQueue queue_=nullptr;
-    WGPUTextureFormat format_=WGPUTextureFormat_BGRA8UnormSrgb;WGPUTexture current_=nullptr;WGPUTextureView view_=nullptr;std::string adapterName_;
+    WGPUTextureFormat format_=WGPUTextureFormat_BGRA8Unorm;WGPUTexture current_=nullptr;WGPUTextureView view_=nullptr;std::string adapterName_;
     int width_=0,height_=0;
 };
 std::string text(WGPUStringView s);

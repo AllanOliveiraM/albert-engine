@@ -5,10 +5,12 @@ add_library(albert_imgui STATIC
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    ${PROJECT_SOURCE_DIR}/third_party/imgui-wgpu/imgui_impl_wgpu.cpp
 )
+target_compile_definitions(albert_imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_WGPU)
 target_include_directories(albert_imgui SYSTEM PUBLIC
-    ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
-target_link_libraries(albert_imgui PUBLIC glfw ${CMAKE_DL_LIBS})
+    ${PROJECT_SOURCE_DIR}/third_party/imgui-wgpu ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_link_libraries(albert_imgui PUBLIC glfw albert_wgpu ${CMAKE_DL_LIBS})
 
 add_library(albert_render STATIC application.cpp window_icon.cpp lighting.cpp layers.cpp solids.cpp ring_systems.cpp comets.cpp shapes.cpp objects.cpp rocks.cpp eclipses.cpp debris.cpp visuals.cpp uploads.cpp paths.cpp borders.cpp clouds.cpp asset_pack.cpp asset_downloads.cpp cache.cpp regional.cpp wms.cpp)
 target_include_directories(albert_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

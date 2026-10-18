@@ -53,7 +53,9 @@ Context::Context(GLFWwindow* window){
     queue_=wgpuDeviceGetQueue(device_);
     if(surface_){
         WGPUSurfaceCapabilities caps{};wgpuSurfaceGetCapabilities(surface_,adapter_,&caps);format_=caps.formatCount?caps.formats[0]:format_;
-        for(std::size_t i=0;i<caps.formatCount;++i)if(caps.formats[i]==WGPUTextureFormat_BGRA8UnormSrgb||caps.formats[i]==WGPUTextureFormat_RGBA8UnormSrgb){format_=caps.formats[i];break;}
+        // Not sRGB: shaders encode their output (tone mapping, then sRGB), so blending happens in
+        // encoded space exactly as in the OpenGL renderer, and ImGui's sRGB colours pass through.
+        for(std::size_t i=0;i<caps.formatCount;++i)if(caps.formats[i]==WGPUTextureFormat_BGRA8Unorm||caps.formats[i]==WGPUTextureFormat_RGBA8Unorm){format_=caps.formats[i];break;}
         wgpuSurfaceCapabilitiesFreeMembers(caps);
         int w=0,h=0;glfwGetFramebufferSize(window,&w,&h);resize(w,h);
     }

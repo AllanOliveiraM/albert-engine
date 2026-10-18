@@ -118,7 +118,7 @@ add_executable(weather_test weather_test.cpp)
 target_link_libraries(weather_test PRIVATE albert_providers)
 add_test(NAME live_weather COMMAND weather_test ${CMAKE_CURRENT_SOURCE_DIR}/gfs_tampa_2026101712_f000.grb2 "${CMAKE_CURRENT_BINARY_DIR}/weather cache" ${CMAKE_CURRENT_SOURCE_DIR}/gfs_tampa_2026101718_f006.grb2)
 add_executable(gpu_smoke gpu_smoke.cpp) # Manual: needs a display and a Vulkan driver.
-target_link_libraries(gpu_smoke PRIVATE albert_gpu glfw)
+target_link_libraries(gpu_smoke PRIVATE albert_gpu albert_imgui glfw)
 add_executable(central_bodies_test central_bodies_test.cpp)
 target_link_libraries(central_bodies_test PRIVATE albert_providers)
 add_test(NAME moon_mars_bodies COMMAND central_bodies_test ${CMAKE_CURRENT_SOURCE_DIR} "${CMAKE_CURRENT_BINARY_DIR}/gravity cache")
