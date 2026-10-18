@@ -18,7 +18,31 @@ nativo; descartados: eclipses de outras luas. Plano consolidado com pareceres do
 do Fable (convergentes); "fidelidade máxima" = **orçamento de erro por subsistema**,
 validado contra referências publicadas.
 
-**API gráfica: manter OpenGL/threepp agora.** O valor novo está no núcleo físico, que é
+**Decisão do Allan em 18/10/2026: migrar já para WebGPU (wgpu-native).** Máquina de referência:
+o notebook de desenvolvimento (i7-1165G7, Iris Xe + GeForce MX350, 14 GB, Ubuntu 26.04), meta
+1080p/60 com p99 < 25 ms. Plano de migração (inventário: 22 shaders GLSL próprios, materiais
+Standard/Phong do threepp com sombras PCF, uma cena e uma câmera por quadro, ImGui):
+
+1. **Fundação** (entregue: `src/gpu`, wgpu-native v29.0.1.1 estático em Linux/MinGW, DLL no MSVC;
+   superfície GLFW; roda em MX350, llvmpipe e Wine).
+2. **Janela e interface**: janela GLFW sem OpenGL que implementa a fonte de eventos do threepp
+   (OrbitControls intacto) e ImGui sobre `imgui_impl_wgpu`; `--renderer=webgpu`.
+3. **Renderizador WebGPU da cena threepp**: percorre a mesma cena (geometrias, atributos, texturas,
+   ordem de transparência e misturas do threepp), Z reverso com `depth32float`, tom ACES e
+   codificação sRGB no shader (troca de imagem não sRGB, como hoje); pontos viram quads
+   instanciados; texturas float filtráveis ou `rgba16float`; mipmaps próprios.
+4. **Porte dos materiais**: Standard/Phong com mapas (bump, alpha, light em `uv2`) e sombra PCF;
+   os 22 programas (órbitas, fronteiras, camadas, eclipse, detritos, rochas, cometas, sólidos,
+   névoa, anéis, Sol, coroa, nuvens, luzes noturnas, atmosfera, estrelas) em WGSL, cada um
+   comparado com a captura OpenGL da mesma vista.
+5. **Testes e troca**: renderização fora da tela com leitura de pixels (porte do `visual_test`),
+   perfil na máquina de referência, WebGPU como padrão e remoção do caminho OpenGL.
+6. **Ganhos da fase 4**: espalhamento de Bruneton com LUTs em compute, terreno CDLOD (Copernicus,
+   LOLA, MOLA) inclusive sob veículos na Lua e em Marte, iluminação rasante do solo.
+
+Até a paridade os dois caminhos convivem sobre a mesma cena; o OpenGL segue padrão.
+
+Histórico: **API gráfica: manter OpenGL/threepp agora.** O valor novo está no núcleo físico, que é
 independente do render; a cena tem poucos draws e os limites atuais (precisão, shaders) não
 dependem da API. Gatilhos para migrar: compute necessário (nuvens volumétricas, LUTs de
 espalhamento, FFT de oceano), alvo macOS ou quadro acima de 16 ms no hardware de
