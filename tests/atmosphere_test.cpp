@@ -5,6 +5,7 @@
 #include "gpu/atmosphere.hpp"
 #include "gpu/programs.hpp"
 #include "gpu/scene.hpp"
+#include "threepp/textures/DataTexture.hpp"
 #include <threepp/threepp.hpp>
 #include <threepp/materials/ShaderMaterial.hpp>
 #include <string>
@@ -235,7 +236,8 @@ struct V { @builtin(position) clip: vec4f, @location(0) world: vec3f };
             box->position.set(-1.6e-5f,ground+2e-6f,-3e-5f);scene.add(box);
             auto sunlight=DirectionalLight::create(0xffffff,2.4f);sunlight->position.set(0,std::sin(.5236f),std::cos(.5236f));scene.add(sunlight); // Toward the default target, the origin.
             PerspectiveCamera camera(50,static_cast<float>(iw)/ih,1e-7f,10);camera.position.set(0,ground,0);camera.lookAt(Vector3(0,ground,-1));
-            auto frameOf=[&](float strength){renderer.air={&earth,globe.get(),6378.137f,strength};
+            threepp::Texture* clouds=nullptr;float cloudOpacity=0; // Cloud shadows: a layer at 12 km.
+            auto frameOf=[&](float strength){renderer.air={&earth,globe.get(),6378.137f,strength};renderer.air.clouds=clouds;renderer.air.cloudShadow=cloudOpacity;
                 WGPUCommandEncoder en2=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);renderer.render(scene,camera,view,iw,ih,en2);
                 WGPUCommandBuffer cb2=wgpuCommandEncoderFinish(en2,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb2);wgpuCommandBufferRelease(cb2);wgpuCommandEncoderRelease(en2);
                 return readPixels(*gpu,target,iw,ih);};
@@ -254,6 +256,12 @@ struct V { @builtin(position) clip: vec4f, @location(0) world: vec3f };
             const auto water=px(smooth,48,36),soil=px(rough,48,36);
             std::printf("near the horizon: smooth %d %d %d, rough %d %d %d\n",water[0],water[1],water[2],soil[0],soil[1],soil[2]);
             check(water[2]>soil[2]+10&&water[2]-water[0]>soil[2]-soil[0],"Smooth water mirrors the sky (bluer, brighter)");
+            { // Under an overcast layer (density 1, opacity 0.88) the ground loses most of its sunlight, keeping the sky's.
+                auto overcast=DataTexture::create(ImageData(std::vector<unsigned char>(8*4*4,255)),8,4);overcast->needsUpdate();
+                clouds=overcast.get();cloudOpacity=.88f;const auto shaded=px(frameOf(1),48,60);clouds=nullptr;cloudOpacity=0;const auto clear=px(frameOf(1),48,60);
+                std::printf("ground under an overcast layer %d %d %d, clear %d %d %d\n",shaded[0],shaded[1],shaded[2],clear[0],clear[1],clear[2]);
+                check(shaded[0]<clear[0]*7/10&&shaded[0]>0,"Clouds shadow the ground (sunlight through the layer)");
+            }
             wgpuTextureViewRelease(view);wgpuTextureRelease(target);
         }
         if(albert::gpu::errors()){std::printf("FAIL WebGPU errors: %u\n",albert::gpu::errors());++failures;}

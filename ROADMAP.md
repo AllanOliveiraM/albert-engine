@@ -47,8 +47,9 @@ câmera, baixado em segundo plano; Alpes conferidos) e na Lua (LOLA em blocos de
 conferida). Em 18/10/2026 também: Marte (MOLA em blocos, Jezero conferida), a imagem regional nos
 nós, morph entre níveis, o chão do ar no relevo sob a câmera e a atmosfera de Marte nas mesmas tabelas
 (CO2 e poeira de profundidade óptica 0,5; céu cor de caramelo de dia e pôr do sol azul, com a
-assimetria da poeira por canal). Faltam nuvens ao vivo no modelo de ar, oceano e o solo regional mais
-claro (hoje escuro também no OpenGL).
+assimetria da poeira por canal), reflexo do céu na água lisa e sombra das nuvens no solo e nos
+veículos. Faltam ondas do oceano, nuvens volumétricas e o solo regional mais claro (hoje escuro
+também no OpenGL).
 
 Estado em 18/10/2026: etapas 1–5 entregues. Os 22 programas e os materiais embutidos rodam em WGSL;
 o `visual_test` passa nos dois renderizadores (llvmpipe e MX350); sombra PCF, MSAA 4×, texturas em

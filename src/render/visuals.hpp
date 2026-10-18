@@ -67,6 +67,9 @@ public:
     bool releaseDistantDetails(const std::string& focus,const threepp::Vector3& camera,bool enabled,float seconds);
     void updateImageDetail(const threepp::Vector3& camera, bool enabled);
     [[nodiscard]] float atmosphereVisibility() const { return displayedAtmosphere_; } // The air's shown strength, 0-1.
+    // The cloud layer's map as drawn (live or the pack's) and its opacity there (the shell's 0.88 × shown).
+    [[nodiscard]] threepp::Texture* cloudMap() const;
+    [[nodiscard]] float cloudOpacity() const { return .88f*displayedClouds_; }
     [[nodiscard]] const Terrain* earthTerrain() const { return earthTerrain_.get(); } // Null until assets load.
     [[nodiscard]] const Terrain* moonTerrain() const { return moonTerrain_.get(); }
 

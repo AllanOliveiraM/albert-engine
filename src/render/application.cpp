@@ -2591,6 +2591,7 @@ int albert::runRenderer(int argc, char** argv) {
                 const auto mars=solids.nodes().find("mars");const bool marsAir=mars!=solids.nodes().end()&&!graphics.gl()
                     &&camera->position.distanceTo(mars->second->position)<3.f*static_cast<float>(albert::core::surfaceRadius("mars")/albert::core::earthRadiusMeters);
                 solids.showAir("mars",marsAir,planets.atmosphereVisibility());
+                graphics.setClouds(marsAir?nullptr:planets.cloudMap(),12.f,planets.cloudOpacity()); // The cloud shell's height over the ellipsoid.
                 if(marsAir)graphics.setAir(mars->second.get(),6378.137f,planets.atmosphereVisibility(),0.f,true);
                 else{Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
                     graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}}

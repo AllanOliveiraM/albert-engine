@@ -765,6 +765,8 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     if(moonTerrainDetail_) moonTerrainDetail_->lightMapIntensity=fill;
 }
 
+threepp::Texture* albert::PlanetVisuals::cloudMap() const{
+    const auto* t=std::get_if<Texture*>(&cloudMaterial_->uniforms.at("cloudMap").value());return t?*t:nullptr;}
 void albert::PlanetVisuals::updateBorderMaterial(ShaderMaterial& material,const Vector3& cameraPosition) {
     material.uniforms.at("heightMap").setValue(textures_[5].get());
     const bool detailed=earthDetail_ && earthDetail_->visible && earthDetailBounds_;

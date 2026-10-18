@@ -31,8 +31,9 @@ terreno (agora gravação atômica, cabeçalho corrompido é apagado e baixado d
 contêm exceções); P2 frustum com raio sin θ (curto para faces: corda 2 sin θ/2); P2 falha de download
 esquecida (fica em `failed_` e volta quando a fila esvazia); P2 imagem regional de Marte nos nós; P2
 irradiância solar local perto de outro corpo (luz da cena 2,4/d², o céu e veículos na mesma escala).
-Todos com teste que falha no código antigo, exceto a luz local (fiação do aplicativo). Próximo: nuvens
-ao vivo no ar, oceano.
+Todos com teste que falha no código antigo, exceto a luz local (fiação do aplicativo); CI verde.
+Sombra das nuvens na luz do ar (mapa desenhado no grupo do quadro, bindings 9/10). Próximo: ondas
+do oceano, imagem regional para veículos na Lua/Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`

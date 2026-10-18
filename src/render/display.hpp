@@ -5,7 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
-namespace threepp {class Scene;class Camera;class GLRenderer;class Object3D;}
+namespace threepp {class Scene;class Camera;class GLRenderer;class Object3D;class Texture;}
 namespace albert {
 // Window, scene renderer and ImGui for one graphics backend: WebGPU (src/gpu, the default) or
 // threepp's OpenGL renderer (--renderer=opengl, and the fallback without a WebGPU adapter). `draw` draws the
@@ -35,6 +35,7 @@ public:
     // OpenGL: no effect (the atmosphere shell's own shader).
     // The air this frame (WebGPU): the Earth's, or Mars's when `mars`; groundKm as SceneRenderer::Air.
     void setAir(const threepp::Object3D* body,float kmPerUnit,float strength,float groundKm=0,bool mars=false);
+    void setClouds(threepp::Texture* map,float altitudeKm,float opacity); // Their shadows (WebGPU; SceneRenderer::Air).
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

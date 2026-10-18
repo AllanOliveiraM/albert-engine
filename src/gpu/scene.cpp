@@ -151,7 +151,7 @@ struct SceneRenderer::Impl {
     unsigned frame=0,drawn=0;bool floatFilterable=false;float tickNanoseconds=1;
     // Sun shadow map: depth from the light's orthographic camera, compared with PCF in the receivers.
     WGPUTexture shadowTexture=nullptr,dummyShadow=nullptr;WGPUTextureView shadowView=nullptr,dummyShadowView=nullptr;unsigned shadowSize=0;std::uint64_t shadowSerial=0,boundFrame=~0ull; // boundFrame: the shadow map serial in frameGroup (0: the dummy).
-    const Atmosphere* boundAir=nullptr;WGPUSampler airSampler=nullptr;WGPUTexture noVolume=nullptr;WGPUTextureView noVolumeView=nullptr;WGPUBuffer noAir=nullptr; // Placeholders without air.
+    const Atmosphere* boundAir=nullptr;std::uint64_t boundClouds=0;WGPUSampler airSampler=nullptr,cloudSampler=nullptr;WGPUTexture noVolume=nullptr;WGPUTextureView noVolumeView=nullptr;WGPUBuffer noAir=nullptr; // Placeholders without air.
     WGPUSampler shadowSampler=nullptr;WGPUBindGroup casterFrame=nullptr;WGPURenderPipeline shadowPipeline=nullptr;WGPUPipelineLayout shadowLayout=nullptr;WGPUShaderModule shadowModule=nullptr;
     // Scene-pass GPU time: two timestamps resolved into a buffer, read back a few frames later.
     WGPUQuerySet timestamps=nullptr;WGPUBuffer resolved=nullptr,readback=nullptr;bool mapping=false,mapPending=false;double gpuMs=-1;WGPUBufferMapCallbackInfo pendingMap{};
@@ -161,14 +161,16 @@ struct SceneRenderer::Impl {
             WGPUBindGroupLayoutDescriptor d{};d.entryCount=1;d.entries=&e;return wgpuDeviceCreateBindGroupLayout(device,&d);};
         objectLayout=uniformLayout(true);
         { // Frame: uniforms, the shadow depth map and its comparison sampler; the air's parameters, tables and sampler.
-            WGPUBindGroupLayoutEntry e[9]{};const auto both=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;
+            WGPUBindGroupLayoutEntry e[11]{};const auto both=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;
             e[0].binding=0;e[0].visibility=both;e[0].buffer.type=WGPUBufferBindingType_Uniform;
             e[1].binding=1;e[1].visibility=WGPUShaderStage_Fragment;e[1].texture.sampleType=WGPUTextureSampleType_Depth;e[1].texture.viewDimension=WGPUTextureViewDimension_2D;
             e[2].binding=2;e[2].visibility=WGPUShaderStage_Fragment;e[2].sampler.type=WGPUSamplerBindingType_Comparison;
             e[3].binding=3;e[3].visibility=both;e[3].buffer.type=WGPUBufferBindingType_Uniform;
             for(std::uint32_t i=4;i<8;++i){e[i].binding=i;e[i].visibility=both;e[i].texture.sampleType=WGPUTextureSampleType_Float;e[i].texture.viewDimension=i==5||i==6?WGPUTextureViewDimension_3D:WGPUTextureViewDimension_2D;}
             e[8].binding=8;e[8].visibility=both;e[8].sampler.type=WGPUSamplerBindingType_Filtering;
-            WGPUBindGroupLayoutDescriptor d{};d.entryCount=9;d.entries=e;frameLayout=wgpuDeviceCreateBindGroupLayout(device,&d);
+            e[9].binding=9;e[9].visibility=WGPUShaderStage_Fragment;e[9].texture.sampleType=WGPUTextureSampleType_Float;e[9].texture.viewDimension=WGPUTextureViewDimension_2D; // The cloud map (shadows).
+            e[10].binding=10;e[10].visibility=WGPUShaderStage_Fragment;e[10].sampler.type=WGPUSamplerBindingType_Filtering;
+            WGPUBindGroupLayoutDescriptor d{};d.entryCount=11;d.entries=e;frameLayout=wgpuDeviceCreateBindGroupLayout(device,&d);
         }
         frameBuffer=buffer(512,WGPUBufferUsage_Uniform);
         {WGPUTextureDescriptor d{};d.size={1,1,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_TextureBinding;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
@@ -176,6 +178,7 @@ struct SceneRenderer::Impl {
          WGPUSamplerDescriptor sd{};sd.addressModeU=sd.addressModeV=sd.addressModeW=WGPUAddressMode_ClampToEdge;sd.magFilter=sd.minFilter=WGPUFilterMode_Linear;sd.mipmapFilter=WGPUMipmapFilterMode_Nearest;
          sd.compare=WGPUCompareFunction_LessEqual;sd.lodMaxClamp=1;sd.maxAnisotropy=1;shadowSampler=wgpuDeviceCreateSampler(device,&sd);
          sd.compare=WGPUCompareFunction_Undefined;airSampler=wgpuDeviceCreateSampler(device,&sd);
+         sd.addressModeU=WGPUAddressMode_Repeat;cloudSampler=wgpuDeviceCreateSampler(device,&sd); // Longitude wraps.
          d.size={1,1,1};d.format=WGPUTextureFormat_RGBA8Unorm;d.dimension=WGPUTextureDimension_3D;noVolume=wgpuDeviceCreateTexture(device,&d);noVolumeView=wgpuTextureCreateView(noVolume,nullptr);}
         noAir=buffer(Atmosphere::parameterBytes,WGPUBufferUsage_Uniform);
         zeros=buffer(64,WGPUBufferUsage_Vertex);
@@ -201,24 +204,24 @@ struct SceneRenderer::Impl {
         for(auto b:{frameBuffer,objectBuffer,zeros,resolved,readback})if(b)wgpuBufferRelease(b);if(timestamps)wgpuQuerySetRelease(timestamps);
         if(frameGroup)wgpuBindGroupRelease(frameGroup);if(casterFrame)wgpuBindGroupRelease(casterFrame);if(objectGroup)wgpuBindGroupRelease(objectGroup);
         if(shadowView)wgpuTextureViewRelease(shadowView);if(shadowTexture)wgpuTextureRelease(shadowTexture);wgpuTextureViewRelease(dummyShadowView);wgpuTextureRelease(dummyShadow);wgpuSamplerRelease(shadowSampler);
-        wgpuSamplerRelease(airSampler);wgpuTextureViewRelease(noVolumeView);wgpuTextureRelease(noVolume);wgpuBufferRelease(noAir);
+        wgpuSamplerRelease(airSampler);wgpuSamplerRelease(cloudSampler);wgpuTextureViewRelease(noVolumeView);wgpuTextureRelease(noVolume);wgpuBufferRelease(noAir);
         if(shadowPipeline)wgpuRenderPipelineRelease(shadowPipeline);if(shadowLayout)wgpuPipelineLayoutRelease(shadowLayout);if(shadowModule)wgpuShaderModuleRelease(shadowModule);
         wgpuBindGroupLayoutRelease(frameLayout);wgpuBindGroupLayoutRelease(objectLayout);
         wgpuSamplerRelease(linear);wgpuTextureViewRelease(white);wgpuTextureRelease(whiteTexture);wgpuTextureViewRelease(black);wgpuTextureRelease(blackTexture);
         if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);if(colourView)wgpuTextureViewRelease(colourView);if(colour)wgpuTextureRelease(colour);
     }
-    WGPUBindGroup frameWith(WGPUTextureView shadow,const Atmosphere* a){ // a: ready tables, or null for placeholders.
-        WGPUBindGroupEntry e[9]{};e[0].binding=0;e[0].buffer=frameBuffer;e[0].size=512;e[1].binding=1;e[1].textureView=shadow;e[2].binding=2;e[2].sampler=shadowSampler;
+    WGPUBindGroup frameWith(WGPUTextureView shadow,const Atmosphere* a,WGPUTextureView clouds){ // a: ready tables, or null for placeholders.
+        WGPUBindGroupEntry e[11]{};e[0].binding=0;e[0].buffer=frameBuffer;e[0].size=512;e[1].binding=1;e[1].textureView=shadow;e[2].binding=2;e[2].sampler=shadowSampler;
         e[3].binding=3;e[3].buffer=a?a->parameters():noAir;e[3].size=Atmosphere::parameterBytes;
         const WGPUTextureView tables[4]{a?a->transmittance():white,a?a->scattering():noVolumeView,a?a->mie():noVolumeView,a?a->irradiance():white};
         for(std::uint32_t i=0;i<4;++i){e[4+i].binding=4+i;e[4+i].textureView=tables[i];}
-        e[8].binding=8;e[8].sampler=airSampler;
-        WGPUBindGroupDescriptor d{};d.layout=frameLayout;d.entryCount=9;d.entries=e;return wgpuDeviceCreateBindGroup(device,&d);
+        e[8].binding=8;e[8].sampler=airSampler;e[9].binding=9;e[9].textureView=clouds;e[10].binding=10;e[10].sampler=cloudSampler;
+        WGPUBindGroupDescriptor d{};d.layout=frameLayout;d.entryCount=11;d.entries=e;return wgpuDeviceCreateBindGroup(device,&d);
     }
-    void bindFrame(WGPUTextureView shadow,const Atmosphere* a){
-        if(!casterFrame)casterFrame=frameWith(dummyShadowView,nullptr); // The shadow pass cannot sample the map it writes.
-        const std::uint64_t key=shadow==dummyShadowView?0:shadowSerial;if(frameGroup&&boundFrame==key&&boundAir==a)return;
-        if(frameGroup)wgpuBindGroupRelease(frameGroup);boundFrame=key;boundAir=a;frameGroup=frameWith(shadow,a);
+    void bindFrame(WGPUTextureView shadow,const Atmosphere* a,WGPUTextureView clouds,std::uint64_t cloudSerial){
+        if(!casterFrame)casterFrame=frameWith(dummyShadowView,nullptr,black); // The shadow pass cannot sample the map it writes.
+        const std::uint64_t key=shadow==dummyShadowView?0:shadowSerial;if(frameGroup&&boundFrame==key&&boundAir==a&&boundClouds==cloudSerial)return;
+        if(frameGroup)wgpuBindGroupRelease(frameGroup);boundFrame=key;boundAir=a;boundClouds=cloudSerial;frameGroup=frameWith(shadow,a,clouds);
     }
     WGPURenderPipeline shadowCaster(){ // Depth only, positions through the sun's view-projection.
         if(shadowPipeline)return shadowPipeline;
@@ -527,7 +530,10 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         Vector3 toward=sun;toward.transformDirection(planet); // Linear part, normalised: the ellipsoid maps to the model's sphere.
         f[92]=eye.x;f[93]=eye.y;f[94]=eye.z;f[95]=std::min(air.strength,1.f);f[96]=toward.x;f[97]=toward.y;f[98]=toward.z;
     }
-    g.bindFrame(shadowing?g.shadowView:g.dummyShadowView,airTables);
+    // Cloud shadows: the layer's map (its GPU copy is the cloud material's), its height and opacity.
+    std::uint64_t cloudSerial=2;WGPUTextureView cloudView=g.black;
+    if(airTables&&air.clouds&&air.cloudShadow>0){cloudView=g.view(air.clouds,true,cloudSerial);f[100]=air.cloudKm;f[101]=std::min(air.cloudShadow,1.f);}
+    g.bindFrame(shadowing?g.shadowView:g.dummyShadowView,airTables,cloudView,cloudSerial);
     Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);f[32]=eye.x;f[33]=eye.y;f[34]=eye.z;f[35]=1;
     f[36]=static_cast<float>(width);f[37]=static_cast<float>(height);f[38]=camera.nearPlane;
     f[40]=sun.x;f[41]=sun.y;f[42]=sun.z;f[43]=sunOn;f[44]=sunColor.r;f[45]=sunColor.g;f[46]=sunColor.b;f[48]=ambient.r;f[49]=ambient.g;f[50]=ambient.b;f[52]=exposure;f[53]=toneMapping?1.f:0.f;

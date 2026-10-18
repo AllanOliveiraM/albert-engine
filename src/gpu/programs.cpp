@@ -22,6 +22,7 @@ struct Frame {
     planet: mat4x4f,         // World to the air's planet frame (km from its centre).
     air: vec4f,              // Camera in the planet frame; w: strength (0: no air this frame).
     airSun: vec4f,           // Towards the sun in the planet frame; w: the model's ground offset (km, <= 0).
+    clouds: vec4f,           // Cloud layer: x its height over the air's ground (km), y its opacity (0: none).
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -62,6 +63,8 @@ const char* const air=R"(
 @group(0) @binding(6) var airMie: texture_3d<f32>;
 @group(0) @binding(7) var airIrradiance: texture_2d<f32>;
 @group(0) @binding(8) var airSampler: sampler;
+@group(0) @binding(9) var airClouds: texture_2d<f32>; // Density in green, u and v as the globe's.
+@group(0) @binding(10) var airCloudSampler: sampler;
 struct Sky { radiance: vec3f, transmittance: vec3f }; // Radiance relative to the sun's colour.
 fn airScatter(r: f32, mu: f32, muS: f32, nu: f32, ground: bool) -> ScatterPair {
     let uvwz = scatteringUvwz(r, mu, muS, nu, ground);
@@ -107,6 +110,15 @@ fn horizonPoint(c: vec3f, toward: vec3f) -> vec3f { // The model sphere's horizo
     let h = toward - dot(toward, up) * up; let hl = max(length(h), 1e-9);
     return up * rc + (h / hl * (b0 / rc) - up * (rho / rc)) * rho;
 }
+// Sunlight through the cloud layer over a point (planet frame, radius r): the layer's opacity where the
+// ray toward the sun crosses it (1 above it, or without clouds).
+fn cloudShadow(p: vec3f, r: f32) -> f32 {
+    let top = bottomRadius() + frame.clouds.x; let sun = frame.airSun.xyz;
+    if (frame.clouds.y <= 0.0 || r >= top) { return 1.0; }
+    let rmu = dot(p, sun); let crossing = normalize(p + sun * (-rmu + sqrt(max(rmu * rmu - (r - top) * (r + top), 0.0))));
+    let uv = vec2f(atan2(crossing.z, -crossing.x) / (2.0 * AIR_PI), asin(clamp(crossing.y, -1.0, 1.0)) / AIR_PI + 0.5);
+    return 1.0 - frame.clouds.y * textureSampleLevel(airClouds, airCloudSampler, uv, 0.0).g;
+}
 struct AirLight { sun: vec3f, sky: vec3f }; // Sunlight reaching a point (fraction of the sun's colour); sky irradiance (relative to it).
 fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {
     if (frame.air.w <= 0.0) { return AirLight(vec3f(1.0), vec3f(0.0)); }
@@ -114,7 +126,7 @@ fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {
     let up = p / r; let muS = dot(up, frame.airSun.xyz); let rc = max(r, bottomRadius());
     let n = normalize((frame.planet * vec4f(worldNormal, 0.0)).xyz);
     let sky = lookupIrradiance(airIrradiance, airSampler, rc, muS) * (1.0 + dot(n, up)) * 0.5;
-    return AirLight(mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, muS), frame.air.w), sky * frame.air.w);
+    return AirLight(mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, muS), frame.air.w) * cloudShadow(p, r), sky * frame.air.w);
 }
 fn skyHitsGround(c: vec3f, ray: vec3f) -> bool { let e = airEntry(c, ray); return e.hit && intersectsGround(e.r, e.rmu / e.r); }
 // The air between c and c + segment (planet frame, km). The segment comes from camera-relative world

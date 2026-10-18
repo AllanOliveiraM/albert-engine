@@ -65,10 +65,13 @@ float albert::Display::aspect()const{return impl_->canvas?impl_->canvas->aspect(
 void albert::Display::onResize(std::function<void(WindowSize)> f){if(impl_->canvas)impl_->canvas->onWindowResize(std::move(f));else impl_->window->onResize(std::move(f));}
 void albert::Display::setShadows(bool enabled){if(impl_->renderer)impl_->renderer->shadowMap().enabled=enabled;else impl_->scene->shadows=enabled;}
 void albert::Display::setExposure(float value){if(impl_->renderer)impl_->renderer->toneMappingExposure=value;else impl_->scene->exposure=value;}
+void albert::Display::setClouds(threepp::Texture* map,float altitudeKm,float opacity){
+    auto& d=*impl_;if(!d.scene)return;d.scene->air.clouds=map;d.scene->air.cloudKm=altitudeKm;d.scene->air.cloudShadow=map?opacity:0.f;}
 void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength,float groundKm,bool mars){
     auto& d=*impl_;if(!d.scene)return;auto& air=mars?d.marsAir:d.earthAir; // Each precomputed once, when first needed.
     if(!air&&body&&strength>0){air=std::make_unique<gpu::Atmosphere>(*d.context,mars?gpu::marsAtmosphere():gpu::earthAtmosphere());d.scene->airSteps=d.context->software()?1:4;}
-    d.scene->air={air.get(),body,kmPerUnit,strength,groundKm};
+    const auto clouds=d.scene->air.clouds;const float cloudKm=d.scene->air.cloudKm,cloudShadow=d.scene->air.cloudShadow;
+    d.scene->air={air.get(),body,kmPerUnit,strength,groundKm,clouds,cloudKm,cloudShadow};
 }
 float albert::Display::exposure()const{return impl_->renderer?impl_->renderer->toneMappingExposure:impl_->scene->exposure;}
 namespace {

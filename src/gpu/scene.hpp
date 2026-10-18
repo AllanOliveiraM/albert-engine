@@ -1,7 +1,7 @@
 #pragma once
 #include "gpu/context.hpp"
 #include <memory>
-namespace threepp {class Scene;class Camera;class Object3D;}
+namespace threepp {class Texture;class Scene;class Camera;class Object3D;}
 namespace albert::gpu {
 class Atmosphere;
 // Draws a threepp scene with WebGPU, as threepp's GLRenderer would: frustum culling, opaque then
@@ -24,7 +24,10 @@ public:
     // precomputation advances `airSteps` dispatches a frame and the air shows once it is complete.
     // groundKm (<= 0): the model's ground lowered to the terrain under the camera where that lies below
     // the body's reference surface (the Cape: ~-0.027), so the eye never sits under the model's ground.
-    struct Air {Atmosphere* atmosphere=nullptr;const threepp::Object3D* body=nullptr;float kmPerUnit=1,strength=0,groundKm=0;} air;
+    // clouds: the cloud layer's map (density in green, u and v as the globe's), cloudKm above the
+    // air's ground, cloudShadow its opacity: sunlight crossing it there is dimmed (no clouds: null).
+    struct Air {Atmosphere* atmosphere=nullptr;const threepp::Object3D* body=nullptr;float kmPerUnit=1,strength=0,groundKm=0;
+        threepp::Texture* clouds=nullptr;float cloudKm=12,cloudShadow=0;} air;
     unsigned airSteps=4;
     // Clears target (scene background) and depth, then draws, recording into encoder. Uniforms are
     // written through the queue: submit this encoder before the next render().
