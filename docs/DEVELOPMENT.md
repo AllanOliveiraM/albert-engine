@@ -338,8 +338,8 @@ do Sol da cena é a irradiância ali (2,4/d²): céu, luz do ar, terreno e veíc
 terreno ativo os remendos regionais ficam ocultos e a imagem regional vai para os nós inteiramente
 dentro da região (`Terrain::detail`: o material do remendo sem bump, coordenadas sobre a região em
 `uv`, as globais em `uv2` para o mapa de preenchimento); nós que cruzam a borda ficam com o mapa
-global. Um veículo perto do solo terrestre mantém o detalhe do sítio (antes era liberado 3 s depois de
-cada carga e baixado de novo).
+global. Um veículo perto do solo de um corpo (Terra, Lua, Marte) pede o detalhe regional dele e o
+mantém (antes só a Terra, e era liberado 3 s depois de cada carga e baixado de novo).
 `Terrain::ground` dá o raio do relevo desenhado sob um ponto (nó mais fino construído, bilinear
 entre postes): a câmera fica acima dele perto de um veículo e o plano próximo respeita a altura
 sobre ele (uma órbita longa arrastada até o horizonte de um módulo cortava o chão inteiro).

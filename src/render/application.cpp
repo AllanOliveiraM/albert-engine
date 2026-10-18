@@ -2476,7 +2476,16 @@ int albert::runRenderer(int argc, char** argv) {
             const float photographicExposure=(exposed==targets::Moon?2.1f:solids.contains(exposed)?std::clamp(1.05f*bodyAu*bodyAu,.25f,1200.f):1.05f)
                 *(1.f+planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f)));
             graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
-            solids.update(graphics.gl(),*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary,visualSettings.terrain);
+            // The body whose regional detail the view wants: the focus, or the body under a focused vehicle near
+            // its ground with the camera (its site: the Cape, a lunar or Martian lander).
+            std::string detailFocus=std::string(targetId(focus));
+            if(objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"){
+                const Vector3 vehicle=objects.nodes().at(focus)->position;
+                auto near=[&](const Object3D& body,float radius){return camera->position.distanceTo(body.position)<1.05f*radius&&vehicle.distanceTo(body.position)<1.01f*radius;};
+                if(near(*earth,1.f))detailFocus="earth";else if(near(*moon,static_cast<float>(1737.4/6378.137)))detailFocus="moon";
+                else for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id)&&near(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters)))detailFocus=id;
+            }
+            solids.update(graphics.gl(),*camera,sunPosition,tdb,detailFocus,visualSettings.quality,dt,visualSettings.auxiliary,visualSettings.terrain);
             {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
              comets.update(*camera,sunPosition,nuclei,cometStates,tdb,dt);}
             objects.updateLighting(*camera,sunPosition,visualSettings.auxiliary,dt);
@@ -2512,10 +2521,9 @@ int albert::runRenderer(int argc, char** argv) {
                 const double lon = albert::longitude(std::atan2(earthCamera.z,-earthCamera.x)*180./PI-180.);
                 cloudSync.requestDetail(albert::cloudRegion(lon,latitude,earthCamera.length(),camera->aspect,camera->fov));
             } else cloudSync.requestDetail(std::nullopt);
-            // A vehicle near the Earth's ground keeps the launch-site detail it asked for (it was released
-            // 3 s after each load, as if the camera had left the Earth, and loaded again).
-            const bool vehicleNearEarth=objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"&&earthCamera.length()<1.05f;
-            const bool planetReleased=planets.releaseDistantDetails(vehicleNearEarth?std::string("earth"):std::string(focus),camera->position,visualSettings.quality,elapsed);
+            // A vehicle near a body's ground keeps the detail it asked for (it was released 3 s after each load,
+            // as if the camera had left the body, and loaded again).
+            const bool planetReleased=planets.releaseDistantDetails(detailFocus,camera->position,visualSettings.quality,elapsed);
             const bool solidReleased=solids.takeEviction();
             const bool released=planetReleased||solidReleased;
             if(released)regional.retry();
@@ -2542,16 +2550,16 @@ int albert::runRenderer(int argc, char** argv) {
                 const double altitude=std::max(.1,(earthCamera.length()-1.)*6378.137); // km; finer cells near the ground, down to ~10 km.
                 const int finer=std::clamp(static_cast<int>(std::floor(std::log2(150./altitude))),0,4);
                 regional.request(albert::viewRegion(lon,latitude,earthCamera.length(),1.,camera->aspect,camera->fov,1.40625/(1<<finer)));
-            } else if(visualSettings.quality && focus==targets::Moon && camera->position.distanceTo(moonPosition)<.8f) {
+            } else if(visualSettings.quality && detailFocus=="moon" && camera->position.distanceTo(moonPosition)<.8f) {
                 Vector3 local=camera->position;moon->worldToLocal(local);
                 const double latitude=std::asin(std::clamp(local.y/local.length(),-1.f,1.f))*180./PI;
                 const double lon=albert::longitude(std::atan2(local.z,-local.x)*180./PI-180.);
                 regional.request(albert::viewRegion(lon,latitude,local.length(),1737.4/6378.137,camera->aspect,camera->fov,1.40625),"moon");
-            } else if(visualSettings.quality&&solids.contains(focus)&&(!solids.hazy(focus)||solids.surfaceView(focus))&&camera->position.distanceTo(solids.nodes().at(focus)->position)<radiusFor(focus)*2.2f){
-                Vector3 local=camera->position;solids.nodes().at(focus)->worldToLocal(local);
+            } else if(visualSettings.quality&&solids.contains(detailFocus)&&(!solids.hazy(detailFocus)||solids.surfaceView(detailFocus))&&camera->position.distanceTo(solids.nodes().at(detailFocus)->position)<radiusFor(detailFocus)*2.2f){
+                Vector3 local=camera->position;solids.nodes().at(detailFocus)->worldToLocal(local);
                 const double latitude=std::asin(std::clamp(local.y/local.length(),-1.f,1.f))*180./PI;
                 const double lon=albert::longitude(std::atan2(local.z,-local.x)*180./PI-180.);
-                regional.request(albert::viewRegion(lon,latitude,local.length(),radiusFor(focus),camera->aspect,camera->fov,1.40625),focus);
+                regional.request(albert::viewRegion(lon,latitude,local.length(),radiusFor(detailFocus),camera->aspect,camera->fov,1.40625),detailFocus);
             } else regional.request(std::nullopt);
             if(auto images=(planets.uploading()||solids.uploading()) ? std::nullopt : regional.poll(); images) {
                 if(!images->error.empty()) std::cerr<<"Detalhes regionais: "<<images->error<<std::endl;
