@@ -2488,10 +2488,21 @@ int albert::runRenderer(int argc, char** argv) {
             }
             if((focus!=lastRegionalFocus&&(solids.contains(focus)||solids.contains(lastRegionalFocus)))||(lastDetailQuality!=static_cast<bool>(visualSettings.quality)&&solids.contains(focus)))regional.retry();
             lastRegionalFocus=focus;lastDetailQuality=visualSettings.quality;
-            if(visualSettings.quality && focus==targets::Earth && earthCamera.length()<2.2f) {
+            Vector3 focusSurface; // An external object near the ground: launch-site detail around its ground point.
+            const bool nearGround=visualSettings.quality&&objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"
+                &&(focusSurface=objects.nodes().at(focus)->position,earth->worldToLocal(focusSurface),focusSurface.length()<1.01f)&&earthCamera.length()<1.05f;
+            if(nearGround){
+                const double latitude=albert::geodeticLatitude(std::asin(std::clamp(focusSurface.y/focusSurface.length(),-1.f,1.f)))*180./PI;
+                const double lon=albert::longitude(std::atan2(focusSurface.z,-focusSurface.x)*180./PI-180.);
+                constexpr double cell=.0439453125,half=.0439453125; // ~10 km box on a 0.044° lattice: 30 m relief.
+                const double south=std::floor(latitude/cell)*cell-half,west=std::floor(lon/cell)*cell-half;
+                regional.request(albert::GeoRegion{west,south,west+2*half+cell,south+2*half+cell});
+            } else if(visualSettings.quality && focus==targets::Earth && earthCamera.length()<2.2f) {
                 const double latitude=albert::geodeticLatitude(std::asin(std::clamp(earthCamera.y/earthCamera.length(),-1.f,1.f)))*180./PI;
                 const double lon=albert::longitude(std::atan2(earthCamera.z,-earthCamera.x)*180./PI-180.);
-                regional.request(albert::viewRegion(lon,latitude,earthCamera.length(),1.,camera->aspect,camera->fov,1.40625));
+                const double altitude=std::max(.1,(earthCamera.length()-1.)*6378.137); // km; finer cells near the ground, down to ~10 km.
+                const int finer=std::clamp(static_cast<int>(std::floor(std::log2(150./altitude))),0,4);
+                regional.request(albert::viewRegion(lon,latitude,earthCamera.length(),1.,camera->aspect,camera->fov,1.40625/(1<<finer)));
             } else if(visualSettings.quality && focus==targets::Moon && camera->position.distanceTo(moonPosition)<.8f) {
                 Vector3 local=camera->position;moon->worldToLocal(local);
                 const double latitude=std::asin(std::clamp(local.y/local.length(),-1.f,1.f))*180./PI;

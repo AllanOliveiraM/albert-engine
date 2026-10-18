@@ -84,6 +84,7 @@ std::string httpGet(const std::string& url, DownloadProgress* progress,HttpOptio
     curl_easy_setopt(curl.get(), CURLOPT_LOW_SPEED_TIME, 20L);
     curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "AlbertEngine/0.2 (+https://github.com/AllanOliveiraM/albert-engine)");
+    if(!options.range.empty())curl_easy_setopt(curl.get(),CURLOPT_RANGE,options.range.c_str());
     if (progress) {
         curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
         curl_easy_setopt(curl.get(), CURLOPT_XFERINFOFUNCTION, reportProgress);
@@ -91,6 +92,7 @@ std::string httpGet(const std::string& url, DownloadProgress* progress,HttpOptio
     }
 
     const auto code = curl_easy_perform(curl.get());
+    if(!options.range.empty()&&code==CURLE_OK){long status=0;curl_easy_getinfo(curl.get(),CURLINFO_RESPONSE_CODE,&status);if(status!=206)throw std::runtime_error("HTTP: server ignored the byte range");}
     if (progress) progress->checkCancelled();
     if(response.overflow)throw std::runtime_error("HTTP response exceeds configured size limit");
     if (code != CURLE_OK) {

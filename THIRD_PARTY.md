@@ -66,6 +66,15 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - CelesTrak (T. S. Kelso): índices de clima espacial `SW-Last5Years.csv`/`SW-All.csv`
   baixados em uso (https://celestrak.org/SpaceData/), com dados de NOAA/SWPC, GFZ Potsdam e
   NRCan; recorte de 2026-10-12 a 22 em `tests/weather_test.cpp`.
+- Copernicus DEM GLO-30 (relevo de 30 m baixado em uso por faixas de bytes do registro aberto
+  na AWS, https://registry.opendata.aws/copernicus-dem/): "produced using Copernicus WorldDEM-30
+  © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS
+  by the European Union and ESA; all rights reserved". The organisations in charge of the
+  Copernicus programme by law or by delegation do not incur any liability for any use of the
+  Copernicus WorldDEM-30.
+- NASA Global Imagery Browse Services (GIBS) / NASA-USGS WELD (Web-Enabled Landsat Data):
+  composição anual Landsat de 2000 a ~31 m (`Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual`),
+  baixada em uso para o detalhe dos sítios de lançamento, https://gibs.earthdata.nasa.gov.
 - NASA GIBS: paleta pública de fração de nuvens MODIS, convertida para JSON,
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml.
 - Planetas e luas (créditos e limites por corpo em `assets/planetary-sources.json`,

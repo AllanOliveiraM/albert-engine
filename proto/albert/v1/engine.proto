@@ -189,6 +189,7 @@ message CreateFlightRequest {
   enum Weather { WEATHER_AUTOMATIC=0; STANDARD_ATMOSPHERE=1; LIVE_GFS=2; }
   Weather weather=11;
   ImuSettings imu=12;
+  bool terrain_height=13; // Site height from Copernicus DEM 30 m + EGM2008 geoid (ellipsoidal), resolved at creation.
 }
 // Inertial measurement unit and barometer errors (IEEE 952 terms, representative grades);
 // the seed makes the noise reproducible.

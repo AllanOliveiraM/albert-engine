@@ -13,6 +13,7 @@ struct RegionalImages {
     int level=0;
     GeoRegion region;
     bool textureOnly=false; // Measured base mesh stays intact when imagery changes.
+    float lift=20;unsigned segments=0; // Height bias (m) over the base sphere; mesh resolution (0: from the imagery).
     std::optional<threepp::Image> day,night,roughness,height,surfaceMask;
     std::shared_ptr<threepp::BufferGeometry> geometry;
     std::array<std::shared_ptr<threepp::Texture>,5> gpu;

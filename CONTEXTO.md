@@ -1,5 +1,12 @@
 # Albert Engine — contexto para continuidade
 
+**Fase 4 iniciada:** relevo Copernicus DEM 30 m (`src/providers/terrain.*`: COG por faixa de
+bytes, DEFLATE + preditor 3, cache por bloco; Everest 8.738 m no tile real) e imagem Landsat WELD
+2000 (NASA GIBS, ~31 m) no detalhe regional da Terra para regiões ≤2° ou ao redor de um objeto
+focado perto do solo; `terrain_height` no voo. Pendente: a renderização no nível do solo sai
+escura (iluminação/atmosfera do shader atual) — é o trabalho de espalhamento atmosférico da fase 4,
+que depende da máquina de referência e da decisão de API gráfica (perguntar ao Allan).
+
 **Revisão do Codex da fase 3 (4 P1, 4 P2) corrigida com regressões:** parada do tempo real
 interrompível (condition variable, envio com tempo-limite de 200 ms), início/parada serializados,
 SIGPIPE suprimido, tabela de clima espacial limitada a 200 mil dias, pedaços de 512 KiB, no máximo

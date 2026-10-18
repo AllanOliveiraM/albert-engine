@@ -7,6 +7,7 @@
 #include "physics/weather.hpp"
 #include "providers/gfs.hpp"
 #include "providers/space_weather.hpp"
+#include "providers/terrain.hpp"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -237,7 +238,16 @@ grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,cons
     if(r.focus_camera())(void)wait(bridge.submit(core::Focus{objectId,true}));
     published=std::chrono::steady_clock::now();fill(out);return grpc::Status::OK;
 }
-grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api::CreateFlightRequest* r,api::FlightSample* out){
+grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api::CreateFlightRequest* request,api::FlightSample* out){
+    api::CreateFlightRequest resolved=*request;const api::CreateFlightRequest* r=&resolved;
+    if(r->terrain_height()){ // Recorded as an explicit height: replay needs no terrain data.
+        const auto& site=r->site();
+        if(!(std::abs(site.latitude_degrees())<=90)||!finite(site.longitude_degrees()))return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid launch site"};
+        try{DownloadProgress progress;const double lon=site.longitude_degrees()-360.*std::floor((site.longitude_degrees()+180.)/360.);
+            const double h=providers::copernicusDem().height(site.latitude_degrees(),lon,progress)+ph::geoidHeight(site.latitude_degrees()*deg,lon*deg);
+            resolved.mutable_site()->set_height_meters(h);resolved.set_terrain_height(false);}
+        catch(const std::exception& e){return{grpc::StatusCode::UNAVAILABLE,std::string("Terrain unavailable: ")+e.what()};}
+    }
     Prepared p;
     const auto shown=impl_->bridge.snapshot();
     try{p=prepare(*r,r->has_utc_unix_seconds()?r->utc_unix_seconds():shown?shown->simulation.utcSeconds:time::simulation().read().utcSeconds);}

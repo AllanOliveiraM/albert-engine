@@ -1,4 +1,8 @@
 #include "regional.hpp"
+#include "wms.hpp"
+#include "physics/earth.hpp"
+#include "providers/terrain.hpp"
+#include "stb_image.h"
 #include "asset_pack.hpp"
 #include "core/bodies.hpp"
 #include "threepp/geometries/SphereGeometry.hpp"
@@ -7,6 +11,7 @@
 using namespace threepp;
 #include "threepp/loaders/ImageLoader.hpp"
 #include <fstream>
+#include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <vector>
@@ -44,9 +49,23 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
             const auto pack=visualAssetPack();
             result.textureOnly=pack->hasPayload("v1/"+body+"/shape.bin");
             progress.stage("Lendo detalhes incluidos",0);
-            result.day=pack->image(body+"-day",region,4096,progress);
+            bool site=false;
+            if(body=="earth"&&region.east-region.west<=2.)try{ // Launch-site detail: 31 m Landsat composite, Copernicus 30 m relief over the EGM2008 geoid.
+                progress.stage("Baixando imagem Landsat (NASA GIBS)",0);
+                const auto jpeg=fetchWms([](const GeoRegion& r,unsigned w,unsigned h){std::ostringstream u;u<<std::setprecision(12)<<"https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0"
+                    "&LAYERS=Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual&CRS=EPSG:4326&BBOX="<<r.south<<","<<r.west<<","<<r.north<<","<<r.east<<"&WIDTH="<<w<<"&HEIGHT="<<h<<"&FORMAT=image/jpeg&TIME=2000-12-01";return u.str();},region,2048,2048,progress);
+                int w=0,h=0;std::unique_ptr<stbi_uc,decltype(&stbi_image_free)> rgba(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(jpeg.data()),static_cast<int>(jpeg.size()),&w,&h,nullptr,4),stbi_image_free);
+                if(!rgba)throw std::runtime_error("Unreadable Landsat image");
+                progress.stage("Baixando relevo Copernicus",0);constexpr unsigned posts=385;
+                const auto heights=providers::copernicusDem().heights(region.west,region.south,region.east,region.north,posts,posts,progress);
+                const float geoid=static_cast<float>(physics::geoidHeight((region.south+region.north)*std::numbers::pi/360.,(region.west+region.east)*std::numbers::pi/360.));
+                std::vector<float> relief(static_cast<std::size_t>(posts)*posts*4,1.f);for(std::size_t i=0;i<heights.size();++i)relief[4*i]=heights[i]+geoid; // Ellipsoidal.
+                result.day=Image(std::vector<unsigned char>(rgba.get(),rgba.get()+static_cast<std::size_t>(w)*h*4),static_cast<unsigned>(w),static_cast<unsigned>(h));
+                result.height=Image(std::move(relief),posts,posts);result.lift=.5f;result.segments=posts-1;site=true;
+            }catch(const std::exception& e){if(progress.cancelled)throw;std::cerr<<"Terreno do sitio indisponivel: "<<e.what()<<std::endl;}
+            if(!site)result.day=pack->image(body+"-day",region,4096,progress);
             if(body=="earth") result.night=pack->image("earth-night",region,4096,progress);
-            result.height=pack->contains(body+"-height")?pack->image(body+"-height",region,1024,progress):Image(std::vector<float>{0,0,0,1},1,1);
+            if(!site)result.height=pack->contains(body+"-height")?pack->image(body+"-height",region,1024,progress):Image(std::vector<float>{0,0,0,1},1,1);
             if(result.day) {
                 auto& image=*result.day;auto& rgba=image.data();
                 std::vector<unsigned char> rough(body=="earth"?rgba.size():0,255);
@@ -94,7 +113,7 @@ void albert::prepareRegionalImages(RegionalImages& images) {
     images.surfaceMask=Image(std::move(mask),maskWidth,maskHeight);
     const float radians=static_cast<float>(pi/180.);
     const float radius=static_cast<float>(core::surfaceRadius(images.body)/core::earthRadiusMeters);
-    const unsigned segments=images.body=="earth"||images.body=="moon" ?
+    const unsigned segments=images.segments?images.segments:images.body=="earth"||images.body=="moon" ?
         std::clamp(std::max(images.day->width(),images.day->height())/8,192u,384u):192u;
     auto geometry=SphereGeometry::create(radius,segments,segments,
         static_cast<float>(region.west+180.)*radians,static_cast<float>(region.east-region.west)*radians,
@@ -119,7 +138,7 @@ void albert::prepareRegionalImages(RegionalImages& images) {
                 point.set(static_cast<float>(-std::cos(phi)*std::cos(latitude)),static_cast<float>(std::sin(latitude)),
                     static_cast<float>(std::sin(phi)*std::cos(latitude)));
             }
-            point.normalize().multiplyScalar(radius+(meters+20.f)/6378137.f);
+            point.normalize().multiplyScalar(radius+(meters+images.lift)/6378137.f);
             position->setXYZ(i,point.x,point.y,point.z);
         }
         geometry->computeVertexNormals();geometry->computeBoundingSphere();

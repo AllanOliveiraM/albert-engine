@@ -266,6 +266,9 @@ NOAA GFS ao vivo quando o Albert segue o relógio real e o instante está a até
 NRLMSISE-00 com os índices solares e geomagnéticos da CelesTrak para o instante do voo. A amostra informa a fonte (`atmosphere`) e o vento
 no veículo, e o painel **Voo** no canto inferior direito mostra estado, vento e fonte.
 
+`terrain_height` põe a base no relevo medido: a altura do sítio vira Copernicus DEM 30 m mais o
+geoide EGM2008 (altura elipsoidal), resolvida na criação e gravada no log de replay.
+
 `imu` escolhe os erros do IMU e do barômetro (`IDEAL`, `TACTICAL`, `INDUSTRIAL`) e a semente do
 ruído. A amostra traz, além dos valores ideais, os medidos sobre o último `Step`: força específica
 e taxa médias, incrementos de velocidade e ângulo e pressão estática; com `IDEAL` coincidem com os

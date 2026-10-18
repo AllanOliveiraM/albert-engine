@@ -30,7 +30,7 @@ int main(int argc,char** argv){try{
     if(!channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(30)))throw std::runtime_error("Abra AlbertEngine --rpc antes de executar o exemplo");
     auto flight=api::FlightService::NewStub(channel);
     api::CreateFlightRequest create;create.set_vehicle(api::GENERIC_LAUNCHER);create.set_heading_degrees(90);create.set_focus_camera(true);if(chosen)create.set_utc_unix_seconds(utc);
-    auto* site=create.mutable_site();site->set_latitude_degrees(28.6082);site->set_longitude_degrees(-80.6041); // Kennedy LC-39A.
+    auto* site=create.mutable_site();site->set_latitude_degrees(28.6082);site->set_longitude_degrees(-80.6041);create.set_terrain_height(true); // Kennedy LC-39A, on the measured ground.
     api::FlightSample s;{grpc::ClientContext c;check(flight->CreateFlight(&c,create,&s));}
     std::printf("%s, passo %.0f ms, %s\n",s.vehicle().c_str(),s.step_seconds()*1e3,fast?"o mais rápido possível":"tempo real");
     constexpr double pi=3.14159265358979323846;constexpr std::uint32_t ticks=20; // Guidance at 50 Hz.
