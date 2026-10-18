@@ -7,8 +7,8 @@
 #include <string>
 namespace threepp {class Scene;class Camera;class GLRenderer;}
 namespace albert {
-// Window, scene renderer and ImGui for one graphics backend: threepp's OpenGL renderer (default)
-// or WebGPU (src/gpu; --renderer=webgpu until the port reaches parity). `draw` draws the
+// Window, scene renderer and ImGui for one graphics backend: WebGPU (src/gpu, the default) or
+// threepp's OpenGL renderer (--renderer=opengl, and the fallback without a WebGPU adapter). `draw` draws the
 // ImGui windows each frame.
 class Display {
 public:

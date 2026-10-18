@@ -919,7 +919,7 @@ struct CameraTransition {
 
 int albert::runRenderer(int argc, char** argv) {
     bool smokeTest = false,demo=false;
-    auto backend=albert::Display::Backend::opengl; // --renderer=webgpu while the WebGPU port reaches parity.
+    auto backend=albert::Display::Backend::webgpu; // --renderer=opengl keeps threepp's renderer; no WebGPU adapter falls back to it.
     std::optional<unsigned> rpcPort;
     try {
         for (int i = 1; i < argc; ++i) {

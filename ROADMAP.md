@@ -40,7 +40,11 @@ Standard/Phong do threepp com sombras PCF, uma cena e uma câmera por quadro, Im
 6. **Ganhos da fase 4**: espalhamento de Bruneton com LUTs em compute, terreno CDLOD (Copernicus,
    LOLA, MOLA) inclusive sob veículos na Lua e em Marte, iluminação rasante do solo.
 
-Até a paridade os dois caminhos convivem sobre a mesma cena; o OpenGL segue padrão.
+Estado em 18/10/2026: etapas 1–5 entregues. Os 22 programas e os materiais embutidos rodam em WGSL;
+o `visual_test` passa nos dois renderizadores (llvmpipe e MX350); sombra PCF, MSAA 4×, texturas em
+fatias com mipmaps na GPU; passada da cena ~3 ms de GPU na MX350 a 1280×800. WebGPU é o padrão,
+com `--renderer=opengl` e recuo automático. Próximo: etapa 6 (ganhos visuais da fase 4) e a
+remoção do caminho OpenGL quando não for mais preciso como recuo.
 
 Histórico: **API gráfica: manter OpenGL/threepp agora.** O valor novo está no núcleo físico, que é
 independente do render; a cena tem poucos draws e os limites atuais (precisão, shaders) não

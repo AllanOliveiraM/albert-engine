@@ -1,7 +1,9 @@
 # Albert Engine — contexto para continuidade
 
-**Fase 4 — migração para WebGPU decidida pelo Allan (18/10/2026)**, plano em 6 etapas no topo do
-`ROADMAP.md`. Máquina de referência: este notebook (i7-1165G7, Iris Xe + MX350, 14 GB, Ubuntu
+**Fase 4 — WebGPU é o renderizador padrão (18/10/2026)**: etapas 1–5 do plano no `ROADMAP.md`
+entregues (`src/gpu`: contexto, janela, `SceneRenderer` que desenha a cena do threepp; WGSL de todos
+os materiais em `src/render/webgpu_programs.cpp`; `Display` escolhe o caminho; `visual_test 1` roda
+os dois). `--renderer=opengl` e recuo automático sem adaptador. Máquina de referência: este notebook (i7-1165G7, Iris Xe + MX350, 14 GB, Ubuntu
 26.04), 1080p/60 e p99 < 25 ms. Etapa 1 entregue (`src/gpu/context.*`, `tests/gpu_smoke.cpp`:
 `DISPLAY=172.17.0.2:100 build/linux/tests/gpu_smoke`, `ALBERT_GPU=software` para llvmpipe; no
 Xvfb o Iris Xe não apresenta por falta de DRI3, então a MX350 é usada). Mars-GRAM: o Allan vai
