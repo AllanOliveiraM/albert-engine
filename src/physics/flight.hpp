@@ -31,6 +31,10 @@ struct Stage {
     double nozzle=0,gimbal=0,minThrottle=1;           // Pivot (m aft), max deflection (rad), deepest throttle.
     double length=1;                                  // Stack length (m), for display.
     Aerodynamics aero;
+    // Landing legs: contact points (x m aft of the nose, y, z) on spring-dampers against the
+    // ground (N/m and N s/m per leg) with regularised Coulomb friction. Without legs touchdown
+    // is detected at the CG and the vehicle stops.
+    std::vector<V3> legs;double legStiffness=0,legDamping=0,friction=.6;
 };
 // torque: ideal attitude torque limit (N m per axis). inertiaRate scales the İω term and
 // jetDamping enables the exhaust momentum flux: 1/true is the complete variable-mass model.
@@ -60,7 +64,7 @@ struct State {
     V3 rate;                   // Body angular velocity relative to inertial (rad/s).
     double propellant=0;       // Remaining in the active stage (kg).
     int stage=0;
-    bool burning=false,clamped=false,landed=false;
+    bool burning=false,clamped=false,landed=false,contact=false; // contact: a leg on the ground.
     double throttle=1,gimbalPitch=0,gimbalYaw=0; // Gimbal + pitch: nose up; + yaw: nose right.
     V3 torque;                 // Commanded body torque (N m).
 };

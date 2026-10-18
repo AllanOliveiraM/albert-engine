@@ -254,7 +254,7 @@ personalizados e camadas raster ainda são próximas entregas.
 `FlightService` controla um veículo de seis graus de liberdade integrado pelo núcleo de
 física do Albert ([PHYSICS.md](PHYSICS.md)); o software externo faz o papel do
 computador de voo. `CreateFlight` põe o veículo preso no pad, com a base no solo, (`GENERIC_LAUNCHER`,
-`NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
+`GENERIC_LANDER`, `NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
 instante exibido), com passo fixo de 1 ms (de 10 µs a 100 ms). Em voo balístico acima
 de 86 km o Albert usa passos internos de até `coast_step_seconds` (padrão 1 s; 0 desliga),
 então chamadas longas propagam órbitas rapidamente; os ticks continuam exatos. A gravidade usa o
@@ -268,6 +268,10 @@ no veículo, e o painel **Voo** no canto inferior direito mostra estado, vento e
 
 `terrain_height` põe a base no relevo medido: a altura do sítio vira Copernicus DEM 30 m mais o
 geoide EGM2008 (altura elipsoidal), resolvida na criação e gravada no log de replay.
+
+O `GENERIC_LANDER` tem pernas com molas e atrito: `leg_contact` (bit `contact` no plano binário)
+diz se alguma perna toca o solo, e `TOUCHDOWN`/`LIFTOFF` marcam o primeiro pé no chão e o último a
+sair (quiques incluídos); ele pode reacender e saltar. Veículos sem pernas param no toque (`landed`).
 
 `body` escolhe o corpo central: `EARTH` (padrão), `MOON` ou `MARS`. Na Lua e em Marte a gravidade
 é GRAIL GRGM1200A (grau 2 a 600) ou MRO GMM-3 (2 a 120), padrão 100, lida do PDS só até o grau

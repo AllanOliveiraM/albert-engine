@@ -68,4 +68,14 @@ Vehicle genericLauncher(double payload){
     b.thrust=981e3;b.exhaust=348*g0;b.exitArea=4.9;b.nozzle=26;b.gimbal=5*pi/180;b.minThrottle=.39;b.length=27;b.aero=slender(area);
     return{"Generic two-stage launcher (approximate)",{a,b},2e5,1,true,2*r};
 }
+Vehicle genericLander(){
+    constexpr double r=2.1,full=15000,empty=6800,h=7; // Body radius, masses (kg), height (m).
+    auto inertia=[&](double m){return V3{m*r*r/2,m*(3*r*r+h*h)/12,m*(3*r*r+h*h)/12};};
+    Stage s;s.name="lander";s.propellant=full-empty;s.massFull=full;s.massEmpty=empty;s.cgFull=4.2;s.cgEmpty=3.8;s.reference=3.5;
+    s.inertiaFull=inertia(full);s.inertiaEmpty=inertia(empty);
+    s.thrust=45040;s.exhaust=311*g0;s.exitArea=1.77;s.nozzle=6.3;s.gimbal=6*pi/180;s.minThrottle=.1;s.length=h;s.aero=slender(pi*r*r);
+    constexpr double pad=4.7/1.4142135623730951; // Footpads 4.7 m from the axis at the base.
+    s.legs={{h,pad,pad},{h,-pad,pad},{h,pad,-pad},{h,-pad,-pad}};s.legStiffness=8.9e5;s.legDamping=5.7e4;s.friction=.6;
+    return{"Generic lander (approximate)",{s},5e3,1,true,2*r};
+}
 }

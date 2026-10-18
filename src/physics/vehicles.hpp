@@ -8,4 +8,7 @@ Vehicle nescTwoStage(); // Unguided two-stage rocket (case 17).
 // approximate masses, thrust, Isp and geometry; aerodynamics from slender-body theory
 // with Allen-Perkins crossflow. Aerodynamically unstable: needs active control.
 Vehicle genericLauncher(double payload=5000.);
+// Single-stage lander sized from public Apollo LM descent figures (15 t, 45 kN throttleable to
+// 10%, Isp 311 s) with four legs; approximate.
+Vehicle genericLander();
 }

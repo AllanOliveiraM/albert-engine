@@ -111,6 +111,19 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         const double cp=std::cos(s.gimbalPitch),sp=std::sin(s.gimbalPitch),cy=std::cos(s.gimbalYaw),sy=std::sin(s.gimbalYaw);
         ft=thrust*V3{cp*cy,-sy,sp*cy};mt=cross(V3{ms.cg-st.nozzle,0,0},ft);
     }
+    V3 fc,mc; // Legs on the ground: spring-damper normal force and friction, at each contact point.
+    if(!st.legs.empty()&&!s.clamped&&std::isfinite(env_.ground)){
+        const V3 wi=b*s.rate;
+        for(const V3& leg:st.legs){
+            const V3 r{ms.cg-leg.x,leg.y,leg.z},p=s.position+b*r;const Geodetic lg=geodetic(env_.planet,o.fixed*p);const double depth=env_.ground-lg.height;
+            if(!(depth>0))continue;
+            const V3 n=back*V3{std::cos(lg.latitude)*std::cos(lg.longitude),std::cos(lg.latitude)*std::sin(lg.longitude),std::sin(lg.latitude)};
+            const V3 v=s.velocity+cross(wi,b*r)-cross(o.omega,p);const double vn=dot(v,n);const V3 vt=v-n*vn;
+            const double fn=std::max(0.,st.legStiffness*depth-st.legDamping*vn),speedT=norm(vt);
+            const V3 f=n*fn-vt*(st.friction*fn/std::max(speedT,.05)); // Linear below 5 cm/s: no stick-slip chatter.
+            const V3 fb=bt*f;fc+=fb;mc+=cross(r,fb);
+        }
+    }
     V3 fs; // Solar radiation pressure, 1361 W/m² at 1 au, shadowed by the central body.
     if(vehicle_.sunArea>0&&env_.sunMoon){
         constexpr double au=149597870700.,pressure=1361./299792458.;const V3 d=sun(s.time)-s.position;const double dn=norm(d);
@@ -118,7 +131,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         if(nu>0)fs=bt*(d*(-nu*pressure*au*au/(dn*dn*dn)*vehicle_.reflectivity*vehicle_.sunArea));
     }
     const double lim=vehicle_.torque;
-    const V3 force=fa+ft+fs,moment=ma+mt+V3{std::clamp(s.torque.x,-lim,lim),std::clamp(s.torque.y,-lim,lim),std::clamp(s.torque.z,-lim,lim)};
+    const V3 force=fa+ft+fs+fc,moment=ma+mt+mc+V3{std::clamp(s.torque.x,-lim,lim),std::clamp(s.torque.y,-lim,lim),std::clamp(s.torque.z,-lim,lim)};
     // d(Iω)/dt with the propellant's inertia loss; the exhaust carries transverse angular
     // momentum ṁ l² ω through the nozzle (jet damping).
     const V3 iw{ms.inertia.x*s.rate.x,ms.inertia.y*s.rate.y,ms.inertia.z*s.rate.z};V3 rhs=moment-cross(s.rate,iw);
@@ -166,9 +179,9 @@ Tt Flight::advance(Tt dt){
         Tt h=left;bool depleted=false;const double flow=massFlow();
         if(step_>0){
             Tt limit=step_;
-            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0){ // Ballistic, torque-free, above the atmosphere.
-                const double speed=norm(s_.velocity),spin=norm(s_.rate),c=secondsSinceJ2000(coast_);
-                if(geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height>airTop(env_.center)+speed*c)
+            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&!s_.contact&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0){ // Ballistic, torque-free, above the atmosphere and the ground.
+                const double speed=norm(s_.velocity),spin=norm(s_.rate),c=secondsSinceJ2000(coast_),h=geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height;
+                if(h>airTop(env_.center)+speed*c&&!(h-env_.ground<=speed*c+vehicle_.stages[s_.stage].length))
                     limit=std::max(step_,std::min(coast_,spin>0?static_cast<Tt>(.05/spin*1e9):coast_)); // ≤0.05 rad per step.
             }
             h=std::min(h,limit);
@@ -178,6 +191,11 @@ Tt Flight::advance(Tt dt){
         if(depleted){s_.propellant=0;s_.burning=false;return dt-left;}
         if(!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
             const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;Geodetic g=geodetic(env_.planet,rf);
+            if(const Stage& st=vehicle_.stages[s_.stage];!st.legs.empty()){ // Contact state of the legs for events and telemetry.
+                const double c=mass(st,s_.propellant).cg;const M3 b=matrix(s_.attitude);bool touching=false;
+                for(const V3& leg:st.legs)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-leg.x,leg.y,leg.z})).height<env_.ground;
+                if(touching!=s_.contact){s_.contact=touching;if(touching)return dt-left;} // Touchdown ends the call, like the CG test below.
+            }
             if(g.height<env_.ground){g.height=env_.ground;s_.landed=true;s_.burning=false;padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
         }
     }
@@ -217,7 +235,7 @@ std::uint64_t Flight::hash()const{
     auto mix=[&](const void* p,std::size_t n){const auto* c=static_cast<const unsigned char*>(p);for(std::size_t i=0;i<n;++i){h^=c[i];h*=1099511628211ull;}};
     const double d[]{s_.position.x,s_.position.y,s_.position.z,s_.velocity.x,s_.velocity.y,s_.velocity.z,s_.attitude.w,s_.attitude.x,s_.attitude.y,s_.attitude.z,
         s_.rate.x,s_.rate.y,s_.rate.z,s_.propellant,s_.throttle,s_.gimbalPitch,s_.gimbalYaw,s_.torque.x,s_.torque.y,s_.torque.z,padPosition_.x,padPosition_.y,padPosition_.z};
-    mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed};mix(flags,sizeof flags);
+    mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
     return h;
 }
 }

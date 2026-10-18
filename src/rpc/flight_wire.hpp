@@ -9,7 +9,7 @@ static_assert(std::endian::native==std::endian::little,"Frames are little-endian
 enum Command:std::uint32_t {ignite=1,cutoff=2,separate=4,release=8,throttle=16,gimbal=32,torque=64};
 enum Status:std::uint32_t {ok=0,invalid=1,precondition=2,noFlight=3};
 enum Event:std::uint32_t {liftoff=1,depleted=2,touchdown=4};
-enum Flag:std::uint32_t {burning=1,clamped=2,landed=4};
+enum Flag:std::uint32_t {burning=1,clamped=2,landed=4,contact=8}; // contact: a landing leg on the ground.
 struct Request {
     char magic[4]{'A','L','B','Q'};std::uint32_t ticks=1,commands=0,reserved=0;
     double throttleValue=1,gimbalPitch=0,gimbalYaw=0,torqueValue[3]{};

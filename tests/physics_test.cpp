@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <random>
 #include <stdexcept>
@@ -289,6 +290,25 @@ int main(){try{
         const double expected=1361./299792458.*std::pow(149597870700./norm(d),2)*1.5*10/x.mass;
         near(norm(x.specificForce)/expected,1,1e-9,"Radiation pressure magnitude");
         near(dot(matrix(f.state().attitude)*x.specificForce,d)/(norm(x.specificForce)*norm(d)),-1,1e-12,"Radiation pressure points away from the Sun");
+    }
+    // Landing legs on the Moon: rest at the static deflection m g / 4k, a 2 m drop dissipates and
+    // settles there, a 1 m/s slide stops after v²/(2 μ g), and the engine lifts it off again.
+    {
+        Environment e=environment(Center::moon);e.ground=0;const Vehicle v=genericLander();const Stage& st=v.stages[0];const Tt t=ttFromUtc(1792238400.);
+        const double g=e.planet.gm/(e.planet.radius*e.planet.radius),sag=st.massFull*g/(4*st.legStiffness),rest=st.length-st.cgFull-sag;
+        auto run=[](Flight& f,double seconds,const std::function<void()>& each={}){const Tt end=f.state().time+static_cast<Tt>(seconds*1e9);while(f.state().time<end){f.advance(std::min<Tt>(end-f.state().time,10*second/1000));if(each)each();}};
+        Flight pad(v,e,Flight::pad(e,v,t,{.2,.4,0},0,pi/2));pad.steps(second/1000,second);pad.release();run(pad,10);
+        const Sample x=pad.sample();
+        near(x.geodetic.height,rest,2e-4,"Lander rests on its legs");near(norm(x.nedVelocity),0,1e-3,"Lander at rest");near(x.specificForce.x,g,2e-3,"Accelerometer on the legs");
+        require(pad.state().contact&&!pad.state().landed,"Leg contact without the CG stop");
+        Flight drop(v,e,Flight::free(e,v,t,{.2,.4,st.length-st.cgFull+2},{},{0,pi/2,0}));drop.steps(second/1000,second);
+        bool touched=false;double bounce=0;run(drop,20,[&]{touched=touched||drop.state().contact;if(touched)bounce=std::max(bounce,drop.sample().geodetic.height);});
+        require(touched&&bounce<st.length-st.cgFull+1,"The drop loses energy");near(drop.sample().geodetic.height,rest,2e-4,"The drop settles");
+        Flight slide(v,e,Flight::free(e,v,t,{.2,.4,rest},{1,0,0},{0,pi/2,0}));slide.steps(second/1000,second);
+        const V3 start=slide.sample().fixedPosition;run(slide,6);const double distance=norm(slide.sample().fixedPosition-start);
+        std::printf("lander: rests %.2f mm down, slides %.3f m from 1 m/s (v²/2μg %.3f m)\n",sag*1e3,distance,1/(2*st.friction*g));
+        near(distance,1/(2*st.friction*g),.03,"Friction stops the slide");
+        pad.ignite();run(pad,3);require(!pad.state().contact&&pad.sample().geodetic.height>rest+1,"Lift-off from the legs");
     }
     // IMU noise: overlapping Allan variance of a still gyro (10 Hz, 20000 s) fitted with
     // σ²(τ) = N²/τ + K²τ/3 returns the configured angle random walk and rate random walk

@@ -42,6 +42,7 @@ Prepared prepare(const api::CreateFlightRequest& r,double utc){
         if(!(payload>=0&&payload<=30000))throw std::invalid_argument("Payload must be 0-30000 kg");p.vehicle=ph::genericLauncher(payload);break;}
     case api::NESC_TWO_STAGE:p.vehicle=ph::nescTwoStage();break;
     case api::NESC_SPHERE:p.vehicle=ph::nescSphere();break;
+    case api::GENERIC_LANDER:p.vehicle=ph::genericLander();break;
     default:throw std::invalid_argument("Unknown vehicle");
     }
     if(!api::CreateFlightRequest::Body_IsValid(r.body()))throw std::invalid_argument("Unknown body");
@@ -174,9 +175,9 @@ struct FlightServices::Impl {
         for(ph::Tt left=total;left>0;){
             if(cancelled()){events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
             const auto before=next.state();left-=next.advance(std::min(left,chunk));const auto& after=next.state();
-            if(before.clamped&&!after.clamped)event(api::FlightEvent::LIFTOFF,wire::liftoff);
+            if((before.clamped&&!after.clamped)||(before.contact&&!after.contact))event(api::FlightEvent::LIFTOFF,wire::liftoff);
             if(before.burning&&!after.burning&&after.propellant<=0)event(api::FlightEvent::DEPLETED,wire::depleted);
-            if(!before.landed&&after.landed)event(api::FlightEvent::TOUCHDOWN,wire::touchdown);
+            if((!before.landed&&after.landed)||(!before.contact&&after.contact))event(api::FlightEvent::TOUCHDOWN,wire::touchdown);
         }
         if(cancelled()){events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
         ph::Imu sensor=*imu;const auto inc=next.increments();
@@ -194,7 +195,7 @@ struct FlightServices::Impl {
         o.geodetic[0]=x.geodetic.latitude/deg;o.geodetic[1]=x.geodetic.longitude/deg;o.geodetic[2]=x.geodetic.height;put3(o.nedVelocity,x.nedVelocity);
         o.attitudeNed[0]=x.nedAttitude.x;o.attitudeNed[1]=x.nedAttitude.y;o.attitudeNed[2]=x.nedAttitude.z;o.attitudeNed[3]=x.nedAttitude.w;
         o.mach=x.mach;o.dynamicPressure=x.dynamicPressure;o.alpha=x.alpha;o.beta=x.beta;o.mass=x.mass;o.propellant=s.propellant;o.thrust=x.thrust;
-        o.stage=static_cast<std::uint32_t>(s.stage);o.flags=(s.burning?wire::burning:0u)|(s.clamped?wire::clamped:0u)|(s.landed?wire::landed:0u);o.events=eventBits;eventBits=0;o.hash=flight->hash();
+        o.stage=static_cast<std::uint32_t>(s.stage);o.flags=(s.burning?wire::burning:0u)|(s.clamped?wire::clamped:0u)|(s.landed?wire::landed:0u)|(s.contact?wire::contact:0u);o.events=eventBits;eventBits=0;o.hash=flight->hash();
     }
     void fill(api::FlightSample* o){
         const ph::Sample x=flight->sample();const auto& s=flight->state();const auto& v=flight->vehicle();
@@ -207,7 +208,7 @@ struct FlightServices::Impl {
         put(x.nedVelocity,o->mutable_velocity_ned_meters_per_second());put(x.nedAttitude,o->mutable_attitude_ned());
         o->set_mach(x.mach);o->set_dynamic_pressure_pascals(x.dynamicPressure);o->set_alpha_radians(x.alpha);o->set_beta_radians(x.beta);o->set_air_density_kilograms_per_meter3(x.air.density);
         o->set_stage(static_cast<unsigned>(s.stage));o->set_stages(static_cast<unsigned>(v.stages.size()));o->set_propellant_kilograms(s.propellant);o->set_mass_kilograms(x.mass);o->set_thrust_newtons(x.thrust);
-        o->set_burning(s.burning);o->set_clamped(s.clamped);o->set_landed(s.landed);o->set_throttle(s.throttle);
+        o->set_burning(s.burning);o->set_clamped(s.clamped);o->set_landed(s.landed);o->set_leg_contact(s.contact);o->set_throttle(s.throttle);
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
         o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());o->set_data_port(data?data->port():0);

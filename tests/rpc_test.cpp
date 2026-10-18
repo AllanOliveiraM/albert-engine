@@ -249,6 +249,13 @@ int main(int argc,char** argv){try{
                 require(writer->Finish().error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Oversized gravity table replayed");}
             {api::CreateFlightRequest ground=moon;ground.set_terrain_height(true);grpc::ClientContext c;
                 require(flight->CreateFlight(&c,ground,&s).ok()&&std::abs(s.geodetic().height_meters()-(-1000-85.4+.0312))<30,"Lunar site on the LOLA ground");}
+            { // A lander released onto its legs: touchdown event, contact flag, lunar weight on the accelerometer, hop.
+                api::CreateFlightRequest lander=moon;lander.set_vehicle(api::GENERIC_LANDER);grpc::ClientContext c;require(flight->CreateFlight(&c,lander,&s).ok(),"Lunar lander");
+                {grpc::ClientContext d;api::StepRequest q;q.set_ticks(3000);q.add_commands()->set_release(true);require(flight->Step(&d,q,&s).ok(),"Lander release");}
+                bool down=false;for(const auto& e:s.events())down=down||e.kind()==api::FlightEvent::TOUCHDOWN;
+                require(down&&s.leg_contact()&&!s.landed()&&std::abs(s.specific_force_meters_per_second2().x()-1.63)<.02,"Lander on its legs");
+                {grpc::ClientContext d;api::StepRequest q;q.set_ticks(3000);q.add_commands()->set_ignite(true);require(flight->Step(&d,q,&s).ok()&&!s.leg_contact(),"Lander hop");}
+                bool up=false;for(const auto& e:s.events())up=up||e.kind()==api::FlightEvent::LIFTOFF;require(up,"Hop lift-off event");}
             api::CreateFlightRequest mars=moon;mars.set_body(api::CreateFlightRequest::MARS);mars.mutable_site()->set_latitude_degrees(18.4);mars.mutable_site()->set_longitude_degrees(77.5);mars.mutable_site()->set_height_meters(-2500);
             {grpc::ClientContext c;require(flight->CreateFlight(&c,mars,&s).ok(),"Martian flight");}
             require(std::abs(s.specific_force_meters_per_second2().x()-3.71)<.03&&std::abs(s.static_pressure_pascals()-albert::physics::marsAtmosphere(s.geodetic().height_meters()).pressure)<1e-6&&s.atmosphere()=="NASA Glenn Mars mean atmosphere","Martian pad");

@@ -172,7 +172,8 @@ service LayerService {
 // the sample at the new tick. Body axes: x forward, y right, z down. The scene shows the
 // vehicle as object "flight" and the simulated clock follows the flight while it is not live.
 message Geodetic { double latitude_degrees=1; double longitude_degrees=2; double height_meters=3; }
-enum Vehicle { VEHICLE_UNSPECIFIED=0; GENERIC_LAUNCHER=1; NESC_TWO_STAGE=2; NESC_SPHERE=3; }
+// GENERIC_LANDER: Apollo LM descent-sized single stage on four sprung legs with friction.
+enum Vehicle { VEHICLE_UNSPECIFIED=0; GENERIC_LAUNCHER=1; NESC_TWO_STAGE=2; NESC_SPHERE=3; GENERIC_LANDER=4; }
 message CreateFlightRequest {
   Vehicle vehicle=1;
   optional double payload_kilograms=2;   // GENERIC_LAUNCHER only; default 5000.
@@ -214,6 +215,7 @@ message FlightCommand {
 }
 message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; } // Up to 600000 ticks.
 message FlightEvent {
+  // LIFTOFF: clamp release or the last leg leaving the ground; TOUCHDOWN: CG stop or a first leg down.
   enum Kind { KIND_UNSPECIFIED=0; LIFTOFF=1; DEPLETED=2; TOUCHDOWN=3; }
   Kind kind=1; double elapsed_seconds=2; uint32 stage=3;
 }
@@ -240,6 +242,7 @@ message FlightSample {
   Vector3 measured_specific_force_meters_per_second2=37; Vector3 measured_angular_rate_radians_per_second=38;
   Vector3 delta_velocity_meters_per_second=39; Vector3 delta_angle_radians=40; double measured_static_pressure_pascals=41;
   uint32 data_port=42; // Binary lockstep data plane on 127.0.0.1 (src/rpc/flight_wire.hpp).
+  bool leg_contact=43; // A landing leg on the ground (landed: stopped at the CG, vehicles without legs).
 }
 // Replay: the creation request (instant resolved), the air inputs (GFS GRIB2 of both hours,
 // space-weather days) and every step with its commands in order. Replaying needs no network
