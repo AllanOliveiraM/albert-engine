@@ -43,8 +43,8 @@ Standard/Phong do threepp com sombras PCF, uma cena e uma câmera por quadro, Im
 Etapa 6, em andamento: espalhamento de Bruneton entregue em 18/10/2026 (tabelas em compute, céu do
 solo e do espaço, perspectiva aérea, luz do Sol filtrada e luz do céu nos materiais; aerossol de dia
 limpo, AOD 0,1). Terreno em quadtree na Terra entregue em 18/10/2026 (Copernicus 30 m perto da
-câmera, baixado em segundo plano; Alpes conferidos). Faltam o terreno na Lua e em Marte (LOLA/MOLA
-em grade), a imagem regional nos nós, transições sem degraus entre níveis (morph), nuvens ao vivo no modelo de ar,
+câmera, baixado em segundo plano; Alpes conferidos) e na Lua (LOLA em blocos de 128×128, Tranquilidade
+conferida). Faltam Marte (MOLA, já lido em blocos pelo provedor), a imagem regional nos nós, transições sem degraus entre níveis (morph), nuvens ao vivo no modelo de ar,
 oceano, atmosfera de Marte nas mesmas tabelas e o solo regional mais claro (hoje escuro também no
 OpenGL).
 

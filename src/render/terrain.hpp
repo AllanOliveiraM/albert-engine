@@ -12,7 +12,8 @@ namespace albert {
 // False: provisional (finer data still downloading), rebuilt once `generation` advances.
 using TerrainHeights=std::function<bool(const std::vector<double>& latitudes,const std::vector<double>& longitudes,int level,std::vector<float>& out)>;
 struct TerrainBody {
-    double radius=1;      // Metres per local unit (the body mesh is the unit sphere).
+    double radius=1;      // Metres of the reference radius.
+    double scale=1;       // Its length in the mesh's local frame (the Moon's mesh: 1737.4 / 6378.137).
     double flattening=1;  // Polar to equatorial axis ratio of the mesh (its y scale): latitudes are parametric there.
     int maxLevel=12;      // Finest level: a cube face's quarter circle / 2^level / 64 (12: ~38 m on Earth).
     double relief=10e3;   // Highest relief (m), for culling behind the horizon.
@@ -22,7 +23,7 @@ struct TerrainBody {
 // Level-of-detail terrain on a cube-sphere quadtree: nodes of 65×65 posts with skirts, built on a
 // worker and drawn with the body's material as children of its mesh, refined by distance to the
 // camera (CDLOD-style ranges); a parent stays until its four children are built. Positions are
-// radial in the mesh's local frame, as the globe's relief: (1 + h / radius) × the unit direction.
+// radial in the mesh's local frame, as the globe's relief: scale × (1 + h / radius) × the direction.
 class Terrain {
 public:
     static constexpr int posts=65; // Per node side (64 quads).

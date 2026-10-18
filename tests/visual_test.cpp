@@ -238,7 +238,7 @@ void graphics(Target& renderer) {
     scene->add(AmbientLight::create(Color(0xffffff),1.f));
     albert::PlanetVisuals planets(*scene,assets());
     planets.earth->position.set(100,0,0);planets.sun->position.set(250,0,0);
-    albert::VisualSettings settings;settings.atmosphere=settings.clouds=settings.nightLights=settings.shadows=false;
+    albert::VisualSettings settings;settings.atmosphere=settings.clouds=settings.nightLights=settings.shadows=false;settings.terrain=false; // The globe mesh and its patches: terrain nodes would join their children asynchronously.
     albert::RegionalImages region;region.body="moon";region.region={-135,-45,-45,45};
     region.day=rgba(255,128);region.height=height(-1200.f);
     planets.stageRegionalImages(std::move(region));
@@ -485,7 +485,7 @@ void graphics(Target& renderer) {
         albert::PlanetVisuals bodies(*world,assets());bodies.earth->position.set(0,0,0);bodies.moon->position.set(0,0,60);bodies.sun->position.set(0,0,-23455);
         light->setTarget(*bodies.moon);
         auto view=PerspectiveCamera::create(60,1,.001f,100000);view->position.set(0,0,58.9f);view->lookAt(bodies.moon->position);
-        albert::VisualSettings settings;settings.atmosphere=settings.clouds=settings.nightLights=false;
+        albert::VisualSettings settings;settings.atmosphere=settings.clouds=settings.nightLights=false;settings.terrain=false;
         bodies.update(Vector3(0,0,-1),view->position,settings,1.f);
         albert::EclipseVisuals eclipses(bodies.earth,bodies.moon,bodies.sun);eclipses.update(true);renderer.render(*world,*view);auto total=renderer.readRGBPixels();
         const size_t center=3*(96*192+96);

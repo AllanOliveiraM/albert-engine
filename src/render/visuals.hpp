@@ -68,6 +68,7 @@ public:
     void updateImageDetail(const threepp::Vector3& camera, bool enabled);
     [[nodiscard]] float atmosphereVisibility() const { return displayedAtmosphere_; } // The air's shown strength, 0-1.
     [[nodiscard]] const Terrain* earthTerrain() const { return earthTerrain_.get(); } // Null until assets load.
+    [[nodiscard]] const Terrain* moonTerrain() const { return moonTerrain_.get(); }
 
     std::shared_ptr<threepp::Mesh> earth, moon, sun;
 
@@ -82,7 +83,8 @@ private:
     std::shared_ptr<threepp::Texture> opaqueMask_;
     std::shared_ptr<threepp::MeshPhongMaterial> moonDetailMaterial_;
     std::shared_ptr<threepp::MeshStandardMaterial> earthMaterial_, earthTerrainMaterial_;
-    std::unique_ptr<Terrain> earthTerrain_; // Replaces the globe mesh near the Earth (children of `earth`).
+    std::unique_ptr<Terrain> earthTerrain_, moonTerrain_; // Replace the globe meshes near the Earth and the Moon (their children).
+    std::shared_ptr<threepp::MeshPhongMaterial> moonTerrainMaterial_;
     DownloadProgress demProgress_;std::jthread demFetcher_; // Downloads the Copernicus pieces the terrain noted.
     std::shared_ptr<threepp::MeshPhongMaterial> moonMaterial_;
     std::shared_ptr<threepp::ShaderMaterial> cloudMaterial_;

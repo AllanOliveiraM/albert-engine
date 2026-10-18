@@ -76,9 +76,11 @@ fn airEntry(camera: vec3f, ray: vec3f) -> AirRay { // From space: moved to the t
     let r = length(camera); let rmu = dot(camera, ray); let top = topRadius();
     if (r < bottomRadius()) { let c = camera * (bottomRadius() / r); return AirRay(c, bottomRadius(), dot(c, ray), true); }
     if (r <= top) { return AirRay(camera, r, rmu, true); }
-    let disc = rmu * rmu - (r - top) * (r + top);
-    if (disc < 0.0 || rmu >= 0.0) { return AirRay(camera, r, rmu, false); }
-    let d = -rmu - sqrt(disc); return AirRay(camera + ray * d, top, rmu + d, true);
+    // Far away (the Moon: 384 000 km) the perpendicular distance |c × ray| is better conditioned
+    // than rμ² - (r - R)(r + R), two terms of ~1.5e11 km² in f32.
+    let h = cross(camera, ray); let h2 = dot(h, h);
+    if (rmu >= 0.0 || h2 >= top * top) { return AirRay(camera, r, rmu, false); }
+    let half = sqrt(top * top - h2); return AirRay(camera + ray * (-rmu - half), top, -half, true);
 }
 fn skyRadiance(camera: vec3f, ray: vec3f, sun: vec3f) -> Sky { // Along the whole ray (to the ground or space).
     let e = airEntry(camera, ray); if (!e.hit) { return Sky(vec3f(0.0), vec3f(1.0)); }

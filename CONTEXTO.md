@@ -5,8 +5,12 @@ saias, thread de construção, frustum/horizonte, nós provisórios), alturas em
 (visuals.cpp: GEBCO + Copernicus só do cache, geoide em grade de 2°) e `CopernicusDem::cachedHeight`
 /`fetchMissing` (download em thread própria; a rede daqui estava lenta, ~11 KB/s, e o design não
 bloqueia). Na MX350 a 1280×800, Alpes: GPU ~7 ms, CPU ~5 ms. Preview: `LAT=46.577 LON=7.91
-UTC=1792234800 build/air-preview.py nome:drag:0:-500` (pad-probe aceita lat/lon). Próximo: Lua e
-Marte (LOLA/MOLA em grade), imagem regional nos nós, morph entre níveis.
+UTC=1792234800 build/air-preview.py nome:drag:0:-500` (pad-probe aceita lat/lon e BODY=moon|mars).
+Lua: `PlanetaryRelief` em blocos (multipart, 1,7 s por bloco), terreno com `scale`, exposição lunar
+perto da Lua; sítio Apollo 11 com `BODY=moon LAT=0.67416 LON=23.47314 UTC=1792497600` (Sol a 48,5°).
+Lição: o "chão preto" perto do módulo era a exposição da Terra, não o terreno (sem terreno a esfera
+base fica igual). Próximo: Marte, imagem regional nos nós, morph entre níveis. Codex com cota só
+depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`
 (tabelas em compute, incrementais por quadro), `air` em `src/gpu/programs.cpp` (céu como fundo,

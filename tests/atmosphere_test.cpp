@@ -96,12 +96,21 @@ int main(){
     let a = airBetween(far, craft, sun); probe[8] = vec4f(a.radiance, 0.0); probe[9] = vec4f(a.transmittance, 0.0);
     let dip = acos(b / (b + 0.01)) + 0.0087; let low = camera + vec3f(-cos(dip), 0.0, -sin(dip)) * 384400.0;
     let m = airBetween(camera, low, vec3f(-cos(0.0), 0.0, -0.02)); probe[10] = vec4f(m.radiance, 0.0); probe[11] = vec4f(m.transmittance, 0.0);
+    // From near the Moon (as the app's frame: 384 400 km, off-axis) to 4096 points within 50 km, in
+    // every direction: the Earth's air never lies between (f32 cancellation once made it).
+    let moon = vec3f(-135483.594, -113303.617, -353712.875); var wrong = 0.0; var worst = 1.0; // The camera of the app's frame at Tranquility Base, 20 October 2026.
+    for (var i = 0u; i < 4096u; i++) {
+        let u = fract(sin(vec3f(f32(i) * 12.9898, f32(i) * 78.233, f32(i) * 37.719)) * 43758.5453) * 2.0 - 1.0;
+        let toward = moon + normalize(u + vec3f(1e-3)) * (1.0 + 49.0 * fract(f32(i) * 0.618034));
+        let t = airBetween(moon, toward, sun).transmittance.g; if (t < 0.999999) { wrong += 1.0; worst = min(worst, t); }
+    }
+    probe[12] = vec4f(wrong, worst, 0.0, 0.0); probe[13] = vec4f(0.0);
 }
 )";
             WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code={code.data(),code.size()};WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;
             WGPUShaderModule module=wgpuDeviceCreateShaderModule(gpu->device(),&md);
             WGPUComputePipelineDescriptor pd{};pd.compute.module=module;pd.compute.entryPoint={"main",4};WGPUComputePipeline pipe=wgpuDeviceCreateComputePipeline(gpu->device(),&pd);
-            WGPUBufferDescriptor bd{};bd.size=192;bd.usage=WGPUBufferUsage_Storage|WGPUBufferUsage_CopySrc;WGPUBuffer out=wgpuDeviceCreateBuffer(gpu->device(),&bd);
+            WGPUBufferDescriptor bd{};bd.size=256;bd.usage=WGPUBufferUsage_Storage|WGPUBufferUsage_CopySrc;WGPUBuffer out=wgpuDeviceCreateBuffer(gpu->device(),&bd);
             bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;WGPUBuffer back=wgpuDeviceCreateBuffer(gpu->device(),&bd);
             WGPUSamplerDescriptor sd{};sd.addressModeU=sd.addressModeV=sd.addressModeW=WGPUAddressMode_ClampToEdge;sd.magFilter=sd.minFilter=WGPUFilterMode_Linear;sd.lodMaxClamp=1;sd.maxAnisotropy=1;
             WGPUSampler sampler=wgpuDeviceCreateSampler(gpu->device(),&sd);
@@ -110,17 +119,19 @@ int main(){
             e0[4].binding=8;e0[4].sampler=sampler;
             WGPUBindGroupLayout l0=wgpuComputePipelineGetBindGroupLayout(pipe,0),l2=wgpuComputePipelineGetBindGroupLayout(pipe,2);
             WGPUBindGroupDescriptor g0{};g0.layout=l0;g0.entryCount=5;g0.entries=e0;WGPUBindGroup group0=wgpuDeviceCreateBindGroup(gpu->device(),&g0);
-            WGPUBindGroupEntry e2{};e2.binding=0;e2.buffer=out;e2.size=192;WGPUBindGroupDescriptor g2{};g2.layout=l2;g2.entryCount=1;g2.entries=&e2;WGPUBindGroup group2=wgpuDeviceCreateBindGroup(gpu->device(),&g2);
+            WGPUBindGroupEntry e2{};e2.binding=0;e2.buffer=out;e2.size=256;WGPUBindGroupDescriptor g2{};g2.layout=l2;g2.entryCount=1;g2.entries=&e2;WGPUBindGroup group2=wgpuDeviceCreateBindGroup(gpu->device(),&g2);
             WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);WGPUComputePassEncoder cp=wgpuCommandEncoderBeginComputePass(en,nullptr);
             wgpuComputePassEncoderSetPipeline(cp,pipe);wgpuComputePassEncoderSetBindGroup(cp,0,group0,0,nullptr);wgpuComputePassEncoderSetBindGroup(cp,2,group2,0,nullptr);
-            wgpuComputePassEncoderDispatchWorkgroups(cp,1,1,1);wgpuComputePassEncoderEnd(cp);wgpuCommandEncoderCopyBufferToBuffer(en,out,0,back,0,192);
+            wgpuComputePassEncoderDispatchWorkgroups(cp,1,1,1);wgpuComputePassEncoderEnd(cp);wgpuCommandEncoderCopyBufferToBuffer(en,out,0,back,0,256);
             WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);
             bool done=false;WGPUBufferMapCallbackInfo mc{};mc.mode=WGPUCallbackMode_AllowProcessEvents;mc.userdata1=&done;mc.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
-            wgpuBufferMapAsync(back,WGPUMapMode_Read,0,192,mc);while(!done)wgpuInstanceProcessEvents(gpu->instance());
-            const auto* v=static_cast<const float*>(wgpuBufferGetConstMappedRange(back,0,192));const char* names[]{"zenith","25 deg","2 deg","-2 deg"};
+            wgpuBufferMapAsync(back,WGPUMapMode_Read,0,256,mc);while(!done)wgpuInstanceProcessEvents(gpu->instance());
+            const auto* v=static_cast<const float*>(wgpuBufferGetConstMappedRange(back,0,256));const char* names[]{"zenith","25 deg","2 deg","-2 deg"};
             for(int i=0;i<4;++i)std::printf("sky %-7s radiance %.4f %.4f %.4f  transmittance %.3f %.3f %.3f\n",names[i],v[8*i],v[8*i+1],v[8*i+2],v[8*i+4],v[8*i+5],v[8*i+6]);
             std::printf("craft before the air: radiance %.4f transmittance %.3f; body below the horizon at sunset: transmittance %.3g %.3g %.3g\n",v[33],v[37],v[44],v[45],v[46]);
             near("No air between a camera in space and a craft in front of the air",v[37]+v[33],1,1e-6);
+            std::printf("near the Moon: %.0f of 4096 short segments saw the Earth's air (lowest transmittance %.3g)\n",v[48],v[49]);
+            near("No Earth air between points near the Moon (f32 cancellation)",v[48],0,.5);
             if(!(v[44]>0&&std::isfinite(v[44])&&std::isfinite(v[40]))){std::printf("FAIL body below the model horizon is black or not finite\n");++failures;}else std::printf("ok   body below the model horizon sees the horizon's air\n");
             wgpuBufferUnmap(back);
             // The scene renderer with this air: a camera 10 m above a grey globe of radius 1 (6378.137 km)

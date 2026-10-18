@@ -2454,7 +2454,9 @@ int albert::runRenderer(int argc, char** argv) {
             // Under Earth's air (below ~30 km) the view is mostly sky and lit ground, not a lit planet on
             // black: one stop more, as a camera on the ground would take.
             const float airAltitude=(camera->position.distanceTo(planets.earth->position)-1.f)*6378.137f;
-            const float photographicExposure=(focus==targets::Moon?2.1f:solids.contains(focus)?std::clamp(1.05f*std::pow(sunPosition.distanceTo(solids.nodes().at(focus)->position)*6378137.f/149597870700.f,2.f),.25f,1200.f):1.05f)
+            // Within three lunar radii (a lander's camera too) the Moon's exposure: its maps are dark.
+            const bool lunarView=focus==targets::Moon||camera->position.distanceTo(planets.moon->position)<3.f*static_cast<float>(1737.4/6378.137);
+            const float photographicExposure=(lunarView?2.1f:solids.contains(focus)?std::clamp(1.05f*std::pow(sunPosition.distanceTo(solids.nodes().at(focus)->position)*6378137.f/149597870700.f,2.f),.25f,1200.f):1.05f)
                 *(1.f+planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f)));
             graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
             solids.update(graphics.gl(),*camera,sunPosition,tdb,focus,visualSettings.quality,dt,visualSettings.auxiliary);

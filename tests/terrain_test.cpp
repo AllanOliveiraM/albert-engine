@@ -1,6 +1,8 @@
 #include "providers/terrain.hpp"
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
+#include <sstream>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -57,8 +59,7 @@ int main(int argc,char** argv){try{
     { // LOLA and MOLA by byte range: pixel-is-area centres, endianness, scaling, tile seams and the 360° wrap.
         auto dn=[](int row,int column){return static_cast<std::int16_t>((row*7+column*3)%20000-10000);};
         int pdsRequests=0;
-        albert::providers::PlanetaryRelief relief([&](const std::string& url,const std::string& range,albert::DownloadProgress*){
-            ++pdsRequests;const std::size_t dash=range.find('-'),first=std::stoull(range.substr(0,dash)),last=std::stoull(range.substr(dash+1));
+        auto bytesOf=[&](const std::string& url,std::size_t first,std::size_t last){
             const bool moon=url.find("ldem_128")!=std::string::npos;std::string out;
             for(std::size_t at=first;at<=last;at+=2){
                 int row,column;
@@ -68,7 +69,16 @@ int main(int argc,char** argv){try{
                 const auto v=static_cast<std::uint16_t>(dn(row,column));
                 if(moon){out+=static_cast<char>(v&255);out+=static_cast<char>(v>>8);}else{out+=static_cast<char>(v>>8);out+=static_cast<char>(v&255);}
             }
-            return out;});
+            return out;};
+        // One range: the bytes; several (terrain blocks): a multipart/byteranges answer, parts shuffled.
+        auto transport=[&](const std::string& url,const std::string& range,albert::DownloadProgress*){
+            ++pdsRequests;std::vector<std::pair<std::size_t,std::size_t>> spans;std::stringstream list(range);std::string item;
+            while(std::getline(list,item,',')){const auto dash=item.find('-');spans.emplace_back(std::stoull(item.substr(0,dash)),std::stoull(item.substr(dash+1)));}
+            if(spans.size()==1)return bytesOf(url,spans[0].first,spans[0].second);
+            std::reverse(spans.begin(),spans.end());std::string out;
+            for(const auto& [a,z]:spans)out+="--sep\r\nContent-Type: application/octet-stream\r\nContent-Range: bytes "+std::to_string(a)+"-"+std::to_string(z)+"/9999999999\r\n\r\n"+bytesOf(url,a,z)+"\r\n";
+            return out+"--sep--\r\n";};
+        const auto blocks=cache/"relief";albert::providers::PlanetaryRelief relief(transport,blocks);
         albert::DownloadProgress progress;
         auto lunar=[&](int row,int column){return relief.height(albert::physics::Center::moon,90-(row+.5)/128,(column+.5)/128,progress);};
         require(std::abs(lunar(100,200)-dn(100,200)*.5)<1e-9&&std::abs(lunar(23039,46079)-dn(23039,46079)*.5)<1e-9,"Lunar pixel centres");
@@ -84,6 +94,19 @@ int main(int argc,char** argv){try{
         for(auto [r,c]:{std::pair{0,0},{5631,11519},{5632,11520},{11300,23100},{22527,46079},{17000,34600}})require(std::abs(martian(r,c))<1e-6,"Martian radii across MOLA tiles");
         bool threw=false;try{relief.height(albert::physics::Center::mars,89,0,progress);}catch(const std::invalid_argument&){threw=true;}require(threw,"MOLA polar gap");
         require(pdsRequests<=30,"Relief requests: two pixels per row");
+        // Terrain blocks: nothing until fetched (the block is noted), then the same heights as by pixel, offline afterwards.
+        const auto apollo=std::pair{.6741,23.4730},seam=std::pair{44.0-.25/128,90.0+.3/128}; // A lunar site; MOLA tile corner (rows 5631/5632, columns 11519/11520).
+        require(!relief.cachedHeight(albert::physics::Center::moon,apollo.first,apollo.second),"No block before it is fetched");
+        int fetched=0;while(relief.fetchMissing(progress))++fetched;
+        const auto moon=relief.cachedHeight(albert::physics::Center::moon,apollo.first,apollo.second);
+        require(fetched>=1&&moon&&std::abs(*moon-relief.height(albert::physics::Center::moon,apollo.first,apollo.second,progress))<1e-9,"Lunar block heights equal pixel heights");
+        for(int pass=0;pass<2;++pass){if(!relief.cachedHeight(albert::physics::Center::mars,seam.first,seam.second))while(relief.fetchMissing(progress)){}}
+        const auto mars=relief.cachedHeight(albert::physics::Center::mars,seam.first,seam.second);
+        require(mars&&std::abs(*mars-relief.height(albert::physics::Center::mars,seam.first,seam.second,progress))<1e-6,"Martian block heights across tile corners");
+        const int before=pdsRequests;albert::providers::PlanetaryRelief offline([](const std::string&,const std::string&,albert::DownloadProgress*)->std::string{throw std::runtime_error("offline");},blocks);
+        const auto again=offline.cachedHeight(albert::physics::Center::moon,apollo.first,apollo.second);
+        require(again&&std::abs(*again-*moon)<1e-12&&pdsRequests==before,"Blocks reused from disk");
+        std::printf("relief blocks: %d fetched, generation %llu\n",fetched,static_cast<unsigned long long>(relief.generation()));
     }
     std::cout<<"terrain_test: ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

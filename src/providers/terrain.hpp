@@ -41,6 +41,8 @@ private:
 };
 // Decodes one DEFLATE + floating-point-predictor (TIFF 3) float32 tile.
 std::vector<float> decodeFloatTile(const std::string& compressed,unsigned width,unsigned height);
+// The parts of a multipart/byteranges answer, ordered by their first byte.
+std::vector<std::string> byteRanges(const std::string& body);
 CopernicusDem& copernicusDem(); // Cache in the data directory.
 // LRO LOLA LDEM_128 (Moon: heights above the 1737.4 km sphere) and MGS MOLA MEGDR 128 px/°
 // radii (Mars, planetocentric, ±88°) from the PDS Geosciences Node: pixel-is-area grids read
@@ -48,10 +50,20 @@ CopernicusDem& copernicusDem(); // Cache in the data directory.
 class PlanetaryRelief {
 public:
     using Transport=CopernicusDem::Transport;
-    explicit PlanetaryRelief(Transport transport={});
+    explicit PlanetaryRelief(Transport transport={},std::filesystem::path cache={}); // Cache: blocks for the terrain (none: data directory).
     // Height above the flight datum (Moon sphere, Mars ellipsoid) under a geodetic site (degrees).
     double height(physics::Center body,double latitude,double longitude,DownloadProgress& progress);
+    // The same from 128×128-post blocks already cached (memory or disk), else nothing and the block
+    // is noted; fetchMissing() downloads one noted block in a single multi-range request (a range a
+    // row) without holding the lock. For the terrain.
+    std::optional<double> cachedHeight(physics::Center body,double latitude,double longitude);
+    bool fetchMissing(DownloadProgress& progress);
+    [[nodiscard]] std::uint64_t generation()const{return generation_.load();}
 private:
+    struct BlockKey {int body,row,column;auto operator<=>(const BlockKey&)const=default;}; // Block row and column (128 posts each).
+    double blockPost(physics::Center body,int row,int column); // Throws when not cached (after noting it).
+    template<class Post> double sampleGrid(physics::Center body,double latitude,double longitude,Post post);
+    std::filesystem::path cache_;std::map<BlockKey,std::vector<float>> blocks_;std::set<BlockKey> missingBlocks_;std::atomic<std::uint64_t> generation_{0};
     double pixel(physics::Center body,int row,int column,DownloadProgress& progress); // Moon: height; Mars: radius (m).
     double bilinear(physics::Center body,double latitude,double longitude,DownloadProgress& progress);
     Transport transport_;std::mutex mutex_;std::map<std::tuple<int,int,int>,double> pixels_;

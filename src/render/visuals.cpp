@@ -96,25 +96,39 @@ double geoidGrid(double lat,double lon) {
     auto g=[&](std::size_t a,std::size_t b){return static_cast<double>(grid[b*181+a]);};
     return (1-fy)*((1-fx)*g(i,j)+fx*g(i+1,j))+fy*((1-fx)*g(i,j+1)+fx*g(i+1,j+1));
 }
+// A global equirectangular height image (RGBA floats, metres in red, south row first), bilinear
+// at texel centres; latitude and longitude in radians.
+struct GlobalHeights {
+    std::shared_ptr<const std::vector<float>> grid;long w=0,h=0;
+    explicit GlobalHeights(const Image& image):grid(std::make_shared<const std::vector<float>>(image.data<float>())),w(image.width()),h(image.height()){}
+    double operator()(double lat,double lon)const{
+        const auto& g=*grid;auto at=[&](long x,long y){x=((x%w)+w)%w;y=std::clamp<long>(y,0,h-1);return static_cast<double>(g[static_cast<std::size_t>(4*(y*w+x))]);};
+        const double x=(lon/pi*.5+.5)*static_cast<double>(w)-.5,y=(lat/pi+.5)*static_cast<double>(h)-.5,fx=x-std::floor(x),fy=y-std::floor(y);
+        const long x0=static_cast<long>(std::floor(x)),y0=static_cast<long>(std::floor(y));
+        return (1-fy)*((1-fx)*at(x0,y0)+fx*at(x0+1,y0))+fy*((1-fx)*at(x0,y0+1)+fx*at(x0+1,y0+1));
+    }
+};
 // Earth's relief for the terrain: the global grid (GEBCO, 0-6400 m) bilinear, Copernicus GLO-30
 // from level 9 (posts ≤ 300 m) when cached (missing pieces are noted for the fetcher; the node is
 // provisional meanwhile), plus the EGM2008 geoid (both over mean sea level). Metres over the ellipsoid.
 albert::TerrainHeights earthHeights(const Image& global) {
-    auto grid=std::make_shared<const std::vector<float>>(global.data<float>());const long w=global.width(),h=global.height();
-    return [grid,w,h](const std::vector<double>& lat,const std::vector<double>& lon,int level,std::vector<float>& out) {
+    return [coarse=GlobalHeights(global)](const std::vector<double>& lat,const std::vector<double>& lon,int level,std::vector<float>& out) {
         bool fine=level>=9;
         if(fine){auto& dem=albert::providers::copernicusDem(); // All samples, so every missing piece gets noted at once.
             for(std::size_t i=0;i<lat.size();++i)if(const auto v=dem.cachedHeight(lat[i]*180/pi,lon[i]*180/pi))out[i]=static_cast<float>(*v);else fine=false;}
-        const auto& g=*grid;auto at=[&](long x,long y){x=((x%w)+w)%w;y=std::clamp<long>(y,0,h-1);return static_cast<double>(g[static_cast<std::size_t>(4*(y*w+x))]);};
-        for(std::size_t i=0;i<lat.size();++i) {
-            if(!fine) {
-                const double x=(lon[i]/pi*.5+.5)*static_cast<double>(w)-.5,y=(lat[i]/pi+.5)*static_cast<double>(h)-.5,fx=x-std::floor(x),fy=y-std::floor(y);
-                const long x0=static_cast<long>(std::floor(x)),y0=static_cast<long>(std::floor(y));
-                out[i]=static_cast<float>((1-fy)*((1-fx)*at(x0,y0)+fx*at(x0+1,y0))+fy*((1-fx)*at(x0,y0+1)+fx*at(x0+1,y0+1)));
-            }
-            out[i]+=static_cast<float>(geoidGrid(lat[i],lon[i]));
-        }
+        for(std::size_t i=0;i<lat.size();++i)out[i]=static_cast<float>((fine?out[i]:coarse(lat[i],lon[i]))+geoidGrid(lat[i],lon[i]));
         return fine||level<9;
+    };
+}
+// The Moon's: the global grid of the visual pack, LOLA LDEM_128 blocks (~237 m) from level 6 (posts
+// ≤ 666 m) when cached. Metres over the 1737.4 km sphere.
+albert::TerrainHeights moonHeights(const Image& global) {
+    return [coarse=GlobalHeights(global)](const std::vector<double>& lat,const std::vector<double>& lon,int level,std::vector<float>& out) {
+        bool fine=level>=6;
+        if(fine){auto& relief=albert::providers::planetaryRelief();
+            for(std::size_t i=0;i<lat.size();++i)if(const auto v=relief.cachedHeight(albert::physics::Center::moon,lat[i]*180/pi,lon[i]*180/pi))out[i]=static_cast<float>(*v);else fine=false;}
+        if(!fine)for(std::size_t i=0;i<lat.size();++i)out[i]=static_cast<float>(coarse(lat[i],lon[i]));
+        return fine||level<6;
     };
 }
 
@@ -277,6 +291,8 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     moonMaterial_->lightMap=surfaceFillTextures_[1];
     moon->castShadow = moon->receiveShadow = true;
     scene.add(moon);
+    moonTerrainMaterial_=MeshPhongMaterial::create(); // The Moon's, without the bump map.
+    moonTerrainMaterial_->specular=Color(0x050505);moonTerrainMaterial_->shininess=3;moonTerrainMaterial_->alphaTest=.5f;
 
     sunMaterial_ = ShaderMaterial::create();sunMaterial_->name="albert:sun";
     sunMaterial_->vertexShader = surfaceVertex;
@@ -501,9 +517,13 @@ void albert::PlanetVisuals::replaceAssets(DecodedAssets assets) {
     albert::TerrainBody body;body.radius=6378137.;body.flattening=6356.752314245/6378.137;body.maxLevel=12;body.heights=earthHeights(textures_[5]->image());
     body.generation=[]{return albert::providers::copernicusDem().generation();};
     earthTerrain_=std::make_unique<albert::Terrain>(*earth,earthTerrainMaterial_,body);
+    moonTerrain_.reset();
+    albert::TerrainBody lunar;lunar.radius=1737400.;lunar.scale=1737.4/6378.137;lunar.maxLevel=8;lunar.relief=11e3;lunar.heights=moonHeights(moonHeightTexture_->image());
+    lunar.generation=[]{return albert::providers::planetaryRelief().generation();};
+    moonTerrain_=std::make_unique<albert::Terrain>(*moon,moonTerrainMaterial_,lunar);
     if(!demFetcher_.joinable())demFetcher_=std::jthread([this](std::stop_token stop) { // Copernicus pieces the terrain noted, one at a time.
         while(!stop.stop_requested())try {
-            if(!albert::providers::copernicusDem().fetchMissing(demProgress_))std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            if(!albert::providers::copernicusDem().fetchMissing(demProgress_)&&!albert::providers::planetaryRelief().fetchMissing(demProgress_))std::this_thread::sleep_for(std::chrono::milliseconds(200));
         } catch(const std::exception& e) {
             if(demProgress_.cancelled)return;std::cerr<<"Relevo Copernicus: "<<e.what()<<std::endl;
             for(int i=0;i<150&&!stop.stop_requested();++i)std::this_thread::sleep_for(std::chrono::milliseconds(200)); // 30 s before the next try.
@@ -745,13 +765,24 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     if(moonMaterial_->alphaMap!=moonMask) {moonMaterial_->alphaMap=moonMask;moonMaterial_->needsUpdate();}
     // Near the Earth the quadtree terrain draws the surface (the globe's material, without bump).
     {auto& t=*earthTerrainMaterial_;const auto& e=*earthMaterial_;
-     if(t.map!=e.map||t.roughnessMap!=e.roughnessMap||t.lightMap!=e.lightMap||t.alphaMap!=e.alphaMap){t.map=e.map;t.roughnessMap=e.roughnessMap;t.lightMap=e.lightMap;t.alphaMap=e.alphaMap;t.needsUpdate();}
+     if(t.map!=e.map||t.roughnessMap!=e.roughnessMap||t.lightMap!=e.lightMap){t.map=e.map;t.roughnessMap=e.roughnessMap;t.lightMap=e.lightMap;t.needsUpdate();}
      t.lightMapIntensity=e.lightMapIntensity;}
-    std::optional<Frustum> view; // The camera's frustum in the globe's frame.
-    if(camera){camera->updateMatrixWorld();Matrix4 m;m.multiplyMatrices(camera->projectionMatrix,camera->matrixWorldInverse);m.multiply(*earth->matrixWorld);view.emplace();view->setFromProjectionMatrix(m);}
+    if(camera)camera->updateMatrixWorld();
+    auto frustumIn=[&](Object3D& body){std::optional<Frustum> f; // The camera's frustum in a body's frame.
+        if(camera){Matrix4 m;m.multiplyMatrices(camera->projectionMatrix,camera->matrixWorldInverse);m.multiply(*body.matrixWorld);f.emplace();f->setFromProjectionMatrix(m);}return f;};
+    const auto view=frustumIn(*earth);
     const bool terrainCovers=earthTerrain_&&settings.terrain&&localCamera.length()<3.f&&earthTerrain_->update(localCamera,view?&*view:nullptr);
     if(earthTerrain_&&!terrainCovers) earthTerrain_->hide();
     earthMaterial_->visible=!terrainCovers;
+    if(terrainCovers&&earthDetail_) earthDetail_->visible=false; // The terrain has its relief; its imagery is the global map for now.
+    {auto& t=*moonTerrainMaterial_;const auto& e=*moonMaterial_; // The Moon's terrain, within three radii.
+     if(t.map!=e.map||t.lightMap!=e.lightMap){t.map=e.map;t.lightMap=e.lightMap;t.needsUpdate();}
+     t.lightMapIntensity=e.lightMapIntensity;}
+    moon->updateMatrixWorld();Vector3 moonCamera=cameraPosition;moon->worldToLocal(moonCamera);const auto moonView=frustumIn(*moon);
+    const bool moonCovers=moonTerrain_&&settings.terrain&&moonCamera.length()<3.f*static_cast<float>(1737.4/6378.137)&&moonTerrain_->update(moonCamera,moonView?&*moonView:nullptr);
+    if(moonTerrain_&&!moonCovers) moonTerrain_->hide();
+    moonMaterial_->visible=!moonCovers;
+    if(moonCovers&&moonDetail_) moonDetail_->visible=false;
     // Close-up city lights are a visual overlay above the regional terrain.
     // No other body can lie between this near-Earth camera and the surface.
     nightMaterial_->depthTest=!(earthDetail_ && earthDetail_->visible);

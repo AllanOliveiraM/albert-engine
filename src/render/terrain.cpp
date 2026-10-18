@@ -79,7 +79,7 @@ struct Terrain::Impl {
         const double skirt=std::max(e.size*.03,2e3/body.radius); // Below any step between levels.
         const std::size_t count=static_cast<std::size_t>(posts*posts+4*posts);b.positions.reserve(3*count);b.normals.reserve(3*count);b.uvs.reserve(2*count);
         auto vertex=[&](int i,int j,double drop){
-            const auto at=static_cast<std::size_t>(j*m+i);const Vec q=p[at]-dirs[at]*drop-b.centre;
+            const auto at=static_cast<std::size_t>(j*m+i);const Vec q=(p[at]-dirs[at]*drop-b.centre)*body.scale;
             for(double v:{q.x,q.y,q.z})b.positions.push_back(static_cast<float>(v));
             const Vec n=(p[at+1]-p[at-1]).cross(p[at+m]-p[at-m]).unit();for(double v:{n.x,n.y,n.z})b.normals.push_back(static_cast<float>(v));
             const double u=(centrePhi+std::remainder(phi[at]-centrePhi,2*pi))/(2*pi); // Unwrapped across the date line (textures repeat).
@@ -106,8 +106,8 @@ struct Terrain::Impl {
             auto g=BufferGeometry::create();
             g->setAttribute("position",FloatBufferAttribute::create(std::move(b.positions),3));g->setAttribute("normal",FloatBufferAttribute::create(std::move(b.normals),3));
             g->setAttribute("uv",FloatBufferAttribute::create(b.uvs,2));g->setAttribute("uv2",FloatBufferAttribute::create(std::move(b.uvs),2));g->setIndex(std::move(b.index));
-            g->boundingSphere=Sphere(Vector3(),b.radius);
-            auto mesh=Mesh::create(g,material);mesh->position.set(static_cast<float>(b.centre.x),static_cast<float>(b.centre.y),static_cast<float>(b.centre.z));
+            g->boundingSphere=Sphere(Vector3(),b.radius);const Vec at=b.centre*body.scale;
+            auto mesh=Mesh::create(g,material);mesh->position.set(static_cast<float>(at.x),static_cast<float>(at.y),static_cast<float>(at.z));
             mesh->castShadow=false;mesh->receiveShadow=true;mesh->renderOrder=0;
             auto& node=nodes[pack(b.key)];
             if(node.mesh){mesh->visible=node.mesh->visible;parent.remove(*node.mesh);node.mesh->geometry()->dispose();}else mesh->visible=false;
@@ -122,8 +122,8 @@ struct Terrain::Impl {
     // Hidden behind the body's horizon from the camera (mountains up to body.relief), or outside the
     // view frustum (in the parent's frame), which then neither draws nor refines it.
     bool culled(const Shape& s,const Vec& camera,double distance,const Frustum* frustum)const{
-        if(frustum){const double r=std::sin(std::min(s.radius,pi/2))*1.05+body.relief/body.radius;
-            if(!frustum->intersectsSphere(Sphere(Vector3(static_cast<float>(s.centre.x),static_cast<float>(s.centre.y),static_cast<float>(s.centre.z)),static_cast<float>(r))))return true;}
+        if(frustum){const double r=(std::sin(std::min(s.radius,pi/2))*1.05+body.relief/body.radius)*body.scale;const Vec at=s.centre*body.scale;
+            if(!frustum->intersectsSphere(Sphere(Vector3(static_cast<float>(at.x),static_cast<float>(at.y),static_cast<float>(at.z)),static_cast<float>(r))))return true;}
         if(distance<=1.)return false;
         const double horizon=std::acos(1/distance)+std::acos(1/(1+body.relief/body.radius));
         return std::acos(std::clamp(camera.dot(s.centre)/distance,-1.,1.))-s.radius>horizon;
@@ -150,7 +150,7 @@ bool Terrain::update(const Vector3& camera,const Frustum* frustum,bool horizonCu
     const auto started=std::chrono::steady_clock::now();
     auto& g=*impl_;++g.frame;g.adopt();
     for(const auto& k:g.selected)if(auto* n=g.node(k))n->mesh->visible=false;
-    g.selected.clear();const Vec c{camera.x,camera.y,camera.z};const double distance=c.length();
+    g.selected.clear();const Vec c=Vec{camera.x,camera.y,camera.z}*(1/g.body.scale);const double distance=c.length(); // In reference radii.
     bool covered=true;
     for(int f=0;f<6;++f){const Key root{f,0,0,0};if(!g.node(root)){g.request(root,0);covered=false;}}
     if(covered)for(int f=0;f<6;++f)g.visit({f,0,0,0},c,distance,horizonCulling,horizonCulling?frustum:nullptr);

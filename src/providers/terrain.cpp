@@ -127,33 +127,90 @@ std::vector<float> CopernicusDem::heights(double west,double south,double east,d
     return out;
 }
 CopernicusDem& copernicusDem(){static CopernicusDem value(dataDirectory()/"terrain");return value;}
-PlanetaryRelief::PlanetaryRelief(Transport transport):transport_(std::move(transport)){
-    if(!transport_)transport_=[](const std::string& url,const std::string& range,DownloadProgress* p){return httpGet(url,p,{4096,60,range});};
+PlanetaryRelief::PlanetaryRelief(Transport transport,std::filesystem::path cache):cache_(std::move(cache)),transport_(std::move(transport)){
+    if(cache_.empty())cache_=dataDirectory()/"relief";
+    if(!transport_)transport_=[](const std::string& url,const std::string& range,DownloadProgress* p){return httpGet(url,p,{1u<<20,60,range});};
+}
+std::vector<std::string> byteRanges(const std::string& body){
+    std::vector<std::pair<std::uint64_t,std::string>> parts;std::size_t at=0;
+    while((at=body.find("Content-Range: bytes ",at))!=std::string::npos){
+        const std::size_t dash=body.find('-',at+21),slash=body.find('/',at+21),data=body.find("\r\n\r\n",at); // After "Content-Range: bytes " (its own hyphen).
+        if(dash==std::string::npos||slash==std::string::npos||data==std::string::npos)break;
+        const auto first=std::stoull(body.substr(at+21,dash-at-21)),last=std::stoull(body.substr(dash+1,slash-dash-1));
+        if(data+4+(last-first+1)>body.size())throw std::runtime_error("Truncated multipart answer");
+        parts.emplace_back(first,body.substr(data+4,last-first+1));at=data+4+(last-first+1);
+    }
+    std::sort(parts.begin(),parts.end(),[](const auto& a,const auto& b){return a.first<b.first;});
+    std::vector<std::string> out;for(auto& [first,part]:parts)out.push_back(std::move(part));return out;
+}
+namespace {
+// File and byte offset of a post: LOLA in one image, MOLA in 44° × 90° tiles named by their northern
+// edge and western longitude (blocks never straddle them: 5632 and 11520 are multiples of 128).
+std::pair<std::string,std::size_t> reliefPost(bool moon,int row,int column){
+    if(moon)return {"https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/ldem_128.img",(static_cast<std::size_t>(row)*46080+static_cast<std::size_t>(column))*2};
+    static constexpr const char* bands[]{"88n","44n","00n","44s"};static constexpr const char* sectors[]{"000","090","180","270"};
+    return {std::string("https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg128/megr")+bands[row/5632]+sectors[column/11520]+"hb.img",
+        (static_cast<std::size_t>(row%5632)*11520+static_cast<std::size_t>(column%11520))*2};
+}
+double reliefValue(bool moon,unsigned char first,unsigned char second){ // LOLA: little-endian height / 2; MOLA: big-endian radius − 3396 km.
+    const auto lo=moon?first:second,hi=moon?second:first;const auto dn=static_cast<std::int16_t>(static_cast<std::uint16_t>(hi<<8|lo));return moon?dn*.5:dn+3396000.;
+}
+std::string blockName(int body,int row,int column){return std::to_string(body)+"."+std::to_string(row)+"."+std::to_string(column);}
 }
 double PlanetaryRelief::pixel(physics::Center body,int row,int column,DownloadProgress& progress){
     if(const auto it=pixels_.find({static_cast<int>(body),row,column});it!=pixels_.end())return it->second;
-    const bool moon=body==physics::Center::moon;std::string url;std::size_t offset;
-    if(moon){url="https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/ldem_128.img";offset=(static_cast<std::size_t>(row)*46080+static_cast<std::size_t>(column))*2;}
-    else{ // 44° × 90° tiles named by their northern edge and western longitude.
-        static constexpr const char* bands[]{"88n","44n","00n","44s"};static constexpr const char* sectors[]{"000","090","180","270"};
-        url=std::string("https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg128/megr")+bands[row/5632]+sectors[column/11520]+"hb.img";
-        offset=(static_cast<std::size_t>(row%5632)*11520+static_cast<std::size_t>(column%11520))*2;
-    }
+    const bool moon=body==physics::Center::moon;const auto [url,offset]=reliefPost(moon,row,column);
     const bool pair=moon?column+1<46080:(column+1)%11520!=0; // The next pixel in the same request.
     const std::string b=transport_(url,std::to_string(offset)+"-"+std::to_string(offset+(pair?3:1)),&progress);
     if(b.size()!=(pair?4u:2u))throw std::runtime_error("Truncated relief sample");
-    auto value=[&](std::size_t k){const auto lo=static_cast<unsigned char>(b[moon?k:k+1]),hi=static_cast<unsigned char>(b[moon?k+1:k]);
-        const auto dn=static_cast<std::int16_t>(static_cast<std::uint16_t>(hi<<8|lo));return moon?dn*.5:dn+3396000.;};
+    auto value=[&](std::size_t k){return reliefValue(moon,static_cast<unsigned char>(b[k]),static_cast<unsigned char>(b[k+1]));};
     pixels_[{static_cast<int>(body),row,column}]=value(0);if(pair)pixels_[{static_cast<int>(body),row,column+1}]=value(2);
     return value(0);
 }
-double PlanetaryRelief::bilinear(physics::Center body,double latitude,double longitude,DownloadProgress& progress){
+template<class Post> double PlanetaryRelief::sampleGrid(physics::Center body,double latitude,double longitude,Post post){
     const bool moon=body==physics::Center::moon;const double top=moon?90:88;const int rows=moon?23040:22528,columns=46080;
     if(!(std::abs(latitude)<=top))throw std::invalid_argument(moon?"Invalid latitude":"MOLA covers latitudes up to 88°");
     const double y=std::clamp((top-latitude)*128-.5,0.,rows-1.),x=(longitude-360*std::floor(longitude/360))*128-.5;
     const int i=std::min(static_cast<int>(y),rows-2);const double fy=y-i,fx0=x-std::floor(x);const int j=static_cast<int>(std::floor(x));
-    auto at=[&](int r,int c){return pixel(body,r,(c%columns+columns)%columns,progress);};
+    auto at=[&](int r,int c){return post(r,(c%columns+columns)%columns);};
     return(1-fy)*((1-fx0)*at(i,j)+fx0*at(i,j+1))+fy*((1-fx0)*at(i+1,j)+fx0*at(i+1,j+1));
+}
+double PlanetaryRelief::bilinear(physics::Center body,double latitude,double longitude,DownloadProgress& progress){
+    return sampleGrid(body,latitude,longitude,[&](int r,int c){return pixel(body,r,c,progress);});
+}
+double PlanetaryRelief::blockPost(physics::Center body,int row,int column){
+    const BlockKey key{static_cast<int>(body),row/128,column/128};auto it=blocks_.find(key);
+    if(it==blocks_.end()){
+        std::string bytes;if(std::ifstream in{cache_/blockName(key.body,key.row,key.column),std::ios::binary})bytes.assign(std::istreambuf_iterator<char>(in),{});
+        if(bytes.size()!=128*128*2){missingBlocks_.insert(key);throw NotCached{};}
+        if(blocks_.size()>=512)blocks_.erase(blocks_.begin()); // Bounded: 512 × 64 KiB.
+        const bool moon=body==physics::Center::moon;std::vector<float> posts(128*128);
+        for(std::size_t i=0;i<posts.size();++i)posts[i]=static_cast<float>(reliefValue(moon,static_cast<unsigned char>(bytes[2*i]),static_cast<unsigned char>(bytes[2*i+1])));
+        it=blocks_.emplace(key,std::move(posts)).first;
+    }
+    return it->second[static_cast<std::size_t>((row%128)*128+column%128)];
+}
+std::optional<double> PlanetaryRelief::cachedHeight(physics::Center body,double latitude,double longitude){
+    if(body==physics::Center::earth)throw std::invalid_argument("Earth relief comes from Copernicus");
+    std::lock_guard lock(mutex_);
+    try{
+        auto post=[&](int r,int c){return blockPost(body,r,c);};
+        if(body==physics::Center::moon)return sampleGrid(body,latitude,longitude,post);
+        constexpr double deg=3.14159265358979323846/180;const physics::V3 p=physics::fixedPosition(physics::planet(physics::Center::mars),{latitude*deg,longitude*deg,0});
+        const double r=physics::norm(p);return sampleGrid(body,std::asin(p.z/r)/deg,longitude,post)-r;
+    }catch(const NotCached&){return std::nullopt;}
+}
+bool PlanetaryRelief::fetchMissing(DownloadProgress& progress){
+    BlockKey key{};{std::lock_guard lock(mutex_);if(missingBlocks_.empty())return false;key=*missingBlocks_.begin();missingBlocks_.erase(missingBlocks_.begin());}
+    const auto path=cache_/blockName(key.body,key.row,key.column);std::error_code ec;
+    if(std::filesystem::file_size(path,ec)==128*128*2){++generation_;return true;}
+    const bool moon=key.body==static_cast<int>(physics::Center::moon);std::string url,ranges;
+    for(int r=0;r<128;++r){const auto [file,offset]=reliefPost(moon,key.row*128+r,key.column*128);url=file;ranges+=(r?",":"")+std::to_string(offset)+"-"+std::to_string(offset+255);}
+    const auto parts=byteRanges(transport_(url,ranges,&progress));
+    std::string bytes;for(const auto& part:parts)bytes+=part;
+    if(parts.size()!=128||bytes.size()!=128*128*2)throw std::runtime_error("Unexpected relief block answer");
+    std::filesystem::create_directories(cache_,ec);std::ofstream(path,std::ios::binary)<<bytes;
+    ++generation_;return true;
 }
 double PlanetaryRelief::height(physics::Center body,double latitude,double longitude,DownloadProgress& progress){
     if(body==physics::Center::earth)throw std::invalid_argument("Earth relief comes from Copernicus");

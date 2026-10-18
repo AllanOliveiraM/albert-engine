@@ -324,7 +324,12 @@ nunca são despejados. Alturas: grade global (GEBCO) nos níveis grossos e Coper
 do nível 9, só do cache: o que falta é anotado e baixado por uma thread própria (`fetchMissing`),
 e o nó fica provisório até os dados chegarem (a geração do provedor avança e ele é refeito), sem
 nunca bloquear a construção; mais o geoide EGM2008 numa grade de 2°. "Relevo detalhado" no menu
-liga e desliga. `ALBERT_TERRAIN_DEBUG=1` imprime nós, fila e custo da seleção e do render.
+liga e desliga. Na Lua (até 3 raios) o mesmo terreno usa a grade global do pacote e blocos LOLA
+LDEM_128 de 128×128 postes (~237 m) a partir do nível 6, cada bloco numa única requisição com uma
+faixa por linha (`PlanetaryRelief::cachedHeight`/`fetchMissing`, multipart/byteranges, cache em
+disco). Perto da Lua a exposição fotográfica é a dela (2,1). Com o terreno ativo os remendos
+regionais ficam ocultos (a imagem regional nos nós é o próximo passo).
+`ALBERT_TERRAIN_DEBUG=1` imprime nós, fila e custo da seleção e do render.
 `terrain_lod_test` confere a cobertura exata da esfera (4π), o refinamento, o corte por horizonte,
 as alturas e a reconstrução dos nós provisórios.
 
