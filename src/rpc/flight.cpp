@@ -1,6 +1,7 @@
 #include "flight.hpp"
 #include "core/simulation.hpp"
 #include "physics/vehicles.hpp"
+#include "providers/gfs.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -21,10 +22,10 @@ core::Reply wait(core::Ticket t){
 grpc::Status failed(const core::Reply& r){return r.code==core::Code::Ok?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,r.message};}
 }
 struct FlightServices::Impl {
-    core::Bridge& bridge;std::mutex mutex;std::optional<ph::Flight> flight;
+    core::Bridge& bridge;Weather weather;std::mutex mutex;std::optional<ph::Flight> flight;std::string atmosphere;
     ph::Tt step=ph::second/1000,start=0;std::uint64_t tick=0;int shown=0;std::vector<api::FlightEvent> events;
     std::chrono::steady_clock::time_point published{};
-    explicit Impl(core::Bridge& b):bridge(b){}
+    Impl(core::Bridge& b,Weather w):bridge(b),weather(std::move(w)){if(!weather)weather=[](double lat,double lon,double utc){return std::shared_ptr<const physics::AirModel>(providers::gfs().around(lat,lon,utc));};}
     double elapsed()const{return ph::secondsSinceJ2000(flight->state().time-start);}
     core::Sample scene()const{ // Cylinder axis (local y) along body x, centred on the stack.
         const auto& s=flight->state();const auto& st=flight->vehicle().stages[s.stage];
@@ -49,6 +50,11 @@ struct FlightServices::Impl {
             shown=flight->state().stage;if(followed)(void)bridge.submit(core::Focus{objectId,false});
         }else (void)bridge.submit(core::Append{objectId,{s}});
         (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),{},false,true});
+        (void)bridge.submit(telemetry());
+    }
+    core::FlightTelemetry telemetry()const{
+        const ph::Sample x=flight->sample();const auto& st=flight->state();
+        return{true,st.burning,st.clamped,st.landed,flight->vehicle().name,atmosphere,elapsed(),x.geodetic.height,ph::norm(x.nedVelocity),x.mach,x.dynamicPressure,x.mass,st.propellant,x.air.wind.x,x.air.wind.y,st.stage,static_cast<int>(flight->vehicle().stages.size())};
     }
     void fill(api::FlightSample* o){
         const ph::Sample x=flight->sample();const auto& s=flight->state();const auto& v=flight->vehicle();
@@ -64,13 +70,13 @@ struct FlightServices::Impl {
         o->set_burning(s.burning);o->set_clamped(s.clamped);o->set_landed(s.landed);o->set_throttle(s.throttle);
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
-        o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));
+        o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());
     }
 };
-FlightServices::FlightServices(core::Bridge& bridge):impl_(std::make_unique<Impl>(bridge)){}
+FlightServices::FlightServices(core::Bridge& bridge,Weather weather):impl_(std::make_unique<Impl>(bridge,std::move(weather))){}
 FlightServices::~FlightServices()=default;
 grpc::Status FlightServices::CreateFlight(grpc::ServerContext*,const api::CreateFlightRequest* r,api::FlightSample* out){
-    std::optional<ph::Flight> made;ph::Tt step=0,t=0;
+    std::optional<ph::Flight> made;ph::Tt step=0,t=0;std::string atmosphere="U.S. Standard Atmosphere 1976";
     try{
         ph::Vehicle vehicle;
         switch(r->vehicle()){
@@ -89,12 +95,20 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext*,const api::Create
         t=ph::ttFromUtc(utc);step=static_cast<ph::Tt>(std::llround(seconds*1e9));
         const unsigned degree=r->has_gravity_degree()?r->gravity_degree():20u;
         if(degree<2||degree>static_cast<unsigned>(ph::egm2008Maximum))throw std::invalid_argument("Gravity degree must be 2-70");
-        ph::Environment env;env.planet.degree=static_cast<int>(degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(utc-946728000.));env.ground=site.height_meters();
+        std::shared_ptr<const physics::AirModel> air;
+        if(r->weather()!=api::CreateFlightRequest::STANDARD_ATMOSPHERE){ // Weather only while Albert follows the real clock.
+            const bool live=!shown||shown->simulation.live;const double now=shown?shown->clock.utcSeconds:std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+            if(r->weather()==api::CreateFlightRequest::LIVE_GFS||(live&&std::abs(utc-now)<=7200)){
+                try{air=impl_->weather(site.latitude_degrees(),site.longitude_degrees(),utc);atmosphere=air->source();}
+                catch(const std::exception& e){if(r->weather()==api::CreateFlightRequest::LIVE_GFS)return{grpc::StatusCode::UNAVAILABLE,std::string("Live weather unavailable: ")+e.what()};atmosphere+=std::string(" (live weather unavailable: ")+e.what()+")";}
+            }
+        }
+        ph::Environment env;env.air=air;env.planet.degree=static_cast<int>(degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(utc-946728000.));env.ground=site.height_meters();
         made.emplace(vehicle,env,ph::Flight::pad(env,vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r->heading_degrees()*deg,pitch*deg));
         made->steps(step,static_cast<ph::Tt>(std::llround(coast*1e9)));
     }catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     std::lock_guard lock(impl_->mutex);auto& m=*impl_;
-    m.flight=std::move(made);m.step=step;m.start=t;m.tick=0;m.events.clear();
+    m.flight=std::move(made);m.step=step;m.start=t;m.tick=0;m.events.clear();m.atmosphere=atmosphere;
     m.shown=0;(void)wait(m.bridge.submit(core::Remove{objectId}));
     if(auto s=failed(wait(m.bridge.submit(core::Create{m.object()})));!s.ok())return s;
     if(auto s=failed(wait(m.bridge.submit(core::SetTime{ph::utcFromTt(t),0.,false})));!s.ok())return s;
@@ -140,7 +154,7 @@ grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::Empty*,ap
 }
 grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::Empty*,api::Applied* out){
     std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
-    impl_->flight.reset();const auto reply=wait(impl_->bridge.submit(core::Remove{objectId}));out->set_revision(reply.revision);
+    impl_->flight.reset();(void)impl_->bridge.submit(core::FlightTelemetry{});const auto reply=wait(impl_->bridge.submit(core::Remove{objectId}));out->set_revision(reply.revision);
     return reply.code==core::Code::Ok||reply.code==core::Code::NotFound?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,reply.message};
 }
 }

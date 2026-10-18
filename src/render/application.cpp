@@ -1244,6 +1244,7 @@ int albert::runRenderer(int argc, char** argv) {
         // A chosen event waits for positions at its date before flying there.
         struct PendingEvent {const SimulationEvent* event;std::uint64_t generation;};
         std::optional<PendingEvent> pendingEvent;
+        std::optional<albert::core::FlightTelemetry> flightTelemetry; // From the gRPC flight API.
         bool menuOpen = false;
         float menuProgress = 0.f;
         float resetZoomProgress = 0.f;
@@ -1628,6 +1629,23 @@ int albert::runRenderer(int argc, char** argv) {
                     ImGui::EndGroup();
                     ImGui::End();ImGui::PopStyleVar(2);
                 }
+            }
+            // External flight: vehicle state and the air it flies through (gRPC FlightService).
+            if(flightTelemetry&&(display.x>700||menuProgress<=0.f)){
+                const auto& f=*flightTelemetry;
+                ImGui::SetNextWindowPos(ImVec2(display.x-margin,display.y-margin),ImGuiCond_Always,ImVec2(1,1));
+                ImGui::SetNextWindowSize(ImVec2(std::min(330.f,display.x-margin*2),0),ImGuiCond_Always);ImGui::SetNextWindowBgAlpha(.65f);
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(16,12));
+                ImGui::Begin("Voo",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoFocusOnAppearing|ImGuiWindowFlags_NoNav|ImGuiWindowFlags_NoMove);
+                protectPanel();
+                ImGui::TextUnformatted(f.vehicle.c_str());
+                ImGui::TextDisabled("T+ %.1f s   estagio %d/%d   %s",f.elapsed,f.stage+1,f.stages,f.landed?"no solo":f.clamped?"preso no pad":f.burning?"motor ligado":"motor desligado");
+                ImGui::Text("Altitude %.2f km   Velocidade %.0f m/s",f.height/1e3,f.speed);
+                ImGui::Text("Mach %.2f   q %.1f kPa   Massa %.1f t",f.mach,f.dynamicPressure/1e3,f.mass/1e3);
+                const double wind=std::hypot(f.windNorth,f.windEast);
+                if(wind>.05)ImGui::Text("Vento %.1f m/s de %.0f graus",wind,std::fmod(std::atan2(-f.windEast,-f.windNorth)*180/PI+360,360.));else ImGui::Text("Vento calmo");
+                ImGui::PushTextWrapPos(ImGui::GetCursorPosX()+std::min(300.f,display.x-margin*2-32));ImGui::TextDisabled("Ar: %s",f.atmosphere.c_str());ImGui::PopTextWrapPos();
+                ImGui::End();ImGui::PopStyleVar();
             }
             // Time panel: the simulated date and the state of its data; opens the time controls.
             if (display.x > 900 || menuProgress <= 0.f) {
@@ -2095,6 +2113,7 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::LayerVisibility>)registry.layerVisible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Focus>) setFocus(value.id,value.reset);
                     else if constexpr(std::is_same_v<T,albert::core::SetTime>) {if(value.live)simulation.live();else if(value.hold&&value.utcSeconds)simulation.stall(*value.utcSeconds);else simulation.choose(value.utcSeconds,value.rate);}
+                    else if constexpr(std::is_same_v<T,albert::core::FlightTelemetry>) {if(value.active)flightTelemetry=std::move(value);else flightTelemetry.reset();}
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
                             throw std::invalid_argument("Invalid orbit parameters");

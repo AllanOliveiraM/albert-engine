@@ -34,7 +34,11 @@ int main(){try{
             bridge.publish(std::move(snapshot));std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
-    albert::rpc::Server server(bridge,0);
+    struct Breeze final:albert::physics::AirModel { // Live-weather stand-in: standard air, 10 m/s toward the east.
+        albert::physics::Air at(std::int64_t,double,double,double h)const override{auto a=albert::physics::standardAtmosphere(h);a.wind={0,10,0};return a;}
+        std::string source()const override{return "test breeze";}
+    };
+    albert::rpc::Server server(bridge,0,nullptr,[](double lat,double,double)->std::shared_ptr<const albert::physics::AirModel>{if(lat<0)throw std::runtime_error("offline");return std::make_shared<Breeze>();});
     auto channel=grpc::CreateChannel("127.0.0.1:"+std::to_string(server.port()),grpc::InsecureChannelCredentials());
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto scene=api::SceneService::NewStub(channel);auto camera=api::CameraService::NewStub(channel);api::Applied applied;
@@ -116,6 +120,11 @@ int main(){try{
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
         {const auto snap=bridge.snapshot();const auto o=std::find_if(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";});
             require(o!=snap->objects.end()&&o->appearance.sizeMeters.y==27,"Upper stack shown after separation");}
+        require(s.atmosphere()=="U.S. Standard Atmosphere 1976","A distant instant uses the standard atmosphere");
+        {grpc::ClientContext c;api::CreateFlightRequest live=create;live.set_weather(api::CreateFlightRequest::LIVE_GFS);require(flight->CreateFlight(&c,live,&s).ok(),"Live flight");}
+        require(s.atmosphere()=="test breeze"&&std::abs(s.wind_ned_meters_per_second().y()-10)<1e-12,"Live weather in the sample");
+        {grpc::ClientContext c;api::CreateFlightRequest south=create;south.set_weather(api::CreateFlightRequest::LIVE_GFS);south.mutable_site()->set_latitude_degrees(-5);
+            require(flight->CreateFlight(&c,south,&s).error_code()==grpc::StatusCode::UNAVAILABLE,"Unavailable live weather accepted");}
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         {const auto snap=bridge.snapshot();require(std::none_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Vehicle left in the scene");}

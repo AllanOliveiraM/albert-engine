@@ -1,5 +1,12 @@
 # Albert Engine — contexto para continuidade
 
+**Fase 2 em andamento (18/10/2026):** clima ao vivo do NOAA GFS na física e na tela
+(`src/providers/gfs.*`: GRIB2 5.0, ciclo pelo índice da AWS, recorte NOMADS ±6°, cache 48 h;
+`src/physics/weather.*`; vento no voo; painel **Voo**; `weather` na API), validado contra
+radiossonda de Tampa e casos NESC 7/8. NRLMSIS 2.x descartado (licença só acadêmica, proíbe
+modificação); próximo: NRLMSISE-00 portado do Orekit (Apache 2.0) + índices CelesTrak.
+Progresso geral (pesos em memória): ~33%.
+
 **Nova direção (17/10/2026, noite):** o Albert vira sandbox + motor físico realista e leve
 (foguete da superfície à órbita, software de voo externo, Terra/Lua/Marte, clima só ao vivo).
 Plano em fases no topo do `ROADMAP.md`, consolidado com pareceres do Codex e do Fable;

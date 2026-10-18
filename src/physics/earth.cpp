@@ -79,6 +79,23 @@ V3 harmonics(int degree,V3 r){ // Montenbruck & Gill, Satellite Orbits §3.2.
     }
     return acc*(gm/(a*a));
 }
+double geoidHeight(double lat,double lon){
+    // Disturbing potential on the ellipsoid (EGM2008 minus the WGS 84 normal field) over normal gravity.
+    const V3 r=fixedPosition(earth,{lat,lon,0});constexpr int top=egm2008Degree;
+    const double rn=norm(r),s=r.z/rn,c=std::sqrt(r.x*r.x+r.y*r.y)/rn,l=std::atan2(r.y,r.x),q=6378136.3/rn;
+    std::array<double,packed(top+1,0)> p{};p[0]=1;
+    for(int m=0;m<=top;++m){
+        if(m)p[packed(m,m)]=(m==1?std::sqrt(3.):std::sqrt((2*m+1)/(2.*m)))*c*p[packed(m-1,m-1)];
+        if(m<top)p[packed(m+1,m)]=std::sqrt(2*m+3.)*s*p[packed(m,m)];
+        for(int n=m+2;n<=top;++n)p[packed(n,m)]=std::sqrt((2*n-1.)*(2*n+1)/((n-m)*(n+m)))*s*p[packed(n-1,m)]-std::sqrt((2*n+1.)*(n+m-1)*(n-m-1)/((n-m)*(n+m)*(2*n-3.)))*p[packed(n-2,m)];
+    }
+    double sum=0,qn=q;
+    for(int n=2;n<=top;++n){qn*=q;for(int m=0;m<=n;++m)sum+=qn*p[packed(n,m)]*(egm2008[packed(n,m)][0]*std::cos(m*l)+egm2008[packed(n,m)][1]*std::sin(m*l));}
+    constexpr double normal[]{-.484166774985e-3,.790303733511e-6,-.168724961151e-8,.346052468394e-11,-.265002225747e-14},wgm=3.986004418e14;
+    double t=3.986004415e14/rn*(1+sum)-wgm/rn;const double qw=6378137./rn;
+    for(int k=0;k<5;++k){const int n=2*k+2;t-=wgm/rn*std::pow(qw,n)*normal[k]*p[packed(n,0)];}
+    const double s2=std::sin(lat)*std::sin(lat);return t/(9.7803253359*(1+.00193185265241*s2)/std::sqrt(1-earth.e2()*s2));
+}
 V3 gravitation(const Planet& pl,V3 r){
     if(pl.egm2008)return harmonics(pl.degree,r);
     const double rn=norm(r),u=r.z/rn,k=pl.gm/(rn*rn);const V3 h=r/rn;

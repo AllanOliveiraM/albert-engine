@@ -184,6 +184,10 @@ message CreateFlightRequest {
   bool focus_camera=8;
   optional double coast_step_seconds=9; // Longest step while ballistic above 86 km; default 1, 0 disables, up to 10.
   optional uint32 gravity_degree=10;     // EGM2008 degree and order, 2 to 70; default 20.
+  // AUTOMATIC: live NOAA GFS when Albert follows the real clock and the instant is within
+  // 2 h of now, else (or if GFS is unreachable) the 1976 standard atmosphere.
+  enum Weather { WEATHER_AUTOMATIC=0; STANDARD_ATMOSPHERE=1; LIVE_GFS=2; }
+  Weather weather=11;
 }
 message Gimbal { double pitch_radians=1; double yaw_radians=2; } // + pitch: nose up; + yaw: nose right.
 message FlightCommand {
@@ -215,6 +219,7 @@ message FlightSample {
   repeated FlightEvent events=31;       // Since the previous Step.
   uint64 state_hash=32;                 // Same commands and steps reproduce it.
   string vehicle=33; double step_seconds=34;
+  string atmosphere=35; Vector3 wind_ned_meters_per_second=36; // Source of air data; wind toward NED at the vehicle.
 }
 service FlightService {
   rpc CreateFlight(CreateFlightRequest) returns (FlightSample); // Replaces any current flight.

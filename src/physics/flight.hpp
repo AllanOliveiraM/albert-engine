@@ -3,6 +3,7 @@
 #include "physics/earth.hpp"
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 namespace albert::physics {
@@ -38,6 +39,7 @@ struct Environment {
     Planet planet=earth;
     Rotation rotation=Rotation::iau(69.184);
     bool atmosphere=true,sunMoon=true;
+    std::shared_ptr<const AirModel> air; // Replaces the standard atmosphere when set.
     double ground=-std::numeric_limits<double>::infinity(); // Ellipsoidal height of the surface (m).
 };
 // Inertial frame: GCRF (or the check-case frame aligned with Earth at the epoch).

@@ -137,9 +137,15 @@ int main(){try{
         std::printf("J2 nodal rate at %.1f deg: %.5f deg/day (theory %.5f)\n",inclination/deg,measured/deg*86400,theory/deg*86400);
         near(measured/theory,1,1e-3,"J2 secular nodal rate");
     }
-    // NESC spheres: 1 dragless (J2, rotating), 4 round non-rotating, 6 ellipsoidal, 9-10 cannonballs.
-    for(int c:{1,4,6,9,10}){
-        const Environment e=nesc(c==4,c!=4,c!=1);const Vehicle v=nescSphere();
+    // NESC spheres: 1 dragless (J2, rotating), 4 round non-rotating, 6 ellipsoidal, 7 steady
+    // wind (20 ft/s from the west), 8 shear (0.003 h - 20 ft/s from the west), 9-10 cannonballs.
+    struct Wind final:AirModel {
+        bool shear;explicit Wind(bool s):shear(s){}
+        Air at(std::int64_t,double,double,double h)const override{Air a=standardAtmosphere(h);a.wind={0,shear?(.003*h/ft-20)*ft:20*ft,0};return a;}
+        std::string source()const override{return "NESC wind";}
+    };
+    for(int c:{1,4,6,7,8,9,10}){
+        Environment e=nesc(c==4,c!=4,c!=1);const Vehicle v=nescSphere();if(c==7||c==8)e.air=std::make_shared<Wind>(c==8);
         const V3 ned=c==9?V3{0,1000*ft,-1000*ft}:c==10?V3{1000*ft,0,-1000*ft}:V3{};
         Flight f(v,e,Flight::free(e,v,0,{0,0,c<9?30000*ft:0},ned,{}));
         for(int t=0;t<=30;t+=10){

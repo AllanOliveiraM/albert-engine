@@ -35,7 +35,7 @@ Aerodynamics slender(double area){
         const double a=d*pi/180,s=std::sin(a),c=std::cos(a),cn=2*s*c+.6*1.2*planform*s*std::abs(s),ca=axial[i];
         lift.values.push_back(cn*c-ca*s);drag.values.push_back(ca*c+std::abs(cn*s));side.values.push_back(-cn);
     }
-    r.lift=lift;r.drag=drag;r.side=side;r.roll=r.pitch=r.yaw=constant(0);
+    r.lift=std::move(lift);r.drag=std::move(drag);r.side=std::move(side);r.roll=constant(0);r.pitch=constant(0);r.yaw=constant(0);
     return r;
 }
 }

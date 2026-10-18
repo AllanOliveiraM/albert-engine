@@ -28,6 +28,7 @@ V3 fixedPosition(const Planet& p,Geodetic g);
 M3 nedFromFixed(double latitude,double longitude); // Rows: north, east, down.
 V3 gravitation(const Planet& p,V3 fixed);           // Attraction only, body-fixed axes (m/s²).
 V3 harmonics(int degree,V3 fixed);                 // EGM2008 to degree × order (Cunningham recursion).
+double geoidHeight(double latitude,double longitude); // EGM2008 (degree 70) over WGS 84, Bruns (m).
 
 // Inertial (GCRF) to body-fixed. Uniform: rotation about z from the epoch (check cases).
 // IAU: CIO-based IAU 2006/2000A bias-precession-nutation (cached 60 s) and Earth rotation

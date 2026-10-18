@@ -66,9 +66,9 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     const Orientation o=env_.rotation.at(s.time);const V3 rf=o.fixed*s.position;const M3 back=transpose(o.fixed);
     V3 g=back*gravitation(env_.planet,rf);if(env_.sunMoon)g+=tidal(s);
     const M3 b=matrix(s.attitude),bt=transpose(b);
-    const V3 relative=s.velocity-cross(o.omega,s.position),air=bt*relative;const double speed=norm(air);
-    const Geodetic geo=geodetic(env_.planet,rf);
-    const Air atm=env_.atmosphere?standardAtmosphere(geo.height):Air{};
+    const Geodetic geo=geodetic(env_.planet,rf);const M3 ned=nedFromFixed(geo.latitude,geo.longitude);
+    const Air atm=!env_.atmosphere?Air{}:env_.air?env_.air->at(s.time,geo.latitude,geo.longitude,geo.height):standardAtmosphere(geo.height);
+    const V3 relative=s.velocity-cross(o.omega,s.position),air=bt*(relative-back*(transpose(ned)*atm.wind));const double speed=norm(air);
     const double q=.5*atm.density*speed*speed,mach=atm.sound>0?speed/atm.sound:0.;
     const double alpha=speed>0?std::atan2(air.z,air.x):0.,beta=speed>0?std::asin(std::clamp(air.y/speed,-1.,1.)):0.;
     V3 fa,ma;
@@ -97,7 +97,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     Rate r{s.velocity,g+b*(force/ms.m),spin(s.attitude,s.rate),{rhs.x/ms.inertia.x,rhs.y/ms.inertia.y,rhs.z/ms.inertia.z},-flow};
     if(out){
         Sample& x=*out;x.mass=ms.m;x.mach=mach;x.dynamicPressure=q;x.alpha=alpha;x.beta=beta;x.thrust=thrust;x.massFlow=flow;x.air=atm;x.geodetic=geo;
-        x.fixedPosition=rf;x.fixedVelocity=o.fixed*relative;const M3 ned=nedFromFixed(geo.latitude,geo.longitude);x.nedVelocity=ned*x.fixedVelocity;
+        x.fixedPosition=rf;x.fixedVelocity=o.fixed*relative;x.nedVelocity=ned*x.fixedVelocity;
         const M3 c=ned*o.fixed*b;x.nedAttitude=quaternion(c);x.euler={std::atan2(c.m[1][0],c.m[0][0]),-std::asin(std::clamp(c.m[2][0],-1.,1.)),std::atan2(c.m[2][1],c.m[2][2])};
         x.aeroForce=fa;x.aeroMoment=ma;x.thrustForce=ft;x.gravity=g;x.acceleration=r.a;x.specificForce=force/ms.m;
         if(s.clamped||s.landed){x.acceleration=cross(o.omega,cross(o.omega,s.position));x.specificForce=bt*(x.acceleration-g);}

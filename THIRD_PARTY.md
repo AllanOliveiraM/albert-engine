@@ -50,6 +50,13 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - National Geospatial-Intelligence Agency (NGA): coeficientes do modelo gravitacional
   EGM2008 tide-free até o grau 70 em `src/physics/egm2008.inc`, extraídos de
   `EGM2008_to2190_TideFree` (https://earth-info.nga.mil). Distribuição sem restrições.
+- NOAA/NCEP: previsões e análises GFS 0,25° baixadas em uso pelo filtro NOMADS
+  (https://nomads.ncep.noaa.gov) e índices do NOAA Open Data Dissemination na AWS
+  (https://registry.opendata.aws/noaa-gfs-bdp-pds/); recorte da análise de 2026-10-17
+  12 UTC em `tests/gfs_tampa_2026101712_f000.grb2`. Dados do governo dos EUA.
+- University of Wyoming, Department of Atmospheric Science: radiossondagem de Tampa
+  (72210) de 2026-10-17 12 UTC, níveis padrão em `tests/weather_test.cpp`,
+  https://weather.uwyo.edu.
 - NASA GIBS: paleta pública de fração de nuvens MODIS, convertida para JSON,
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml.
 - Planetas e luas (créditos e limites por corpo em `assets/planetary-sources.json`,
