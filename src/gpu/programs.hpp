@@ -20,4 +20,7 @@ struct Program {
 void define(const std::string& name,Program program);
 const Program* program(const std::string& name);
 extern const char* const prelude;
+// threepp's physical lighting (r166+ conventions, no legacy π): GGX with correlated Smith,
+// Blinn-Phong, Lambert, three.js bump mapping; view space, light from `frame`.
+extern const char* const lighting;
 }

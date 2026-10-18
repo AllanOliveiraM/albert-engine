@@ -65,9 +65,10 @@ void pack(std::vector<std::byte>& out,std::size_t at,Uniform u,const UniformValu
 // directional and one ambient light, with map (sRGB decoded), alphaMap + alphaTest and a light
 // map on uv2 added as irradiance (threepp's lightMap). Basic is unlit.
 const char* const builtinWgsl=R"(
-struct Material { colour: vec4f, emissive: vec4f, params: vec4f, flags: vec4f };
+struct Material { colour: vec4f, emissive: vec4f, params: vec4f, flags: vec4f, specular: vec4f, more: vec4f };
 // params: roughness, metalness or shininess, alphaTest, lightMapIntensity
-// flags: map sRGB, kind (0 basic, 1 phong, 2 standard), has alphaMap, has lightMap
+// flags: map sRGB, kind (0 basic, 1 phong, 2 standard, 3 lambert), has alphaMap, has lightMap
+// specular: Phong specular colour, bumpScale; more: has bumpMap, has roughnessMap, double sided, flat shading
 @group(2) @binding(0) var<uniform> material: Material;
 @group(2) @binding(1) var map: texture_2d<f32>;
 @group(2) @binding(2) var mapSampler: sampler;
@@ -75,41 +76,41 @@ struct Material { colour: vec4f, emissive: vec4f, params: vec4f, flags: vec4f };
 @group(2) @binding(4) var alphaSampler: sampler;
 @group(2) @binding(5) var lightMap: texture_2d<f32>;
 @group(2) @binding(6) var lightSampler: sampler;
-struct Varyings { @builtin(position) clip: vec4f, @location(0) world: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) uv2: vec2f };
+@group(2) @binding(7) var bumpMap: texture_2d<f32>;
+@group(2) @binding(8) var bumpSampler: sampler;
+@group(2) @binding(9) var roughnessMap: texture_2d<f32>;
+@group(2) @binding(10) var roughnessSampler: sampler;
+struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) uv2: vec2f };
 @vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) uv2: vec2f) -> Varyings {
-    var o: Varyings;
-    let world = object.model * vec4f(position, 1.0);
-    o.clip = frame.projection * object.modelView * vec4f(position, 1.0);
-    o.world = world.xyz; o.normal = object.normalWorld * normal; o.uv = uv; o.uv2 = uv2;
+    var o: Varyings; let view = object.modelView * vec4f(position, 1.0);
+    o.clip = frame.projection * view; o.position = view.xyz; o.normal = object.normalView * normal; o.uv = uv; o.uv2 = uv2;
     return o;
 }
 @fragment fn fs_main(v: Varyings, @builtin(front_facing) front: bool) -> @location(0) vec4f {
-    var albedo = textureSample(map, mapSampler, v.uv);
-    if (material.flags.x > 0.5) { albedo = vec4f(srgbToLinear(albedo.rgb), albedo.a); }
-    var base = material.colour * albedo;
+    let face = select(-1.0, 1.0, front);
+    var texel = textureSample(map, mapSampler, v.uv);
+    if (material.flags.x > 0.5) { texel = vec4f(srgbToLinear(texel.rgb), texel.a); }
+    var base = material.colour * texel;
     let mask = textureSample(alphaMap, alphaSampler, v.uv).g;
-    let light = textureSample(lightMap, lightSampler, v.uv2).rgb;
+    let lightTexel = textureSample(lightMap, lightSampler, v.uv2).rgb;
+    let roughTexel = textureSample(roughnessMap, roughnessSampler, v.uv);
+    let dx = dpdx(v.uv); let dy = dpdy(v.uv); let scale = material.specular.w;
+    let h = scale * textureSample(bumpMap, bumpSampler, v.uv).x;
+    let dBx = scale * textureSample(bumpMap, bumpSampler, v.uv + dx).x - h; let dBy = scale * textureSample(bumpMap, bumpSampler, v.uv + dy).x - h;
+    var geometryNormal = normalize(v.normal); if (material.more.z > 0.5) { geometryNormal = geometryNormal * face; }
+    if (material.more.w > 0.5) { geometryNormal = flatNormal(v.position); }
+    var n = geometryNormal; if (material.more.x > 0.5) { n = bumpNormal(v.position, geometryNormal, dBx, dBy, face); }
     if (material.flags.z > 0.5) { base.a = base.a * mask; }
     if (base.a < material.params.z) { discard; }
-    if (material.flags.y < 0.5) { return vec4f(finish(base.rgb), base.a); }
-    var n = normalize(v.normal); if (!front) { n = -n; }
-    let l = normalize(frame.sun.xyz); let e = normalize(frame.camera.xyz - v.world); let h = normalize(l + e);
-    let nl = max(dot(n, l), 0.0) * frame.sun.w;
-    var irradiance = frame.ambient.rgb;
-    if (material.flags.w > 0.5) { irradiance = irradiance + light * material.params.w; }
+    let extra = select(vec3f(0.0), lightTexel * material.params.w, material.flags.w > 0.5);
     var colour: vec3f;
-    if (material.flags.y < 1.5) {
-        let specular = pow(max(dot(n, h), 0.0), max(material.params.y, 1.0)) * nl;
-        colour = base.rgb * (irradiance + frame.sunColor.rgb * nl) + frame.sunColor.rgb * specular * 0.02;
-    } else {
-        let a = max(material.params.x * material.params.x, 0.002); let nh = max(dot(n, h), 0.0); let nv = max(dot(n, e), 1e-4);
-        let d = a * a / (3.14159265 * pow(nh * nh * (a * a - 1.0) + 1.0, 2.0));
-        let f0 = mix(vec3f(0.04), base.rgb, material.params.y);
-        let f = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, e), 0.0), 5.0);
-        let k = a * 0.5; let g = nl / max(nl * (1.0 - k) + k, 1e-4) / (nv * (1.0 - k) + k);
-        let diffuse = base.rgb * (1.0 - material.params.y);
-        colour = diffuse * irradiance + (diffuse * (1.0 - f) + 3.14159265 * d * f * g / 4.0) * frame.sunColor.rgb * nl;
-    }
+    let kind = material.flags.y;
+    if (kind < 0.5) { colour = base.rgb * select(vec3f(1.0), extra / PI_L, material.flags.w > 0.5); }
+    else if (kind > 1.5 && kind < 2.5) {
+        let roughness = material.params.x * select(1.0, roughTexel.g, material.more.y > 0.5);
+        colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra);
+    } else if (kind > 2.5) { colour = phongLight(base.rgb, vec3f(0.0), 1.0, n, v.position, extra); }
+    else { colour = phongLight(base.rgb, material.specular.rgb, material.params.y, n, v.position, extra); }
     return vec4f(finish(colour + material.emissive.rgb), base.a);
 }
 )";
@@ -143,7 +144,7 @@ struct SceneRenderer::Impl {
         WGPUSamplerDescriptor s{};s.addressModeU=s.addressModeV=s.addressModeW=WGPUAddressMode_ClampToEdge;s.magFilter=s.minFilter=WGPUFilterMode_Linear;s.mipmapFilter=WGPUMipmapFilterMode_Linear;s.lodMaxClamp=32;s.maxAnisotropy=1;
         linear=wgpuDeviceCreateSampler(device,&s);
         floatFilterable=wgpuDeviceHasFeature(device,WGPUFeatureName_Float32Filterable);
-        Program b;b.wgsl=builtinWgsl;b.attributes={{"normal",3},{"uv",2},{"uv2",2}};b.textures={"map","alphaMap","lightMap"};define("albert:builtin",b);
+        Program b;b.wgsl=builtinWgsl;b.attributes={{"normal",3},{"uv",2},{"uv2",2}};b.textures={"map","alphaMap","lightMap","bumpMap","roughnessMap"};define("albert:builtin",b);
     }
     ~Impl(){
         for(auto& [k,p]:pipelines)wgpuRenderPipelineRelease(p);
@@ -170,7 +171,7 @@ struct SceneRenderer::Impl {
     const Compiled* program(const std::string& name){
         if(const auto it=compiled.find(name);it!=compiled.end())return &it->second;
         const Program* p=gpu::program(name);if(!p){report("no WebGPU program for material '"+name+"'");return nullptr;}
-        Compiled c;c.program=*p;const std::string source=std::string(prelude)+p->wgsl;
+        Compiled c;c.program=*p;const std::string source=std::string(prelude)+lighting+p->wgsl;
         WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code=sv(source);WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;md.label=sv(name);
         c.module=wgpuDeviceCreateShaderModule(device,&md);
         std::vector<WGPUBindGroupLayoutEntry> entries(1+2*p->textures.size());
@@ -253,18 +254,21 @@ struct SceneRenderer::Impl {
             for(std::size_t i=0;i<c.program.uniforms.size();++i){const auto it=shader->uniforms.find(c.program.uniforms[i].first);if(it!=shader->uniforms.end())pack(bytes,at[i],c.program.uniforms[i].second,&it->second.value());}
             for(const auto& n:c.program.textures){const auto it=shader->uniforms.find(n);threepp::Texture* t=nullptr;if(it!=shader->uniforms.end())if(auto* p=std::get_if<threepp::Texture*>(&it->second.value()))t=*p;maps.push_back(t);}
         }else{
-            float f[16]{1,1,1,m.opacity, 0,0,0,0, 1,0,m.alphaTest,1, 0,0,0,0};
+            float f[24]{1,1,1,m.opacity, 0,0,0,0, 1,0,m.alphaTest,1, 0,0,0,0, 0,0,0,0, 0,0,m.side==Side::Double?1.f:0.f,0};
             if(auto* c=dynamic_cast<MaterialWithColor*>(&m)){f[0]=c->color.r;f[1]=c->color.g;f[2]=c->color.b;}
             if(auto* e=dynamic_cast<MaterialWithEmissive*>(&m)){f[4]=e->emissive.r*e->emissiveIntensity;f[5]=e->emissive.g*e->emissiveIntensity;f[6]=e->emissive.b*e->emissiveIntensity;}
             if(auto* s=dynamic_cast<MeshStandardMaterial*>(&m)){f[8]=s->roughness;f[9]=s->metalness;f[13]=2;}
-            else if(auto* p=dynamic_cast<MeshPhongMaterial*>(&m)){f[9]=p->shininess;f[13]=1;}
-            else if(dynamic_cast<MeshLambertMaterial*>(&m)){f[9]=1;f[13]=1;}
-            threepp::Texture *map=nullptr,*alpha=nullptr,*light=nullptr;
+            else if(auto* p=dynamic_cast<MeshPhongMaterial*>(&m)){f[9]=p->shininess;f[13]=1;f[16]=p->specular.r;f[17]=p->specular.g;f[18]=p->specular.b;}
+            else if(dynamic_cast<MeshLambertMaterial*>(&m)){f[13]=3;}
+            if(auto* fl=dynamic_cast<MaterialWithFlatShading*>(&m))f[23]=fl->flatShading?1.f:0.f;
+            threepp::Texture *map=nullptr,*alpha=nullptr,*light=nullptr,*bump=nullptr,*rough=nullptr;
             if(auto* w=dynamic_cast<MaterialWithMap*>(&m))map=w->map.get();
             if(auto* w=dynamic_cast<MaterialWithAlphaMap*>(&m))alpha=w->alphaMap.get();
             if(auto* w=dynamic_cast<MaterialWithLightMap*>(&m)){light=w->lightMap.get();f[11]=w->lightMapIntensity;}
-            f[12]=map&&map->colorSpace==ColorSpace::sRGB?1.f:0.f;f[14]=alpha?1.f:0.f;f[15]=light?1.f:0.f;
-            bytes.resize(sizeof f);std::memcpy(bytes.data(),f,sizeof f);maps={map,alpha,light};
+            if(auto* w=dynamic_cast<MaterialWithBumpMap*>(&m)){bump=w->bumpMap.get();f[19]=w->bumpScale;}
+            if(auto* w=dynamic_cast<MaterialWithRoughness*>(&m))rough=w->roughnessMap.get();
+            f[12]=map&&map->colorSpace==ColorSpace::sRGB?1.f:0.f;f[14]=alpha?1.f:0.f;f[15]=light?1.f:0.f;f[20]=bump?1.f:0.f;f[21]=rough?1.f:0.f;
+            bytes.resize(sizeof f);std::memcpy(bytes.data(),f,sizeof f);maps={map,alpha,light,bump,rough};
         }
         if(!state.uniforms.buffer||state.uniforms.bytes<bytes.size()){if(state.uniforms.buffer)wgpuBufferRelease(state.uniforms.buffer);state.uniforms.buffer=buffer(bytes.size(),WGPUBufferUsage_Uniform);state.uniforms.bytes=bytes.size();if(state.group){wgpuBindGroupRelease(state.group);state.group=nullptr;}}
         wgpuQueueWriteBuffer(queue,state.uniforms.buffer,0,bytes.data(),bytes.size());

@@ -17,7 +17,7 @@ albert::DebrisFields::DebrisFields(Scene& scene){
             positions.insert(positions.end(),{x*au,(z*.39777716f+y*.91748206f)*au,-(z*.91748206f-y*.39777716f)*au});
         }
         auto geometry=BufferGeometry::create();geometry->setAttribute("position",FloatBufferAttribute::create(std::move(positions),3));
-        auto material=ShaderMaterial::create();material->vertexShader=R"(
+        auto material=ShaderMaterial::create();material->name="albert:debris";material->vertexShader=R"(
             uniform float opacity;varying float alpha;
             void main(){vec4 p=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*p;gl_PointSize=2.0;alpha=opacity;}
         )";material->fragmentShader=R"(

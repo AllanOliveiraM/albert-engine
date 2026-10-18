@@ -33,4 +33,40 @@ fn aces(colour: vec3f) -> vec3f {
 }
 fn finish(colour: vec3f) -> vec3f { return linearToSrgb(aces(colour)); } // tonemapping + encodings.
 )";
+const char* const lighting=R"(
+const PI_L = 3.141592653589793;
+fn sunView() -> vec3f { return normalize((frame.view * vec4f(frame.sun.xyz, 0.0)).xyz); }
+fn specularGGX(n: vec3f, l: vec3f, v: vec3f, f0: vec3f, roughness: f32) -> vec3f {
+    let alpha = roughness * roughness; let h = normalize(l + v);
+    let nl = clamp(dot(n, l), 0.0, 1.0); let nv = clamp(dot(n, v), 0.0, 1.0); let nh = clamp(dot(n, h), 0.0, 1.0); let vh = clamp(dot(l, h), 0.0, 1.0);
+    let fresnel = pow(1.0 - vh, 5.0); let f = f0 * (1.0 - fresnel) + fresnel;
+    let a2 = alpha * alpha;
+    let gv = nl * sqrt(a2 + (1.0 - a2) * nv * nv); let gl = nv * sqrt(a2 + (1.0 - a2) * nl * nl);
+    let denom = nh * nh * (a2 - 1.0) + 1.0;
+    return f * (0.5 / max(gv + gl, 1e-6)) * (a2 / (PI_L * denom * denom));
+}
+fn blinnPhong(n: vec3f, l: vec3f, v: vec3f, specular: vec3f, shininess: f32) -> vec3f {
+    let h = normalize(l + v); let vh = clamp(dot(v, h), 0.0, 1.0); let fresnel = pow(1.0 - vh, 5.0);
+    return (specular * (1.0 - fresnel) + fresnel) * 0.25 * (shininess * 0.5 + 1.0) / PI_L * pow(clamp(dot(n, h), 0.0, 1.0), shininess);
+}
+// MeshStandardMaterial: direct sun, ambient and extra irradiance (light maps) on a dielectric/metal.
+fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geometryNormal: vec3f, position: vec3f, extra: vec3f) -> vec3f {
+    let dxy = max(abs(dpdx(geometryNormal)), abs(dpdy(geometryNormal)));
+    let roughness = min(max(roughnessIn, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
+    let diffuse = albedo * (1.0 - metalness); let f0 = mix(vec3f(0.04), albedo, metalness);
+    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
+    return nl * frame.sunColor.rgb * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * diffuse / PI_L;
+}
+fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f) -> vec3f {
+    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
+    return nl * frame.sunColor.rgb * (albedo / PI_L + blinnPhong(n, l, v, specular, shininess)) + (frame.ambient.rgb + extra) * albedo / PI_L;
+}
+// three.js perturbNormalArb with dHdxy_fwd (invariant under WebGPU's flipped framebuffer y).
+fn bumpNormal(position: vec3f, normal: vec3f, dBx: f32, dBy: f32, face: f32) -> vec3f {
+    let sigmaX = dpdx(position); let sigmaY = dpdy(position);
+    let r1 = cross(sigmaY, normal); let r2 = cross(normal, sigmaX); let det = dot(sigmaX, r1) * face;
+    return normalize(abs(det) * normal - sign(det) * (dBx * r1 + dBy * r2));
+}
+fn flatNormal(position: vec3f) -> vec3f { return normalize(cross(dpdy(position), dpdx(position))); } // GL's cross(dFdx, dFdy) with y flipped.
+)";
 }

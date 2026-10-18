@@ -11,5 +11,7 @@ std::shared_ptr<ShaderMaterial> albert::assistedMaterial(Color color,float metal
     m->fragmentShader.insert(at,"outgoingLight += diffuseColor.rgb * auxiliaryStrength * (1.0-smoothstep(-0.10,0.0,dot(normal,normalize(auxiliarySolarDirection))));\n");
     if(flat)m->defines["FLAT_SHADED"]="";
     if(doubleSided)m->side=Side::Double;
+    m->name=flat?"albert:assisted-flat":"albert:assisted"; // WGSL in webgpu_programs.cpp.
+    m->uniforms.emplace("doubleSided",Uniform(doubleSided?1.f:0.f));
     return m;
 }

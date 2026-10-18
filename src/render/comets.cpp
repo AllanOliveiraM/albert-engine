@@ -53,7 +53,7 @@ constexpr const char* phaseFunction=R"(
 // The column fades over 10 X as older grains leave for the Finson-Probstein tail sheet,
 // reaching black well inside the 80 X shell even on the stretched scale.
 std::shared_ptr<ShaderMaterial> comaMaterial(Texture* phase){
-    auto m=ShaderMaterial::create();m->transparent=true;m->depthWrite=false;m->side=Side::Front;m->blending=Blending::Additive;
+    auto m=ShaderMaterial::create();m->name="albert:coma";m->transparent=true;m->depthWrite=false;m->side=Side::Front;m->blending=Blending::Additive;
     m->uniforms={{"phase",Uniform(phase)},{"centre",Uniform(Vector3())},{"solar",Uniform(Vector3(1,0,0))},{"afrho",Uniform(0.f)},{"apex",Uniform(1.f)},
         {"radius",Uniform(1.f)},{"nucleus",Uniform(0.f)},{"intensity",Uniform(2.4f)},{"stretch",Uniform(0.f)},{"reference",Uniform(1e-5f)}};
     m->vertexShader=R"(varying vec3 vPosition;void main(){vec4 view=modelViewMatrix*vec4(position,1.0);vPosition=view.xyz;gl_Position=projectionMatrix*view;})";
@@ -79,7 +79,7 @@ std::shared_ptr<ShaderMaterial> comaMaterial(Texture* phase){
 // projects to a Gaussian across its axis, so each vertex carries the axis I/F
 // (already divided by the sine between view and axis) and the offset in sigmas.
 std::shared_ptr<ShaderMaterial> ionMaterial(Texture* phase){
-    auto m=ShaderMaterial::create();m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
+    auto m=ShaderMaterial::create();m->name="albert:ions";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
     m->uniforms={{"phase",Uniform(phase)},{"intensity",Uniform(2.4f)},{"stretch",Uniform(0.f)},{"reference",Uniform(1e-5f)}};
     m->vertexShader=R"(attribute float axial,across;varying float vAxial,vAcross;
         void main(){vAxial=axial;vAcross=across;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);})";
@@ -96,7 +96,7 @@ std::shared_ptr<ShaderMaterial> ionMaterial(Texture* phase){
 // the nucleus carries the column integrated along the axis (radial profile in a texture,
 // squared radius mapping for the narrow core), faded in as the view nears the axis.
 std::shared_ptr<ShaderMaterial> capMaterial(Texture* phase,Texture* profile){
-    auto m=ShaderMaterial::create();m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
+    auto m=ShaderMaterial::create();m->name="albert:ion-cap";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
     m->uniforms={{"phase",Uniform(phase)},{"profile",Uniform(profile)},{"intensity",Uniform(2.4f)},{"stretch",Uniform(0.f)},{"reference",Uniform(1e-5f)},
         {"radius",Uniform(1.f)},{"weight",Uniform(0.f)}};
     m->vertexShader=R"(uniform float radius;varying vec2 vDisc;
@@ -114,7 +114,7 @@ std::shared_ptr<ShaderMaterial> capMaterial(Texture* phase,Texture* profile){
 // Dust sheet: albedo cross-section per area sigma gives I/F = sigma*phase/4 through a
 // thin layer, divided by the cosine of the view to the sheet, limited by its thickness.
 std::shared_ptr<ShaderMaterial> tailMaterial(Texture* phase){
-    auto m=ShaderMaterial::create();m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
+    auto m=ShaderMaterial::create();m->name="albert:dust-tail";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
     m->uniforms={{"phase",Uniform(phase)},{"solar",Uniform(Vector3(1,0,0))},{"intensity",Uniform(2.4f)},{"stretch",Uniform(0.f)},{"reference",Uniform(1e-5f)}};
     m->vertexShader=R"(
         attribute float density,thickness;varying float vDensity,vThickness;varying vec3 vWorld,vNormal;

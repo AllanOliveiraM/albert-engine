@@ -469,4 +469,166 @@ struct Material { radius: f32, localSun: vec3f, irradiance: f32, incidence: f32 
     albert::gpu::define("albert:rings",image);
 }
 }
-void albert::defineWebGpuPrograms(){stars();earthLayers();paths();solids();}
+namespace {
+// comets.cpp phaseFunction: Halley-Marcus phase (log table), reddish dust, CO+ ions, asinh display stretch.
+const char* const cometPhase=R"(
+@group(2) @binding(1) var phase: texture_2d<f32>;
+@group(2) @binding(2) var phaseSampler: sampler;
+const DUST = vec3f(1.06, 1.0, 0.94); const IONS = vec3f(0.22, 0.48, 1.0); const PI = 3.141592653589793;
+fn dustPhase(cosine: f32) -> f32 { let deg = degrees(acos(clamp(cosine, -1.0, 1.0))); return exp(textureSampleLevel(phase, phaseSampler, vec2f((deg + 0.5) / 181.0, 0.5), 0.0).r); }
+fn arcsinh(x: f32) -> f32 { return log(x + sqrt(x * x + 1.0)); }
+fn shade(reflectance: f32, colour: vec3f) -> vec3f {
+    let soft = material.reference * 5e-5; let enhanced = 0.15 * arcsinh(reflectance / soft) / arcsinh(material.reference / soft);
+    let value = exp(mix(log(max(reflectance, 1e-30)), log(max(enhanced, 1e-30)), material.stretch));
+    return colour * value * material.intensity / PI;
+}
+)";
+void comets(){
+    const std::vector<std::pair<std::string,Uniform>> shared{{"intensity",Uniform::f32},{"stretch",Uniform::f32},{"reference",Uniform::f32}};
+    auto with=[&](std::vector<std::pair<std::string,Uniform>> extra){extra.insert(extra.begin(),shared.begin(),shared.end());return extra;};
+    Program coma;coma.textures={"phase"};coma.uniforms=with({{"centre",Uniform::vec3},{"solar",Uniform::vec3},{"afrho",Uniform::f32},{"apex",Uniform::f32},{"radius",Uniform::f32},{"nucleus",Uniform::f32}});
+    coma.wgsl=std::string(R"(
+struct Material { intensity: f32, stretch: f32, reference: f32, centre: vec3f, solar: vec3f, afrho: f32, apex: f32, radius: f32, nucleus: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+)")+cometPhase+R"(
+struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f };
+@vertex fn vs_main(@location(0) position: vec3f) -> Varyings { var o: Varyings; let view = object.modelView * vec4f(position, 1.0); o.position = view.xyz; o.clip = frame.projection * view; return o; }
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f { // Afρ/(8b) column over the pixel footprint, fountain envelope.
+    let d = normalize(v.position); let along = dot(material.centre, d); let q = along * d - material.centre; let b = length(q);
+    let footprint = fwidth(b); let reach = sqrt(b * b + 0.25 * footprint * footprint);
+    let ahead = 0.5 + atan2(along, reach) / PI;
+    let column = material.afrho / (8.0 * reach) * ahead * exp(-b / (10.0 * material.apex));
+    let parabolic = (b + dot(q, material.solar)) / (2.0 * material.apex); let envelope = 1.0 / (1.0 + parabolic * parabolic);
+    let edge = 1.0 - smoothstep(0.8 * material.radius, material.radius, b);
+    let hidden = select(1.0, 0.5, b < material.nucleus);
+    return vec4f(finish(shade(column * envelope * edge * hidden * dustPhase(dot(material.solar, -d)), DUST)), 1.0);
+}
+)";
+    albert::gpu::define("albert:coma",coma);
+    Program ions;ions.textures={"phase"};ions.uniforms=shared;ions.attributes={{"axial",1},{"across",1}};
+    ions.wgsl=std::string(R"(
+struct Material { intensity: f32, stretch: f32, reference: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+)")+cometPhase+R"(
+struct Varyings { @builtin(position) clip: vec4f, @location(0) axial: f32, @location(1) across: f32 };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) axial: f32, @location(2) across: f32) -> Varyings {
+    var o: Varyings; o.axial = axial; o.across = across; o.clip = frame.projection * object.modelView * vec4f(position, 1.0); return o;
+}
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f { return vec4f(finish(shade(v.axial * exp(-0.5 * v.across * v.across), IONS)), 1.0); }
+)";
+    albert::gpu::define("albert:ions",ions);
+    Program cap;cap.textures={"phase","profile"};cap.uniforms=with({{"radius",Uniform::f32},{"weight",Uniform::f32}});
+    cap.wgsl=std::string(R"(
+struct Material { intensity: f32, stretch: f32, reference: f32, radius: f32, weight: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+@group(2) @binding(3) var profile: texture_2d<f32>;
+@group(2) @binding(4) var profileSampler: sampler;
+)")+cometPhase+R"(
+struct Varyings { @builtin(position) clip: vec4f, @location(0) disc: vec2f };
+@vertex fn vs_main(@location(0) position: vec3f) -> Varyings { // A disc facing the camera at the nucleus.
+    var o: Varyings; o.disc = position.xy; let centre = object.modelView * vec4f(0.0, 0.0, 0.0, 1.0);
+    o.clip = frame.projection * (centre + vec4f(position.xy * material.radius, 0.0, 0.0)); return o;
+}
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
+    let rho = length(v.disc);
+    let column = textureSampleLevel(profile, profileSampler, vec2f(sqrt(min(rho, 1.0)) * 63.0 / 64.0 + 0.5 / 64.0, 0.5), 0.0).r;
+    if (rho > 1.0) { discard; }
+    return vec4f(finish(shade(material.weight * column, IONS)), 1.0);
+}
+)";
+    albert::gpu::define("albert:ion-cap",cap);
+    Program tail;tail.textures={"phase"};tail.uniforms=with({{"solar",Uniform::vec3}});tail.attributes={{"normal",3},{"density",1},{"thickness",1}};
+    tail.wgsl=std::string(R"(
+struct Material { intensity: f32, stretch: f32, reference: f32, solar: vec3f };
+@group(2) @binding(0) var<uniform> material: Material;
+)")+cometPhase+R"(
+struct Varyings { @builtin(position) clip: vec4f, @location(0) density: f32, @location(1) thickness: f32, @location(2) world: vec3f, @location(3) normal: vec3f };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) density: f32, @location(3) thickness: f32) -> Varyings {
+    var o: Varyings; o.density = density; o.thickness = thickness;
+    o.normal = normalize(mat3x3f(object.model[0].xyz, object.model[1].xyz, object.model[2].xyz) * normal);
+    let world = object.model * vec4f(position, 1.0); o.world = world.xyz; o.clip = frame.projection * frame.view * world; return o;
+}
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f { // Thin dust sheet: σ·phase/4 per slant.
+    let view = normalize(frame.camera.xyz - v.world);
+    let slant = max(abs(dot(normalize(v.normal), view)), v.thickness);
+    return vec4f(finish(shade(v.density * 0.25 * dustPhase(dot(material.solar, view)) / slant, DUST)), 1.0);
+}
+)";
+    albert::gpu::define("albert:dust-tail",tail);
+}
+}
+namespace {
+// lighting.cpp assistedMaterial: threepp's MeshStandardMaterial lighting plus the didactic fill on
+// the unlit side; rocks.cpp adds procedural mineral albedo and grain bump.
+std::string assisted(bool flat,bool rock){
+    std::string s=R"(
+struct Material { diffuse: vec3f, opacity: f32, emissive: vec3f, roughness: f32, metalness: f32, auxiliaryStrength: f32, auxiliarySolarDirection: vec3f, doubleSided: f32, rockSeed: f32, rockScale: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, @location(1) normal: vec3f, @location(2) local: vec3f };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f) -> Varyings {
+    var o: Varyings; let view = object.modelView * vec4f(position, 1.0);
+    o.clip = frame.projection * view; o.position = view.xyz; o.normal = object.normalView * normal; o.local = position; return o;
+}
+fn rockHash(q: vec3f) -> f32 { var p = fract(q * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
+fn rockNoise(p: vec3f) -> f32 {
+    let i = floor(p); var f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(rockHash(i), rockHash(i + vec3f(1, 0, 0)), f.x), mix(rockHash(i + vec3f(0, 1, 0)), rockHash(i + vec3f(1, 1, 0)), f.x), f.y),
+               mix(mix(rockHash(i + vec3f(0, 0, 1)), rockHash(i + vec3f(1, 0, 1)), f.x), mix(rockHash(i + vec3f(0, 1, 1)), rockHash(i + vec3f(1, 1, 1)), f.x), f.y), f.z);
+}
+fn rockGrain(q: vec3f) -> f32 { // Octave fade by footprint; fwidth stays in uniform control flow (fixed loop).
+    var p = q; var value = 0.0; var weight = 0.53;
+    for (var i = 0; i < 4; i++) {
+        let footprint = max(max(fwidth(p.x), fwidth(p.y)), fwidth(p.z));
+        value += weight * mix(0.5, rockNoise(p), 1.0 - smoothstep(0.3, 1.0, footprint));
+        p = p * 2.13 + vec3f(7.3, 2.6, 9.1); weight *= 0.47;
+    }
+    return value;
+}
+@fragment fn fs_main(v: Varyings, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+    let face = select(-1.0, 1.0, front);
+    var geometryNormal = normalize(v.normal); if (material.doubleSided > 0.5) { geometryNormal = geometryNormal * face; }
+)";
+    if(flat)s+="    geometryNormal = flatNormal(v.position);\n";
+    s+="    var albedo = material.diffuse; var n = geometryNormal;\n";
+    if(rock)s+=R"(
+    let mineral = rockGrain(v.local * 17.0 + vec3f(material.rockSeed));
+    let grain = rockGrain(v.local * 155.0 + vec3f(material.rockSeed));
+    albedo = albedo * mix(0.42, 1.25, mineral) * mix(0.70, 1.12, grain);
+    let q0 = dpdx(v.position); let q1 = dpdy(v.position); // Grain bump (sign-invariant under the flipped y).
+    let r0 = cross(q1, n); let r1 = cross(n, q0); let determinant = dot(q0, r0);
+    n = normalize(n - sign(determinant) * (r0 * dpdx(grain) + r1 * dpdy(grain)) * (material.rockScale * 0.0012) / max(abs(determinant), 1e-20));
+)";
+    s+=R"(
+    var colour = standardLight(albedo, material.roughness, material.metalness, n, geometryNormal, v.position, vec3f(0.0)) + material.emissive;
+    colour += albedo * material.auxiliaryStrength * (1.0 - smoothstep(-0.10, 0.0, dot(n, normalize(material.auxiliarySolarDirection))));
+    return vec4f(finish(colour), material.opacity);
+}
+)";
+    return s;
+}
+void objects(){
+    Program p;p.attributes={{"normal",3}};
+    p.uniforms={{"diffuse",Uniform::vec3},{"opacity",Uniform::f32},{"emissive",Uniform::vec3},{"roughness",Uniform::f32},{"metalness",Uniform::f32},{"auxiliaryStrength",Uniform::f32},
+        {"auxiliarySolarDirection",Uniform::vec3},{"doubleSided",Uniform::f32},{"rockSeed",Uniform::f32},{"rockScale",Uniform::f32}};
+    p.wgsl=assisted(false,false);albert::gpu::define("albert:assisted",p);
+    p.wgsl=assisted(true,false);albert::gpu::define("albert:assisted-flat",p);
+    p.wgsl=assisted(false,true);albert::gpu::define("albert:rock",p);
+    Program debris;debris.points=true;debris.uniforms={{"opacity",Uniform::f32},{"ink",Uniform::vec3}};
+    debris.wgsl=std::string(quadCorner)+R"(
+struct Material { opacity: f32, ink: vec3f };
+@group(2) @binding(0) var<uniform> material: Material;
+struct Varyings { @builtin(position) clip: vec4f, @location(0) corner: vec2f };
+@vertex fn vs_main(@location(0) position: vec3f, @builtin(vertex_index) i: u32) -> Varyings { // 2 px points.
+    var o: Varyings; let c = quad(i); let clip = frame.projection * object.modelView * vec4f(position, 1.0);
+    o.clip = vec4f(clip.xy + c * 2.0 / frame.viewport.xy * clip.w, clip.zw); o.corner = c; return o;
+}
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
+    let coverage = 1.0 - smoothstep(0.12, 0.5, length(v.corner) * 0.5);
+    if (coverage < 0.01) { discard; }
+    return vec4f(material.ink, material.opacity * coverage);
+}
+)";
+    albert::gpu::define("albert:debris",debris);
+}
+}
+void albert::defineWebGpuPrograms(){stars();earthLayers();paths();solids();comets();objects();}

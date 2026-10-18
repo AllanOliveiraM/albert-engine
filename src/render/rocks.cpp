@@ -59,6 +59,7 @@ std::shared_ptr<Mesh> albert::makeArtisticRock(const core::LocalOrbit& body){
     for(size_t i=0;i<vertices.size();i+=3){vertices[i]=(vertices[i]-centroid.x)*scale;vertices[i+1]=(vertices[i+1]-centroid.y)*scale;vertices[i+2]=(vertices[i+2]-centroid.z)*scale;}
     geometry->computeBoundingSphere();geometry->computeBoundingBox();
     auto material=assistedMaterial(comet?Color(.24f,.22f,.20f):Color(.40f,.37f,.32f),0.f,.97f);
+    material->name="albert:rock";
     material->uniforms.emplace("rockSeed",Uniform(float(seed%8192)));
     material->uniforms.emplace("rockScale",Uniform(float(body.radius*2/core::earthRadiusMeters)));
     material->vertexShader="varying vec3 rockPoint;\n"+material->vertexShader;
