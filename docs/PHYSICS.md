@@ -18,6 +18,7 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Propulsão | `F = F_vac·throttle − p_a·A_e`; `ṁ = F_vac·throttle/v_e`; cardã em arfagem e guinada | sem transiente de ignição |
 | Massa | propriedades do conjunto lineares no propelente restante; estagiamento move o CG | inércia principal (sem produtos) |
 | Rotação | `I ω̇ = M − ω×Iω − İω − ṁ l² ω⊥` (perda de inércia do propelente e amortecimento por jato) | — |
+| Lua e Marte | `Environment environment(Center, campo, grau)`: centro inercial no corpo com eixos ICRF; GRAIL GRGM1200A (Lua, eixos principais DE440) e MRO GMM-3 (Marte) baixados até o grau pedido (≤1200 e ≤120); rotação IAU de `pck00011` (Lua: referencial médio da Terra com librações, levado aos eixos principais por 67,8526″/78,6944″/0,2785″; Marte: IAU 2015) com ω analítico; terceiros corpos Terra+Sol (Lua) e Sol por `plan94` (Marte); Marte com a atmosfera média da NASA Glenn até ~49 km, isotérmica a 140 K acima e vácuo acima de 150 km; Lua sem ar | série IAU da Lua a ≤155 m da libração do DE na superfície; Marte sem estações, poeira nem vento; alturas sobre elipsoide (esfera de 1737,4 km na Lua; 3396,19 × 3376,20 km em Marte), não sobre o areoide |
 | Solo | pad com a base do conjunto no solo, preso girando com a Terra até empuxo > peso; toque a uma altura elipsoidal fixa, detectado no CG | sem terreno, contato nem atrito |
 
 Integração RK4 com passo fixo (1 ms por padrão); `advance` divide o passo no instante
@@ -78,6 +79,21 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
 - Pad (base no solo), liberação no empuxo, acelerômetro e pouso.
 - O guiamento de exemplo leva o lançador genérico a uma órbita ~182 × 212 km.
 - Coast de uma volta com passos de 1 s contra 10 ms: diferença <1 mm.
+
+Lua e Marte (`tests/central_bodies_test.cpp`, com os excertos de grau 8 das tabelas do PDS):
+
+- Leitura por faixa (5612 bytes até o grau 8), cache, recarga de cache corrompido,
+  coeficientes não finitos e tabela truncada rejeitados.
+- Gravidade na superfície: 1,624 m/s² na Lua e 3,724 m/s² no equador de Marte; o campo tende
+  à massa pontual longe do corpo.
+- Orientação de Marte contra CSPICE `pxform(IAU_MARS, J2000)` com `pck00011` em três épocas de
+  2000 a 2100 (<2e-9); rotação entre os eixos principais da Lua e o referencial IAU de 103,91″
+  com as componentes da NAIF; ω contra a derivada numérica da matriz (<1e-7).
+- Libração: o ponto subterrestre fica a ≤6,1° de longitude e ≤6,6° de latitude em um mês.
+- Atmosfera marciana: 699 Pa, 242,1 K e 0,0150 kg/m³ na superfície, contínua na camada
+  isotérmica, densidade decrescente até o vácuo.
+- Órbitas circulares de 100 km na Lua e 300 km em Marte: uma volta com passos de 1 s a <1 µm
+  de 0,1 s.
 
 ## API
 

@@ -50,6 +50,16 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - National Geospatial-Intelligence Agency (NGA): coeficientes do modelo gravitacional
   EGM2008 tide-free até o grau 70 em `src/physics/egm2008.inc`, extraídos de
   `EGM2008_to2190_TideFree` (https://earth-info.nga.mil). Distribuição sem restrições.
+- NASA Planetary Data System, Geosciences Node: campos gravitacionais GRAIL GRGM1200A
+  (Lua, Lemoine et al. 2014; Goossens et al. 2016) e MRO GMM-3 (Marte, Genova et al. 2016),
+  tabelas SHADR lidas em uso por faixas de bytes até o grau pedido
+  (https://pds-geosciences.wustl.edu); excertos até o grau 8 em `tests/*_gravity_degree8.tab`.
+  Dados do governo dos EUA.
+- NAIF/JPL: elementos rotacionais IAU da Lua e de Marte como em `pck00011.tpc` e a rotação
+  entre os eixos principais DE440 e o referencial médio da Terra de `moon_de440_250416.tf`
+  (https://naif.jpl.nasa.gov), transcritos em `src/physics/earth.cpp`.
+- NASA Glenn Research Center: ajuste da atmosfera de Marte a perfis do Mars Global Surveyor
+  (https://www.grc.nasa.gov/www/k-12/airplane/atmosmrm.html), em `src/physics/atmosphere.cpp`.
 - NOAA/NCEP: previsões e análises GFS 0,25° baixadas em uso pelo filtro NOMADS
   (https://nomads.ncep.noaa.gov) e índices do NOAA Open Data Dissemination na AWS
   (https://registry.opendata.aws/noaa-gfs-bdp-pds/); recorte da análise de 2026-10-17

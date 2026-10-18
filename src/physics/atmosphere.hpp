@@ -8,6 +8,11 @@ struct Air {double temperature=0,pressure=0,density=0,sound=0;V3 wind;}; // K, P
 // lowest layer extends to -5 km). Above 86 km: vacuum until an upper model replaces it.
 Air standardAtmosphere(double geometricHeight);
 constexpr double standardTop=86000.;
+// Mars mean atmosphere: the NASA Glenn fit to Mars Global Surveyor profiles (ellipsoidal
+// height standing in for the MOLA datum) until it cools to 140 K near 49 km, isothermal
+// hydrostatic above, vacuum above 150 km. No seasons, dust or winds.
+Air marsAtmosphere(double height);
+constexpr double marsTop=150000.;
 // Weather or climatology at an instant (TT ns), geodetic latitude/longitude (rad) and
 // ellipsoidal height (m). Implementations are immutable snapshots, so flights replay.
 class AirModel {

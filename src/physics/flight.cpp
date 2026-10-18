@@ -16,6 +16,13 @@ M3 bodyToNed(V3 e){ // Yaw, pitch, roll (3-2-1).
     return{{{cy*cp,cy*sp*sr-sy*cr,cy*sp*cr+sy*sr},{sy*cp,sy*sp*sr+cy*cr,sy*sp*cr-cy*sr},{-sp,cp*sr,cp*cr}}};
 }
 Tt floorDiv(Tt t,Tt d){return t>=0?t/d:(t-d+1)/d;}
+Air climatology(Center c,double h){return c==Center::earth?standardAtmosphere(h):c==Center::mars?marsAtmosphere(h):Air{};}
+double airTop(Center c){return c==Center::earth?standardTop:c==Center::mars?marsTop:0.;}
+}
+Environment environment(Center c,std::shared_ptr<const Gravity> field,int degree){
+    Environment e;e.center=c;
+    if(c!=Center::earth){e.planet=planet(c,field.get(),degree);e.rotation=Rotation::body(c);e.field=std::move(field);}
+    return e;
 }
 double Table::operator()(double m,double a)const{
     auto locate=[](const std::vector<double>& b,double x,std::size_t& i,double& t){
@@ -57,9 +64,10 @@ double Flight::massFlow()const{
 }
 V3 Flight::tidal(const State& s)const{
     constexpr Tt bucket=60*second;const Tt k=floorDiv(s.time,bucket);
-    if(k!=perturbed_){p0_=perturbers(k*bucket);p1_=perturbers((k+1)*bucket);perturbed_=k;}
-    const double w=secondsSinceJ2000(s.time-k*bucket)/60.;
-    return physics::tidal(s.position,p0_.sun+(p1_.sun-p0_.sun)*w,sunGM)+physics::tidal(s.position,p0_.moon+(p1_.moon-p0_.moon)*w,moonGM);
+    if(k!=perturbed_){bodies_=thirdBodies(env_.center,k*bucket,p0_);thirdBodies(env_.center,(k+1)*bucket,p1_);perturbed_=k;}
+    const double w=secondsSinceJ2000(s.time-k*bucket)/60.;V3 a;
+    for(int i=0;i<bodies_;++i)a+=physics::tidal(s.position,p0_[i].position+(p1_[i].position-p0_[i].position)*w,p0_[i].gm);
+    return a;
 }
 Flight::Rate Flight::rate(const State& s,Sample* out)const{
     const Stage& st=vehicle_.stages[s.stage];const Mass ms=mass(st,s.propellant);
@@ -67,7 +75,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     V3 g=back*gravitation(env_.planet,rf);if(env_.sunMoon)g+=tidal(s);
     const M3 b=matrix(s.attitude),bt=transpose(b);
     const Geodetic geo=geodetic(env_.planet,rf);const M3 ned=nedFromFixed(geo.latitude,geo.longitude);
-    const Air atm=!env_.atmosphere?Air{}:env_.air?env_.air->at(s.time,geo.latitude,geo.longitude,geo.height):standardAtmosphere(geo.height);
+    const Air atm=!env_.atmosphere?Air{}:env_.air?env_.air->at(s.time,geo.latitude,geo.longitude,geo.height):climatology(env_.center,geo.height);
     const V3 relative=s.velocity-cross(o.omega,s.position),air=bt*(relative-back*(transpose(ned)*atm.wind));const double speed=norm(air);
     const double q=.5*atm.density*speed*speed,mach=atm.sound>0?speed/atm.sound:0.;
     const double alpha=speed>0?std::atan2(air.z,air.x):0.,beta=speed>0?std::asin(std::clamp(air.y/speed,-1.,1.)):0.;
@@ -138,7 +146,7 @@ Tt Flight::advance(Tt dt){
             Tt limit=step_;
             if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0){ // Ballistic, torque-free, above the atmosphere.
                 const double speed=norm(s_.velocity),spin=norm(s_.rate),c=secondsSinceJ2000(coast_);
-                if(geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height>standardTop+speed*c)
+                if(geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height>airTop(env_.center)+speed*c)
                     limit=std::max(step_,std::min(coast_,spin>0?static_cast<Tt>(.05/spin*1e9):coast_)); // ≤0.05 rad per step.
             }
             h=std::min(h,limit);

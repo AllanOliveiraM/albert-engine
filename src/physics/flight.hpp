@@ -1,6 +1,7 @@
 #pragma once
 #include "physics/atmosphere.hpp"
 #include "physics/earth.hpp"
+#include "physics/gravity.hpp"
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -38,11 +39,15 @@ struct Vehicle {std::string name;std::vector<Stage> stages;double torque=0,inert
 struct Environment {
     Planet planet=earth;
     Rotation rotation=Rotation::iau(69.184);
-    bool atmosphere=true,sunMoon=true;
+    Center center=Center::earth;
+    bool atmosphere=true,sunMoon=true; // sunMoon: third bodies of the centre (see thirdBodies).
+    std::shared_ptr<const Gravity> field; // Owns planet.field.
     std::shared_ptr<const AirModel> air; // Replaces the standard atmosphere when set.
     double ground=-std::numeric_limits<double>::infinity(); // Ellipsoidal height of the surface (m).
 };
-// Inertial frame: GCRF (or the check-case frame aligned with Earth at the epoch).
+// Earth (defaults), or the Moon / Mars with their rotation, climatology and a field of the given degree.
+Environment environment(Center c,std::shared_ptr<const Gravity> field={},int degree=0);
+// Inertial frame: GCRF, or ICRF axes at the Moon or Mars (or the check-case frame aligned with Earth at the epoch).
 struct State {
     Tt time=0;
     V3 position,velocity;      // CG (m, m/s).
@@ -98,6 +103,6 @@ private:
     V3 tidal(const State& s)const;
     Vehicle vehicle_;Environment env_;State s_;Tt step_=0,coast_=0;Increments increments_;
     V3 padPosition_;Q padAttitude_; // ECEF and body→ECEF while clamped/landed.
-    mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable Perturbers p0_{},p1_{};
+    mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable ThirdBody p0_[2]{},p1_[2]{};mutable int bodies_=0;
 };
 }

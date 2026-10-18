@@ -17,6 +17,14 @@ const Layers& layers(){
 // Molecular-weight ratio M/M0 from 80 to 86 km geometric, 0.5 km steps (USSA76 Table 8).
 constexpr std::array<double,13> ratio{1.,.999996,.999989,.999971,.999941,.999909,.999870,.999829,.999786,.999741,.999694,.999641,.999579};
 }
+Air marsAtmosphere(double z){
+    if(!(z<marsTop))return{};
+    constexpr double gas=192.1,gamma=1.3,cold=140,radius=3389500.,g0=3.7276,top=(23.4-273.1+cold)/-.00222; // J/(kg K); K; m; m/s²; m.
+    double t,p;
+    if(z<top){t=273.1+(z>7000?-23.4-.00222*z:-31-.000998*z);p=699*std::exp(-.00009*z);}
+    else{auto geo=[](double h){return radius*h/(radius+h);};t=cold;p=699*std::exp(-.00009*top)*std::exp(-(geo(z)-geo(top))*g0/(gas*cold));}
+    return{t,p,p/(gas*t),std::sqrt(gamma*gas*t),{}};
+}
 Air standardAtmosphere(double z){
     if(!(z<standardTop))return{};
     const double h=r0*z/(r0+z);const auto& l=layers();
