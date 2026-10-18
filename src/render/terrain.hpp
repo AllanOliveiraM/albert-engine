@@ -2,6 +2,7 @@
 #include "threepp/core/Object3D.hpp"
 #include "threepp/materials/Material.hpp"
 #include "threepp/math/Vector3.hpp"
+#include "threepp/math/Vector4.hpp"
 #include "threepp/math/Frustum.hpp"
 #include <functional>
 #include <memory>
@@ -45,6 +46,11 @@ public:
     [[nodiscard]] std::size_t pending()const; // Nodes queued or building.
     [[nodiscard]] int finestLevel()const;     // Of the last selection.
     [[nodiscard]] double coveredSolidAngle()const; // Of the last selection, steradians (4π without culling).
+    // Imagery of a region on the nodes wholly inside it: that material, and texture coordinates over
+    // the region (u' = (u - bounds.x) / bounds.z, v' = (v - bounds.y) / bounds.w, u and v as the globe's;
+    // uv2 keeps the global ones). Nodes across its edge keep the body's material; none restores all.
+    void detail(std::shared_ptr<threepp::Material> material,std::optional<threepp::Vector4> bounds);
+    [[nodiscard]] std::size_t detailed()const; // Drawn nodes with the region's imagery.
     // Radius of the drawn relief toward a point in the parent's local frame (its finest built node,
     // bilinear between posts), in that frame's units; none while nothing is drawn.
     [[nodiscard]] std::optional<double> ground(const threepp::Vector3& local)const;

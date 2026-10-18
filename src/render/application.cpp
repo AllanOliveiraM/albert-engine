@@ -2511,7 +2511,10 @@ int albert::runRenderer(int argc, char** argv) {
                 const double lon = albert::longitude(std::atan2(earthCamera.z,-earthCamera.x)*180./PI-180.);
                 cloudSync.requestDetail(albert::cloudRegion(lon,latitude,earthCamera.length(),camera->aspect,camera->fov));
             } else cloudSync.requestDetail(std::nullopt);
-            const bool planetReleased=planets.releaseDistantDetails(focus,camera->position,visualSettings.quality,elapsed);
+            // A vehicle near the Earth's ground keeps the launch-site detail it asked for (it was released
+            // 3 s after each load, as if the camera had left the Earth, and loaded again).
+            const bool vehicleNearEarth=objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"&&earthCamera.length()<1.05f;
+            const bool planetReleased=planets.releaseDistantDetails(vehicleNearEarth?std::string("earth"):std::string(focus),camera->position,visualSettings.quality,elapsed);
             const bool solidReleased=solids.takeEviction();
             const bool released=planetReleased||solidReleased;
             if(released)regional.retry();

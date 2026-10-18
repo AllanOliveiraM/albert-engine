@@ -330,14 +330,19 @@ faixa por linha (`PlanetaryRelief::cachedHeight`/`fetchMissing`, multipart/byter
 disco). Em Marte (até 3 raios) a grade MOLA do pacote e blocos MEGDR de 128 postes por grau a
 partir do nível 7 (raio MOLA menos o elipsoide IAU; acima de 88° de latitude só a grade). A
 exposição fotográfica é a do corpo perto da câmera (Lua 2,1; demais pela distância ao Sol). Com o
-terreno ativo os remendos regionais ficam ocultos (a imagem regional nos nós é o próximo passo).
+terreno ativo os remendos regionais ficam ocultos e a imagem regional vai para os nós inteiramente
+dentro da região (`Terrain::detail`: o material do remendo sem bump, coordenadas sobre a região em
+`uv`, as globais em `uv2` para o mapa de preenchimento); nós que cruzam a borda ficam com o mapa
+global. Um veículo perto do solo terrestre mantém o detalhe do sítio (antes era liberado 3 s depois de
+cada carga e baixado de novo).
 `Terrain::ground` dá o raio do relevo desenhado sob um ponto (nó mais fino construído, bilinear
 entre postes): a câmera fica acima dele perto de um veículo (na Terra também acima do elipsoide, o
 chão do modelo de ar) e o plano próximo respeita a altura sobre ele (uma órbita longa arrastada até
 o horizonte de um módulo cortava o chão inteiro).
 `ALBERT_TERRAIN_DEBUG=1` imprime nós, fila e custo da seleção e do render.
 `terrain_lod_test` confere a cobertura exata da esfera (4π), o refinamento, o corte por horizonte,
-as alturas, a reconstrução dos nós provisórios e `ground` contra um relevo analítico nas seis faces.
+as alturas, a reconstrução dos nós provisórios, `ground` contra um relevo analítico nas seis faces e
+a imagem regional só nos nós dentro dela (e a restauração ao limpar).
 
 **Atmosfera (WebGPU).** Espalhamento pré-computado de Bruneton (implementação de referência de
 2017, BSD-3) portado para WGSL em `src/gpu/atmosphere.*`: transmitância, irradiância do céu e

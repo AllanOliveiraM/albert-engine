@@ -70,6 +70,24 @@ int main(){
         std::printf("ground error %.3f m (finest level %d)\n",worst,varied.finestLevel());
         check(worst<2,"Ground lookup follows the drawn relief on every face");
     }
+    { // Regional imagery: nodes wholly inside the bounds take its material and coordinates over it (uv2
+      // keeps the global ones); the others keep the body's; clearing restores every node.
+        Object3D other;albert::TerrainBody b=body;b.maxLevel=6;albert::Terrain t(other,material,b);auto detail=MeshBasicMaterial::create();
+        const Vector3 eye(0,0,static_cast<float>(1+300/radius));settle(t,eye,false); // Toward +z: u 0.25, v 0.5.
+        const Vector4 bounds(.2f,.45f,.1f,.1f);t.detail(detail,bounds);t.update(eye,nullptr,false);
+        auto audit=[&](bool regional){std::size_t inside=0,wrong=0;
+            for(const auto& child:other.children){auto* m=dynamic_cast<Mesh*>(child);if(!m||!m->visible)continue;
+                const auto* uv=m->geometry()->getAttribute<float>("uv");const auto* global=m->geometry()->getAttribute<float>("uv2");const bool mine=m->material()==detail;inside+=mine;
+                if(mine!=regional&&mine)++wrong;
+                for(int i=0;i<uv->count();++i){const float u=mine?bounds.x+uv->getX(i)*bounds.z:uv->getX(i),v=mine?bounds.y+uv->getY(i)*bounds.w:uv->getY(i);
+                    if(std::abs(u-global->getX(i))>1e-5f||std::abs(v-global->getY(i))>1e-5f||(mine&&(uv->getX(i)<-1e-4f||uv->getX(i)>1.0001f||uv->getY(i)<-1e-4f||uv->getY(i)>1.0001f))){++wrong;break;}}
+                if(!mine&&m->material()!=material)++wrong;}
+            return std::pair{inside,wrong};};
+        const auto [inside,wrong]=audit(true);std::printf("regional imagery: %zu of %zu drawn nodes, %zu wrong\n",inside,t.drawn(),wrong);
+        check(inside>0&&inside==t.detailed()&&inside<t.drawn()&&wrong==0,"Regional imagery on the nodes inside its bounds, over its coordinates");
+        t.detail(nullptr,std::nullopt);t.update(eye,nullptr,false);const auto [left,stale]=audit(false);
+        check(left==0&&stale==0&&t.detailed()==0,"Clearing the region restores the body's material and coordinates");
+    }
     { // Mars nodes straddling 88°: MOLA stops there and the grid alone completes them (review: only the
       // first point was checked, so such nodes stayed provisional and were rebuilt on every download).
         constexpr double deg=std::numbers::pi/180;const auto heights=albert::marsTerrainHeights(Image(ImageData(std::vector<float>(4*64*32,-1000.f)),64,32));

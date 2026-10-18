@@ -20,8 +20,9 @@ do Create, thread antes do servidor de dados, segmento nulo perto do solo, nó m
 sempre provisório), corrigidos com testes que falham no código antigo. Pendência: com o olho abaixo
 do elipsoide (o chão do Cabo fica ~27 m abaixo) a perspectiva aérea sai salpicada em faixas; os
 testes de compute e de cena não reproduziram, então na Terra a câmera do voo fica acima do elipsoide
-(como antes) e o certo é baixar o chão do modelo de ar ao relevo local. Próximo: imagem regional nos
-nós, morph entre níveis.
+(como antes) e o certo é baixar o chão do modelo de ar ao relevo local. Imagem regional nos nós do
+terreno (`Terrain::detail`) e o detalhe do sítio não é mais liberado em laço com um veículo em foco.
+Próximo: morph entre níveis, chão do ar no relevo local.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
 
 **Fase 4, etapa 6 — atmosfera de Bruneton no WebGPU (18/10/2026)**: `src/gpu/atmosphere.*`
