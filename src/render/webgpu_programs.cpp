@@ -326,4 +326,147 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) @interpolate(line
     albert::gpu::define("albert:marker",marker);
 }
 }
-void albert::defineWebGpuPrograms(){stars();earthLayers();paths();}
+namespace {
+void solids(){ // solids.cpp: other planets and moons, haze shells and rings.
+    Program surface;surface.attributes={{"normal",3},{"uv",2}};surface.textures={"heightMap","baseHeightMap","dayMap","baseMap","surfaceMask"};
+    surface.uniforms={{"displacement",Uniform::f32},{"isPatch",Uniform::f32},{"baseRadius",Uniform::f32},{"detailBlend",Uniform::f32},{"shapeSurface",Uniform::f32},{"bounds",Uniform::vec4},
+        {"solarDirection",Uniform::vec3},{"intensity",Uniform::f32},{"angularRadius",Uniform::f32},{"masked",Uniform::f32},{"auxiliaryStrength",Uniform::f32},{"cloudSurface",Uniform::f32},{"haze",Uniform::f32},{"hazeAlbedo",Uniform::vec3}};
+    surface.wgsl=R"(
+struct Material { displacement: f32, isPatch: f32, baseRadius: f32, detailBlend: f32, shapeSurface: f32, bounds: vec4f, solarDirection: vec3f, intensity: f32, angularRadius: f32,
+    masked: f32, auxiliaryStrength: f32, cloudSurface: f32, haze: f32, hazeAlbedo: vec3f };
+@group(2) @binding(0) var<uniform> material: Material;
+@group(2) @binding(1) var heightMap: texture_2d<f32>;
+@group(2) @binding(2) var heightSampler: sampler;
+@group(2) @binding(3) var baseHeightMap: texture_2d<f32>;
+@group(2) @binding(4) var baseHeightSampler: sampler;
+@group(2) @binding(5) var dayMap: texture_2d<f32>;
+@group(2) @binding(6) var daySampler: sampler;
+@group(2) @binding(7) var baseMap: texture_2d<f32>;
+@group(2) @binding(8) var baseSampler: sampler;
+@group(2) @binding(9) var surfaceMask: texture_2d<f32>;
+@group(2) @binding(10) var maskSampler: sampler;
+struct Varyings { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @location(1) globalUv: vec2f, @location(2) normal: vec3f, @location(3) position: vec3f };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f) -> Varyings {
+    var o: Varyings; o.uv = uv;
+    o.globalUv = select(material.bounds.xy + uv * material.bounds.zw, uv, material.shapeSurface > 0.5);
+    let radial = normalize(position);
+    var p = position + radial * textureSampleLevel(heightMap, heightSampler, uv, 0.0).r * material.displacement;
+    if (material.isPatch > 0.5) {
+        let coarse = material.baseRadius + (textureSampleLevel(baseHeightMap, baseHeightSampler, o.globalUv, 0.0).r + 20.0) / 6378137.0;
+        p = radial * mix(coarse, length(position), material.detailBlend);
+    }
+    let view = object.modelView * vec4f(p, 1.0);
+    o.normal = normalize(object.normalView * select(radial, normal, material.shapeSurface > 0.5)); o.position = view.xyz;
+    o.clip = frame.projection * view;
+    return o;
+}
+const PI = 3.141592653589793;
+fn terrain(local: vec2f, global: vec2f) -> f32 {
+    return mix(textureSample(baseHeightMap, baseHeightSampler, global).r, textureSample(heightMap, heightSampler, local).r, material.detailBlend) / 6378137.0;
+}
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
+    let mask = textureSample(surfaceMask, maskSampler, v.globalUv).g;
+    if (material.masked > 0.5 && mask < 0.5) { discard; }
+    let b = material.bounds;
+    let localUv = select(v.uv, vec2f(fract(v.uv.x - b.x), v.uv.y - b.y) / b.zw, material.shapeSurface > 0.5);
+    let sampleColour = textureSample(dayMap, daySampler, localUv);
+    let edge = min(localUv, 1.0 - localUv);
+    let blend = material.detailBlend * smoothstep(0.0, 0.025, min(edge.x, edge.y));
+    let albedo = srgbToLinear(mix(textureSample(baseMap, baseSampler, v.globalUv).rgb, sampleColour.rgb, blend));
+    var normal = normalize(v.normal); let sigmaX = dpdx(v.position); let sigmaY = dpdy(v.position);
+    let height = terrain(v.uv, v.globalUv); // Derivative bump mapping from the relief.
+    let gradient = vec2f(terrain(v.uv + dpdx(v.uv), v.globalUv + dpdx(v.globalUv)) - height, terrain(v.uv + dpdy(v.uv), v.globalUv + dpdy(v.globalUv)) - height);
+    let r1 = cross(sigmaY, normal); let r2 = cross(normal, sigmaX); let determinant = dot(sigmaX, r1);
+    normal = normalize(abs(determinant) * normal - sign(determinant) * (gradient.x * r1 + gradient.y * r2));
+    let light = normalize(material.solarDirection); let view = normalize(-v.position);
+    let mu = dot(normal, light); let nl = max(mu, 0.0); let nv = max(dot(normal, view), 0.0);
+    let a = max(material.angularRadius, 0.00001); let x = clamp(mu / a, -1.0, 1.0); let s = sqrt(max(0.0, 1.0 - x * x));
+    var irradiance = mu * (0.5 + (asin(x) + x * s) / PI) + 2.0 * a * s * s * s / (3.0 * PI); // Finite solar disc at the terminator.
+    if (mu >= a) { irradiance = mu; } else if (mu <= -a) { irradiance = 0.0; }
+    let lp = light - normal * mu; let vp = view - normal * nv; // Oren-Nayar diffuse.
+    let gamma = max(0.0, dot(lp, vp) / max(length(lp) * length(vp), 0.00001));
+    let lo = min(nl, nv); let hi = max(nl, nv);
+    let rough = 0.70122 + 0.38017 * gamma * sqrt(max(0.0, 1.0 - lo * lo)) * sqrt(max(0.0, 1.0 - hi * hi)) / max(hi, 0.02);
+    let aid = material.auxiliaryStrength * (material.intensity / 2.4) * (1.0 - smoothstep(-0.10, 0.0, dot(normalize(v.normal), light)));
+    let hazeLight = pow(clamp((dot(normalize(v.normal), light) + 0.35) / 1.35, 0.0, 1.0), 1.3);
+    let direct = mix(max(irradiance, 0.0) * mix(rough, 1.0, material.cloudSurface), hazeLight, material.haze);
+    return vec4f(finish(mix(albedo, material.hazeAlbedo, material.haze) * (material.intensity * direct / PI + aid)), 1.0);
+}
+)";
+    albert::gpu::define("albert:solid",surface);
+    Program haze;haze.uniforms={{"centre",Uniform::vec3},{"radius",Uniform::f32},{"altitude",Uniform::f32},{"scale",Uniform::f32},{"layer",Uniform::f32},{"solarDirection",Uniform::vec3},
+        {"intensity",Uniform::f32},{"visibility",Uniform::f32},{"inside",Uniform::f32},{"hazeAlbedo",Uniform::vec3}};
+    haze.wgsl=R"(
+struct Material { centre: vec3f, radius: f32, altitude: f32, scale: f32, layer: f32, solarDirection: vec3f, intensity: f32, visibility: f32, inside: f32, hazeAlbedo: vec3f };
+@group(2) @binding(0) var<uniform> material: Material;
+struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f };
+@vertex fn vs_main(@location(0) position: vec3f) -> Varyings { var o: Varyings; let view = object.modelView * vec4f(position, 1.0); o.position = view.xyz; o.clip = frame.projection * view; return o; }
+const PI = 3.141592653589793; const G = 0.65;
+fn phase(c: f32) -> f32 { let d = 1.0 + G * G - 2.0 * G * c; return (1.0 - G * G) / (4.0 * PI * d * sqrt(d)); }
+@fragment fn fs_main(v: Varyings, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+    if ((material.inside < 0.5) != front) { discard; } // One surface per ray.
+    let d = normalize(v.position); let l = normalize(material.solarDirection); let t0 = dot(material.centre, d); let q = t0 * d - material.centre;
+    let b = length(q); let h = b - material.radius;
+    let mu = sqrt(max(0.0, 1.0 - (b / material.radius) * (b / material.radius)));
+    let column = select(1.0 / max(mu, 0.05), exp(-h / material.scale) * sqrt(2.0 * PI * (material.radius + h) / material.scale), h >= 0.0); // Chapman above the limb.
+    let top = exp(-pow((h - material.altitude) / material.layer, 2.0)) * sqrt(2.0 * PI * (material.radius + max(h, 0.0)) / material.layer);
+    let lit = smoothstep(-0.25, 0.05, dot(select(-d, q / b, b > 0.0), l));
+    let forward = 0.15 + 0.85 * phase(dot(l, d)) / phase(1.0);
+    let colour = material.hazeAlbedo * (1.0 - exp(-0.025 * column)) + vec3f(0.10, 0.17, 0.36) * (1.0 - exp(-0.02 * top));
+    return vec4f(finish(colour * material.intensity * material.visibility * lit * forward / PI), 1.0);
+}
+)";
+    albert::gpu::define("albert:haze",haze);
+    const char* ringVertex=R"(
+struct Varyings { @builtin(position) clip: vec4f, @location(0) point: vec3f };
+@vertex fn vs_main(@location(0) position: vec3f) -> Varyings { var o: Varyings; o.point = position; o.clip = frame.projection * object.modelView * vec4f(position, 1.0); return o; }
+)";
+    Program thin;thin.textures={"profile"};thin.uniforms={{"inner",Uniform::f32},{"outer",Uniform::f32},{"radius",Uniform::f32},{"localSun",Uniform::vec3},{"localCamera",Uniform::vec3},
+        {"irradiance",Uniform::f32},{"incidence",Uniform::f32},{"gain",Uniform::f32},{"particleAlbedo",Uniform::f32},{"dustAlbedo",Uniform::f32},{"dustG",Uniform::f32}};
+    thin.wgsl=std::string(R"(
+struct Material { inner: f32, outer: f32, radius: f32, localSun: vec3f, localCamera: vec3f, irradiance: f32, incidence: f32, gain: f32, particleAlbedo: f32, dustAlbedo: f32, dustG: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+@group(2) @binding(1) var profile: texture_2d<f32>;
+@group(2) @binding(2) var profileSampler: sampler;
+)")+ringVertex+R"(
+const PI = 3.141592653589793;
+fn lambert(a: f32) -> f32 { return (sin(a) + (PI - a) * cos(a)) / PI; }
+fn henyey(c: f32) -> f32 { let g = material.dustG; let d = 1.0 + g * g - 2.0 * g * c; return (1.0 - g * g) / (d * sqrt(d)); }
+fn slab(tau: f32, mu: f32, mu0: f32, lit: bool) -> f32 { // I/F of a slab per unit albedo × phase / 4.
+    if (tau <= 0.0) { return 0.0; }
+    if (lit) { return mu0 / (mu + mu0) * (1.0 - exp(-tau * (1.0 / mu + 1.0 / mu0))); }
+    return select(mu0 / (mu - mu0) * (exp(-tau / mu) - exp(-tau / mu0)), tau / mu * exp(-tau / mu), abs(mu - mu0) < 1e-4);
+}
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
+    let u = (length(v.point.xz) - material.inner) / (material.outer - material.inner);
+    let tau = textureSample(profile, profileSampler, vec2f(clamp(u, 0.0, 1.0), 0.5)).rg;
+    let l = normalize(material.localSun); let w = normalize(material.localCamera - v.point);
+    let mu0 = max(abs(l.y), 1e-3); let mu = max(abs(w.y), 1e-3); let lit = l.y * w.y > 0.0;
+    let c = clamp(dot(l, w), -1.0, 1.0); let alpha = acos(c);
+    let p = v.point / material.radius; let b = dot(p, l); let q = dot(p, p) - 1.0; let disc = b * b - q; let edge = max(fwidth(disc), 1e-5);
+    if (u < 0.0 || u > 1.0) { discard; }
+    let shadow = 1.0 - step(0.0, -b) * smoothstep(-edge, edge, disc);
+    let reflectance = material.particleAlbedo * lambert(alpha) * slab(tau.r, mu, mu0, lit) + material.dustAlbedo * henyey(-c) / 4.0 * slab(tau.g, mu, mu0, lit);
+    return vec4f(finish(vec3f(reflectance * shadow * material.gain * material.irradiance / PI)), 1.0 - exp(-(tau.r + tau.g) / mu)); // Premultiplied: alpha is transmission loss.
+}
+)";
+    albert::gpu::define("albert:thin-rings",thin);
+    Program image;image.textures={"profile"};image.uniforms={{"radius",Uniform::f32},{"localSun",Uniform::vec3},{"irradiance",Uniform::f32},{"incidence",Uniform::f32}};
+    image.wgsl=std::string(R"(
+struct Material { radius: f32, localSun: vec3f, irradiance: f32, incidence: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+@group(2) @binding(1) var profile: texture_2d<f32>;
+@group(2) @binding(2) var profileSampler: sampler;
+)")+ringVertex+R"(
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
+    let p = v.point / material.radius; let u = (length(p.xz) - 1.23) / (2.3309 - 1.23);
+    let map = textureSample(profile, profileSampler, vec2f(u, 0.5));
+    let l = normalize(material.localSun); let b = dot(p, l); let c = dot(p, p) - 1.0; let disc = b * b - c;
+    let edge = max(fwidth(disc), 0.00001); let shadow = 1.0 - step(0.0, -b) * smoothstep(-edge, edge, disc);
+    return vec4f(finish(srgbToLinear(map.rgb) * material.irradiance * (0.08 + 0.92 * sqrt(material.incidence)) * shadow / 3.14159265), map.a);
+}
+)";
+    albert::gpu::define("albert:rings",image);
+}
+}
+void albert::defineWebGpuPrograms(){stars();earthLayers();paths();solids();}

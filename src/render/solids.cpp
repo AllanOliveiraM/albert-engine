@@ -11,7 +11,7 @@ namespace {
 std::shared_ptr<Texture> colorTexture(Image image){std::vector<Image> images;images.emplace_back(std::move(image));auto t=Texture::create(std::move(images));t->colorSpace=ColorSpace::NoColorSpace;t->wrapS=TextureWrapping::Repeat;t->anisotropy=8;t->needsUpdate();return t;}
 std::shared_ptr<Texture> heightTexture(Image image,bool global=false){auto t=DataTexture::create(ImageData(std::move(image.data<float>())),image.width(),image.height());t->type=Type::Float;t->minFilter=t->magFilter=Filter::Linear;t->colorSpace=ColorSpace::NoColorSpace;if(global)t->wrapS=TextureWrapping::Repeat;return t;}
 std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* mask){
-    auto m=ShaderMaterial::create();
+    auto m=ShaderMaterial::create();m->name="albert:solid";
     m->vertexShader=R"(
         uniform sampler2D heightMap,baseHeightMap;
         uniform float displacement,isPatch,baseRadius,detailBlend,shapeSurface;
@@ -83,7 +83,7 @@ std::shared_ptr<ShaderMaterial> material(Texture* day,Texture* height,Texture* m
 // its closest approach: main haze with a scale height, a thin detached layer above,
 // lit where sunlight reaches and scattered forward (Henyey-Greenstein).
 std::shared_ptr<ShaderMaterial> hazeShell(){
-    auto m=ShaderMaterial::create();m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
+    auto m=ShaderMaterial::create();m->name="albert:haze";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Additive;
     m->uniforms={{"centre",Uniform(Vector3())},{"radius",Uniform(1.f)},{"altitude",Uniform(.1f)},{"scale",Uniform(.02f)},{"layer",Uniform(.01f)},
         {"solarDirection",Uniform(Vector3(1,0,0))},{"intensity",Uniform(2.4f)},{"visibility",Uniform(1.f)},{"inside",Uniform(0.f)},{"hazeAlbedo",Uniform(Vector3())}};
     m->vertexShader=R"(varying vec3 vPosition;void main(){vec4 view=modelViewMatrix*vec4(position,1.0);vPosition=view.xyz;gl_Position=projectionMatrix*view;})";
@@ -117,7 +117,7 @@ std::shared_ptr<ShaderMaterial> hazeShell(){
 // direct transmission exp(-tau/mu) (Uranus' epsilon ring dims what lies behind it).
 // Profile texels hold band-averaged normal optical depths.
 std::shared_ptr<ShaderMaterial> thinRings(Texture* profile,float inner,float outer,float radius,const albert::RingSystem& system){
-    auto m=ShaderMaterial::create();m->side=Side::Double;m->transparent=true;m->depthWrite=false;
+    auto m=ShaderMaterial::create();m->name="albert:thin-rings";m->side=Side::Double;m->transparent=true;m->depthWrite=false;
     m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::OneMinusSrcAlpha;
     m->uniforms={{"profile",Uniform(profile)},{"inner",Uniform(inner)},{"outer",Uniform(outer)},{"radius",Uniform(radius)},{"localSun",Uniform(Vector3(1,0,0))},
         {"localCamera",Uniform(Vector3(0,1,0))},{"irradiance",Uniform(1.f)},{"incidence",Uniform(1.f)},{"gain",Uniform(1.f)},
@@ -158,7 +158,7 @@ std::shared_ptr<Texture> ringProfileTexture(const albert::RingProfile& profile){
     t->type=Type::Float;t->magFilter=Filter::Linear;t->minFilter=Filter::LinearMipmapLinear;t->generateMipmaps=true;t->colorSpace=ColorSpace::NoColorSpace;t->needsUpdate();return t;
 }
 std::shared_ptr<ShaderMaterial> rings(Texture* profile,float radius){
-    auto m=ShaderMaterial::create();m->side=Side::Double;m->transparent=true;m->depthWrite=false;
+    auto m=ShaderMaterial::create();m->name="albert:rings";m->side=Side::Double;m->transparent=true;m->depthWrite=false;
     m->uniforms={{"profile",Uniform(profile)},{"radius",Uniform(radius)},{"localSun",Uniform(Vector3(1,0,0))},{"irradiance",Uniform(1.f)},{"incidence",Uniform(1.f)}};
     m->vertexShader=R"(varying vec3 point;void main(){point=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);})";
     m->fragmentShader=R"(
