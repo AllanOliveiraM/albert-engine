@@ -45,7 +45,10 @@ fn aces(colour: vec3f) -> vec3f {
     let b = v * (0.983729 * v + 0.4329510) + 0.238081;
     return clamp(output * (a / b), vec3f(0.0), vec3f(1.0));
 }
-fn finish(colour: vec3f) -> vec3f { return linearToSrgb(aces(colour)); } // tonemapping + encodings.
+fn finish(colour: vec3f) -> vec3f { // tonemapping (ACES, or none) + encodings.
+    if (frame.exposure.y > 0.5) { return linearToSrgb(aces(colour)); }
+    return linearToSrgb(max(colour, vec3f(0.0)));
+}
 )";
 const char* const lighting=R"(
 const PI_L = 3.141592653589793;

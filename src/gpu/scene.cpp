@@ -418,9 +418,15 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     auto& g=*impl_;++g.frame;g.drawn=0;g.ensureDepth(width,height);g.streamBudget=8u<<20;
     scene.updateMatrixWorld();if(!camera.parent)camera.updateMatrixWorld();
     // Reversed-Z infinite perspective: depth = near / -z, 1 at the near plane, 0 at infinity.
-    Matrix4 projection;const auto* perspective=dynamic_cast<PerspectiveCamera*>(&camera);
-    {const float f=perspective?1.f/std::tan(perspective->fov*3.14159265358979f/360.f):1.f,aspect=perspective?perspective->aspect:1.f,n=camera.nearPlane;
-     auto& e=projection.elements;e.fill(0);e[0]=f/aspect;e[5]=f;e[11]=-1;e[14]=n;}
+    // Orthographic: depth = (far + z) / (far - near), 1 at the near plane and 0 at the far one.
+    Matrix4 projection;auto& pe=projection.elements;pe.fill(0);
+    if(const auto* o=dynamic_cast<OrthographicCamera*>(&camera)){
+        const float zoom=std::max(o->zoom,1e-12f),cx=(o->left+o->right)/2,cy=(o->top+o->bottom)/2,dx=(o->right-o->left)/(2*zoom),dy=(o->top-o->bottom)/(2*zoom);
+        const float l=cx-dx,r=cx+dx,t=cy+dy,b=cy-dy,n=o->nearPlane,f=o->farPlane;
+        pe[0]=2/(r-l);pe[5]=2/(t-b);pe[10]=1/(f-n);pe[12]=-(r+l)/(r-l);pe[13]=-(t+b)/(t-b);pe[14]=f/(f-n);pe[15]=1;
+    }else{const auto* perspective=dynamic_cast<PerspectiveCamera*>(&camera);
+        const float f=perspective?1.f/std::tan(perspective->fov*3.14159265358979f/360.f):1.f,aspect=perspective?perspective->aspect:1.f,n=camera.nearPlane;
+        pe[0]=f/aspect;pe[5]=f;pe[11]=-1;pe[14]=n;}
     Frustum frustum;Matrix4 screen;screen.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);frustum.setFromProjectionMatrix(screen);
     struct Item {Object3D* object;Material* material;BufferGeometry* geometry;const Impl::Compiled* program;float z;int order;bool points;};
     std::vector<Item> opaque,blended;Vector3 sun;float sunOn=0;Color sunColor(0,0,0),ambient(0,0,0);
@@ -457,7 +463,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     g.bindFrame(shadowing?g.shadowView:g.dummyShadowView);
     Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);f[32]=eye.x;f[33]=eye.y;f[34]=eye.z;f[35]=1;
     f[36]=static_cast<float>(width);f[37]=static_cast<float>(height);f[38]=camera.nearPlane;
-    f[40]=sun.x;f[41]=sun.y;f[42]=sun.z;f[43]=sunOn;f[44]=sunColor.r;f[45]=sunColor.g;f[46]=sunColor.b;f[48]=ambient.r;f[49]=ambient.g;f[50]=ambient.b;f[52]=exposure;
+    f[40]=sun.x;f[41]=sun.y;f[42]=sun.z;f[43]=sunOn;f[44]=sunColor.r;f[45]=sunColor.g;f[46]=sunColor.b;f[48]=ambient.r;f[49]=ambient.g;f[50]=ambient.b;f[52]=exposure;f[53]=toneMapping?1.f:0.f;
     wgpuQueueWriteBuffer(g.queue,g.frameBuffer,0,f,sizeof f);
     // Object uniforms, one 256-byte slot per draw, then one per shadow caster.
     const std::size_t count=opaque.size()+blended.size()+(shadowing?casters.size():0);

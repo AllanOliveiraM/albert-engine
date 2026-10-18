@@ -13,6 +13,10 @@
 #include "core/layers.hpp"
 #include "core/model.hpp"
 #include "model_fixture.hpp"
+#include "gpu/context.hpp"
+#include "gpu/scene.hpp"
+#include "webgpu_programs.hpp"
+#include <memory>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -188,9 +192,45 @@ int cyanPixels(const std::vector<unsigned char>& pixels,int x0,int x1,int y0,int
     }
     return count;
 }
-void graphics() {
-    Canvas canvas(Canvas::Parameters().title("Albert visual regression").size(192,192).headless(true).antialiasing(0));
-    GLRenderer renderer(canvas);renderer.setPixelRatio(1);
+// The same scenes through threepp's OpenGL renderer and through the WebGPU one (192x192, no
+// tone mapping, RGB rows bottom-up as GLRenderer::readRGBPixels returns them).
+struct Target {
+    virtual ~Target()=default;
+    virtual void render(Scene& scene,Camera& camera)=0;
+    virtual std::vector<unsigned char> readRGBPixels()=0;
+    virtual GLRenderer* gl()=0; // Texture uploads stream through OpenGL; null publishes whole.
+};
+struct GlTarget final:Target {
+    Canvas canvas{Canvas::Parameters().title("Albert visual regression").size(192,192).headless(true).antialiasing(0)};GLRenderer renderer{canvas};
+    GlTarget(){renderer.setPixelRatio(1);}
+    void render(Scene& s,Camera& c) override{renderer.render(s,c);}
+    std::vector<unsigned char> readRGBPixels() override{return renderer.readRGBPixels();}
+    GLRenderer* gl() override{return &renderer;}
+};
+struct GpuTarget final:Target {
+    albert::gpu::Context context;albert::gpu::SceneRenderer scene{context};WGPUTexture texture=nullptr;WGPUTextureView view=nullptr;
+    GpuTarget(){albert::defineWebGpuPrograms();scene.toneMapping=false;
+        WGPUTextureDescriptor d{};d.size={192,192,1};d.format=context.format();d.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_CopySrc;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
+        texture=wgpuDeviceCreateTexture(context.device(),&d);view=wgpuTextureCreateView(texture,nullptr);}
+    ~GpuTarget() override{wgpuTextureViewRelease(view);wgpuTextureRelease(texture);}
+    void render(Scene& s,Camera& c) override{
+        WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);scene.render(s,c,view,192,192,e);
+        WGPUCommandBuffer b=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(context.queue(),1,&b);scene.submitted();wgpuCommandBufferRelease(b);wgpuCommandEncoderRelease(e);
+    }
+    std::vector<unsigned char> readRGBPixels() override{
+        constexpr unsigned row=192*4; // A multiple of 256 bytes, as copies require.
+        WGPUBufferDescriptor bd{};bd.size=row*192;bd.usage=WGPUBufferUsage_CopyDst|WGPUBufferUsage_MapRead;WGPUBuffer b=wgpuDeviceCreateBuffer(context.device(),&bd);
+        WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=texture;WGPUTexelCopyBufferInfo dst{};dst.buffer=b;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=192;
+        const WGPUExtent3D size{192,192,1};wgpuCommandEncoderCopyTextureToBuffer(e,&src,&dst,&size);WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(context.queue(),1,&c);
+        bool done=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&done;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
+        wgpuBufferMapAsync(b,WGPUMapMode_Read,0,bd.size,cb);while(!done)wgpuInstanceProcessEvents(context.instance());
+        const auto* p=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(b,0,bd.size));std::vector<unsigned char> out(192*192*3);const bool bgra=context.format()==WGPUTextureFormat_BGRA8Unorm;
+        for(unsigned y=0;y<192;++y)for(unsigned x=0;x<192;++x){const auto* s=p+(191-y)*row+x*4;auto* d=&out[(y*192+x)*3];d[0]=bgra?s[2]:s[0];d[1]=s[1];d[2]=bgra?s[0]:s[2];}
+        wgpuBufferUnmap(b);wgpuBufferRelease(b);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);return out;
+    }
+    GLRenderer* gl() override{return nullptr;}
+};
+void graphics(Target& renderer) {
     auto scene=Scene::create();scene->background=Color(0x000000);
     auto camera=OrthographicCamera::create(-.6f,.6f,.6f,-.6f,.01f,300.f);
     camera->position.set(0,0,1.5f);camera->lookAt(Vector3());
@@ -201,7 +241,7 @@ void graphics() {
     albert::RegionalImages region;region.body="moon";region.region={-135,-45,-45,45};
     region.day=rgba(255,128);region.height=height(-1200.f);
     planets.stageRegionalImages(std::move(region));
-    for(int frame=0;planets.uploading() && frame<256;++frame) planets.updateUploads(&renderer);
+    for(int frame=0;planets.uploading() && frame<256;++frame) planets.updateUploads(renderer.gl());
     require(!planets.uploading(),"Incremental terrain upload did not complete");
     auto material=albert::orbitMaterial(100.f);
     material->uniforms.at("viewport").setValue(Vector2(192,192));
@@ -334,15 +374,15 @@ void graphics() {
     auto solidCamera=PerspectiveCamera::create(45,1,.001f,30000.f);solidCamera->position.set(0,0,1.5f);solidCamera->lookAt(Vector3());
     std::vector<albert::SurfaceAssets> surfaceAssets;surfaceAssets.push_back({"mercury",rgba(120),height(0)});
     albert::SolidBodies solids(*solidScene,std::move(surfaceAssets));
-    solids.update(&renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
+    solids.update(renderer.gl(),*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
     const int lit=pixels[3*(96*192+96)];require(lit>20,"Solid body solar shader failed to render");
-    solids.update(&renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
+    solids.update(renderer.gl(),*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
     require(pixels[3*(96*192+96)]<3,"Solid body's night hemisphere is lit without solar incidence");
     albert::AuxiliaryLights auxiliary;auxiliary["mercury"].enabled=true;
-    solids.update(&renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,0.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]<3,"Auxiliary light appeared before its fade");
-    solids.update(&renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]>15,"Solid auxiliary light did not reveal the night hemisphere");
-    solids.update(&renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(std::abs(int(renderer.readRGBPixels()[3*(96*192+96)])-lit)<3,"Auxiliary light changed the day hemisphere");
-    auxiliary["mercury"].enabled=false;solids.update(&renderer,*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]<3,"Solid auxiliary light remained enabled after fade out");
+    solids.update(renderer.gl(),*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,0.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]<3,"Auxiliary light appeared before its fade");
+    solids.update(renderer.gl(),*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]>15,"Solid auxiliary light did not reveal the night hemisphere");
+    solids.update(renderer.gl(),*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(std::abs(int(renderer.readRGBPixels()[3*(96*192+96)])-lit)<3,"Auxiliary light changed the day hemisphere");
+    auxiliary["mercury"].enabled=false;solids.update(renderer.gl(),*solidCamera,Vector3(0,0,-23455),2451545.,"mercury",true,1.f,auxiliary);renderer.render(*solidScene,*solidCamera);require(renderer.readRGBPixels()[3*(96*192+96)]<3,"Solid auxiliary light remained enabled after fade out");
     {   // Jupiter's dusty rings: invisible at physical brightness, visible when enhanced, and far
         // brighter seen against the Sun (forward scattering) than with it behind the camera.
         auto ringScene=Scene::create();ringScene->background=Color(0x000000);
@@ -352,11 +392,11 @@ void graphics() {
         auto view=PerspectiveCamera::create(20,1,r*.01f,r*1000);
         auto shot=[&](float side,bool enhanced){
             ringed.enhanceRings("jupiter",enhanced);
-            ringed.update(&renderer,*view,Vector3(0,0,20000),2451545.,"jupiter",false,1.f);auto node=ringed.nodes().at("jupiter");node->updateMatrixWorld();
+            ringed.update(renderer.gl(),*view,Vector3(0,0,20000),2451545.,"jupiter",false,1.f);auto node=ringed.nodes().at("jupiter");node->updateMatrixWorld();
             Vector3 normal(0,1,0);normal.transformDirection(*node->matrixWorld);Vector3 point(125750000.f/earth,0,0);point.applyMatrix4(*node->matrixWorld);
             view->position.copy(point).add(normal.clone().multiplyScalar(r*2));view->lookAt(point);view->updateMatrixWorld();
             const auto sun=point.clone().add(normal.clone().multiplyScalar(side*20000.f));
-            for(int i=0;i<4;++i)ringed.update(&renderer,*view,sun,2451545.,"jupiter",false,10.f);
+            for(int i=0;i<4;++i)ringed.update(renderer.gl(),*view,sun,2451545.,"jupiter",false,10.f);
             renderer.render(*ringScene,*view);return int(renderer.readRGBPixels()[3*(96*192+96)]);
         };
         const int physical=shot(1,false),back=shot(1,true),forward=shot(-1,true);
@@ -369,12 +409,12 @@ void graphics() {
         albert::SolidBodies ringed(*ringScene,std::move(ringAssets));
         const float earth=static_cast<float>(albert::core::earthRadiusMeters),r=static_cast<float>(albert::core::surfaceRadius("uranus"))/earth;
         auto view=PerspectiveCamera::create(20,1,r*.001f,r*1000);
-        ringed.update(&renderer,*view,Vector3(0,0,20000),2451545.,"uranus",false,1.f);auto node=ringed.nodes().at("uranus");node->updateMatrixWorld();
+        ringed.update(renderer.gl(),*view,Vector3(0,0,20000),2451545.,"uranus",false,1.f);auto node=ringed.nodes().at("uranus");node->updateMatrixWorld();
         Vector3 normal(0,1,0);normal.transformDirection(*node->matrixWorld);Vector3 point(51149000.f/earth,0,0);point.applyMatrix4(*node->matrixWorld);
         view->position.copy(point).add(normal.clone().multiplyScalar(r*.2f));view->lookAt(point);view->updateMatrixWorld();
         auto backdrop=Mesh::create(PlaneGeometry::create(r,r),MeshBasicMaterial::create());backdrop->position.copy(point).sub(normal.clone().multiplyScalar(r*.1f));backdrop->lookAt(view->position);ringScene->add(backdrop);
         auto centre=[&](bool ring){for(auto& child:node->children)child->visible=ring;
-            for(int i=0;i<3;++i)ringed.update(&renderer,*view,point.clone().add(normal.clone().multiplyScalar(20000.f)),2451545.,"uranus",false,1.f);
+            for(int i=0;i<3;++i)ringed.update(renderer.gl(),*view,point.clone().add(normal.clone().multiplyScalar(20000.f)),2451545.,"uranus",false,1.f);
             renderer.render(*ringScene,*view);return int(renderer.readRGBPixels()[3*(96*192+96)]);};
         const int clear=centre(false),dimmed=centre(true);
         require(clear>100&&dimmed<clear*.6,"Dense ring did not attenuate the background");
@@ -382,12 +422,12 @@ void graphics() {
     }
     albert::RegionalImages solidRegion;solidRegion.body="mercury";solidRegion.day=rgba(230);solidRegion.height=height(1000);
     albert::prepareRegionalImages(solidRegion);solids.stage(std::move(solidRegion));
-    for(int i=0;solids.uploading()&&i<256;++i)solids.update(&renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);
+    for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer.gl(),*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);
     require(!solids.uploading(),"Solid regional texture upload did not finish");renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
     require(std::abs(int(pixels[3*(96*192+96)])-lit)<4,"Solid detail appeared without crossfade");
-    solids.update(&renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
+    solids.update(renderer.gl(),*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,1.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
     require(pixels[3*(96*192+96)]>lit+30,"Solid detail crossfade did not settle");
-    solids.update(&renderer,*solidCamera,Vector3(0,0,23455),2451545.,"earth",true,4.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
+    solids.update(renderer.gl(),*solidCamera,Vector3(0,0,23455),2451545.,"earth",true,4.f);renderer.render(*solidScene,*solidCamera);pixels=renderer.readRGBPixels();
     require(std::abs(int(pixels[3*(96*192+96)])-lit)<4,"Solid detail eviction damaged the global surface");
     require(solids.takeEviction()&&!solids.takeEviction(),"Regional loader was not notified of eviction exactly once");
     // Local moons share surface LOD/lighting while retaining their local registry
@@ -401,13 +441,13 @@ void graphics() {
         objects.sync(registry,0,{});const float radius=static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters);
         // Near plane scaled to the body: 67P's catalogue radius is only 1.65 km.
         auto camera=PerspectiveCamera::create(45,1,radius*.1f,30000.f);camera->position.set(0,0,radius*4);camera->lookAt(Vector3());
-        moons.update(&renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);
+        moons.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);
         require(renderer.readRGBPixels()[3*(96*192+96)]>20,"Local moon surface did not render");
         if(moons.hazy(id)){
             // Visible haze hides the grey test map behind its orange colour; the
             // surface view fades it out and shows the map again.
             const auto hazy=renderer.readRGBPixels();require(hazy[3*(96*192+96)]>2*hazy[3*(96*192+96)+2]+10,"Visible haze did not cover the surface");
-            moons.showSurface(id,true);for(int i=0;i<40;++i)moons.update(&renderer,*camera,Vector3(0,0,23455),2451545.,id,true,.05f);renderer.render(*world,*camera);
+            moons.showSurface(id,true);for(int i=0;i<40;++i)moons.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,id,true,.05f);renderer.render(*world,*camera);
             const auto surface=renderer.readRGBPixels();require(std::abs(int(surface[3*(96*192+96)])-int(surface[3*(96*192+96)+2]))<12&&moons.surfaceView(id),"Surface view did not reveal the map");
             moons.showSurface(id,false);
         }
@@ -416,27 +456,27 @@ void graphics() {
         if(definition.axesMeters[0]>0){const auto& axes=definition.axesMeters;const double r=definition.radiusMeters;
             require(std::abs(node->scale.x-axes[0]/r)<1e-6&&std::abs(node->scale.y-axes[2]/r)<1e-6&&std::abs(node->scale.z-axes[1]/r)<1e-6,"IAU axes mapped incorrectly into render coordinates");}
         albert::RegionalImages detail;detail.body=id;detail.day=rgba(230);detail.height=height(0);albert::prepareRegionalImages(detail);moons.stage(std::move(detail));
-        for(int i=0;moons.uploading()&&i<256;++i)moons.update(&renderer,*camera,Vector3(0,0,23455),2451545.,id,true,0.f);
-        require(!moons.uploading(),"Moon detail upload did not finish");moons.update(&renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);
-        moons.update(&renderer,*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(moons.takeEviction(),"Moon detail stayed resident after focus changed");
+        for(int i=0;moons.uploading()&&i<256;++i)moons.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,id,true,0.f);
+        require(!moons.uploading(),"Moon detail upload did not finish");moons.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,id,true,1.f);
+        moons.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(moons.takeEviction(),"Moon detail stayed resident after focus changed");
     }
     for(const std::string id:{"phobos","deimos","mimas","phoebe","hyperion","proteus","67p","halley"}){
         auto world=Scene::create();world->background=Color(0x000000);auto shape=albert::decodeShape(albert::visualAssetPack()->payload("v1/"+id+"/shape.bin"));auto geometry=shape.geometry;
         std::vector<albert::SurfaceAssets> maps;maps.push_back({id,rgba(140),height(0),{},std::move(shape)});albert::SolidBodies measured(*world,std::move(maps));
         albert::core::Scene registry;registry.include(*albert::core::localOrbit(id));albert::SceneObjects objects(*world);objects.bind(id,measured.nodes().at(id),measured.picker(id));objects.sync(registry,0,{});
         auto camera=PerspectiveCamera::create(45,1,.00001f,30000.f);camera->position.set(0,0,float(albert::core::surfaceBody(id)->shapeRadiusMeters*4/albert::core::earthRadiusMeters));camera->lookAt(Vector3());
-        measured.update(&renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);const auto before=renderer.readRGBPixels();require(before[3*(96*192+96)]>10,"Observed shape failed to render");
+        measured.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);const auto before=renderer.readRGBPixels();require(before[3*(96*192+96)]>10,"Observed shape failed to render");
         Raycaster ray;ray.setFromCamera(Vector2(0,0),*camera);require(objects.pick(registry,ray)==id,"Measured BVH picking failed");
         albert::RegionalImages detail;detail.body=id;detail.day=rgba(230);detail.textureOnly=true;albert::prepareRegionalImages(detail);require(!detail.geometry&&!detail.surfaceMask,"Measured imagery allocated a replacement sphere or mask");measured.stage(std::move(detail));
-        for(int i=0;measured.uploading()&&i<256;++i)measured.update(&renderer,*camera,Vector3(0,0,23455),2451545.,id,true,0.f);
+        for(int i=0;measured.uploading()&&i<256;++i)measured.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,id,true,0.f);
         require(!measured.uploading(),"Observed shape detail upload stalled");renderer.render(*world,*camera);const auto start=renderer.readRGBPixels();require(std::abs(int(start[3*(96*192+96)])-before[3*(96*192+96)])<4,"Measured detail appeared without fade");
-        measured.update(&renderer,*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);const auto after=renderer.readRGBPixels();long increase=0;for(size_t i=0;i<after.size();i+=3)increase+=int(after[i])-int(before[i]);require(increase>500,"Measured texture detail fade did not settle");
+        measured.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,id,true,1.f);renderer.render(*world,*camera);const auto after=renderer.readRGBPixels();long increase=0;for(size_t i=0;i<after.size();i+=3)increase+=int(after[i])-int(before[i]);require(increase>500,"Measured texture detail fade did not settle");
         require(measured.nodes().at(id)->geometry()==geometry&&measured.nodes().at(id)->children.empty(),"Texture LOD replaced observed plate geometry");
-        measured.update(&renderer,*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(measured.takeEviction(),"Measured texture detail was not evicted");renderer.render(*world,*camera);const auto released=renderer.readRGBPixels();require(std::abs(int(released[3*(96*192+96)])-before[3*(96*192+96)])<4,"Shape detail eviction damaged base imagery");
+        measured.update(renderer.gl(),*camera,Vector3(0,0,23455),2451545.,"earth",true,4.f);require(measured.takeEviction(),"Measured texture detail was not evicted");renderer.render(*world,*camera);const auto released=renderer.readRGBPixels();require(std::abs(int(released[3*(96*192+96)])-before[3*(96*192+96)])<4,"Shape detail eviction damaged base imagery");
     }
     albert::RegionalImages reload;reload.body="mercury";reload.day=rgba(230);reload.height=height(1000);albert::prepareRegionalImages(reload);solids.stage(std::move(reload));
-    for(int i=0;solids.uploading()&&i<256;++i)solids.update(&renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);
-    solids.update(&renderer,*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,4.f);
+    for(int i=0;solids.uploading()&&i<256;++i)solids.update(renderer.gl(),*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,0.f);
+    solids.update(renderer.gl(),*solidCamera,Vector3(0,0,23455),2451545.,"mercury",true,4.f);
     require(solids.takeEviction(),"Zooming out on the same planet retained high-resolution terrain");
     {
         auto world=Scene::create();world->background=Color(0x000000);world->add(AmbientLight::create(Color(0xffffff),.2f));
@@ -543,6 +583,14 @@ void orbitPaths() {
     require(albert::pathPresent(37,6,10)==1e7&&albert::pathPresent(-20000,6,10)==1e7,"Highlight shown far from its samples");
 }
 int main(int argc,char**) {
-    try {controls();orbitPaths();if(argc>1) graphics();return 0;}
+    try {
+        controls();orbitPaths();
+        if(argc>1){
+            {GlTarget gl;graphics(gl);}
+            std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';}
+            if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";graphics(*gpu);}
+        }
+        return 0;
+    }
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }
