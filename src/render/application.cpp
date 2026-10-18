@@ -2481,9 +2481,9 @@ int albert::runRenderer(int argc, char** argv) {
             std::string detailFocus=std::string(targetId(focus));
             if(objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"){
                 const Vector3 vehicle=objects.nodes().at(focus)->position;
-                auto near=[&](const Object3D& body,float radius){return camera->position.distanceTo(body.position)<1.05f*radius&&vehicle.distanceTo(body.position)<1.01f*radius;};
-                if(near(*earth,1.f))detailFocus="earth";else if(near(*moon,static_cast<float>(1737.4/6378.137)))detailFocus="moon";
-                else for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id)&&near(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters)))detailFocus=id;
+                auto over=[&](const Object3D& body,float radius){return camera->position.distanceTo(body.position)<1.05f*radius&&vehicle.distanceTo(body.position)<1.01f*radius;}; // Not "near": a Windows macro.
+                if(over(*earth,1.f))detailFocus="earth";else if(over(*moon,static_cast<float>(1737.4/6378.137)))detailFocus="moon";
+                else for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id)&&over(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters)))detailFocus=id;
             }
             solids.update(graphics.gl(),*camera,sunPosition,tdb,detailFocus,visualSettings.quality,dt,visualSettings.auxiliary,visualSettings.terrain);
             {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
