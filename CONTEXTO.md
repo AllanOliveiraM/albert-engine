@@ -6,7 +6,7 @@
 radiossonda de Tampa e casos NESC 7/8. NRLMSIS 2.x descartado (licença só acadêmica, proíbe
 modificação); NRLMSISE-00 portado do Orekit (Apache 2.0, 17 casos de referência exatos) com
 índices CelesTrak, acima do GFS e fora do modo ao vivo. Previsão +6 h validada contra radiossonda independente (mediana |ΔT| 0,64 K). Adiado: HWM14
-(NRL, governo dos EUA; ventos >80 km). Progresso geral ~36%. Próximo: fase 3.
+(NRL, governo dos EUA; ventos >80 km). Progresso geral ~42%. Próximo: fase 3.
 
 **Nova direção (17/10/2026, noite):** o Albert vira sandbox + motor físico realista e leve
 (foguete da superfície à órbita, software de voo externo, Terra/Lua/Marte, clima só ao vivo).
