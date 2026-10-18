@@ -31,6 +31,34 @@ FetchContent_Declare(erfa
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(threepp json imgui erfa)
 set_property(TARGET threepp PROPERTY SYSTEM TRUE)
+
+# wgpu-native v29.0.1.1 (WebGPU over Vulkan and D3D12; MIT/Apache-2.0): pinned static release.
+if(MSVC) # The Rust static library uses the DLL C runtime while Albert links it statically: use wgpu's DLL.
+    set(albert_wgpu_asset windows-x86_64-msvc)
+    set(albert_wgpu_hash 7e67d7445c42aeb85e30f88930fd8d7d83ee769e3390aeb1ada75ebf3cf78132)
+elseif(WIN32)
+    set(albert_wgpu_asset windows-x86_64-gnu)
+    set(albert_wgpu_hash d471e3614733c1d4ddd61bfd19868356477d0d37bf531bf8c6cb64a7f579bd2a)
+    set(albert_wgpu_system d3dcompiler ws2_32 userenv bcrypt ntdll opengl32 propsys runtimeobject)
+else()
+    set(albert_wgpu_asset linux-x86_64)
+    set(albert_wgpu_hash 95a4d90c071005a98d03eab348beaa6b07e16eb00d1dcdb9f8348f75eb97ec5a)
+    set(albert_wgpu_system dl pthread m)
+endif()
+FetchContent_Declare(wgpu
+    URL https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.1.1/wgpu-${albert_wgpu_asset}-release.zip
+    URL_HASH SHA256=${albert_wgpu_hash}
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(wgpu)
+if(MSVC)
+    add_library(albert_wgpu SHARED IMPORTED GLOBAL)
+    set_target_properties(albert_wgpu PROPERTIES IMPORTED_LOCATION ${wgpu_SOURCE_DIR}/lib/wgpu_native.dll IMPORTED_IMPLIB ${wgpu_SOURCE_DIR}/lib/wgpu_native.dll.lib)
+else()
+    add_library(albert_wgpu STATIC IMPORTED GLOBAL)
+    set_target_properties(albert_wgpu PROPERTIES IMPORTED_LOCATION ${wgpu_SOURCE_DIR}/lib/libwgpu_native.a)
+endif()
+target_include_directories(albert_wgpu SYSTEM INTERFACE ${wgpu_SOURCE_DIR}/include)
+target_link_libraries(albert_wgpu INTERFACE ${albert_wgpu_system})
 set_property(TARGET nlohmann_json PROPERTY SYSTEM TRUE)
 
 # ERFA ships autotools sources. Compile the pinned C library directly on all

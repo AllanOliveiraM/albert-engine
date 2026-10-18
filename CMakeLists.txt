@@ -30,6 +30,7 @@ add_subdirectory(src/catalog)
 if(ALBERT_RPC)
     add_subdirectory(src/rpc)
 endif()
+add_subdirectory(src/gpu)
 add_subdirectory(src/render)
 
 add_executable(render WIN32 src/main.cpp)
