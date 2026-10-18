@@ -183,7 +183,7 @@ message CreateFlightRequest {
   optional double step_seconds=7;       // Default 0.001; 1e-5 to 0.1.
   bool focus_camera=8;
   optional double coast_step_seconds=9; // Longest step while ballistic above the atmosphere (86 km Earth, 150 km Mars); default 1, 0 disables, up to 10.
-  // Degree and order: EGM2008 2-70 (default 20); GRAIL GRGM1200A 2-600 and MRO GMM-3 2-120 (default 50), downloaded once.
+  // Degree and order: EGM2008 2-70 (default 20); GRAIL GRGM1200A 2-600 and MRO GMM-3 2-120 (default 100), downloaded once.
   optional uint32 gravity_degree=10;
   // AUTOMATIC: live NOAA GFS when Albert follows the real clock and the instant is within
   // 2 h of now, else (or if GFS is unreachable) the 1976 standard atmosphere. Elsewhere only

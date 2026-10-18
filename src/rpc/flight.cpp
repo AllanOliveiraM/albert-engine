@@ -51,7 +51,7 @@ Prepared prepare(const api::CreateFlightRequest& r,double utc){
     if(!(std::abs(site.latitude_degrees())<=90&&std::abs(site.longitude_degrees())<=360&&site.height_meters()>=(earth?-500:-1e4)&&site.height_meters()<=(earth?1e4:2.5e4)))throw std::invalid_argument("Invalid launch site");
     if(!finite(r.heading_degrees())||!(std::abs(p.pitch)<=90)||!(p.seconds>=1e-5&&p.seconds<=.1)||!(p.coast>=0&&p.coast<=10))throw std::invalid_argument("Invalid heading, pitch, step or coast step");
     if(!(utc>=time::Simulation::earliestUtc&&utc<=time::Simulation::latestUtc))throw std::invalid_argument("Instant outside 1900-2100");
-    p.utc=utc;p.degree=r.has_gravity_degree()?r.gravity_degree():earth?20u:50u;const int maximum=earth?ph::egm2008Maximum:providers::gravityMaximum(p.body);
+    p.utc=utc;p.degree=r.has_gravity_degree()?r.gravity_degree():earth?20u:100u;const int maximum=earth?ph::egm2008Maximum:providers::gravityMaximum(p.body);
     if(p.degree<2||p.degree>static_cast<unsigned>(maximum))throw std::invalid_argument("Gravity degree must be 2-"+std::to_string(maximum));
     return p;
 }

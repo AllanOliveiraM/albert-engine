@@ -95,6 +95,15 @@ Lua e Marte (`tests/central_bodies_test.cpp`, com os excertos de grau 8 das tabe
 - Órbitas circulares de 100 km na Lua e 300 km em Marte: uma volta com passos de 1 s a <1 µm
   de 0,1 s.
 
+Contra órbitas reais (estado inicial do JPL Horizons, ICRF, trajetórias reconstruídas,
+propagação de 6 h com passos de 1 s, sem arrasto nem radiação solar):
+
+- LRO, 2026-03-10 00–06 TDB, 83–100 km de altitude, 3 voltas: 3,7 m do Horizons com
+  GRGM1200A no grau 300, 8,3 m no 100, 202 m no 50 e 894 m no 20; sem a Terra e o Sol, 368 m.
+- MRO, 2026-09-10 00–06 TDB, 238–288 km: 37 m com GMM-3 no grau 120 (48 m no 50), quase todo
+  ao longo da trajetória e crescendo com o tempo — o efeito esperado da pressão de radiação
+  solar (~7e-8 m/s² para a MRO) que o modelo ainda não tem.
+
 ## API
 
 `FlightService` (gRPC, lockstep) expõe o voo a software externo e espelha o veículo na
