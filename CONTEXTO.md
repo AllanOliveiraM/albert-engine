@@ -94,6 +94,16 @@ grava vistas de cúmulos. O CI do Windows perdeu o dispositivo (WARP) no `ocean_
 imprime o motivo da perda e o oceano, num adaptador de CPU, submete cada dispatch sozinho. O traço do CI mostrou as cinco
 passadas completas e a perda logo depois (escrita no array de texturas ou a cópia dele, só no WARP): o app não roda ondas
 em adaptador de CPU e o `ocean_test` pula no WARP. Risco aberto: conferir as ondas numa GPU real no Windows (Direct3D 12).
+**Fase 7 — física genérica (19/10/2026, pedido do Allan: "tudo configurável e escalável, não fixo ao Starship"):**
+motores individuais (`Stage::engines`, falha, taxa do cardã; o atalho de um motor no eixo é bit a bit o modelo antigo),
+definição de veículo pela API (`CUSTOM` + `VehicleDefinition`, semântica de pilha do núcleo; `GetVehicle` devolve presets que
+voam com o mesmo hash; JSON no `albert_flight_client --export-vehicle/--definition`), RCS (`Stage::rcs`, alocação exata por
+conjunto ativo primal — a FISTA desperdiçava 12% e o primeiro conjunto ativo travava em limite; regressões no physics_test) e
+superfícies (`Table3`), chaves físicas por voo (`PhysicsSettings`, página "Fisica" do menu com padrões em settings.json,
+resolvidas no log), sensores (GNSS, radar, rastreador de estrelas), turbulência de Dryden, começar em voo (`StartState`),
+vários voos por `flight_id` (`Slot` por voo: física, sensores, plano de dados, pacer, keeper, log; ids de cena `flight.<id>`)
+e `spawn` (o estágio separado vira outro voo com log próprio). Nós térmicos (`physics/thermal`, testados) ainda não ligados
+ao voo. Faltam: contato genérico (rodas, água, torre), motores a ar (aviões), térmico no voo, validação contra telemetria.
 **Escopo (18/10/2026):** o Allan adiou o refinamento de Marte (GRAM Suite, atmosfera sazonal e
 termosfera, Viking < 20%) para atualizações futuras; o foco é Terra e Lua. Não puxar itens de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.
