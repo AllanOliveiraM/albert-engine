@@ -1,7 +1,10 @@
 #include "gpu/ocean.hpp"
+#include <webgpu/wgpu.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 namespace albert::gpu {
 namespace {
@@ -55,16 +58,17 @@ fn mul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * 
     fields[(c * 2u + 1u) * N * N + i] = vec4f(gz + vec2f(-xx.y, xx.x), zz);
 }
 var<workgroup> line: array<vec4f, 256>;
-fn transform(l: u32) { // In-place inverse FFT (radix 2, bit-reversed input) of two complex sequences.
-    for (var s = 1u; s <= 8u; s++) {
-        let m = 1u << s; let half = m >> 1u; let j = l % m;
-        if (j < half) {
-            let a = 2.0 * PI * f32(j) / f32(m); let w = vec2f(cos(a), sin(a));
-            let u = line[l]; let v = line[l + half]; let t = vec4f(mul(w, v.xy), mul(w, v.zw));
-            line[l] = u + t; line[l + half] = u - t;
-        }
-        workgroupBarrier();
+fn butterfly(l: u32, s: u32) { // One stage of an in-place inverse FFT (radix 2, bit-reversed input) of two complex sequences.
+    let m = 1u << s; let half = m >> 1u; let j = l % m;
+    if (j < half) {
+        let a = 2.0 * PI * f32(j) / f32(m); let w = vec2f(cos(a), sin(a));
+        let u = line[l]; let v = line[l + half]; let t = vec4f(mul(w, v.xy), mul(w, v.zw));
+        line[l] = u + t; line[l + half] = u - t;
     }
+}
+fn transform(l: u32) { // The eight stages in straight-line code: no barrier inside a loop (FXC on Direct3D 12).
+    butterfly(l, 1u); workgroupBarrier(); butterfly(l, 2u); workgroupBarrier(); butterfly(l, 3u); workgroupBarrier(); butterfly(l, 4u); workgroupBarrier();
+    butterfly(l, 5u); workgroupBarrier(); butterfly(l, 6u); workgroupBarrier(); butterfly(l, 7u); workgroupBarrier(); butterfly(l, 8u); workgroupBarrier();
 }
 @compute @workgroup_size(256, 1, 1) fn rowsPass(@builtin(local_invocation_id) l: vec3u, @builtin(workgroup_id) g: vec3u) {
     let base = (g.z * 2u + g.y) * N * N + g.x * N;
@@ -128,12 +132,15 @@ void Ocean::update(WGPUCommandEncoder encoder,double seconds,float east,float no
     const float data[8]{speed,east,north,0,static_cast<float>(std::fmod(seconds,1e5)),choppiness,0,0};wgpuQueueWriteBuffer(d.queue,d.params,0,data,sizeof data);
     const bool respectrum=d.speed<0||std::abs(speed-d.speed)>.25f||std::acos(std::clamp((east*d.east+north*d.north)/std::max(speed*std::hypot(d.east,d.north),1e-6f),-1.f,1.f))>.05f;
     // A pass per dispatch; on a CPU adapter (WARP) each also goes in its own submission, under the driver's watchdog alone.
-    auto run=[&](WGPUComputePipeline pl,unsigned x,unsigned y,unsigned z){
+    // ALBERT_GPU_TRACE (with a CPU adapter): each pass waited for and named, to find one that loses the device.
+    static const bool trace=std::getenv("ALBERT_GPU_TRACE")!=nullptr;
+    auto run=[&](WGPUComputePipeline pl,unsigned x,unsigned y,unsigned z,const char* name){
         WGPUCommandEncoder e=d.software?wgpuDeviceCreateCommandEncoder(d.device,nullptr):encoder;WGPUComputePassEncoder p=wgpuCommandEncoderBeginComputePass(e,nullptr);
         wgpuComputePassEncoderSetBindGroup(p,0,d.group,0,nullptr);wgpuComputePassEncoderSetPipeline(p,pl);wgpuComputePassEncoderDispatchWorkgroups(p,x,y,z);wgpuComputePassEncoderEnd(p);wgpuComputePassEncoderRelease(p);
-        if(d.software){WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(d.queue,1,&c);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);}};
-    if(respectrum){run(d.spectrumPass,size/16,size/16,cascades);d.speed=speed;d.east=east;d.north=north;}
-    run(d.evolvePass,size/16,size/16,cascades);run(d.rowsPass,size,2,cascades);run(d.columnsPass,size,2,cascades);run(d.assemblePass,size/16,size/16,cascades);
+        if(d.software){WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(d.queue,1,&c);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);
+            if(trace){wgpuDevicePoll(d.device,true,nullptr);std::fprintf(stderr,"ocean: %s done\n",name);std::fflush(stderr);}}};
+    if(respectrum){run(d.spectrumPass,size/16,size/16,cascades,"spectrum");d.speed=speed;d.east=east;d.north=north;}
+    run(d.evolvePass,size/16,size/16,cascades,"evolve");run(d.rowsPass,size,2,cascades,"rows");run(d.columnsPass,size,2,cascades,"columns");run(d.assemblePass,size/16,size/16,cascades,"assemble");
 }
 double Ocean::significantHeight(double u){const double wp=.877*g/(1.026*u);return 4*std::sqrt(.0081*g*g/(5*std::pow(wp,4)));}
 double Ocean::resolvedSlope(double u){double s=0;for(unsigned c=0;c<cascades;++c)s+=bandSlope(u,c);return s;}
