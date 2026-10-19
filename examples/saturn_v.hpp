@@ -111,7 +111,7 @@ private:
         if(r.stage<=3){for(const Burn& b:burns){if(t>=b.until)continue;const double flow=b.thrust/b.exhaust,span=std::min(b.until-t,left/flow);
                 if(!burn(span,b.thrust,b.exhaust))return p;left-=flow*span;t=b.until;if(left<=1e-6)break;}
             m=166571;p.tgo+=5.5;} // Staging gap to the S-IVB at full thrust.
-        burn(1e9,901223,ivb);return p;
+        burn((r.stage<=3?107095.:r.propellant)*ivb/901223,901223,ivb);return p; // Past its propellant: the time to burnout.
     }
     Phase phase_=Phase::pad;Vec up_,down_,pole_,steer_,hold_,plane_;double last_=-1,start_=release;bool resumed_=false;
 };

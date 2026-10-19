@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iterator>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <iostream>
@@ -65,13 +66,13 @@ int main(int argc,char** argv){try{
     {
         const Tt t0=ttFromUtc(zero+ex::SaturnV::release);
         Flight f(v,e,Flight::pad(e,v,t0,{28.6084*deg,-80.6041*deg,0},90*deg,90*deg));ex::SaturnV g=program(v);
-        double maxq=0,maxqAt=0,mach1=0;Conditions ceco{},oeco{};
-        fly(f,g,t0,162.3,[&](double t){const Sample s=f.sample();
+        double maxq=0,maxqAt=0,mach1=0,depleted=0;Conditions ceco{},oeco{};
+        fly(f,g,t0,162.3,[&](double t){const Sample s=f.sample();if(depleted==0&&f.state().propellant<=0)depleted=t;
             if(s.dynamicPressure>maxq){maxq=s.dynamicPressure;maxqAt=t;}if(mach1==0&&s.mach>=1)mach1=t;
             if(ceco.t==0&&t>=135.2)ceco=conditions(f,t);if(oeco.t==0&&t>=161.63)oeco=conditions(f,t);});
         within(mach1,66.3,1.5,"Mach 1 (s)");within(maxqAt,83.0,3,"maximum q (s)");within(maxq/1e3,35.2,1.8,"maximum q (kPa)");
         within(ceco.speed,1979.0,20,"centre cutoff: space-fixed speed (m/s)");within(oeco.speed,2764.1,28,"outboard cutoff: speed (m/s)");
-        within(oeco.mass,827292,1500,"outboard cutoff: mass (kg)");
+        within(depleted,161.63,.5,"outboard cutoff, LOX depletion (s)"); // Early by ~5 s without the centre engine cutoff.
         std::printf("  against Apollo 12, which flew this pitch program (SP-2000-4029):\n");
         within(ceco.height/1e3,24.158*nmi/1e3,1.5,"centre cutoff: height (km)");within(ceco.path,23.944,.8,"centre cutoff: flight-path angle (°)");
         within(oeco.height/1e3,36.773*nmi/1e3,1.5,"outboard cutoff: height (km)");within(oeco.path,20.513,.8,"outboard cutoff: flight-path angle (°)");
@@ -104,6 +105,12 @@ int main(int argc,char** argv){try{
         std::printf("  S-IVB cutoff:\n");
         within(end.t,699.34,5,"time (s)");within(end.mass,135182,1200,"mass (kg)");within(end.speed,7791.2,10,"space-fixed speed (m/s)");
         within((a*(1+ecc)-sphere)/1e3,186.0,3,"apogee (km)");within((a*(1-ecc)-sphere)/1e3,183.2,3,"perigee (km)");within(inclination,32.521,.05,"inclination (°)");
+    }
+    { // Off-nominal: a reading whose mass is below one step's propellant (or more velocity to gain than the stage holds)
+      // returns at once: the plan stops at the S-IVB's burnout instead of burning past it into NaN.
+        ex::SaturnV g;g.resume(250,{1,0,0},{0,0,1});ex::Reading r;r.position={6.6e6,0,0};r.velocity={0,1000,0};r.stage=4;r.mass=50;r.propellant=10;r.height=220e3;
+        const auto start=std::chrono::steady_clock::now();g.step(r);const double took=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
+        within(took,0,.2,"guidance beyond the propellant (s of computation)");
     }
     std::printf(" 3. Eagle's powered descent from ignition (1969-07-20 20:05:05 UTC) to Tranquility Base:\n");
     {
