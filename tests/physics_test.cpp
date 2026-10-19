@@ -313,6 +313,33 @@ int main(){try{
         g.advance(second/4);x=g.sample();near(g.surfaces()[0].deflection*180/3.14159265358979,5,1e-9,"Surface at its command");
         near(x.aeroMoment.y,x.dynamicPressure*2*3*.05,1e-9*x.dynamicPressure,"Surface pitching moment q S L ΔCm");
     }
+    // Navigation sensors against their settings: the GNSS's noise per axis and its limits; the radar altimeter's slant range
+    // and beam edge; the star tracker's noise across and about its boresight, and its exclusions.
+    {
+        GnssModel gm;gm.drift=0;Gnss gnss(gm,7);const M3 ned=nedFromFixed(.5,-1.4);const V3 p=fixedPosition(earth,{.5,-1.4,100}),v{10,20,30};
+        double sn=0,sd=0,sv=0;constexpr int n=4000;
+        for(int i=0;i<n;++i){const auto r=gnss.measure(i*.1,.1,p,v,ned,100,50,true);require(r.valid,"GNSS fix");const V3 e=ned*(r.position-p);sn+=e.x*e.x;sd+=e.z*e.z;sv+=dot(r.velocity-v,r.velocity-v)/3;}
+        std::printf("GNSS sigma: north %.3f m, down %.3f m, velocity %.4f m/s\n",std::sqrt(sn/n),std::sqrt(sd/n),std::sqrt(sv/n));
+        near(std::sqrt(sn/n),1.5,.08,"GNSS horizontal sigma");near(std::sqrt(sd/n),3,.15,"GNSS vertical sigma");near(std::sqrt(sv/n),.05,.0025,"GNSS velocity sigma");
+        GnssModel civil=gm;civil.maxHeight=18000;civil.maxSpeed=515;Gnss limited(civil,1);
+        require(!limited.measure(0,.1,p,v,ned,20000,100,true).valid&&!limited.measure(0,.1,p,v,ned,1000,600,true).valid&&limited.measure(0,.1,p,v,ned,1000,100,true).valid,"GNSS export limits");
+        require(!limited.measure(0,.1,p,v,ned,1000,100,false).valid,"No GNSS off the Earth");
+        RadarAltimeter radar({},3);double sum=0,sq=0;
+        for(int i=0;i<n;++i){const auto r=radar.measure(i,100,{0,0,1});sum+=r.range;sq+=r.range*r.range;}
+        const double mean=sum/n,sigma=std::sqrt(sq/n-mean*mean);std::printf("radar at 100 m: mean %.3f m, sigma %.3f m\n",mean,sigma);
+        near(mean,100,.06,"Radar range");near(sigma,1,.05,"Radar noise (1% of the range)");
+        const double t=10*3.14159265358979/180;double tilted=0;for(int i=0;i<n;++i)tilted+=radar.measure(i,100,{std::sin(t),0,std::cos(t)}).range;
+        near(tilted/n,100/std::cos(t),.06,"Slant range at 10 degrees");require(!radar.measure(0,100,{.5,0,std::sqrt(.75)}).valid&&!radar.measure(0,3000,{0,0,1}).valid,"Beam edge and range limit");
+        StarTracker tracker({},5);const Q q=normalized({.9,.1,.3,.2});double across=0,roll=0;const V3 sun{1,0,0},body{-1,0,0},look=matrix(q)*V3{0,0,-1};
+        const V3 away=cross(look,V3{0,1,0})/norm(cross(look,V3{0,1,0})); // Sun and body well off the boresight.
+        for(int i=0;i<n;++i){const auto r=tracker.measure(i,q,away,away*-1.,.1,{});require(r.valid,"Star tracker fix");
+            const Q d=Q{q.w,-q.x,-q.y,-q.z}*r.attitude;const V3 e{2*d.x,2*d.y,2*d.z}; // Body-axis error.
+            roll+=e.z*e.z;across+=(e.x*e.x+e.y*e.y)/2;}
+        std::printf("star tracker sigma: across %.2f arcsec, roll %.2f arcsec\n",std::sqrt(across/n)*206265,std::sqrt(roll/n)*206265);
+        near(std::sqrt(across/n),2.4e-5,1.2e-6,"Star tracker sigma across the boresight");near(std::sqrt(roll/n),2e-4,1e-5,"Star tracker roll sigma");
+        require(!tracker.measure(0,q,look,away,.1,{}).valid&&!tracker.measure(0,q,away,look,.1,{}).valid&&!tracker.measure(0,q,away,away*-1.,.1,{0,0,.1}).valid,"Sun, body and rate exclusions");
+        (void)sun;(void)body;
+    }
     // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
     // against 10 ms steps.
     {

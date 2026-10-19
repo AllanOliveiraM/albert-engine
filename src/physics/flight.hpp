@@ -132,6 +132,7 @@ public:
     const std::vector<double>& thrusters()const{return duty_;} // Duty cycles.
     std::vector<double> engineThrust()const; // Each engine's thrust now (N, after the ambient pressure).
     const State& state()const{return s_;}
+    V3 sunFromVehicle()const{return sun(s_.time)-s_.position;} // Inertial (m).
     const Vehicle& vehicle()const{return vehicle_;}
     const Environment& environment()const{return env_;}
     Sample sample()const;

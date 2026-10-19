@@ -25,6 +25,14 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Radiação solar | pressão de esfera (`Vehicle::sunArea`, `reflectivity`; 1361 W/m² a 1 au) com umbra e penumbra cônicas do corpo central | desligada por padrão; sem albedo nem infravermelho do planeta; atitude ignorada |
 | Solo | pad com a base do conjunto no solo, preso girando com o corpo até empuxo > peso; solo a uma altura elipsoidal fixa (do relevo medido com `terrain_height`); pernas de pouso (`Stage::legs`) como molas-amortecedores com atrito de Coulomb regularizado (linear abaixo de 5 cm/s), força e momento em cada pé; sem pernas, toque detectado no CG e o veículo para | solo plano em torno do sítio; sem deformação do regolito nem rebote do corpo |
 
+Sensores de navegação além do IMU (`physics/sensors`), reproduzíveis pela semente: GNSS (ruído branco horizontal, vertical
+e de velocidade mais deriva de Gauss-Markov; só na Terra; limites de altura e velocidade, de fábrica um receptor espacial até
+3000 km, com 18 km e 515 m/s um civil), altímetro radar (alcance inclinado pelo eixo de mira até o solo plano do sítio,
+dentro do meio ângulo do feixe e do alcance; ruído máx(piso, fração do alcance)) e rastreador de estrelas (atitude com ruído
+através e em torno do eixo de mira; nada a menos do ângulo de exclusão do Sol, dentro do disco do corpo central mais uma
+margem, ou acima da taxa limite). Cada um mede no fim do passo que completa o seu período; `physics_test` confere os
+desvios contra os ajustes (GNSS 1,53/2,96 m e 0,050 m/s para 1,5/3/0,05; radar 0,99 m a 100 m; rastreador 4,95″/42″).
+
 Chaves por voo (`Environment`: `sunMoon`, `relativity`, `atmosphere`, `wind`, `solarPressure`; na API, `PhysicsSettings`, e
 o grau 0 da gravidade como massa pontual) removem cada modelo para estudos e validação.
 

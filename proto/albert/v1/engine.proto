@@ -254,7 +254,23 @@ message CreateFlightRequest {
   Body body=14;
   VehicleDefinition definition=15;      // CUSTOM only.
   PhysicsSettings physics=16;           // Unset fields: Albert's defaults (its Física menu; all on unless changed there).
+  SensorSettings sensors=17;            // Beyond the IMU; each when enabled.
 }
+// Navigation sensors (docs/PHYSICS.md), reproducible from the seed; unset values: the defaults noted.
+message SensorSettings { GnssSettings gnss=1; RadarAltimeterSettings radar_altimeter=2; StarTrackerSettings star_tracker=3; uint64 seed=4; }
+// White noise 1.5 m horizontal, 3 m vertical, 0.05 m/s; Gauss-Markov drift 1 m over 300 s; 10 Hz; below 3000 km, no speed
+// limit (a space receiver; 18000 m and 515 m/s make a civil one). Earth flights only.
+message GnssSettings { bool enabled=1; optional double horizontal_sigma_meters=2; optional double vertical_sigma_meters=3;
+  optional double velocity_sigma_meters_per_second=4; optional double drift_sigma_meters=5; optional double drift_correlation_seconds=6;
+  optional double period_seconds=7; optional double max_height_meters=8; optional double max_speed_meters_per_second=9; }
+// Slant range along the boresight (body; +z, down by default) to the ground, within 20° of the vertical and 2500 m; noise
+// max(0.3 m, 1% of the range); 20 Hz.
+message RadarAltimeterSettings { bool enabled=1; optional Vector3 boresight=2; optional double half_angle_radians=3; optional double max_range_meters=4;
+  optional double noise_floor_meters=5; optional double noise_fraction=6; optional double period_seconds=7; }
+// Attitude (body to inertial) with 5″ across the boresight (body; -z, up by default) and 40″ about it; none within 30° of
+// the Sun, within the central body's disc plus 10°, or above 2°/s; 10 Hz.
+message StarTrackerSettings { bool enabled=1; optional Vector3 boresight=2; optional double cross_sigma_radians=3; optional double roll_sigma_radians=4;
+  optional double sun_exclusion_radians=5; optional double body_margin_radians=6; optional double max_rate_radians_per_second=7; optional double period_seconds=8; }
 // The physics models a flight runs (docs/PHYSICS.md); each switch off removes that model. The flight's sample and its log
 // carry them resolved, so a replay does not depend on Albert's defaults.
 message PhysicsSettings {
@@ -319,7 +335,12 @@ message FlightSample {
   repeated double thruster_duty=48;     // The stage's thrusters' duty cycles (from the torque command or set directly).
   Vector3 thruster_force_newtons=49; Vector3 thruster_moment_newton_meters=50; // Theirs, body axes, about the CG.
   PhysicsSettings physics=51;           // The models this flight runs, resolved.
+  // The latest measurement of each enabled sensor (valid false: none possible then), timed in elapsed seconds.
+  GnssReading gnss=52; RadarAltimeterReading radar_altimeter=53; StarTrackerReading star_tracker=54;
 }
+message GnssReading { bool valid=1; double elapsed_seconds=2; Vector3 position_ecef_meters=3; Vector3 velocity_ecef_meters_per_second=4; }
+message RadarAltimeterReading { bool valid=1; double elapsed_seconds=2; double range_meters=3; }
+message StarTrackerReading { bool valid=1; double elapsed_seconds=2; Quaternion attitude=3; }
 message SurfaceSample { string name=1; double deflection_radians=2; double command_radians=3; }
 // One engine now: gimbal as moved (rate-limited toward its command); thrust after the ambient pressure.
 message EngineSample { string name=1; bool on=2; bool failed=3; double throttle=4; Gimbal gimbal=5; Gimbal gimbal_command=6; double thrust_newtons=7; }

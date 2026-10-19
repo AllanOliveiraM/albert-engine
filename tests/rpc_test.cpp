@@ -296,6 +296,16 @@ int main(int argc,char** argv){try{
             {grpc::ClientContext c;require(flight->CreateFlight(&c,a,&x).ok()&&!x.physics().atmosphere()&&x.air_density_kilograms_per_meter3()==0&&x.static_pressure_pascals()==0,"Atmosphere off: vacuum");}
             {const auto snap=bridge.snapshot();(void)snap;}
             a.set_gravity_degree(1);{grpc::ClientContext c;require(flight->CreateFlight(&c,a,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Degree 1 accepted");}
+            // Sensors: a GNSS fix and a radar range at the pad (the stack's base on the ground), measured again after a step.
+            api::CreateFlightRequest b=create;b.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);auto* q=b.mutable_sensors();q->mutable_gnss()->set_enabled(true);
+            q->mutable_radar_altimeter()->set_enabled(true);q->mutable_star_tracker()->set_enabled(true);q->set_seed(9);
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,b,&x).ok()&&x.gnss().valid()&&x.has_radar_altimeter()&&x.has_star_tracker(),"Sensors at the pad");}
+            const double offset=std::hypot(x.gnss().position_ecef_meters().x()-x.position_ecef_meters().x(),x.gnss().position_ecef_meters().y()-x.position_ecef_meters().y(),x.gnss().position_ecef_meters().z()-x.position_ecef_meters().z());
+            require(offset>0&&offset<30,"GNSS near the truth");
+            // Measured at the end of the step that completes their period: both at 0.15 s; 30 ms later neither is due.
+            {grpc::ClientContext c;api::StepRequest r;r.set_ticks(150);require(flight->Step(&c,r,&x).ok()&&std::abs(x.gnss().elapsed_seconds()-.15)<1e-9&&std::abs(x.radar_altimeter().elapsed_seconds()-.15)<1e-9,"Sensors at their rates");}
+            {grpc::ClientContext c;api::StepRequest r;r.set_ticks(30);require(flight->Step(&c,r,&x).ok()&&std::abs(x.gnss().elapsed_seconds()-.15)<1e-9&&std::abs(x.radar_altimeter().elapsed_seconds()-.15)<1e-9,"Not before their period");}
+            {auto bad=b;bad.mutable_sensors()->mutable_gnss()->set_period_seconds(0);grpc::ClientContext c;require(flight->CreateFlight(&c,bad,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A zero GNSS period accepted");}
         }
         { // Every preset as a definition (GetVehicle) flies as CUSTOM exactly as the preset; malformed definitions are refused.
             auto fly=[&](const api::CreateFlightRequest& r,bool engine){api::FlightSample x;

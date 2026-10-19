@@ -314,6 +314,11 @@ a atmosfera (desligada: vácuo), o vento e a pressão de radiação solar; campo
 página "Fisica" do menu; tudo ligado de fábrica) e o voo grava os resolvidos (amostra e log: o replay não depende dos
 padrões). `gravity_degree: 0` faz do corpo central uma massa pontual. A página mostra também os modelos do voo atual.
 
+**Sensores de navegação.** `sensors` (`SensorSettings`) liga GNSS, altímetro radar e rastreador de estrelas, cada um com
+ruídos, taxa, limites e eixo de mira configuráveis (padrões no proto) e uma semente; a amostra traz a última medida de
+cada um (`valid` falso quando não havia medida possível, como o GNSS fora da Terra ou o rastreador olhando o Sol), com o
+instante em segundos de voo. Medem no fim do passo que completa o período (passos longos medem uma vez).
+
 **Veículos definidos pela API.** `vehicle: CUSTOM` com `definition` (`VehicleDefinition`) voa qualquer veículo: estágios
 na ordem de queima, cada um descrevendo o conjunto inteiro enquanto é o mais baixo (massas cheio e vazio, CG, inércias
 principais, comprimento), seus motores (`EngineDefinition`: posição do bocal, direção, empuxo no vácuo, velocidade de

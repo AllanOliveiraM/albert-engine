@@ -50,4 +50,29 @@ Imu::Reading Imu::measure(double dt,V3 f,V3 w,V3 dv,V3 da,double p){
     r.pressure=p>0?std::max(0.,p+pressureBias_+model_.pressureNoise*noise_.gaussian()):0.;
     return r;
 }
+Gnss::Gnss(const GnssModel& m,std::uint64_t seed):model_(m),noise_(seed){drift_={m.drift*noise_.gaussian(),m.drift*noise_.gaussian(),m.drift*noise_.gaussian()};}
+Gnss::Reading Gnss::measure(double time,double dt,V3 p,V3 v,const M3& ned,double height,double speed,bool available){
+    if(model_.drift>0&&dt>0){const double k=std::exp(-dt/model_.correlation),w=model_.drift*std::sqrt(1-k*k);drift_={k*drift_.x+w*noise_.gaussian(),k*drift_.y+w*noise_.gaussian(),k*drift_.z+w*noise_.gaussian()};}
+    const V3 e{model_.horizontal*noise_.gaussian(),model_.horizontal*noise_.gaussian(),model_.vertical*noise_.gaussian()},u{model_.velocity*noise_.gaussian(),model_.velocity*noise_.gaussian(),model_.velocity*noise_.gaussian()};
+    Reading r;r.time=time; // The noise is drawn whether or not there is a fix: the sequence does not depend on availability.
+    if(!available||(model_.maxHeight>0&&height>model_.maxHeight)||(model_.maxSpeed>0&&speed>model_.maxSpeed))return r;
+    const M3 back=transpose(ned);r.valid=true;r.position=p+back*(e+drift_);r.velocity=v+back*u;return r;
+}
+RadarAltimeter::RadarAltimeter(const RadarModel& m,std::uint64_t seed):model_(m),noise_(seed){}
+RadarAltimeter::Reading RadarAltimeter::measure(double time,double height,V3 b){
+    Reading r;r.time=time;const double n=noise_.gaussian(),c=b.z; // Cosine to the downward vertical.
+    if(!(height>0)||c<=std::cos(model_.halfAngle))return r;
+    const double range=height/c;if(range>model_.maxRange)return r;
+    r.valid=true;r.range=std::max(0.,range+std::max(model_.floor,model_.fraction*range)*n);return r;
+}
+StarTracker::StarTracker(const StarTrackerModel& m,std::uint64_t seed):model_(m),noise_(seed){}
+StarTracker::Reading StarTracker::measure(double time,Q q,V3 sun,V3 body,double bodyRadius,V3 rate){
+    Reading r;r.time=time;const double a=model_.cross*noise_.gaussian(),b=model_.cross*noise_.gaussian(),c=model_.roll*noise_.gaussian();
+    const V3 bore=model_.boresight/norm(model_.boresight),look=matrix(q)*bore; // Inertial.
+    if(dot(look,sun)>std::cos(model_.sunExclusion)||dot(look,body)>std::cos(std::min(bodyRadius+model_.bodyMargin,3.14159265358979323846))||norm(rate)>model_.maxRate)return r;
+    const V3 helper=std::abs(bore.x)<.9?V3{1,0,0}:V3{0,1,0},u=cross(bore,helper)/norm(cross(bore,helper)),w=cross(bore,u);
+    const V3 e=u*a+w*b+bore*c;const double angle=norm(e); // A small body-axis rotation error.
+    const Q d=angle>0?Q{std::cos(angle/2),e.x/angle*std::sin(angle/2),e.y/angle*std::sin(angle/2),e.z/angle*std::sin(angle/2)}:Q{1,0,0,0};
+    r.valid=true;r.attitude=normalized(q*d);return r;
+}
 }
