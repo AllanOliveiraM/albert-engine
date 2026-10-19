@@ -433,7 +433,7 @@ núcleo.
 - **Veículos:** a pilha e o Super Heavy são `CUSTOM` com `VehicleDefinition` (de [starship.hpp](../examples/starship.hpp)):
   - 33 motores, dos quais 13 com cardã de 15° a 20°/s;
   - RCS de 8 propulsores;
-  - grid fins como duas superfícies, com incrementos de momento e arrasto por deflexão;
+  - grid fins como duas superfícies, com momento por deflexão e arrasto constante;
   - pinos de captura como `hard_points`.
 - **Torre:** os braços são `structures`, quatro barras de aço amortecidas em pares, formando trilhos. O pino fica no sulco
   entre as barras.

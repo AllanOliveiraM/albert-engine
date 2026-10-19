@@ -17,7 +17,7 @@ int main(){try{
     std::jthread owner([&](std::stop_token stop){CameraState camera;
         while(!stop.stop_requested()){
             bridge.drain([&](Command& command){std::visit([&](auto& value){using T=std::decay_t<decltype(value)>;
-                if constexpr(std::is_same_v<T,Create>)registry.create(std::move(value.object));
+                if constexpr(std::is_same_v<T,Create>)registry.create(std::move(value.object),value.replace);
                 else if constexpr(std::is_same_v<T,Remove>)registry.remove(value.id);
                 else if constexpr(std::is_same_v<T,Append>)registry.samples(value.id,std::move(value.values));
                 else if constexpr(std::is_same_v<T,Visibility>)registry.visible(value.id,value.enabled);

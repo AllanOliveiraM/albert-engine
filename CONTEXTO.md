@@ -104,14 +104,15 @@ resolvidas no log), sensores (GNSS, radar, rastreador de estrelas), turbulência
 vários voos por `flight_id` (`Slot` por voo: física, sensores, plano de dados, pacer, keeper, log; ids de cena `flight.<id>`)
 e `spawn` (o estágio separado vira outro voo com log próprio), nós térmicos no voo (OVERHEAT), rodas e motores a ar, água
 e estruturas (pontos de captura). Voo completo de Starship em `examples/starship_flight.hpp` (teste `starship_mission`):
-- **Resultado:** separação aos 151 s a 77 km, nave em 181 × 204 km, booster capturado a 0,17 m do eixo com 42 t.
+- **Resultado:** separação aos 151 s a 77 km, nave em 181 × 204 km, booster capturado a 0,02 m do eixo com 40 t.
 - **Lições da guiagem:**
   - a subida precisa dos cardãs; o torque ideal de 2e5 N m não vira a pilha;
   - em q alto, inclinar o empuxo gera sustentação contrária, então a correção lateral fica com as grid fins e a
     inclinação é limitada a T/2qSC;
   - o previsor tem que incluir a queima de pouso;
-  - o laço lateral precisa de 1/4 da banda da atitude, senão o booster orbita a torre;
-  - o sinal do rolamento estava trocado;
+  - o laço lateral precisa de 1/3 da banda da atitude, senão o booster orbita a torre;
+  - o sinal do rolamento estava trocado, e ±y ao norte bastam (pinos simétricos);
+  - o pouso se planeja com a massa de pouso, e o leste-norte-cima é geodésico (o geocêntrico dava 0,17 m falsos);
   - braços de cilindro único derrubam o pino: são trilhos de duas barras de 1e8 N/m com ζ ~0,8.
 - **Falta:** validação contra telemetria pública.
 - **Visto em 19/10:** três instâncias do app na MX350 esgotam a memória da GPU, e o wgpu entra em pânico sem tratamento.

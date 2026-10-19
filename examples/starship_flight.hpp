@@ -29,8 +29,8 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,const std::fun
     std::printf("%s de Starbase, %s\n",ship.vehicle().c_str(),fast?"o mais rápido possível":"tempo real");
     const double a=6378137,e2=6.69437999014e-3,phi=lat*pi/180,lam=lon*pi/180,n=a/std::sqrt(1-e2*std::sin(phi)*std::sin(phi)); // WGS 84: the tower's base.
     const Vec site{(n+ground)*std::cos(phi)*std::cos(lam),(n+ground)*std::cos(phi)*std::sin(lam),(n*(1-e2)+ground)*std::sin(phi)};
-    BoosterReturn back(site,arms,std::sqrt(armRadius*armRadius-.36));GravityTurn ascent(97*pi/180,.07); // A small kick: lofted, so the booster's way back stays short.
-    bool spawned=false,orbit=false,bucket=false;double report=0,maxQ=0,maxQAt=0,spawnAt=0,caughtAt=0;const auto wall=std::chrono::steady_clock::now();
+    BoosterReturn back(site,phi,lam,arms,std::sqrt(armRadius*armRadius-.36));GravityTurn ascent(97*pi/180,.07); // A small kick: lofted, so the booster's way back stays short.
+    bool spawned=false,orbit=false,bucket=false,coasting=false;double report=0,maxQ=0,maxQAt=0,spawnAt=0,caughtAt=0;const auto wall=std::chrono::steady_clock::now();
     auto state=[](const api::FlightSample& s){State x;x.position=vec(s.position_ecef_meters());x.velocity=vec(s.velocity_ecef_meters_per_second());x.rate=vec(s.angular_rate_radians_per_second());
         x.contact=vec(s.contact_force_newtons());x.mass=s.mass_kilograms();x.propellant=s.propellant_kilograms();x.thrust=s.thrust_newtons();x.height=s.geodetic().height_meters();x.q=s.dynamic_pressure_pascals();
         const Mat b=bodyToNed(s.attitude_ned().w(),s.attitude_ned().x(),s.attitude_ned().y(),s.attitude_ned().z()),n=nedOf(x.position);
@@ -49,6 +49,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,const std::fun
             spawned=true;spawnAt=t;if(onSpawn)onSpawn();out.meco=t;out.mecoHeight=ship.geodetic().height_meters();back.start(boost.elapsed_seconds());step.add_commands()->set_ignite(true);ascent.upper(reading(ship));
         }
         if(!spawned&&!bucket&&t>=40){step.add_commands()->set_throttle(.8);bucket=true;} // Through max-Q to cutoff at 80%.
+        if(orbit&&!coasting){auto* q=step.add_commands()->mutable_torque_newton_meters();q->set_x(0);q->set_y(0);q->set_z(0);step.add_commands()->mutable_gimbal();coasting=true;}
         if(!orbit){const Commands c=ascent.step(reading(ship));
             if(c.ignite&&!spawned)step.add_commands()->set_ignite(true);if(c.cutoff)step.add_commands()->set_cutoff(true);
             auto* q=step.add_commands()->mutable_torque_newton_meters();q->set_x(c.torque.x);q->set_y(c.torque.y);q->set_z(c.torque.z);
@@ -76,7 +77,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,const std::fun
             std::printf("%7.2f s  nave: h %6.1f km  v %6.0f m/s  q %6.0f Pa  %7.0f t%s\n",ship.elapsed_seconds(),ship.geodetic().height_meters()/1e3,std::hypot(ship.velocity_meters_per_second().x(),ship.velocity_meters_per_second().y(),ship.velocity_meters_per_second().z()),
                 ship.dynamic_pressure_pascals(),ship.mass_kilograms()/1e3,spawned?(std::string("; booster h ")+std::to_string(static_cast<int>(boost.geodetic().height_meters()))+" m").c_str():"");}
         if(orbit&&back.phase()==BoosterReturn::Phase::caught&&t-caughtAt>=30){ // 30 s on the arms.
-            const Vec rel=vec(boost.position_ecef_meters())+site*-1.,up=site*(1/norm(site));const auto& v=boost.velocity_ned_meters_per_second();
+            const Vec rel=vec(boost.position_ecef_meters())+site*-1.,up=back.up();const auto& v=boost.velocity_ned_meters_per_second();
             out.maxQ=maxQ;out.maxQAt=maxQAt;out.caught=caughtAt;out.offAxis=norm(rel+up*-dot(rel,up));out.speed=std::hypot(v.x(),v.y(),v.z());out.propellant=boost.propellant_kilograms();
             std::printf("Max-Q %.0f Pa aos %.0f s. Booster capturado aos %.1f s; %.0f s depois, nos braços: %.2f m do eixo da torre, %.3f m/s, %.0f t de propelante restante.\n",maxQ,maxQAt,caughtAt,
                 t-caughtAt,out.offAxis,out.speed,out.propellant/1e3);return out;}

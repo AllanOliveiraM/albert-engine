@@ -280,7 +280,7 @@ Albert chega ao fim do S-II a 0,3 m/s da velocidade medida e corta o S-IVB 1,9 s
 O `--starship` voa um Starship montado só com a física genérica, por definições na API (nada dele no núcleo; valores
 públicos aproximados em examples/starship.hpp). A pilha sobe com 33 Raptors e separa a quente aos 151 s, a 77 km. A nave
 segue até uma órbita de 181 × 204 km. O Super Heavy vira outro voo e volta à torre: boostback, descida guiada pelas grid
-fins, queima de pouso em 13 e depois 3 motores e captura nos braços. Ele fica a 0,17 m do eixo da torre, com 42 t de
+fins, queima de pouso em 13 e depois 3 motores e captura nos braços. Ele fica a 0,02 m do eixo da torre, com 40 t de
 sobra. `--follow-booster` leva a câmera para o booster na separação.
 
 Em Ajustes ficam as opções de gráficos, Terra, vista, câmera e som (guardadas entre execuções), e a câmera livre: F liga,
