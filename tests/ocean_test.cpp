@@ -21,8 +21,9 @@ float half(std::uint16_t h){const std::uint32_t s=(h&0x8000u)<<16,e=(h>>10)&0x1f
 std::vector<float> read(albert::gpu::Context& gpu,WGPUTexture texture){ // RGBA16F, 256 x 256 x 3, as floats.
     const unsigned n=albert::gpu::Ocean::size,layers=albert::gpu::Ocean::cascades,row=n*8;WGPUBufferDescriptor bd{};bd.size=static_cast<std::uint64_t>(row)*n*layers;bd.usage=WGPUBufferUsage_CopyDst|WGPUBufferUsage_MapRead;
     WGPUBuffer b=wgpuDeviceCreateBuffer(gpu.device(),&bd);WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(gpu.device(),nullptr);
-    WGPUTexelCopyTextureInfo src{};src.texture=texture;WGPUTexelCopyBufferInfo dst{};dst.buffer=b;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=n;const WGPUExtent3D size{n,n,layers};
-    wgpuCommandEncoderCopyTextureToBuffer(e,&src,&dst,&size);WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(gpu.queue(),1,&c);
+    for(unsigned layer=0;layer<layers;++layer){ // One layer a copy: WARP (Direct3D 12) loses the device copying the array whole.
+        WGPUTexelCopyTextureInfo src{};src.texture=texture;src.origin.z=layer;WGPUTexelCopyBufferInfo dst{};dst.buffer=b;dst.layout.offset=static_cast<std::uint64_t>(row)*n*layer;
+        dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=n;const WGPUExtent3D size{n,n,1};wgpuCommandEncoderCopyTextureToBuffer(e,&src,&dst,&size);}WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(gpu.queue(),1,&c);
     bool done=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&done;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
     wgpuBufferMapAsync(b,WGPUMapMode_Read,0,bd.size,cb);while(!done)wgpuInstanceProcessEvents(gpu.instance());
     const auto* p=static_cast<const std::uint16_t*>(wgpuBufferGetConstMappedRange(b,0,bd.size));std::vector<float> out(bd.size/2);for(std::size_t i=0;i<out.size();++i)out[i]=half(p[i]);
