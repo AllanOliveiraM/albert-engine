@@ -4,9 +4,15 @@
 //  1. The S-IC from the pad. AS-506's pitch program is unpublished: the program flies Apollo 12's (AS-507), so the
 //     path is checked against Apollo 12's flight with that program and the speeds against Apollo 11's.
 //  2. The S-II and S-IVB from AS-506's reconstructed state at S-IC/S-II separation to the parking orbit.
+//  3. Eagle's powered descent by Luminary 99's guidance and targets from the reconstructed state at ignition to Tranquility
+//     Base, against the premission nominal (Bennett, NASA TN D-6846, Table I) and the flight (Apollo 11 Mission Report).
+#include "apollo_descent.hpp"
 #include "physics/msis.hpp"
 #include "physics/vehicles.hpp"
+#include "providers/gravity_models.hpp"
 #include "saturn_v.hpp"
+#include <fstream>
+#include <iterator>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -20,7 +26,7 @@ namespace {
 constexpr double pi=3.14159265358979323846,deg=pi/180,nmi=1852;
 int failures=0;
 void within(double got,double want,double tolerance,const char* what){
-    const bool ok=std::abs(got-want)<=tolerance;std::printf("  %-38s %12.3f  flight %12.3f  %s\n",what,got,want,ok?"":"<-- outside");
+    const bool ok=std::abs(got-want)<=tolerance;std::printf("  %-42s %12.3f  reference %12.3f  %s\n",what,got,want,ok?"":"<-- outside");
     if(!ok)++failures;
 }
 ex::Vec vec(V3 v){return{v.x,v.y,v.z};}
@@ -49,7 +55,8 @@ template<class Each> void fly(Flight& f,ex::SaturnV& g,Tt t0,double until,Each&&
 }
 ex::SaturnV program(const Vehicle& v){ex::SaturnV g;for(std::size_t i=0;i<g.inertia.size();++i)g.inertia[i]=v.stages[i].inertiaFull.y;return g;}
 }
-int main(){try{
+int main(int argc,char** argv){try{
+    if(argc<2)throw std::runtime_error("usage: apollo_test <tests directory>");
     const double zero=-14552880.; // 1969-07-16 13:32:00 UTC, range zero.
     Environment e;e.ground=0;e.rotation=Rotation::iau(secondsSinceJ2000(ttFromUtc(zero))-(zero-946728000.)); // TT-UTC for UT1, as Albert's flights.
     e.air=std::make_shared<const Msis>(SpaceWeather{},"NRLMSISE-00/HWM14 climatology"); // Nominal solar indices: they act above ~100 km.
@@ -97,6 +104,40 @@ int main(){try{
         std::printf("  S-IVB cutoff:\n");
         within(end.t,699.34,5,"time (s)");within(end.mass,135182,1200,"mass (kg)");within(end.speed,7791.2,10,"space-fixed speed (m/s)");
         within((a*(1+ecc)-sphere)/1e3,186.0,3,"apogee (km)");within((a*(1-ecc)-sphere)/1e3,183.2,3,"perigee (km)");within(inclination,32.521,.05,"inclination (°)");
+    }
+    std::printf(" 3. Eagle's powered descent from ignition (1969-07-20 20:05:05 UTC) to Tranquility Base:\n");
+    {
+        std::ifstream in(std::string(argv[1])+"/moon_gravity_degree8.tab",std::ios::binary);const std::string table{std::istreambuf_iterator<char>(in),{}};
+        Environment e=environment(Center::moon,albert::providers::gravityModel(Center::moon,table,8).gravity,8);
+        // Mission report (best estimates): the site at 0.647° N, 23.505° E, 1,735.58 km from the centre; ignition 15,050 m above it
+        // at 1.037° N, 39.371° E, 1,696.2 m/s space-fixed at +0.03°, westward along the great circle to the site.
+        e.ground=1735.58e3-1737.4e3;const Geodetic site{.647*deg,23.505*deg,e.ground},pdi{1.037*deg,39.371*deg,e.ground+15050};
+        const Tt t0=ttFromUtc(zero+369185.2);const Orientation o=e.rotation.at(t0);
+        const V3 S=fixedPosition(e.planet,site),P=fixedPosition(e.planet,pdi),up=P*(1/norm(P)),motion=cross(cross(P,S),P);
+        const V3 north{-std::sin(pdi.latitude)*std::cos(pdi.longitude),-std::sin(pdi.latitude)*std::sin(pdi.longitude),std::cos(pdi.latitude)},east=cross(north,up);
+        const double heading=std::atan2(dot(motion,east),dot(motion,north)),speed=1696.2,path=.03*deg;
+        const V3 inertial{speed*std::cos(path)*std::cos(heading),speed*std::cos(path)*std::sin(heading),-speed*std::sin(path)};
+        const V3 relative{inertial.x,inertial.y-norm(o.omega)*std::hypot(P.x,P.y),inertial.z};
+        const Vehicle v=apolloLunarModule();Flight f(v,e,Flight::free(e,v,t0,pdi,relative,{heading+pi,0,0}));
+        ex::ApolloDescent g(vec(S),vec(P));g.inertia=v.stages[0].inertiaFull.y;
+        double dv=0,touchdown=0,lowAt=0;V3 gate{},low{};ex::ApolloDescent::Phase last=g.phase();
+        while(g.phase()!=ex::ApolloDescent::Phase::landed&&f.state().time-t0<900*second){
+            const ex::Reading r=[&]{ex::Reading x=reading(f,t0);const Sample s=f.sample();x.fixedPosition=vec(s.fixedPosition);x.fixedVelocity=vec(s.fixedVelocity);x.contact=f.state().contact;return x;}();
+            const ex::Vec R=g.frame(r.fixedPosition+vec(S)*-1),V=g.frame(r.fixedVelocity); // Height above the site, vertical and horizontal speed.
+            if(g.phase()!=last){if(last==ex::ApolloDescent::Phase::braking)gate=V3{R.x,V.x,std::hypot(V.y,V.z)};last=g.phase();}
+            if(lowAt==0&&g.phase()==ex::ApolloDescent::Phase::approach&&R.x<=512*.3048){lowAt=r.elapsed;low=V3{R.x,V.x,std::hypot(V.y,V.z)};} // Low gate: 512 ft.
+            const auto c=g.step(r);if(c.ignite)f.ignite();if(c.cutoff){f.cutoff();touchdown=r.elapsed;}if(c.throttle>=0)f.throttle(c.throttle);
+            f.torque({c.torque.x,c.torque.y,c.torque.z});
+            for(Tt left=20*second/1000;left>0;){const Tt h=f.advance(left);left-=h;dv+=norm(f.sample().specificForce)*secondsSinceJ2000(h);}
+        }
+        if(g.phase()!=ex::ApolloDescent::Phase::landed)throw std::runtime_error("Eagle did not land");
+        const double miss=norm(f.sample().fixedPosition-S); // From the aim point, on the ground.
+        within(g.recovery(),386,12,"throttle recovery (s; plan 384)");
+        within(g.highGate(),506,12,"high gate, P64 (s; flight 507)");within(gate.x,2291,250,"  height (m; flight 2,173)");
+        within(gate.y,-44.2,6,"  vertical speed (m/s; flight -38.1)");within(gate.z,154.2,15,"  horizontal speed (m/s)");
+        within(lowAt,606,15,"low gate, 512 ft (s)");within(low.y,-16*.3048,2,"  vertical speed (m/s)");within(low.z,55*.3048,6,"  horizontal speed (m/s)");
+        within(touchdown,714,25,"touchdown (s; flight 754.7 flown by hand)");within(dv,6775*.3048,40,"velocity change (m/s; flight 2,112)");
+        within(f.state().propellant,957*.4536,60,"propellant left (kg; flight 349)");within(miss,0,150,"from the aim point (m)");
     }
     if(failures)throw std::runtime_error(std::to_string(failures)+" quantities outside the flight's tolerance");
     std::cout<<"apollo_test: ok\n";return 0;

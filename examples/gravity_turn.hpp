@@ -20,6 +20,8 @@ struct Reading {
     Vec rate,specificForce;            // Body axes: IMU (rad/s, m/s²).
     Vec position,velocity;             // GCRF (m, m/s).
     double iw=1,ix=0,iy=0,iz=0;        // Body to GCRF.
+    Vec fixedPosition,fixedVelocity;   // The central body's rotating frame (m, m/s).
+    bool contact=false;                // A leg on the ground.
     int stage=0,stages=1;bool burning=false,clamped=false;double propellant=0,mass=0; // kg.
 };
 struct Commands {bool ignite=false,separate=false,cutoff=false;double gimbalPitch=0,gimbalYaw=0,throttle=-1;Vec torque;}; // throttle < 0: unchanged; separate before ignite.

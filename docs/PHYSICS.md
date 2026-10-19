@@ -99,6 +99,14 @@ climatologia do Albert para 1969-07-16 13:32 UTC em 39A (NRLMSISE-00 e HWM14), c
   (699,34) com 134.952 kg (135.182), órbita de 186,5 × 183,1 km (186,0 × 183,2) a 32,521°. No meio do S-II a
   trajetória fica 0,5° mais íngreme que a do IGM (176,2 km e 1,41° contra 180,2 e 0,90).
 
+- Descida do Eagle (`apolloLunarModule`, guiagem de `examples/apollo_descent.hpp`: a quadrática de Klumpp do Luminary 99
+  com os alvos P63/P64 da carga do LM-5, P65 a 3 ft/s; GRGM1200A grau 8), do estado reconstruído na ignição (15.050 m
+  sobre o sítio, 1.696,2 m/s inerciais) contra o plano (Bennett, NASA TN D-6846, Tabela I) e o voo: recuperação do
+  acelerador aos 390,6 s (plano 384, voo 386), portão alto aos 499,3 s a 2.394 m e −42,6 m/s (plano 506 s, 2.291 m,
+  −44,2 m/s; voo 507 s, 2.173 m), portão baixo de 512 ft aos 604,6 s (606), toque aos 711,6 s (plano 714; o voo,
+  pilotado à mão sobre o campo de rochas, 754,7 s), Δv 2.065,4 m/s (plano 6.775 ft/s = 2.065,0), 469 kg de
+  propelente no toque (plano 957 lb = 434 kg; voo 349 kg), a 16 m do ponto mirado (navegação exata).
+
 Lua e Marte (`tests/central_bodies_test.cpp`, com os excertos de grau 8 das tabelas do PDS):
 
 - Leitura por faixa (5612 bytes até o grau 8), cache, recarga de cache corrompido,
@@ -147,6 +155,10 @@ cena; ver [RPC.md](RPC.md#voo-físico-em-lockstep).
 
 - `genericLander`: estágio único do porte da descida do módulo lunar Apollo (15 t, 45 kN com
   estrangulamento até 10%, Isp 311 s), quatro pernas a 4,7 m do eixo; aproximado.
+- `apolloLunarModule`: o Eagle (LM-5) na ignição da descida pelo relatório da missão Apollo 11: 15.151 kg, 8.128 kg
+  no estágio de descida (7.023 kg sem eles: no toque, 7.327 kg menos 349 kg de sobra e 43 kg do RCS fecham), DPS de
+  46.706 N nominais, acelerável de 10% a 65% e a 93,5% (os 43.670 N do Luminary 99) acima, velocidade de exaustão
+  efetiva do voo (2.112 m/s medidos sobre o propelente queimado: 2.931 m/s), RCS ~3 kN m, pernas do `genericLander`.
 - `genericLunarAscent`: estágio de subida do porte do módulo lunar Apollo (4,85 t com 2.353 kg de
   propelente, motor fixo de 15,57 kN a Isp 311 s, atitude por RCS ~1,4 kN m); aproximado. Com a
   guiagem de exemplo sai da Base da Tranquilidade para 18 × 85 km em 434 s (Apollo 11: 435 s,

@@ -77,6 +77,21 @@ Vehicle genericLander(){
     s.legs={{h,pad,pad},{h,-pad,pad},{h,pad,-pad},{h,-pad,-pad}};s.legStiffness=8.9e5;s.legDamping=5.7e4;s.friction=.6;
     return{"Generic lander (approximate)",{s},5e3,1,true,2*r};
 }
+Vehicle apolloLunarModule(){
+    // Eagle (LM-5) at powered descent initiation (Apollo 11 Mission Report, MSC-00171): 15,151 kg after descent orbit
+    // insertion (Table A-I), 8,128 kg in the descent engine's tanks (8,248 kg loaded less ~120 kg for DOI's 23.3 m/s), so
+    // 7,023 kg without them: the report's 7,327 kg at touchdown less 349 kg left and 43 kg of RCS used agree.
+    // DPS: 46,706 N rated (10,500 lbf), throttleable 10% to 65% and run at 93.5% (Luminary 99's 43,670 N) above; the
+    // effective exhaust velocity is the sensed 2,112 m/s (Table 7-V) over the propellant burned. Legs as genericLander.
+    constexpr double r=2.1,full=15151,empty=7023,h=7;
+    auto inertia=[&](double m){return V3{m*r*r/2,m*(3*r*r+h*h)/12,m*(3*r*r+h*h)/12};};
+    Stage s;s.name="LM descent";s.propellant=full-empty;s.massFull=full;s.massEmpty=empty;s.cgFull=4.2;s.cgEmpty=3.6;s.reference=3.5;
+    s.inertiaFull=inertia(full);s.inertiaEmpty=inertia(empty);
+    s.thrust=46706;s.exhaust=2112/std::log(full/(full-7779.));s.exitArea=1.79;s.nozzle=6.3;s.gimbal=6*pi/180;s.minThrottle=.1;s.length=h;s.aero=slender(pi*r*r);s.noseRadius=r;
+    constexpr double pad=4.7/1.4142135623730951;
+    s.legs={{h,pad,pad},{h,-pad,pad},{h,pad,-pad},{h,-pad,-pad}};s.legStiffness=8.9e5;s.legDamping=5.7e4;s.friction=.6;
+    return{"Apollo 11 Lunar Module Eagle (descent)",{s},3000,1,true,2*r}; // RCS: ~3 kN m per axis.
+}
 Vehicle genericLunarAscent(){
     constexpr double r=1.7,h=2.8,full=4853,empty=2500; // Effective radius, height (m); masses with crew and samples (kg).
     auto inertia=[&](double m){return V3{m*r*r/2,m*(3*r*r+h*h)/12,m*(3*r*r+h*h)/12};};

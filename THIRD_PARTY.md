@@ -52,6 +52,11 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   Apollo 11 e do Apollo 12; Boeing D5-15481-1 (trajetória de referência AS-504, coeficiente axial) e
   D5-15551(I)-7 (trajetória do AS-507, tabela de arfagem), documentos produzidos para a NASA. Obras do governo dos EUA
   ou sob contrato, citadas como referência de dados.
+- NASA Manned Spacecraft Center: Apollo 11 Mission Report (MSC-00171, 1969), massas e estados da descida em
+  `src/physics/vehicles.cpp` e `tests/apollo_test.cpp`; F. V. Bennett, Apollo Experience Report — Mission Planning for
+  Lunar Module Descent and Ascent (NASA TN D-6846, 1972), trajetória planejada; A. R. Klumpp, Apollo Lunar-Descent
+  Guidance (MIT Charles Stark Draper Laboratory R-695, 1971), lei de guiagem, e os alvos P63/P64 da carga de dados do
+  Luminary 99 (LM-5 Data Book, SNA-8-D-027(II)) em `examples/apollo_descent.hpp`. Obras do governo dos EUA ou sob contrato.
 - NASA Engineering and Safety Center: check cases 6-DOF (NASA/TM-2015-218675),
   https://nescacademy.nasa.gov/flightsim/2015; valores de referência em
   `tests/nesc_fixture.inc` e modelos DAVE-ML da esfera e do foguete de dois estágios

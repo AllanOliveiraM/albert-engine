@@ -11,6 +11,9 @@ Vehicle genericLauncher(double payload=5000.);
 // Single-stage lander sized from public Apollo LM descent figures (15 t, 45 kN throttleable to
 // 10%, Isp 311 s) with four legs; approximate.
 Vehicle genericLander();
+// Apollo 11's Lunar Module Eagle at powered descent initiation (mission report masses; DPS 46.7 kN rated, 10-65% and 93.5%
+// fixed throttle position, the flight's effective exhaust velocity; RCS ~3 kN m); four legs.
+Vehicle apolloLunarModule();
 // Lunar ascent stage sized from public Apollo LM ascent figures (4.85 t with 2,353 kg of propellant,
 // fixed 15.57 kN APS at Isp 311 s, RCS attitude); approximate.
 Vehicle genericLunarAscent();
