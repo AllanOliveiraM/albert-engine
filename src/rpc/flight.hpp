@@ -24,7 +24,7 @@ public:
     grpc::Status StopRealtime(grpc::ServerContext*,const ::albert::v1::FlightRequest*,::albert::v1::RealtimeStatus*) override;
     // The flight as a sound source (its rotating frame, the plume along -body x, d_e of its exit area): none without a
     // flight or off the Earth (the acoustics are Earth air's).
-    struct Sound {double utc=0;physics::acoustics::Emission emission;physics::Planet planet;std::shared_ptr<const physics::AirModel> air;};
+    struct Sound {double utc=0;physics::acoustics::Emission emission;physics::Planet planet;std::shared_ptr<const physics::AirModel> air;const void* owner=nullptr;}; // owner: which flight.
     std::optional<Sound> sound()const;
     void physicsDefaults(const ::albert::v1::PhysicsSettings& defaults); // For flights that leave switches unset (the Física menu).
 private:

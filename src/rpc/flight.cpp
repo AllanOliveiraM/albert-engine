@@ -293,7 +293,8 @@ struct Slot {
         const auto now=std::chrono::steady_clock::now();
         if(!force&&now-published<std::chrono::milliseconds(33))return;
         published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
-        heard.store(center==ph::Center::earth?std::make_shared<const Sound>(heardSound()):nullptr); // Read by the frame loop without the lock.
+        if(center==ph::Center::earth){auto h=std::make_shared<Sound>(heardSound());h->owner=this;heard.store(std::move(h));} // Read by the frame loop without the lock.
+        else if(const auto h=heard.load();h&&h->owner==this)heard.store(nullptr); // Only its own sound: another flight may be heard.
         // The stack got shorter, or the same instant again (the keeper; appending would be refused as
         // out of order): replace the cylinder, keeping the camera on it.
         if(flight->state().stage!=shown||s.utcSeconds<=publishedUtc){
@@ -341,7 +342,7 @@ struct Slot {
     std::vector<api::CreateFlightRequest> children;
     // The request of a flight spawned from `f` now: its definition, inertial start at its centre of mass, the propellant left.
     api::CreateFlightRequest child(const ph::Flight& f,const api::Spawn& sp,std::size_t k)const{
-        if(flightName(sp.flight_id())==name)throw std::invalid_argument("A spawned flight needs another id");
+        if(sp.flight_id().empty()||flightName(sp.flight_id())==name)throw std::invalid_argument("A spawned flight needs an id of its own");
         const ph::Vehicle v=vehicleFrom(sp.definition());const double off=sp.nose_offset_meters();if(!finite(off))throw std::invalid_argument("Invalid nose offset");
         auto cg=[](const ph::Stage& st,double left){const double x=st.propellant>0?std::clamp(left/st.propellant,0.,1.):0.;return st.cgEmpty+(st.cgFull-st.cgEmpty)*x;};
         const auto& s=f.state();const auto& st=f.vehicle().stages[static_cast<std::size_t>(s.stage)];const auto& c0=v.stages[0];const double left=std::min(s.propellant,c0.propellant);
@@ -351,6 +352,7 @@ struct Slot {
         api::CreateFlightRequest q=log.request();q.set_flight_id(flightName(sp.flight_id()));q.set_vehicle(api::CUSTOM);*q.mutable_definition()=sp.definition();q.clear_payload_kilograms();
         q.set_utc_unix_seconds(ph::utcFromTt(s.time));q.set_focus_camera(false);q.set_terrain_height(false);
         q.mutable_imu()->set_seed(q.imu().seed()^(0x9e3779b97f4a7c15ull*(k+1)));q.mutable_sensors()->set_seed(q.sensors().seed()^(0xbf58476d1ce4e5b9ull*(k+1)));
+        q.mutable_physics()->set_turbulence_seed(q.physics().turbulence_seed()^(0x94d049bb133111ebull*(k+1)));
         auto* w=q.mutable_start();w->Clear();w->set_stage(0);w->set_propellant_kilograms(left);auto* i=w->mutable_inertial();
         put(x.position,i->mutable_position_meters());put(x.velocity,i->mutable_velocity_meters_per_second());put(x.attitude,i->mutable_attitude());put(x.rate,i->mutable_angular_rate_radians_per_second());
         return q;
@@ -370,7 +372,7 @@ struct Slot {
             case wire::throttle:next.throttle(c.a,e);break;case wire::gimbal:next.gimbal(c.a,c.b,e);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
             case wire::fail:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e);break;
             case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;
-            case wire::spawn:{const auto k=static_cast<std::size_t>(c.a);if(e>=0||!(c.a>=0)||k>=static_cast<std::size_t>(log.spawns_size()))throw std::invalid_argument("No such spawn");
+            case wire::spawn:{if(e>=0||!(c.a>=0&&c.a<static_cast<double>(log.spawns_size())))throw std::invalid_argument("No such spawn");const auto k=static_cast<std::size_t>(c.a);
                 if(next.state().stage+1>=static_cast<int>(next.vehicle().stages.size()))throw std::logic_error("No stage to separate");
                 spawned.push_back(child(next,log.spawns(static_cast<int>(k)),k));next.separate();break;}
             default:throw std::invalid_argument("Unknown command");}}}
@@ -436,9 +438,11 @@ struct Slot {
     }
 };
 struct FlightServices::Impl {
-    core::Bridge& bridge;AirSources sources;std::mutex lock;std::map<std::string,std::shared_ptr<Slot>> slots;
+    core::Bridge& bridge;AirSources sources;
+    std::atomic<std::shared_ptr<const Sound>> sound;       // The flight last published on the Earth (the app plays one); before the slots, which use it.
+    std::mutex lock;std::map<std::string,std::shared_ptr<Slot>> slots;
     std::mutex defaultsLock;api::PhysicsSettings defaults; // Albert's (the Fisica page), for unset switches.
-    std::atomic<std::shared_ptr<const Sound>> sound;       // The flight last published on the Earth (the app plays one).
+    static constexpr std::size_t maxFlights=64;            // Each holds threads and a socket.
     Impl(core::Bridge& b,AirSources s):bridge(b),sources(std::move(s)){
         if(!sources.weather)sources.weather=[](double lat,double lon,double utc){auto d=providers::gfs().fetch(lat,lon,utc);return LiveAir{d.model,std::move(d.grib)};};
         if(!sources.upper)sources.upper=[](double utc){UpperAir a;try{a.model=providers::spaceWeather().msis(utc,&a.days);}catch(const std::exception&){a={};}return a;};
@@ -451,10 +455,27 @@ struct FlightServices::Impl {
         {std::lock_guard l(parent.mutex);if(parent.children.empty()||!parent.flight)return;kids.swap(parent.children);
             air=parent.flight->environment().air;atmosphere=parent.atmosphere;grib.assign(parent.log.gfs().begin(),parent.log.gfs().end());days=daysOf(parent.log);
             gravity={parent.flight->environment().field,parent.log.gravity()};}
-        for(const auto& q:kids){api::FlightSample ignored;try{const Prepared p=prepare(q,q.utc_unix_seconds());(void)make(q.flight_id())->create(q,p,air,atmosphere,grib,days,gravity,[]{return false;},&ignored);}catch(const std::exception&){}}
+        for(const auto& q:kids){api::FlightSample ignored;try{const Prepared p=prepare(q,q.utc_unix_seconds());(void)launch(q,p,air,atmosphere,grib,days,gravity,[]{return false;},&ignored);}catch(const std::exception&){}}
     }
     std::shared_ptr<Slot> find(const std::string& id){std::lock_guard l(lock);const auto it=slots.find(id);return it==slots.end()?nullptr:it->second;}
-    std::shared_ptr<Slot> make(const std::string& id){std::lock_guard l(lock);auto& x=slots[id];if(!x)x=std::make_shared<Slot>(bridge,sources,id,sound);return x;}
+    std::shared_ptr<Slot> make(const std::string& id){ // Built before it enters the map: a throwing constructor leaves no entry.
+        std::lock_guard l(lock);if(const auto it=slots.find(id);it!=slots.end())return it->second;
+        if(slots.size()>=maxFlights)throw std::length_error("At most 64 flights at once");
+        auto x=std::make_shared<Slot>(bridge,sources,id,sound);slots.emplace(id,x);return x;}
+    // A slot without a flight (a failed creation, an ended flight) leaves the map, if it is still the one there.
+    void drop(const std::string& id,const std::shared_ptr<Slot>& x){
+        std::lock_guard l(lock);const auto it=slots.find(id);if(it==slots.end()||it->second!=x)return;
+        bool empty;{std::lock_guard g(x->mutex);empty=!x->flight;}if(empty)slots.erase(it);}
+    // Creates (or replaces) a flight in its slot; a failure leaves no empty slot behind, and a flight ended meanwhile is undone.
+    grpc::Status launch(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,std::vector<std::string> grib,
+        std::vector<ph::SpaceWeatherDay> days,providers::GravityModel gravity,const std::function<bool()>& cancelled,api::FlightSample* out,std::shared_ptr<Slot>* made=nullptr){
+        std::shared_ptr<Slot> x;try{x=make(r.flight_id());}catch(const std::length_error& e){return{grpc::StatusCode::RESOURCE_EXHAUSTED,e.what()};}
+        auto st=x->create(r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),cancelled,out);
+        if(!st.ok()){drop(r.flight_id(),x);return st;}
+        if(find(r.flight_id())!=x){x->stopPacing();{std::lock_guard g(x->mutex);x->flight.reset();}(void)bridge.submit(core::Remove{x->sceneId});
+            return{grpc::StatusCode::ABORTED,"The flight was ended while being created"};}
+        if(made)*made=x;return st;
+    }
 };
 FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(std::make_unique<Impl>(bridge,std::move(sources))){}
 FlightServices::~FlightServices(){std::map<std::string,std::shared_ptr<Slot>> gone;{std::lock_guard l(impl_->lock);gone.swap(impl_->slots);}}
@@ -484,7 +505,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
                 if(!(n>0)||!finite(n)||!finite(s.position.x+s.position.y+s.position.z+s.velocity.x+s.velocity.y+s.velocity.z+s.rate.x+s.rate.y+s.rate.z)||!(ph::norm(s.position)>1))throw std::invalid_argument("Invalid inertial start");
                 s.attitude={q.w()/n,q.x()/n,q.y()/n,q.z()/n};}
             else throw std::invalid_argument("A start needs a local or inertial state");
-            for(const double x:{s.velocity.x,s.velocity.y,s.velocity.z})if(!finite(x))throw std::invalid_argument("Invalid start velocity");
+            for(const double x:{s.velocity.x,s.velocity.y,s.velocity.z,s.rate.x,s.rate.y,s.rate.z})if(!finite(x))throw std::invalid_argument("Invalid start velocity or rate");
             s.stage=static_cast<int>(w.stage());s.propellant=left;made.emplace(p.vehicle,env,s);
         }
     }
@@ -516,7 +537,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
             m.period=v(g.has_period_seconds(),g.period_seconds(),m.period);tracker.emplace(m,seed^0x73746172ull);}
         sense();
     }
-    log=api::FlightLog{};record.clear();lastRecord=std::string::npos;truncated=false;log.set_engine("Albert Engine "+std::string(ALBERT_VERSION));*log.mutable_request()=r;log.mutable_request()->set_utc_unix_seconds(p.utc);log.set_atmosphere(atmosphere);
+    log=api::FlightLog{};record.clear();children.clear();lastRecord=std::string::npos;truncated=false;log.set_engine("Albert Engine "+std::string(ALBERT_VERSION));*log.mutable_request()=r;log.mutable_request()->set_utc_unix_seconds(p.utc);log.set_atmosphere(atmosphere);
     for(auto& b:grib)log.add_gfs(std::move(b));
     log.set_gravity(std::move(gravity.table));
     for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}
@@ -569,7 +590,7 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api
         }
         atmosphere=(air?air->source():atmosphere)+unavailable;
     }
-    return impl_->make(id)->create(*r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},out);
+    return impl_->launch(*r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},out);
 }
 grpc::Status FlightServices::GetVehicle(grpc::ServerContext*,const api::VehicleRequest* r,api::VehicleDefinition* out){
     try{put(preset(r->vehicle(),r->has_payload_kilograms()?std::optional(r->payload_kilograms()):std::nullopt),out);return grpc::Status::OK;}
@@ -592,7 +613,7 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
     while(reader->Read(&c)){bytes+=c.data();if(bytes.size()>(512u<<20))return{grpc::StatusCode::RESOURCE_EXHAUSTED,"Flight log above 512 MiB"};}
     api::FlightLog log;if(!log.ParseFromString(bytes))return{grpc::StatusCode::INVALID_ARGUMENT,"Malformed flight log"};
     const auto& r=log.request();Prepared p;std::shared_ptr<Slot> slot;
-    try{slot=impl_->make(flightName(r.flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    try{(void)flightName(r.flight_id());}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     try{p=prepare(r,r.utc_unix_seconds());}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     // Air from the embedded inputs only: never the network.
     std::shared_ptr<const physics::AirModel> air;std::vector<ph::SpaceWeatherDay> days=daysOf(log);std::vector<std::string> grib(log.gfs().begin(),log.gfs().end());
@@ -609,7 +630,8 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
     const std::string expected=p.body!=ph::Center::earth?climatology(p.body):air?air->source():"U.S. Standard Atmosphere 1976";
     if(log.atmosphere().rfind(expected,0)!=0)return{grpc::StatusCode::FAILED_PRECONDITION,"The log does not carry the air data it used ("+log.atmosphere()+")"};
     api::FlightSample created;
-    if(auto s=slot->create(r,p,std::move(air),log.atmosphere(),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},&created);!s.ok())return s;
+    api::CreateFlightRequest named=r;named.set_flight_id(flightName(r.flight_id()));
+    if(auto s=impl_->launch(named,p,std::move(air),log.atmosphere(),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},&created,&slot);!s.ok())return s;
     {std::lock_guard lock(slot->mutex);*slot->log.mutable_spawns()=log.spawns();} // The spawn commands' payloads, by index.
     const std::string& steps=log.steps();
     for(std::size_t at=0;at<steps.size();){
@@ -660,15 +682,22 @@ grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::FlightReq
     std::lock_guard lock(slot->mutex);if(!slot->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};slot->fill(out);return grpc::Status::OK;
 }
 grpc::Status FlightServices::ListFlights(grpc::ServerContext*,const api::Empty*,api::FlightList* out){
-    std::lock_guard l(impl_->lock);for(const auto& [id,slot]:impl_->slots)out->add_flight_ids(id);return grpc::Status::OK;
+    std::lock_guard l(impl_->lock);for(const auto& [id,slot]:impl_->slots){std::lock_guard g(slot->mutex);if(slot->flight)out->add_flight_ids(id);}return grpc::Status::OK;
 }
 grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::FlightRequest* q,api::Applied* out){
     std::shared_ptr<Slot> slot;std::string id;try{id=flightName(q->flight_id());slot=impl_->find(id);}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     slot->stopPacing();core::Reply reply;
-    {std::lock_guard lock(slot->mutex);if(!slot->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
-        slot->flight.reset();impl_->sound.store(nullptr);(void)impl_->bridge.submit(core::FlightTelemetry{});reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));out->set_revision(reply.revision);}
-    {std::lock_guard l(impl_->lock);if(const auto it=impl_->slots.find(id);it!=impl_->slots.end()&&it->second==slot)impl_->slots.erase(it);} // Its threads stop with the last reference.
+    {std::lock_guard lock(slot->mutex);
+        if(slot->flight){slot->flight.reset();if(const auto h=impl_->sound.load();h&&h->owner==slot.get())impl_->sound.store(nullptr);
+            reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));out->set_revision(reply.revision);}
+        else reply={core::Code::NotFound,"",0};}
+    impl_->drop(id,slot); // Its threads stop with the last reference.
+    { // The app's flight panel: another flight's, or none.
+        std::vector<std::shared_ptr<Slot>> left;{std::lock_guard l(impl_->lock);for(const auto& [k,x]:impl_->slots)left.push_back(x);}
+        bool shown=false;for(const auto& x:left){std::lock_guard g(x->mutex);if(x->flight){(void)impl_->bridge.submit(x->telemetry());shown=true;break;}}
+        if(!shown)(void)impl_->bridge.submit(core::FlightTelemetry{});}
+    if(reply.code==core::Code::NotFound&&reply.message.empty())return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     return reply.code==core::Code::Ok||reply.code==core::Code::NotFound?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,reply.message};
 }
 grpc::Status FlightServices::StartRealtime(grpc::ServerContext*,const api::RealtimeRequest* r,api::RealtimeStatus* out){

@@ -366,6 +366,16 @@ int main(int argc,char** argv){try{
             {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("booster");require(flight->EndFlight(&c,q,&applied).ok(),"End the second");}
             {grpc::ClientContext c;api::FlightList l;require(flight->ListFlights(&c,{},&l).ok()&&l.flight_ids_size()==1&&l.flight_ids(0)=="flight","One flight left");}
             {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("no spaces");api::FlightSample x;require(flight->GetFlight(&c,q,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A bad id accepted");}
+            // Review regressions: a failed creation leaves no flight behind; non-finite masses and start rates are refused.
+            api::VehicleRequest vq;vq.set_vehicle(api::GENERIC_LAUNCHER);api::VehicleDefinition d;{grpc::ClientContext c;require(flight->GetVehicle(&c,vq,&d).ok(),"GetVehicle");}
+            api::CreateFlightRequest g=create;g.set_flight_id("ghost");g.set_vehicle(api::CUSTOM);*g.mutable_definition()=d;g.mutable_definition()->mutable_stages(0)->set_mass_empty_kilograms(1);api::FlightSample x;
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,g,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Inconsistent masses accepted");}
+            {grpc::ClientContext c;api::FlightList l;require(flight->ListFlights(&c,{},&l).ok()&&l.flight_ids_size()==1,"A failed creation left a flight behind");}
+            {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("ghost");require(flight->EndFlight(&c,q,&applied).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"A ghost flight to end");}
+            *g.mutable_definition()=d;g.mutable_definition()->mutable_stages(0)->set_mass_full_kilograms(std::nan(""));
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,g,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A NaN mass accepted");}
+            api::CreateFlightRequest n=create;n.set_flight_id("ghost");auto* l=n.mutable_start()->mutable_local();l->mutable_position()->set_height_meters(1e4);l->mutable_angular_rate_radians_per_second()->set_x(std::nan(""));
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,n,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A NaN start rate accepted");}
         }
         { // Spawn: the launcher in flight drops its first stage as flight "stage1" (the NESC 1-slug ball, for the test); the child starts at
           // the parent's instant and velocity, its log replays alone, and replaying the parent creates it again.
@@ -378,11 +388,13 @@ int main(int argc,char** argv){try{
             api::VehicleRequest vr;vr.set_vehicle(api::NESC_SPHERE);api::VehicleDefinition ball;{grpc::ClientContext c;require(flight->GetVehicle(&c,vr,&ball).ok(),"Ball definition");}
             auto spawnStep=[&](const std::string& id,api::FlightSample& out){grpc::ClientContext c;api::StepRequest q;auto* sp=q.add_commands()->mutable_spawn();sp->set_flight_id(id);*sp->mutable_definition()=ball;sp->set_nose_offset_meters(40);return flight->Step(&c,q,&out);};
             require(spawnStep("flight",x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A spawn into its own id accepted");
+            require(spawnStep("",x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A spawn without an id accepted");
             {const auto st=spawnStep("stage1",x);if(!st.ok())std::cerr<<st.error_message()<<"\n";require(st.ok()&&x.stage()==1,"Spawn separates the parent");}
             api::FlightSample kid;{grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("stage1");require(flight->GetFlight(&c,q,&kid).ok()&&kid.tick()==0&&kid.flight_id()=="stage1","The spawned flight");}
             const double dv=std::hypot(kid.velocity_meters_per_second().x()-before.velocity_meters_per_second().x(),kid.velocity_meters_per_second().y()-before.velocity_meters_per_second().y(),kid.velocity_meters_per_second().z()-before.velocity_meters_per_second().z());
             std::printf("spawn: child %.3f s after the parent's start, velocity off by %.4f m/s, mass %.3f kg\n",kid.utc_unix_seconds()-p.utc_unix_seconds(),dv,kid.mass_kilograms());
             require(std::abs(kid.utc_unix_seconds()-before.utc_unix_seconds())<1e-6&&dv<.5&&std::abs(kid.mass_kilograms()-14.5939029)<1e-3,"The child at the parent's instant and velocity");
+            require(kid.physics().turbulence_seed()!=before.physics().turbulence_seed(),"The child's gusts reseeded");
             {grpc::ClientContext c;api::StepRequest q;q.set_flight_id("stage1");q.set_ticks(2000);require(flight->Step(&c,q,&kid).ok(),"The child steps alone");}
             {const auto log=exportOf("stage1");api::FlightSample again;require(replayOf(log,again).ok()&&again.state_hash()==kid.state_hash()&&again.flight_id()=="stage1","The child replays alone");}
             {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("stage1");require(flight->EndFlight(&c,q,&applied).ok(),"End the child");}

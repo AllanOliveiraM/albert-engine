@@ -72,13 +72,17 @@ double Table::operator()(double m,double a)const{
 }
 Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std::move(vehicle)),env_(std::move(environment)),s_(state){
     if(vehicle_.stages.empty())throw std::invalid_argument("Vehicle without stages");
+    auto finite=[](std::initializer_list<double> x){return std::all_of(x.begin(),x.end(),[](double v){return std::isfinite(v);});};
+    if(!finite({vehicle_.torque,vehicle_.inertiaRate,vehicle_.diameter,vehicle_.sunArea,vehicle_.reflectivity}))throw std::invalid_argument("Non-finite vehicle value");
     for(auto& st:vehicle_.stages){
+        if(!finite({st.massFull,st.massEmpty,st.propellant,st.cgFull,st.cgEmpty,st.reference,st.length,st.noseRadius,st.legStiffness,st.legDamping,st.friction,st.aero.area,st.aero.length,st.aero.span,
+            st.inertiaFull.x,st.inertiaFull.y,st.inertiaFull.z,st.inertiaEmpty.x,st.inertiaEmpty.y,st.inertiaEmpty.z}))throw std::invalid_argument("Non-finite stage value: "+st.name);
         if(!(st.massEmpty>0)||!(st.propellant>=0)||std::abs(st.massFull-st.massEmpty-st.propellant)>1e-6*st.massFull)throw std::invalid_argument("Inconsistent stage mass: "+st.name);
         for(V3 i:{st.inertiaFull,st.inertiaEmpty})if(!(i.x>0&&i.y>0&&i.z>0))throw std::invalid_argument("Non-positive inertia: "+st.name);
         if(st.engines.empty()&&st.thrust>0)st.engines.push_back({st.name,{st.nozzle,0,0},{1,0,0},st.thrust,st.exhaust,st.exitArea,st.minThrottle,st.gimbal,0}); // The shorthand.
         for(auto& e:st.engines){
             const double n=norm(e.direction);
-            if(!(e.thrust>0)||!(e.exhaust>0))throw std::invalid_argument("Engine without thrust or exhaust velocity: "+st.name+" "+e.name);
+            if(!(e.thrust>0)||!(e.exhaust>0)||!finite({e.thrust,e.exhaust}))throw std::invalid_argument("Engine without finite thrust or exhaust velocity: "+st.name+" "+e.name);
             if(!(n>0)||!std::isfinite(n)||!std::isfinite(e.position.x)||!std::isfinite(e.position.y)||!std::isfinite(e.position.z)||!(e.exitArea>=0)||!(e.minThrottle>0&&e.minThrottle<=1)||!(e.gimbal>=0)||!(e.gimbalRate>=0))
                 throw std::invalid_argument("Invalid engine: "+st.name+" "+e.name);
             e.direction=e.direction/n;
@@ -322,7 +326,8 @@ void Flight::slew(double seconds){
     if(turbulence_.sigma()>0&&env_.atmosphere&&!s_.clamped&&!s_.landed){ // Gusts in the air-relative velocity's axes, held over the step.
         const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;const Geodetic geo=geodetic(env_.planet,rf);
         if(geo.height<airTop(env_.center)+1e5){
-            const M3 ned=nedFromFixed(geo.latitude,geo.longitude);const V3 v=ned*(o.fixed*(s_.velocity-cross(o.omega,s_.position)));const double speed=norm(v);
+            const M3 ned=nedFromFixed(geo.latitude,geo.longitude);V3 v=ned*(o.fixed*(s_.velocity-cross(o.omega,s_.position))); // Relative to the air: the mean wind out.
+            if(env_.wind)v=v-(env_.air?env_.air->at(s_.time,geo.latitude,geo.longitude,geo.height):climatology(env_.center,geo.height)).wind;const double speed=norm(v);
             const V3 g=turbulence_.step(seconds,speed,geo.height-(std::isfinite(env_.ground)?env_.ground:0.));
             const V3 x=speed>.1?v/speed:V3{1,0,0},h=std::hypot(x.x,x.y)>1e-6?V3{-x.y,x.x,0}/std::hypot(x.x,x.y):V3{0,1,0},z=cross(x,h);
             gustNed_=x*g.x+h*g.y+z*g.z;
@@ -408,7 +413,7 @@ std::uint64_t Flight::hash()const{
     auto mix=[&](const void* p,std::size_t n){const auto* c=static_cast<const unsigned char*>(p);for(std::size_t i=0;i<n;++i){h^=c[i];h*=1099511628211ull;}};
     const double d[]{s_.position.x,s_.position.y,s_.position.z,s_.velocity.x,s_.velocity.y,s_.velocity.z,s_.attitude.w,s_.attitude.x,s_.attitude.y,s_.attitude.z,
         s_.rate.x,s_.rate.y,s_.rate.z,s_.propellant,s_.heatLoad,s_.throttle,s_.gimbalPitch,s_.gimbalYaw,s_.torque.x,s_.torque.y,s_.torque.z,padPosition_.x,padPosition_.y,padPosition_.z};
-    mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
+    mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const double pad[]{padAttitude_.w,padAttitude_.x,padAttitude_.y,padAttitude_.z};mix(pad,sizeof pad);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
     for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed};mix(x,sizeof x);mix(b,sizeof b);}
     for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);}for(double u:duty_)mix(&u,8);
     {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z};mix(t,sizeof t);}
