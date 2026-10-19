@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 namespace albert::physics {
-struct Air {double temperature=0,pressure=0,density=0,sound=0;V3 wind;}; // K, Pa, kg/m³, m/s; wind toward NED (m/s).
+struct Air {double temperature=0,pressure=0,density=0,sound=0;V3 wind;double humidity=-1;}; // K, Pa, kg/m³, m/s; wind toward NED (m/s); specific humidity (kg/kg), negative: unknown.
 // U.S. Standard Atmosphere 1976 below 86 km geometric (exact layer equations; the
 // lowest layer extends to -5 km). Above 86 km: vacuum until an upper model replaces it.
 Air standardAtmosphere(double geometricHeight);

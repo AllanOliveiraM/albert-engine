@@ -1,4 +1,6 @@
 #pragma once
+#include "physics/acoustics.hpp"
+#include <optional>
 #include "core/bridge.hpp"
 #include "air_sources.hpp"
 #include "albert/v1/engine.grpc.pb.h"
@@ -18,6 +20,10 @@ public:
     grpc::Status ReplayFlight(grpc::ServerContext*,grpc::ServerReader<::albert::v1::FlightLogChunk>*,::albert::v1::FlightSample*) override;
     grpc::Status StartRealtime(grpc::ServerContext*,const ::albert::v1::RealtimeRequest*,::albert::v1::RealtimeStatus*) override;
     grpc::Status StopRealtime(grpc::ServerContext*,const ::albert::v1::Empty*,::albert::v1::RealtimeStatus*) override;
+    // The flight as a sound source (its rotating frame, the plume along -body x, d_e of its exit area): none without a
+    // flight or off the Earth (the acoustics are Earth air's).
+    struct Sound {double utc=0;physics::acoustics::Emission emission;physics::Planet planet;std::shared_ptr<const physics::AirModel> air;};
+    std::optional<Sound> sound()const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

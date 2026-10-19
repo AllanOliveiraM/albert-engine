@@ -50,9 +50,9 @@ Air Weather::at(std::int64_t tt,double latitude,double longitude,double height)c
     const double w=std::min(edge,1.)*std::clamp((m.top-h)/8000.,0.,1.);
     if(w<=0)return above();
     const double p=std::exp(m.logPressure),tv=m.temperature*(1+.6078*m.humidity);
-    const Air g{m.temperature,p,p/(dryGas*tv),std::sqrt(1.4*dryGas*tv),{m.north,m.east,0}};
+    const Air g{m.temperature,p,p/(dryGas*tv),std::sqrt(1.4*dryGas*tv),{m.north,m.east,0},m.humidity};
     if(w>=1)return g;
     const Air upper=above();auto mix=[&](double a,double b){return w*a+(1-w)*b;};
-    return{mix(g.temperature,upper.temperature),mix(g.pressure,upper.pressure),mix(g.density,upper.density),mix(g.sound,upper.sound),g.wind*w+upper.wind*(1-w)};
+    return{mix(g.temperature,upper.temperature),mix(g.pressure,upper.pressure),mix(g.density,upper.density),mix(g.sound,upper.sound),g.wind*w+upper.wind*(1-w),g.humidity*w}; // Dry above.
 }
 }

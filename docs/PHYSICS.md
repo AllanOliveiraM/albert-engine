@@ -14,6 +14,7 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Terceiros corpos | Sol (epv00) e Lua (moon98), aceleração de maré, 60 s interpolados; termo relativístico de Schwarzschild do corpo central (IERS 2010, 10.12) | sem planetas; sem Lense-Thirring nem de Sitter |
 | Atmosfera | NOAA GFS 0,25° ao vivo (41 níveis isobáricos até 0,01 hPa ≈ 80 km: altura geopotencial, temperatura, vento, umidade específica), interpolado no tempo, na horizontal e na vertical; acima (transição de 8 km) e fora do recorte de ±6° (transição de 0,5°), NRLMSISE-00 até 1000 km com F10.7 e Ap da CelesTrak (observados ou previstos) e ventos horizontais do HWM14 (climatologia do solo a ~450 km mais os ventos de perturbação geomagnética com o ap de 3 h); sem índices, US Standard Atmosphere 1976 (vácuo acima de 86 km); co-rotativa | NRLMSIS 2.x excluído pela licença (uso acadêmico, sem modificação); HWM14 é climatologia (sem fluxo solar; perturbação média, constante acima de ~225 km); onde o NRLMSISE-00 vale sozinho (fora do recorte ou sem GFS) o vento perto do solo também é do HWM14 |
 | Vento | do GFS no veículo, do HWM14 acima dele (mesma transição de 8 km); a velocidade do ar desconta vento e rotação da Terra | rajadas e turbulência não modeladas |
+| Som | `physics/acoustics`: fonte pelo NASA SP-8072 (potência η ½ F Ue com η 0,35%, espectro da Fig. 5 no número de Strouhal f d_e/Ue, d_e da área de saída do estágio), lóbulo de diretividade de +4,8 dB a 65° da pluma (−3 dB a ±20°, normalizado na esfera), terços de oitava de 1,26 Hz a 15,8 kHz; propagação no referencial girante: tempo retardado sobre o histórico de emissões, absorção ISO 9613-1 somada em 8 pontos do caminho com o ar do voo (umidade do GFS; sem ela, 50%), velocidade do som média do caminho, Doppler pelas velocidades em relação ao ar, reflexão no solo duro (+6 dB a +3 dB) abaixo de 100 m | caminho reto (sem refração), sem difração; sem crepitação (não linear) nem ruído aerodinâmico; impedância constante ao longo do caminho; só na Terra |
 | Aerodinâmica | tabelas bilineares (Mach, ângulo); arrasto oposto ao ar relativo, sustentação no plano x-z, força lateral em y; amortecimento opcional | fora da tabela o valor é mantido |
 | Propulsão | `F = F_vac·throttle − p_a·A_e`; `ṁ = F_vac·throttle/v_e`; cardã em arfagem e guinada | sem transiente de ignição |
 | Massa | propriedades do conjunto lineares no propelente restante; estagiamento move o CG | inércia principal (sem produtos) |
@@ -84,6 +85,13 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
 - Pad (base no solo), liberação no empuxo, acelerômetro e pouso.
 - O guiamento de exemplo leva o lançador genérico a uma órbita ~182 × 212 km.
 - Coast de uma volta com passos de 1 s contra 10 ms: diferença <1 mm.
+
+Som (`tests/acoustics_test.cpp`): absorção contra a ISO 9613-2 Tabela 2 (10 °C, 70%, oitavas de 63 Hz a 8 kHz, ≤2%) e
+a ISO 9613-1 Tabela 1 (−20 °C, 10%: 1,649 e 16,36 dB/km a 1 e 10 kHz; 1,65 e 16,4); o espectro e o lóbulo levam a potência
+uma vez; nível global máximo com o veículo a 25° acima do horizonte (65° da pluma), 1,5 m sobre solo duro, contra as medições
+da BYU: Starship 144,9/130,6/124,4 dB a 1/5/10 km (145,7/131,5/125,2), SLS 136,9 e 125,8 dB a 1,48 e 5,15 km (136 e 128),
+pico do SLS no terço de 16 Hz (~20 Hz medidos); tempo retardado, Doppler de fonte que se afasta e silêncio no vácuo, através
+do solo, antes da chegada e com o motor parado.
 
 Apollo 11 (`tests/apollo_test.cpp`): o Saturn V AS-506 pelo seu programa de voo (`examples/saturn_v.hpp`) na
 climatologia do Albert para 1969-07-16 13:32 UTC em 39A (NRLMSISE-00 e HWM14), contra o relatório de voo:

@@ -45,6 +45,7 @@
 #ifdef ALBERT_HAS_RPC
 #include "rpc/server.hpp"
 #endif
+#include "sound.hpp"
 #include "threepp/renderers/gl/GLShadowMap.hpp"
 #include "threepp/renderers/gl/GLInfo.hpp"
 
@@ -1084,6 +1085,11 @@ int albert::runRenderer(int argc, char** argv) {
         albert::catalog::Manager catalog(commands,albert::providers::horizons(),{},{},[&simulation]{return simulation.read();});
 #ifdef ALBERT_HAS_RPC
         std::unique_ptr<albert::rpc::Server> rpc;
+        // The flight's sound at the camera: muted until "Som do voo" is ticked (the device opens then); its emissions over
+        // the last ten minutes and the listener's last place.
+        bool soundOn=false;std::unique_ptr<albert::Sound> sound;std::vector<albert::physics::acoustics::Emission> emissions;
+        std::optional<std::pair<double,albert::physics::V3>> lastListener;albert::physics::V3 listenerVelocity;
+        const bool soundStats=std::getenv("ALBERT_SOUND_STATS")!=nullptr;auto soundReport=std::chrono::steady_clock::now();
 #endif
         albert::SceneObjects objects(*scene);
         albert::VectorLayers vectorLayers(*scene);
@@ -1426,6 +1432,10 @@ int albert::runRenderer(int argc, char** argv) {
                     if (focus == targets::Earth || focus == targets::Moon) ImGui::Checkbox("Sombras", &visualSettings.shadows);
                     ImGui::Checkbox("Caminhos das orbitas", &showOrbits);
                     ImGui::Checkbox("Cinturoes e nuvem de Oort", &showDebris);
+#ifdef ALBERT_HAS_RPC
+                    ImGui::Checkbox("Som do voo",&soundOn);
+                    if(soundOn)ImGui::TextDisabled("O ruido do foguete na camera, com o atraso e o ar do caminho.");
+#endif
                     if(showDebris&&systemView(focus))ImGui::TextDisabled("Populacoes ilustrativas, visiveis ao afastar.");
                     if (showOrbits) {
                         ImGui::TextDisabled("Distancias e tamanhos em escala real.");
@@ -2607,6 +2617,37 @@ int albert::runRenderer(int argc, char** argv) {
                 else{Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
                     graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}}
             graphics.setEarthshine(earth.get(),earth->scale.x); // The Earth mesh is a unit sphere.
+#ifdef ALBERT_HAS_RPC
+            { // The flight's sound at the camera, at the shown instant (an Earth flight; physics/acoustics.hpp).
+                namespace ph=albert::physics;namespace ac=ph::acoustics;
+                const auto source=rpc?rpc->flightSound():std::nullopt;bool audible=false;ac::Spectrum levels{};float pan=0;
+                if(soundOn&&!sound&&!smokeTest)sound=std::make_unique<albert::Sound>(true);else if(!soundOn&&sound)sound.reset();
+                if(source){
+                    if(!emissions.empty()&&source->utc<emissions.back().time)emissions.clear(); // A new flight, or a replay.
+                    if(emissions.empty()||source->utc>=emissions.back().time+.05)emissions.push_back(source->emission);
+                    if(emissions.size()>2&&emissions.front().time<source->utc-660)
+                        emissions.erase(emissions.begin(),std::lower_bound(emissions.begin(),emissions.end(),source->utc-600,[](const ac::Emission& e,double t){return e.time<t;}));
+                    // The camera in the Earth's rotating frame (renderPosition inverted); its velocity there between shown instants.
+                    const double r=albert::core::earthRadiusMeters;const auto& c=camera->position;
+                    const ph::V3 gcrf{c.x*r+sceneOrigin.x,-c.z*r+sceneOrigin.y,c.y*r+sceneOrigin.z};const ph::Tt tt=ph::ttFromUtc(simulatedUtc);
+                    const ph::V3 here=ph::Rotation::iau(ph::secondsSinceJ2000(tt)-(simulatedUtc-946728000.)).at(tt).fixed*gcrf;
+                    if(lastListener&&simulatedUtc>lastListener->first)listenerVelocity=(here-lastListener->second)*(1/(simulatedUtc-lastListener->first));
+                    else if(!lastListener||simulatedUtc<lastListener->first)listenerVelocity={};
+                    lastListener={simulatedUtc,here};
+                    const auto air=source->air;
+                    const auto heard=ac::hear(emissions,simulatedUtc,here,listenerVelocity,source->planet,
+                        [&](const ph::Geodetic& g){return air?air->at(tt,g.latitude,g.longitude,g.height):ph::standardAtmosphere(g.height);});
+                    audible=heard.audible;levels=heard.levels;
+                    if(soundStats&&steadyNow>=soundReport){soundReport=steadyNow+std::chrono::seconds(1); // ALBERT_SOUND_STATS: once a second.
+                        std::printf("sound: %s, %s, %.1f dB SPL (%.1f dB above 20 Hz) from %.0f m, %.2f s late, Doppler %.3f, adaptation %.1f dB\n",sound&&sound->playing()?"device":"muted",
+                            audible?"audible":"silent",ac::overall(levels),[&]{ac::Spectrum a=levels;for(int b=0;b<12;++b)a[static_cast<std::size_t>(b)]=-1e9;return ac::overall(a);}(),heard.distance,heard.delay,heard.doppler,sound?sound->adaptation():0.);std::fflush(stdout);}
+                    if(const auto node=objects.nodes().find("flight");node!=objects.nodes().end()){
+                        Vector3 to=node->second->position;to.sub(camera->position);Vector3 right;right.setFromMatrixColumn(*camera->matrixWorld,0);
+                        if(to.length()>0)pan=to.normalize().dot(right.normalize());}
+                }else{emissions.clear();lastListener.reset();}
+                if(sound)sound->hear(levels,audible,pan,dt);
+            }
+#endif
             graphics.render(*scene, *camera);
             graphics.ui();
 #ifdef ALBERT_HAS_RPC

@@ -312,6 +312,13 @@ interpolado em f32, mapa de rugosidade, light map e sombra PCF do Sol. Profundid
 (`depth32float`, infinito na perspectiva). Texturas grandes sobem em fatias de ~8 MB por quadro e os
 mipmaps são renderizados na GPU. `ALBERT_FRAME_STATS=1` imprime média, p99 e pior quadro a cada 300
 quadros, com o trabalho da CPU, a apresentação e o tempo da passada da cena na GPU (timestamps).
+Som do voo (`src/render/sound.*`): começa mudo; a opção "Som do voo" do menu abre o dispositivo padrão (miniaudio 0.11.25,
+fixado por SHA-256 em `src/render/CMakeLists.txt`) e a câmera ouve o voo pela física de `physics/acoustics` (tempo retardado,
+absorção, Doppler). A síntese é a das auralizações da NASA: quadros de 8192 pontos com fase aleatória e a potência de cada
+terço de oitava nos seus bins, FFT inversa, janela seno e sobreposição de meio quadro (bandas de 20 Hz para cima); acima de
+95 dB SPL o nível desce em ~1,5 s como a audição se protege, e 95 dB tocam a −14 dBFS. `ALBERT_AUDIO=0` nunca abre o
+dispositivo (use em execuções automáticas); `ALBERT_SOUND_STATS=1` imprime por segundo o nível ouvido, a distância, o atraso
+e o Doppler.
 `visual_test 1` roda as mesmas cenas nos dois renderizadores (`visual_test webgpu`, no ctest, só o
 WebGPU fora da tela); `gpu_scene_test` cobre fundo, profundidade, misturas, texturas (troca a cada
 quadro e streaming em dois quadros), atributos compartilhados, MSAA e sombra (pulado sem adaptador).

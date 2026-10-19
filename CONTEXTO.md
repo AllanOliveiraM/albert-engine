@@ -80,7 +80,11 @@ A API ainda não cria voos fora do pad (descida só no teste).
 tipo 4 por nome `albert:moon`, `frame.earth` (f[104..107]), `SceneRenderer::earthshine`/`Display::setEarthshine`; direção
 de vista ortográfica corrigida (`viewDirection`, como o three.js); `lunarAdaptation` sobe a exposição na Lua além da quarta.
 Testes: disco integrado no shader contra ROLO e Lane e Irvine (atmosphere_test), limbo e lado noturno (gpu_scene_test).
-A seguir: som (pedido do Allan depois desses itens).
+**Som (19/10/2026):** `physics/acoustics` (ISO 9613-1, SP-8072, `hear` com tempo retardado/Doppler/absorção no caminho;
+`Air::humidity` do GFS), `src/render/sound.*` (síntese espectral OLA 8192/4096, adaptação de nível, miniaudio 0.11.25 por hash),
+`FlightServices::sound()` publicado atomicamente com a cena (ler com o mutex travava: o passo espera o quadro), app começa mudo
+com "Som do voo" no menu. O Allan pediu silêncio nos testes: execuções automáticas sempre com `ALBERT_AUDIO=0`.
+Ponta a ponta (lançador genérico, câmera perto do pad): 128,8 dB a 128 m; 98,6 dB a 3,6 km com 11 s de atraso e Doppler 0,25.
 **Escopo (18/10/2026):** o Allan adiou o refinamento de Marte (GRAM Suite, atmosfera sazonal e
 termosfera, Viking < 20%) para atualizações futuras; o foco é Terra e Lua. Não puxar itens de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.

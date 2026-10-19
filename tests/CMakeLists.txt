@@ -122,6 +122,10 @@ target_include_directories(apollo_test PRIVATE ${PROJECT_SOURCE_DIR}/examples)
 target_link_libraries(apollo_test PRIVATE albert_providers)
 add_test(NAME apollo_11 COMMAND apollo_test ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(acoustics_test acoustics_test.cpp)
+target_link_libraries(acoustics_test PRIVATE albert_physics albert_erfa)
+add_test(NAME acoustics COMMAND acoustics_test)
+
 add_executable(hwm14_test hwm14_test.cpp)
 target_link_libraries(hwm14_test PRIVATE albert_physics)
 add_test(NAME hwm14 COMMAND hwm14_test ${CMAKE_CURRENT_SOURCE_DIR}/hwm14_check.txt)

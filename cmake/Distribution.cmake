@@ -19,6 +19,8 @@ install(FILES ${PROJECT_SOURCE_DIR}/third_party/wgpu-native/LICENSE.MIT ${PROJEC
     DESTINATION licenses/wgpu-native COMPONENT Runtime)
 install(FILES ${PROJECT_SOURCE_DIR}/third_party/bruneton/LICENSE
     DESTINATION licenses/precomputed-atmospheric-scattering COMPONENT Runtime)
+install(FILES ${PROJECT_BINARY_DIR}/_deps/miniaudio/LICENSE
+    DESTINATION licenses/miniaudio COMPONENT Runtime)
 install(CODE "if(NOT EXISTS \"${ALBERT_ASSET_PACK}\")\n  message(FATAL_ERROR \"Complete visuals.pak missing. Run make assets before creating a distribution.\")\nendif()" COMPONENT Runtime)
 install(FILES "${ALBERT_ASSET_PACK}" DESTINATION assets RENAME visuals.pak COMPONENT Runtime)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

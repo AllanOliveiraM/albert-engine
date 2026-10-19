@@ -10,6 +10,7 @@
 #include "providers/terrain.hpp"
 #include <cstdio>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -160,6 +161,7 @@ struct FlightServices::Impl {
         const auto now=std::chrono::steady_clock::now();
         if(!force&&now-published<std::chrono::milliseconds(33))return;
         published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
+        sound.store(center==ph::Center::earth?std::make_shared<const Sound>(heard()):nullptr); // Read by the frame loop without the lock.
         // The stack got shorter, or the same instant again (the keeper; appending would be refused as
         // out of order): replace the cylinder, keeping the camera on it.
         if(flight->state().stage!=shown||s.utcSeconds<=publishedUtc){
@@ -171,6 +173,17 @@ struct FlightServices::Impl {
         publishedUtc=s.utcSeconds;publishedOrigin=at;
         (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),{},false,true});
         (void)bridge.submit(telemetry());
+    }
+    // The flight as a sound source (see FlightServices::sound); published with the scene, read without the mutex (the
+    // frame loop must not wait on a step that waits on the frame loop).
+    std::atomic<std::shared_ptr<const Sound>> sound;
+    Sound heard()const{
+        const ph::Sample x=flight->sample();const auto& st=flight->vehicle().stages[flight->state().stage];
+        Sound s;s.utc=ph::utcFromTt(flight->state().time);s.planet=flight->environment().planet;s.air=flight->environment().air;auto& e=s.emission;
+        e.time=s.utc;e.position=x.fixedPosition;e.velocity=x.fixedVelocity;
+        const ph::V3 nose=flight->environment().rotation.at(flight->state().time).fixed*(ph::matrix(flight->state().attitude)*ph::V3{1,0,0});e.plume=nose*-1.;
+        e.noise={x.thrust,st.exhaust,std::sqrt(4*st.exitArea/3.14159265358979323846),.0035};e.on=flight->state().burning&&x.thrust>0;
+        return s;
     }
     core::FlightTelemetry telemetry()const{
         const ph::Sample x=flight->sample();const auto& st=flight->state();
@@ -317,6 +330,7 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api
     }
     return impl_->create(*r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},out);
 }
+std::optional<FlightServices::Sound> FlightServices::sound()const{const auto s=impl_->sound.load();return s?std::optional<Sound>(*s):std::nullopt;}
 grpc::Status FlightServices::ExportFlight(grpc::ServerContext*,const api::Empty*,grpc::ServerWriter<api::FlightLogChunk>* writer){
     std::string bytes;
     {std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
@@ -382,7 +396,7 @@ grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::Empty*,ap
 }
 grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::Empty*,api::Applied* out){
     impl_->stopPacing();std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
-    impl_->flight.reset();(void)impl_->bridge.submit(core::FlightTelemetry{});const auto reply=wait(impl_->bridge.submit(core::Remove{objectId}));out->set_revision(reply.revision);
+    impl_->flight.reset();impl_->sound.store(nullptr);(void)impl_->bridge.submit(core::FlightTelemetry{});const auto reply=wait(impl_->bridge.submit(core::Remove{objectId}));out->set_revision(reply.revision);
     return reply.code==core::Code::Ok||reply.code==core::Code::NotFound?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,reply.message};
 }
 grpc::Status FlightServices::StartRealtime(grpc::ServerContext*,const api::RealtimeRequest* r,api::RealtimeStatus* out){

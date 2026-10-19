@@ -276,6 +276,10 @@ programa de voo da época (examples/saturn_v.hpp). A partir do estado real na se
 Albert chega ao fim do S-II a 0,3 m/s da velocidade medida e corta o S-IVB 1,9 s depois do voo, numa
 órbita de 186,5 × 183,1 km (Apollo 11: 186,0 × 183,2 km).
 
+Com "Som do voo" ligado no menu (o Albert começa mudo), a câmera ouve o foguete: ruído pelo modelo da NASA (SP-8072),
+com o atraso da distância, a absorção do ar do caminho e o Doppler; a 1, 5 e 10 km de um Starship o nível fica a menos de
+1 dB do medido.
+
 `albert_landing_client` faz o mesmo na Lua: o módulo de pouso genérico sai das pernas na Base da
 Tranquilidade (altura do LOLA), sobe a 150 m, paira e pousa a menos de 1 m/s:
 

@@ -16,6 +16,7 @@
 #include "gpu/context.hpp"
 #include "gpu/scene.hpp"
 #include "lighting.hpp"
+#include "sound.hpp"
 #include "webgpu_programs.hpp"
 #include <string_view>
 #include <memory>
@@ -597,6 +598,23 @@ void regionalTone(){
     require(std::abs((d[0]+d[4])/2.-120)<=1&&std::abs((d[1]+d[5])/2.-130)<=1&&std::abs((d[2]+d[6])/2.-90)<=1&&d[8]==0,"Regional imagery takes the base map's mean colour");
     Image dark(std::vector<unsigned char>{10,10,10,255},1,1);albert::matchTone(dark,reference);require(dark.data()[0]==30,"Tone gains stay within 0.5-3");
 }
+// The sound's synthesis, offline: one band at 95 dB SPL plays at -14 dBFS around its centre, 135 dB comes down to the same
+// over ~10 s (loudness adaptation), silence when not audible, and the pan sends it to one side.
+void soundLevels(){
+    namespace ac=albert::physics::acoustics;albert::Sound s(false);ac::Spectrum levels;levels.fill(-1e9);levels[29]=95; // 1 kHz.
+    auto play=[&](double seconds,bool audible,float pan){s.hear(levels,audible,pan,seconds);std::vector<float> out(static_cast<std::size_t>(seconds*albert::Sound::rate)*2);
+        s.render(out.data(),static_cast<unsigned>(out.size()/2),2);return out;};
+    auto rms=[](const std::vector<float>& v,int channel,std::size_t from){double sum=0;std::size_t n=0;for(std::size_t i=2*from+static_cast<std::size_t>(channel);i<v.size();i+=2){sum+=static_cast<double>(v[i])*v[i];++n;}return 20*std::log10(std::sqrt(sum/static_cast<double>(n)));};
+    play(.3,true,0);const auto one=play(1,true,0);int crossings=0;for(std::size_t i=2;i<one.size();i+=2)crossings+=(one[i]>0)!=(one[i-2]>0);
+    std::cout<<"sound: 1 kHz band at 95 dB SPL plays at "<<rms(one,0,0)<<" dBFS, "<<crossings/2<<" Hz by zero crossings\n";
+    require(std::abs(rms(one,0,0)+14)<1&&crossings/2>850&&crossings/2<1150,"Sound: a band plays at its level and frequency");
+    levels[29]=135;for(int i=0;i<20;++i)play(.5,true,0);const auto loud=play(1,true,0);
+    std::cout<<"sound: 135 dB after 10 s plays at "<<rms(loud,0,0)<<" dBFS (adaptation "<<s.adaptation()<<" dB)\n";
+    require(std::abs(rms(loud,0,0)+14)<1.2&&std::abs(s.adaptation()-40)<1,"Sound: loud sources adapt down to the same level");
+    const auto side=play(1,true,1);std::cout<<"sound: panned right, left "<<rms(side,0,24000)<<" dBFS, right "<<rms(side,1,24000)<<" dBFS\n";
+    require(rms(side,0,24000)<-40&&std::abs(rms(side,1,24000)+11)<1.5,"Sound: pan");
+    play(.3,false,0);const auto quiet=play(.5,false,0);std::cout<<"sound: silent at "<<rms(quiet,0,0)<<" dBFS\n";require(rms(quiet,0,0)<-80,"Sound: silence");
+}
 // Dark adaptation at the Moon: none down to quarter phase; the night side seen from the Earth's direction (sun-Moon-camera
 // 180°, full Earth 60.27 radii away) is lit by earthshine alone, ~760 times fainter than the quarter (Allen's law at 90°).
 void lunarAdaptationLevels(){
@@ -607,7 +625,7 @@ void lunarAdaptationLevels(){
 }
 int main(int argc,char** argv) {
     try {
-        controls();orbitPaths();regionalTone();lunarAdaptationLevels();
+        controls();orbitPaths();regionalTone();lunarAdaptationLevels();soundLevels();
         if(argc>1){
             std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';return 77;}
             if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";graphics(*gpu);require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}
