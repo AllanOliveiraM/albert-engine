@@ -352,6 +352,27 @@ int main(){try{
         double lu,lw,s1,s2;Turbulence::scales(100*.3048,1,lu,lw,s1,s2);const double k=.177+.000823*100;
         near(lw,100*.3048,1e-9,"Low-altitude L_w = h");near(lu,100/std::pow(k,1.2)*.3048,1e-9,"Low-altitude L_u");near(s1,1/std::pow(k,.4),1e-12,"Low-altitude sigma_u");
     }
+    // Wheels and a jet: a 10 t vehicle on three wheels (struts 2 m below the centre of mass) rolling at 20 m/s loses
+    // μ_r g a second, stops at μ_b g on full brakes, turns with its nose wheel steered; a 50 kN jet spools up with its time
+    // constant (63% at τ), burns TSFC × T, and gives nothing without air.
+    {
+        Environment e;e.sunMoon=false;e.relativity=false;e.ground=0;const Tt t0=ttFromUtc(1792238400.);
+        Stage st;st.name="taxi";st.propellant=1000;st.massFull=10000;st.massEmpty=9000;st.cgFull=st.cgEmpty=10;st.inertiaFull=st.inertiaEmpty={2e4,1e5,1e5};st.length=20;
+        st.aero.lift=st.aero.drag=st.aero.side=st.aero.roll=st.aero.pitch=st.aero.yaw={{0},{0},{0}};
+        for(const auto& p:{V3{3,0,2},V3{12,-2,2},V3{12,2,2}}){Wheel w;w.name="w";w.position=p;w.stiffness=1e6;w.damping=6e4;w.steer=p.x<5?.5:0;st.wheels.push_back(w);}
+        Engine jet;jet.name="jet";jet.position={18,0,0};jet.breathing=true;jet.thrustTable={{0,1},{0,20},{5e4,5e4,1e4,1e4}};jet.fuelTable={{0},{0},{2e-5}};jet.spool=2;st.engines={jet};
+        const Vehicle v{"taxi",{st},0};
+        auto rolling=[&](double speed){const double sag=10000*9.79/3e6;return Flight(v,e,Flight::free(e,v,t0,{.5,-1.4,2-sag},{speed,0,0},{}));};
+        auto run=[](Flight& f,double seconds){for(Tt t=0;t<static_cast<Tt>(seconds*1e9);)t+=f.advance(std::min<Tt>(second/1000,static_cast<Tt>(seconds*1e9)-t));};
+        Flight roll=rolling(20);run(roll,10);const double v10=roll.sample().nedVelocity.x;
+        std::printf("wheels: 20 m/s rolling 10 s -> %.3f m/s (mu_r g: %.3f)\n",v10,20-.015*9.79*10);near(v10,20-.015*9.79*10,.08,"Rolling resistance");
+        Flight stop=rolling(20);stop.brake(1);run(stop,5);const double vs=stop.sample().nedVelocity.x;near(vs,0,.05,"Full brakes stop it");
+        Flight turn=rolling(10);turn.steer(.1,0);run(turn,3);const double yaw=turn.sample().euler.x;
+        std::printf("steering 0.1 rad at 10 m/s for 3 s: heading %.3f rad (kinematic %.3f)\n",yaw,10*std::tan(.1)/9*3);near(yaw,10*std::tan(.1)/9*3,.06,"Steered nose wheel turns it");
+        Flight jetFlight=rolling(0);jetFlight.ignite();run(jetFlight,2);const double t2=jetFlight.engineThrust()[0];
+        near(t2,5e4*(1-std::exp(-1.)),500,"Jet spools to 63% at its time constant");near(jetFlight.massFlow(),t2*2e-5,1e-9,"Fuel flow TSFC x thrust");
+        Environment vacuum=e;vacuum.atmosphere=false;Flight dry(v,vacuum,Flight::free(vacuum,v,t0,{.5,-1.4,2-10000*9.79/3e6},{},{}));dry.ignite();run(dry,3);near(dry.engineThrust()[0],0,0,"No air, no jet thrust");
+    }
     // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
     // against 10 ms steps.
     {

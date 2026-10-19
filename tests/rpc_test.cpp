@@ -306,6 +306,23 @@ int main(int argc,char** argv){try{
                 {grpc::ClientContext c;api::StepRequest q;q.set_ticks(60000);require(flight->Step(&c,q,&x).ok()&&std::abs(x.geodetic().height_meters()-4e5)<2e4,"Still in orbit a minute later");}
                 o.mutable_start()->set_stage(5);{grpc::ClientContext c;require(flight->CreateFlight(&c,o,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A missing start stage accepted");}
             }
+            { // A wheeled jet on a runway (a definition from scratch): the jet spools up and pushes it, the brakes slow it.
+                api::VehicleDefinition plane;plane.set_name("Taxi test");auto* st=plane.add_stages();st->set_name("airframe");st->set_propellant_kilograms(1000);
+                st->set_mass_full_kilograms(10000);st->set_mass_empty_kilograms(9000);st->set_cg_full_meters(10);st->set_cg_empty_meters(10);st->set_length_meters(20);
+                for(auto* i:{st->mutable_inertia_full_kilogram_meters2(),st->mutable_inertia_empty_kilogram_meters2()}){i->set_x(2e4);i->set_y(1e5);i->set_z(1e5);}
+                for(const auto& [x,y]:{std::pair{3.,0.},std::pair{12.,-2.},std::pair{12.,2.}}){auto* w=st->add_wheels();w->set_name("w");w->mutable_position_meters()->set_x(x);w->mutable_position_meters()->set_y(y);
+                    w->mutable_position_meters()->set_z(2);w->set_stiffness_newtons_per_meter(1e6);w->set_damping_newton_seconds_per_meter(6e4);if(x<5)w->set_steer_limit_radians(.5);}
+                auto* jet=st->add_engines();jet->set_name("jet");jet->mutable_position_meters()->set_x(18);jet->set_air_breathing(true);jet->set_spool_seconds(1);
+                auto* tt=jet->mutable_thrust_table();tt->add_mach(0);tt->add_altitude_km(0);tt->add_values(3e4);auto* ft=jet->mutable_fuel_table();ft->add_mach(0);ft->add_altitude_km(0);ft->add_values(2e-5);
+                api::CreateFlightRequest f=create;f.set_vehicle(api::CUSTOM);*f.mutable_definition()=plane;f.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);f.mutable_site()->set_height_meters(0);
+                f.mutable_physics()->set_wind(false);
+                auto* l=f.mutable_start()->mutable_local();l->mutable_position()->set_latitude_degrees(28.6);l->mutable_position()->set_longitude_degrees(-80.6);l->mutable_position()->set_height_meters(2-10000*9.79/3e6);
+                {grpc::ClientContext c;const auto st2=flight->CreateFlight(&c,f,&x);if(!st2.ok())std::cerr<<st2.error_message()<<"\n";require(st2.ok()&&x.wheels_size()==3,"A wheeled jet");}
+                {grpc::ClientContext c;api::StepRequest q;q.set_ticks(10000);q.add_commands()->set_ignite(true);require(flight->Step(&c,q,&x).ok()&&x.engines(0).spool()>.99&&x.velocity_ned_meters_per_second().x()>10,"The jet pushes it");}
+                const double fast=x.velocity_ned_meters_per_second().x();
+                {grpc::ClientContext c;api::StepRequest q;q.set_ticks(3000);q.add_commands()->set_cutoff(true);q.add_commands()->set_brake(1);auto* k=q.add_commands();k->set_steer_radians(.2);k->set_index(1);
+                    require(flight->Step(&c,q,&x).ok()&&x.wheels(0).brake()==1&&x.wheels(0).steer_radians()==.2&&x.wheels(1).steer_radians()==0&&x.velocity_ned_meters_per_second().x()<fast-5,"Brakes and the nose wheel");}
+            }
             { // Reentry heating: the NESC ball at 70 km and 7 km/s, nose along the velocity, a windward node (limit 1000 K) and a lee one.
                 api::VehicleRequest vq;vq.set_vehicle(api::NESC_SPHERE);api::VehicleDefinition ball;{grpc::ClientContext c;require(flight->GetVehicle(&c,vq,&ball).ok(),"Ball");}
                 for(const double nx:{1.,-1.}){auto* n=ball.mutable_stages(0)->add_thermal_nodes();n->set_name(nx>0?"front":"back");n->mutable_normal()->set_x(nx);n->set_area_meters2(.01);

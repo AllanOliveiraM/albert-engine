@@ -7,7 +7,7 @@
 namespace albert::wire {
 static_assert(std::endian::native==std::endian::little,"Frames are little-endian");
 enum Command:std::uint32_t {ignite=1,cutoff=2,separate=4,release=8,throttle=16,gimbal=32,torque=64,fail=128}; // fail: the selected engine fails (needs one).
-enum Extra:std::uint32_t {thruster=256,surface=512,spawn=1024}; // gRPC only (FlightCommand.thruster_duty, surface_radians, spawn); kinds in the replay log.
+enum Extra:std::uint32_t {thruster=256,surface=512,spawn=1024,brake=2048,steer=4096}; // gRPC only (thruster_duty, surface_radians, spawn, brake, steer_radians); kinds in the replay log.
 enum Status:std::uint32_t {ok=0,invalid=1,precondition=2,noFlight=3};
 enum Event:std::uint32_t {liftoff=1,depleted=2,touchdown=4,overheat=8}; // overheat: a thermal node above its limit.
 enum Flag:std::uint32_t {burning=1,clamped=2,landed=4,contact=8}; // contact: a landing leg on the ground.

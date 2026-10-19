@@ -308,6 +308,8 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | `torque_newton_meters` | Torque de atitude nos eixos do corpo: dos propulsores de RCS do estágio, se houver (ciclos alocados, consumo); senão ideal, limitado por eixo |
 | `thruster_duty` | Ciclo de trabalho (0–1) de um propulsor de RCS, até o próximo comando de torque |
 | `surface_radians` | Deflexão comandada de uma superfície de controle, limitada e alcançada na taxa do atuador |
+| `brake` | Freio das rodas (0–1) |
+| `steer_radians` | Direção de uma roda, limitada ao seu curso |
 
 **Vários voos.** Cada voo tem um `flight_id` (letras, dígitos, `_` e `-`, até 32; vazio: `flight`) em `CreateFlight`,
 `Step`, `GetFlight`, `EndFlight`, `ExportFlight`, `StartRealtime` e `StopRealtime`; criar um id existente o substitui,
@@ -341,7 +343,9 @@ instante em segundos de voo. Medem no fim do passo que completa o período (pass
 na ordem de queima, cada um descrevendo o conjunto inteiro enquanto é o mais baixo (massas cheio e vazio, CG, inércias
 principais, comprimento), seus motores (`EngineDefinition`: posição do bocal, direção, empuxo no vácuo, velocidade de
 exaustão, área de saída, aceleração mínima, curso e taxa do cardã), aerodinâmica (tabelas Mach × ângulo de sustentação,
-arrasto, força lateral e momentos, amortecimentos), nós de proteção térmica (`ThermalNodeDefinition`: posição, normal, área, capacidade térmica, emissividade, condução à
+arrasto, força lateral e momentos, amortecimentos), rodas (`WheelDefinition`: ponto de contato, mola e amortecedor, rolamento, frenagem, curva, curso da direção), motores a
+ar (`EngineDefinition.air_breathing` com tabelas de empuxo e consumo por Mach × altitude e o tempo do carretel),
+nós de proteção térmica (`ThermalNodeDefinition`: posição, normal, área, capacidade térmica, emissividade, condução à
 estrutura, fator de aquecimento e limite; a amostra traz temperatura e fluxo de cada um e o evento `OVERHEAT`),
 superfícies de controle (`SurfaceDefinition`: limite, taxa e
 incrementos em tabelas Mach × ângulo × deflexão), propulsores de RCS (`ThrusterDefinition`), pernas e o torque ideal de

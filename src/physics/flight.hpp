@@ -38,7 +38,14 @@ struct Thruster {std::string name;V3 position,direction{1,0,0};double thrust=0,e
 // zero gimbal (body axes; normalised); vacuum thrust (N), effective exhaust velocity (m/s), nozzle exit area (m²: thrust
 // falls by the ambient pressure on it); deepest throttle; gimbal limit (rad, pitch about body y, yaw about body z) and the
 // actuators' rate (rad/s, 0: instant).
-struct Engine {std::string name;V3 position,direction{1,0,0};double thrust=0,exhaust=0,exitArea=0,minThrottle=1,gimbal=0,gimbalRate=0;};
+struct Engine {std::string name;V3 position,direction{1,0,0};double thrust=0,exhaust=0,exitArea=0,minThrottle=1,gimbal=0,gimbalRate=0;
+    // Air-breathing (a jet): thrust at full throttle and fuel per newton-second (kg/N/s) from tables of Mach and altitude (km,
+    // the tables' angle axis), none without air; the spool follows the throttle with this time constant (s). thrust, exhaust
+    // and exitArea are then unused.
+    bool breathing=false;Table thrustTable,fuelTable;double spool=0;};
+// A wheel (landing gear): its contact point (as legs), strut stiffness and damping, rolling resistance and braking (μ at full
+// brake) along its heading, cornering (μ across it), and its steering limit (rad about body z, + to the right; 0: fixed).
+struct Wheel {std::string name;V3 position;double stiffness=0,damping=0,rolling=.015,braking=.5,cornering=.8,steer=0;};
 // Mass properties of the whole stack while this stage is the lowest, linear in its
 // remaining propellant between full and empty. Positions are metres aft of the nose.
 struct Stage {
@@ -54,6 +61,7 @@ struct Stage {
     // ground (N/m and N s/m per leg) with regularised Coulomb friction. Without legs touchdown
     // is detected at the CG and the vehicle stops.
     std::vector<V3> legs;double legStiffness=0,legDamping=0,friction=.6;
+    std::vector<Wheel> wheels;
     std::vector<Surface> surfaces;
     // With thrusters the torque command fires them (duty cycles by bounded least squares on the least propellant, preferring
     // couples; they burn propellant and leave whatever force results); without, it is the vehicle's ideal torque.
@@ -143,8 +151,12 @@ public:
     void throttle(double t,int engine=-1);void gimbal(double pitch,double yaw,int engine=-1);void torque(V3 t);
     void surface(double deflection,int index=-1); // rad, clamped to each surface's limit; reached at its rate.
     void thruster(double duty,int index=-1);      // A thruster's duty cycle (0-1) directly, until the next torque command.
+    void brake(double fraction,int index=-1);     // Wheel brakes, 0-1.
+    void steer(double angle,int index=-1);        // Wheel steering (rad), clamped to each wheel's limit.
+    struct WheelState {double brake=0,steer=0;};
+    const std::vector<WheelState>& wheels()const{return wheels_;}
     // Each engine of the stage: on, failed, throttle, gimbal as moved (rad) and as commanded.
-    struct EngineState {bool on=false,failed=false;double throttle=1,pitch=0,yaw=0,targetPitch=0,targetYaw=0;};
+    struct EngineState {bool on=false,failed=false;double throttle=1,pitch=0,yaw=0,targetPitch=0,targetYaw=0,spool=0;}; // spool: a jet's (0-1).
     const std::vector<EngineState>& engines()const{return engines_;}
     struct SurfaceState {double deflection=0,target=0;};
     const std::vector<SurfaceState>& surfaces()const{return surfaces_;}
@@ -174,7 +186,7 @@ private:
     Turbulence turbulence_;V3 gustNed_; // The gust over the step (NED, m/s).
     double flowOf(std::size_t i)const; // Engine i's propellant flow (kg/s).
     void allocate(); // Thruster duties for the torque command.
-    Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_;Tt step_=0,coast_=0;Increments increments_;
+    Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_;std::vector<WheelState> wheels_;Tt step_=0,coast_=0;Increments increments_;
     void heat(double seconds); // The thermal nodes over a step, from its start's flow.
     V3 padPosition_;Q padAttitude_; // ECEF and body→ECEF while clamped/landed.
     mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable ThirdBody p0_[2]{},p1_[2]{};mutable int bodies_=0;

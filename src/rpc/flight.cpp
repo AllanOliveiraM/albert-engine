@@ -56,13 +56,19 @@ ph::Table3 table(const api::SurfaceTable& t,const std::string& what){
     increasing(r.mach,what);increasing(r.angle,what);increasing(r.deflection,what);for(double v:r.values)if(!finite(v))throw std::invalid_argument("Non-finite "+what+" coefficient");
     return r;
 }
+ph::Table jetTable(const api::EngineTable& t,const std::string& what){
+    if(t.mach_size()<1||t.altitude_km_size()<1||t.mach_size()>128||t.altitude_km_size()>128||t.values_size()!=t.mach_size()*t.altitude_km_size())throw std::invalid_argument("Malformed "+what+" table");
+    ph::Table r{{t.mach().begin(),t.mach().end()},{t.altitude_km().begin(),t.altitude_km().end()},{t.values().begin(),t.values().end()}};
+    increasing(r.mach,what);increasing(r.angle,what);for(double v:r.values)if(!finite(v)||v<0)throw std::invalid_argument("Invalid "+what+" value");
+    return r;
+}
 ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
     if(d.stages_size()<1||d.stages_size()>32||d.name().size()>128)throw std::invalid_argument("A vehicle needs 1-32 stages and a name of at most 128 bytes");
     ph::Vehicle v;v.name=d.name().empty()?"Custom vehicle":d.name();v.torque=d.attitude_torque_newton_meters();v.diameter=d.has_diameter_meters()?d.diameter_meters():1.;
     v.sunArea=d.solar_area_meters2();v.reflectivity=d.has_reflectivity()?d.reflectivity():1.3;v.jetDamping=!d.has_jet_damping()||d.jet_damping();v.inertiaRate=d.has_inertia_rate()?d.inertia_rate():1.;
     if(!(v.torque>=0)||!(v.diameter>0)||!(v.sunArea>=0)||!(v.reflectivity>=0)||!finite(v.inertiaRate)||!std::isfinite(v.torque))throw std::invalid_argument("Invalid vehicle torque, diameter, solar area, reflectivity or inertia rate");
     for(const auto& sd:d.stages()){
-        if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters and 256 thermal nodes a stage");
+        if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256||sd.wheels_size()>32)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters and 256 thermal nodes a stage");
         ph::Stage st;st.name=sd.name().substr(0,128);st.propellant=sd.propellant_kilograms();st.massFull=sd.mass_full_kilograms();st.massEmpty=sd.mass_empty_kilograms();
         st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
         st.length=sd.length_meters();st.reference=sd.aerodynamic_reference_meters();st.noseRadius=sd.has_nose_radius_meters()?sd.nose_radius_meters():1.;
@@ -71,8 +77,11 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
         if(!(st.length>0)||!(st.noseRadius>0)||!(st.legStiffness>=0)||!(st.legDamping>=0)||!(st.friction>=0)||!std::isfinite(st.length+st.legStiffness+st.legDamping+st.friction))throw std::invalid_argument("Invalid length, nose radius or legs: "+st.name);
         for(const auto& l:sd.legs_meters()){const ph::V3 p=get(l);if(!finite(p.x+p.y+p.z))throw std::invalid_argument("Non-finite leg: "+st.name);st.legs.push_back(p);}
         if(!st.legs.empty()&&!(st.legStiffness>0))throw std::invalid_argument("Legs need a stiffness: "+st.name);
-        for(const auto& e:sd.engines())st.engines.push_back({e.name().substr(0,128),get(e.position_meters()),e.has_direction()?get(e.direction()):ph::V3{1,0,0},e.vacuum_thrust_newtons(),
+        for(const auto& e:sd.engines()){st.engines.push_back({e.name().substr(0,128),get(e.position_meters()),e.has_direction()?get(e.direction()):ph::V3{1,0,0},e.vacuum_thrust_newtons(),
             e.exhaust_velocity_meters_per_second(),e.exit_area_meters2(),e.has_min_throttle()?e.min_throttle():1.,e.gimbal_radians(),e.gimbal_rate_radians_per_second()});
+            if(e.air_breathing()){auto& x=st.engines.back();x.breathing=true;x.thrustTable=jetTable(e.thrust_table(),"jet thrust");x.fuelTable=jetTable(e.fuel_table(),"jet fuel");x.spool=e.spool_seconds();}}
+        for(const auto& w:sd.wheels())st.wheels.push_back({w.name().substr(0,128),get(w.position_meters()),w.stiffness_newtons_per_meter(),w.damping_newton_seconds_per_meter(),
+            w.has_rolling()?w.rolling():.015,w.has_braking()?w.braking():.5,w.has_cornering()?w.cornering():.8,w.steer_limit_radians()});
         for(const auto& f:sd.surfaces()){ph::Surface x;x.name=f.name().substr(0,128);x.limit=f.limit_radians();x.rate=f.rate_radians_per_second();
             x.lift=table(f.lift(),"surface lift");x.drag=table(f.drag(),"surface drag");x.side=table(f.side(),"surface side force");x.roll=table(f.roll(),"surface roll");x.pitch=table(f.pitch(),"surface pitch");x.yaw=table(f.yaw(),"surface yaw");
             st.surfaces.push_back(std::move(x));}
@@ -102,7 +111,11 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
         d->set_leg_stiffness_newtons_per_meter(st.legStiffness);d->set_leg_damping_newton_seconds_per_meter(st.legDamping);d->set_friction(st.friction);
         auto engines=st.engines;if(engines.empty()&&st.thrust>0)engines.push_back({st.name,{st.nozzle,0,0},{1,0,0},st.thrust,st.exhaust,st.exitArea,st.minThrottle,st.gimbal,0}); // The shorthand, as the core reads it.
         for(const auto& e:engines){auto* x=d->add_engines();x->set_name(e.name);put(e.position,x->mutable_position_meters());put(e.direction,x->mutable_direction());x->set_vacuum_thrust_newtons(e.thrust);
-            x->set_exhaust_velocity_meters_per_second(e.exhaust);x->set_exit_area_meters2(e.exitArea);x->set_min_throttle(e.minThrottle);x->set_gimbal_radians(e.gimbal);x->set_gimbal_rate_radians_per_second(e.gimbalRate);}
+            x->set_exhaust_velocity_meters_per_second(e.exhaust);x->set_exit_area_meters2(e.exitArea);x->set_min_throttle(e.minThrottle);x->set_gimbal_radians(e.gimbal);x->set_gimbal_rate_radians_per_second(e.gimbalRate);
+            if(e.breathing){x->set_air_breathing(true);x->set_spool_seconds(e.spool);for(const auto& [t,o]:{std::pair{&e.thrustTable,x->mutable_thrust_table()},std::pair{&e.fuelTable,x->mutable_fuel_table()}}){
+                for(double m:t->mach)o->add_mach(m);for(double a:t->angle)o->add_altitude_km(a);for(double v:t->values)o->add_values(v);}}}
+        for(const auto& w:st.wheels){auto* x=d->add_wheels();x->set_name(w.name);put(w.position,x->mutable_position_meters());x->set_stiffness_newtons_per_meter(w.stiffness);x->set_damping_newton_seconds_per_meter(w.damping);
+            x->set_rolling(w.rolling);x->set_braking(w.braking);x->set_cornering(w.cornering);x->set_steer_limit_radians(w.steer);}
         const auto& ae=st.aero;auto* a=d->mutable_aerodynamics();a->set_reference_area_meters2(ae.area);a->set_reference_length_meters(ae.length);a->set_reference_span_meters(ae.span);
         put(ae.lift,a->mutable_lift());put(ae.drag,a->mutable_drag());put(ae.side,a->mutable_side());put(ae.roll,a->mutable_roll());put(ae.pitch,a->mutable_pitch());put(ae.yaw,a->mutable_yaw());
         a->set_roll_damping(ae.rollDamping);a->set_pitch_damping(ae.pitchDamping);a->set_yaw_damping(ae.yawDamping);
@@ -372,12 +385,12 @@ struct Slot {
         std::vector<api::CreateFlightRequest> spawned;
         try{for(const auto& c:commands){const int e=static_cast<int>(c.kind>>16)-1; // The engine in the high bits: 0 every one.
             const std::uint32_t k=c.kind&0xffff;
-            if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface)throw std::invalid_argument("This command takes no index");
+            if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface&&k!=wire::brake&&k!=wire::steer)throw std::invalid_argument("This command takes no index");
             switch(c.kind&0xffff){
             case wire::ignite:next.ignite(e);break;case wire::cutoff:next.cutoff(e);break;case wire::separate:next.separate();break;case wire::release:next.release();break;
             case wire::throttle:next.throttle(c.a,e);break;case wire::gimbal:next.gimbal(c.a,c.b,e);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
             case wire::fail:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e);break;
-            case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;
+            case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;case wire::brake:next.brake(c.a,e);break;case wire::steer:next.steer(c.a,e);break;
             case wire::spawn:{if(e>=0||!(c.a>=0&&c.a<static_cast<double>(log.spawns_size())))throw std::invalid_argument("No such spawn");const auto k=static_cast<std::size_t>(c.a);
                 if(next.state().stage+1>=static_cast<int>(next.vehicle().stages.size()))throw std::logic_error("No stage to separate");
                 spawned.push_back(child(next,log.spawns(static_cast<int>(k)),k));next.separate();break;}
@@ -433,10 +446,11 @@ struct Slot {
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         {const auto thrust=flight->engineThrust();const auto& es=v.stages[static_cast<std::size_t>(s.stage)].engines;
          for(std::size_t i=0;i<es.size();++i){const auto& e=flight->engines()[i];auto* x=o->add_engines();x->set_name(es[i].name);x->set_on(e.on&&s.burning);x->set_failed(e.failed);x->set_throttle(e.throttle);
-            x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);}
+            x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);x->set_spool(e.spool);}
          const auto& fs=v.stages[static_cast<std::size_t>(s.stage)].surfaces;
          for(std::size_t i=0;i<fs.size();++i){auto* x=o->add_surfaces();x->set_name(fs[i].name);x->set_deflection_radians(flight->surfaces()[i].deflection);x->set_command_radians(flight->surfaces()[i].target);}
          for(double u:flight->thrusters())o->add_thruster_duty(u);
+         const auto& ws=v.stages[static_cast<std::size_t>(s.stage)].wheels;for(std::size_t i=0;i<ws.size();++i){auto* w=o->add_wheels();w->set_name(ws[i].name);w->set_brake(flight->wheels()[i].brake);w->set_steer_radians(flight->wheels()[i].steer);}
          const auto& nodes=v.stages[static_cast<std::size_t>(s.stage)].thermal;for(std::size_t i=0;i<nodes.size();++i){auto* t=o->add_thermal_nodes();t->set_name(nodes[i].name);
             t->set_temperature_kelvin(flight->temperatures()[i]);t->set_heat_flux_watts_per_meter2(ph::nodeHeating(nodes[i],x.heatFlux,x.airBody));t->set_over_limit(nodes[i].limit>0&&flight->temperatures()[i]>nodes[i].limit);}put(x.rcsForce,o->mutable_thruster_force_newtons());put(x.rcsMoment,o->mutable_thruster_moment_newton_meters());}
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
@@ -674,6 +688,8 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
         case api::FlightCommand::kFail:if(c.fail())commands.push_back({wire::fail|e});break;
         case api::FlightCommand::kThrusterDuty:commands.push_back({wire::thruster|e,c.thruster_duty()});break;
         case api::FlightCommand::kSurfaceRadians:commands.push_back({wire::surface|e,c.surface_radians()});break;
+        case api::FlightCommand::kBrake:commands.push_back({wire::brake|e,c.brake()});break;
+        case api::FlightCommand::kSteerRadians:commands.push_back({wire::steer|e,c.steer_radians()});break;
         case api::FlightCommand::kSpawn:commands.push_back({wire::spawn|e,-1,static_cast<double>(j)});break; // b: the request's command, for its payload.
         default:return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
         }
