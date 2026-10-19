@@ -367,6 +367,30 @@ int main(int argc,char** argv){try{
             {grpc::ClientContext c;api::FlightList l;require(flight->ListFlights(&c,{},&l).ok()&&l.flight_ids_size()==1&&l.flight_ids(0)=="flight","One flight left");}
             {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("no spaces");api::FlightSample x;require(flight->GetFlight(&c,q,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A bad id accepted");}
         }
+        { // Spawn: the launcher in flight drops its first stage as flight "stage1" (the NESC 1-slug ball, for the test); the child starts at
+          // the parent's instant and velocity, its log replays alone, and replaying the parent creates it again.
+            auto exportOf=[&](const std::string& id){grpc::ClientContext c;api::FlightRequest q;q.set_flight_id(id);auto reader=flight->ExportFlight(&c,q);api::FlightLogChunk k;std::vector<api::FlightLogChunk> v;
+                while(reader->Read(&k))v.push_back(k);require(reader->Finish().ok(),"ExportFlight");return v;};
+            auto replayOf=[&](const std::vector<api::FlightLogChunk>& v,api::FlightSample& out){grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&out);for(const auto& k:v)writer->Write(k);writer->WritesDone();return writer->Finish();};
+            api::CreateFlightRequest a=create;a.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);api::FlightSample p,before,x;
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,a,&p).ok(),"Parent flight");}
+            {grpc::ClientContext c;api::StepRequest q;q.set_ticks(3000);q.add_commands()->set_ignite(true);require(flight->Step(&c,q,&before).ok(),"Parent in flight");}
+            api::VehicleRequest vr;vr.set_vehicle(api::NESC_SPHERE);api::VehicleDefinition ball;{grpc::ClientContext c;require(flight->GetVehicle(&c,vr,&ball).ok(),"Ball definition");}
+            auto spawnStep=[&](const std::string& id,api::FlightSample& out){grpc::ClientContext c;api::StepRequest q;auto* sp=q.add_commands()->mutable_spawn();sp->set_flight_id(id);*sp->mutable_definition()=ball;sp->set_nose_offset_meters(40);return flight->Step(&c,q,&out);};
+            require(spawnStep("flight",x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A spawn into its own id accepted");
+            {const auto st=spawnStep("stage1",x);if(!st.ok())std::cerr<<st.error_message()<<"\n";require(st.ok()&&x.stage()==1,"Spawn separates the parent");}
+            api::FlightSample kid;{grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("stage1");require(flight->GetFlight(&c,q,&kid).ok()&&kid.tick()==0&&kid.flight_id()=="stage1","The spawned flight");}
+            const double dv=std::hypot(kid.velocity_meters_per_second().x()-before.velocity_meters_per_second().x(),kid.velocity_meters_per_second().y()-before.velocity_meters_per_second().y(),kid.velocity_meters_per_second().z()-before.velocity_meters_per_second().z());
+            std::printf("spawn: child %.3f s after the parent's start, velocity off by %.4f m/s, mass %.3f kg\n",kid.utc_unix_seconds()-p.utc_unix_seconds(),dv,kid.mass_kilograms());
+            require(std::abs(kid.utc_unix_seconds()-before.utc_unix_seconds())<1e-6&&dv<.5&&std::abs(kid.mass_kilograms()-14.5939029)<1e-3,"The child at the parent's instant and velocity");
+            {grpc::ClientContext c;api::StepRequest q;q.set_flight_id("stage1");q.set_ticks(2000);require(flight->Step(&c,q,&kid).ok(),"The child steps alone");}
+            {const auto log=exportOf("stage1");api::FlightSample again;require(replayOf(log,again).ok()&&again.state_hash()==kid.state_hash()&&again.flight_id()=="stage1","The child replays alone");}
+            {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("stage1");require(flight->EndFlight(&c,q,&applied).ok(),"End the child");}
+            {const auto log=exportOf("flight");api::FlightSample again;require(replayOf(log,again).ok()&&again.stage()==1,"Parent replays with its spawn");
+                grpc::ClientContext c;api::FlightList l;require(flight->ListFlights(&c,{},&l).ok()&&l.flight_ids_size()==2,"The replay spawned the child again");}
+            {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("stage1");(void)flight->EndFlight(&c,q,&applied);}
+            {grpc::ClientContext c;api::StepRequest q;auto* sp=q.add_commands()->mutable_spawn();sp->set_flight_id("again");*sp->mutable_definition()=ball;require(flight->Step(&c,q,&x).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"A spawn from the last stage accepted");}
+        }
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         {const auto snap=bridge.snapshot();require(std::none_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Vehicle left in the scene");}

@@ -121,6 +121,16 @@ ph::Vehicle preset(const api::Vehicle kind,const std::optional<double> payloadKi
     default:throw std::invalid_argument("Unknown vehicle");
     }
 }
+std::string flightName(const std::string& id){ // Empty: the default flight; else letters, digits, _ and -.
+    if(id.empty())return "flight";
+    if(id.size()>32||!std::all_of(id.begin(),id.end(),[](char c){return std::isalnum(static_cast<unsigned char>(c))||c=='_'||c=='-';}))throw std::invalid_argument("A flight id is 1-32 letters, digits, _ or -");
+    return id;
+}
+std::vector<ph::SpaceWeatherDay> daysOf(const api::FlightLog& log){ // The space-weather days a log carries.
+    std::vector<ph::SpaceWeatherDay> days;
+    for(const auto& d:log.space_weather()){ph::SpaceWeatherDay x;x.day=d.day();x.f107=d.f107();x.f107a=d.f107a();x.apAverage=d.ap_average();x.type=d.type();x.hasAp=d.ap_size()==8;for(int i=0;i<d.ap_size()&&i<8;++i)x.ap[static_cast<std::size_t>(i)]=d.ap(i);days.push_back(x);}
+    return days;
+}
 struct Prepared {ph::Vehicle vehicle;double utc=0,pitch=90,seconds=.001,coast=1;unsigned degree=20;ph::Center body=ph::Center::earth;};
 // Air off Earth: the body's climatology.
 const char* climatology(ph::Center c){return c==ph::Center::moon?"Vacuum (no lunar atmosphere)":"NASA Glenn Mars mean atmosphere";}
@@ -327,12 +337,31 @@ struct Slot {
         if(!st.legs.empty())on+=", pernas";
         return off.empty()?on:on+"; sem "+off;
     }
+    // Spawned flights waiting to be created once the step that separated them is committed (outside this flight's lock).
+    std::vector<api::CreateFlightRequest> children;
+    // The request of a flight spawned from `f` now: its definition, inertial start at its centre of mass, the propellant left.
+    api::CreateFlightRequest child(const ph::Flight& f,const api::Spawn& sp,std::size_t k)const{
+        if(flightName(sp.flight_id())==name)throw std::invalid_argument("A spawned flight needs another id");
+        const ph::Vehicle v=vehicleFrom(sp.definition());const double off=sp.nose_offset_meters();if(!finite(off))throw std::invalid_argument("Invalid nose offset");
+        auto cg=[](const ph::Stage& st,double left){const double x=st.propellant>0?std::clamp(left/st.propellant,0.,1.):0.;return st.cgEmpty+(st.cgFull-st.cgEmpty)*x;};
+        const auto& s=f.state();const auto& st=f.vehicle().stages[static_cast<std::size_t>(s.stage)];const auto& c0=v.stages[0];const double left=std::min(s.propellant,c0.propellant);
+        const ph::M3 b=ph::matrix(s.attitude);const ph::V3 r=b*ph::V3{cg(st,s.propellant)-(off+cg(c0,left)),0,0};
+        ph::State x;x.time=s.time;x.position=s.position+r;x.velocity=s.velocity+ph::cross(b*s.rate,r);x.attitude=s.attitude;x.rate=s.rate;x.propellant=left;
+        (void)ph::Flight(v,f.environment(),x); // Checks the vehicle against the core's rules now, not after the step.
+        api::CreateFlightRequest q=log.request();q.set_flight_id(flightName(sp.flight_id()));q.set_vehicle(api::CUSTOM);*q.mutable_definition()=sp.definition();q.clear_payload_kilograms();
+        q.set_utc_unix_seconds(ph::utcFromTt(s.time));q.set_focus_camera(false);q.set_terrain_height(false);
+        q.mutable_imu()->set_seed(q.imu().seed()^(0x9e3779b97f4a7c15ull*(k+1)));q.mutable_sensors()->set_seed(q.sensors().seed()^(0xbf58476d1ce4e5b9ull*(k+1)));
+        auto* w=q.mutable_start();w->Clear();w->set_stage(0);w->set_propellant_kilograms(left);auto* i=w->mutable_inertial();
+        put(x.position,i->mutable_position_meters());put(x.velocity,i->mutable_velocity_meters_per_second());put(x.attitude,i->mutable_attitude());put(x.rate,i->mutable_angular_rate_radians_per_second());
+        return q;
+    }
     std::uint32_t eventBits=0; // For the data plane, since its last response.
     grpc::Status run(const std::vector<Command>& commands,std::uint32_t ticks,const std::function<bool()>& cancelled){
         if(!flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
         if(ticks>600000)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 600000 ticks per step"};
         if(commands.size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 commands per step"};
         ph::Flight next=*flight; // Commands apply atomically.
+        std::vector<api::CreateFlightRequest> spawned;
         try{for(const auto& c:commands){const int e=static_cast<int>(c.kind>>16)-1; // The engine in the high bits: 0 every one.
             const std::uint32_t k=c.kind&0xffff;
             if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface)throw std::invalid_argument("This command takes no index");
@@ -341,10 +370,13 @@ struct Slot {
             case wire::throttle:next.throttle(c.a,e);break;case wire::gimbal:next.gimbal(c.a,c.b,e);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
             case wire::fail:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e);break;
             case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;
+            case wire::spawn:{const auto k=static_cast<std::size_t>(c.a);if(e>=0||!(c.a>=0)||k>=static_cast<std::size_t>(log.spawns_size()))throw std::invalid_argument("No such spawn");
+                if(next.state().stage+1>=static_cast<int>(next.vehicle().stages.size()))throw std::logic_error("No stage to separate");
+                spawned.push_back(child(next,log.spawns(static_cast<int>(k)),k));next.separate();break;}
             default:throw std::invalid_argument("Unknown command");}}}
         catch(const std::invalid_argument& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}catch(const std::logic_error& e){return{grpc::StatusCode::FAILED_PRECONDITION,e.what()};}
         // Integrated on the copy and committed whole: a cancelled call leaves the flight untouched.
-        bool changed=std::any_of(commands.begin(),commands.end(),[](const Command& c){return (c.kind&0xffff)<=wire::release||(c.kind&0xffff)==wire::fail;});
+        bool changed=std::any_of(commands.begin(),commands.end(),[](const Command& c){return (c.kind&0xffff)<=wire::release||(c.kind&0xffff)==wire::fail||(c.kind&0xffff)==wire::spawn;});
         const std::size_t pending=events.size();std::uint32_t bits=0;
         auto event=[&](api::FlightEvent::Kind kind,std::uint32_t bit){api::FlightEvent e;e.set_kind(kind);e.set_elapsed_seconds(ph::secondsSinceJ2000(next.state().time-start));e.set_stage(static_cast<unsigned>(next.state().stage));events.push_back(std::move(e));bits|=bit;changed=true;};
         const ph::Tt total=step*static_cast<ph::Tt>(ticks),chunk=step*4096;
@@ -359,6 +391,7 @@ struct Slot {
         ph::Imu sensor=*imu;const auto inc=next.increments();
         if(inc.seconds>0)reading=sensor.measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,next.sample().air.pressure);
         *flight=std::move(next);*imu=std::move(sensor);tick+=ticks;eventBits|=bits;note(commands,ticks);if(ticks)sense();
+        for(auto& q:spawned)children.push_back(std::move(q));
         if(ticks)publish(changed||flight->state().stage!=shown);
         return grpc::Status::OK;
     }
@@ -412,16 +445,17 @@ struct FlightServices::Impl {
         if(!sources.gravity)sources.gravity=[](ph::Center c,int degree){return providers::gravityModels().load(c,degree);};
         if(!sources.relief)sources.relief=[](ph::Center c,double lat,double lon){DownloadProgress p;return providers::planetaryRelief().height(c,lat,lon,p);};
     }
+    // The flights a step spawned, created from the parent's air, gravity and settings (outside the parent's lock).
+    void adopt(Slot& parent){
+        std::vector<api::CreateFlightRequest> kids;std::shared_ptr<const physics::AirModel> air;std::string atmosphere;std::vector<std::string> grib;std::vector<ph::SpaceWeatherDay> days;providers::GravityModel gravity;
+        {std::lock_guard l(parent.mutex);if(parent.children.empty()||!parent.flight)return;kids.swap(parent.children);
+            air=parent.flight->environment().air;atmosphere=parent.atmosphere;grib.assign(parent.log.gfs().begin(),parent.log.gfs().end());days=daysOf(parent.log);
+            gravity={parent.flight->environment().field,parent.log.gravity()};}
+        for(const auto& q:kids){api::FlightSample ignored;try{const Prepared p=prepare(q,q.utc_unix_seconds());(void)make(q.flight_id())->create(q,p,air,atmosphere,grib,days,gravity,[]{return false;},&ignored);}catch(const std::exception&){}}
+    }
     std::shared_ptr<Slot> find(const std::string& id){std::lock_guard l(lock);const auto it=slots.find(id);return it==slots.end()?nullptr:it->second;}
     std::shared_ptr<Slot> make(const std::string& id){std::lock_guard l(lock);auto& x=slots[id];if(!x)x=std::make_shared<Slot>(bridge,sources,id,sound);return x;}
 };
-namespace {
-std::string flightName(const std::string& id){ // Empty: the default flight; else letters, digits, _ and -.
-    if(id.empty())return "flight";
-    if(id.size()>32||!std::all_of(id.begin(),id.end(),[](char c){return std::isalnum(static_cast<unsigned char>(c))||c=='_'||c=='-';}))throw std::invalid_argument("A flight id is 1-32 letters, digits, _ or -");
-    return id;
-}
-}
 FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(std::make_unique<Impl>(bridge,std::move(sources))){}
 FlightServices::~FlightServices(){std::map<std::string,std::shared_ptr<Slot>> gone;{std::lock_guard l(impl_->lock);gone.swap(impl_->slots);}}
 grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
@@ -561,8 +595,7 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
     try{slot=impl_->make(flightName(r.flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     try{p=prepare(r,r.utc_unix_seconds());}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     // Air from the embedded inputs only: never the network.
-    std::shared_ptr<const physics::AirModel> air;std::vector<ph::SpaceWeatherDay> days;std::vector<std::string> grib(log.gfs().begin(),log.gfs().end());
-    for(const auto& d:log.space_weather()){ph::SpaceWeatherDay x;x.day=d.day();x.f107=d.f107();x.f107a=d.f107a();x.apAverage=d.ap_average();x.type=d.type();x.hasAp=d.ap_size()==8;for(int i=0;i<d.ap_size()&&i<8;++i)x.ap[static_cast<std::size_t>(i)]=d.ap(i);days.push_back(x);}
+    std::shared_ptr<const physics::AirModel> air;std::vector<ph::SpaceWeatherDay> days=daysOf(log);std::vector<std::string> grib(log.gfs().begin(),log.gfs().end());
     providers::GravityModel gravity;
     try{
         if(p.body!=ph::Center::earth){ // Bounded before any copy: a forged log must not inflate memory.
@@ -577,6 +610,7 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
     if(log.atmosphere().rfind(expected,0)!=0)return{grpc::StatusCode::FAILED_PRECONDITION,"The log does not carry the air data it used ("+log.atmosphere()+")"};
     api::FlightSample created;
     if(auto s=slot->create(r,p,std::move(air),log.atmosphere(),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},&created);!s.ok())return s;
+    {std::lock_guard lock(slot->mutex);*slot->log.mutable_spawns()=log.spawns();} // The spawn commands' payloads, by index.
     const std::string& steps=log.steps();
     for(std::size_t at=0;at<steps.size();){
         auto get=[&](void* d,std::size_t n){if(at+n>steps.size())throw std::invalid_argument("Truncated flight log");std::memcpy(d,steps.data()+at,n);at+=n;};
@@ -586,13 +620,13 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
         for(std::uint32_t i=0;i<repeat;++i){std::lock_guard lock(slot->mutex);
             if(auto s=slot->run(commands,ticks,[&]{return context->IsCancelled();});!s.ok())return s;}
     }
-    std::lock_guard lock(slot->mutex);slot->fill(out);
+    impl_->adopt(*slot);std::lock_guard lock(slot->mutex);slot->fill(out);
     if(out->state_hash()!=log.state_hash()||out->tick()!=log.tick())return{grpc::StatusCode::DATA_LOSS,"Replay diverged from the recorded state"};
     return grpc::Status::OK;
 }
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
     std::vector<Slot::Command> commands;
-    for(const auto& c:r->commands()){
+    for(int j=0;j<r->commands_size();++j){const auto& c=r->commands(j);
         if(c.index()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine, thruster or surface"};
         const std::uint32_t e=c.index()<<16; // In the kind's high bits (the replay log keeps the record format).
         switch(c.command_case()){
@@ -606,15 +640,19 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
         case api::FlightCommand::kFail:if(c.fail())commands.push_back({wire::fail|e});break;
         case api::FlightCommand::kThrusterDuty:commands.push_back({wire::thruster|e,c.thruster_duty()});break;
         case api::FlightCommand::kSurfaceRadians:commands.push_back({wire::surface|e,c.surface_radians()});break;
+        case api::FlightCommand::kSpawn:commands.push_back({wire::spawn|e,-1,static_cast<double>(j)});break; // b: the request's command, for its payload.
         default:return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
         }
     }
     std::shared_ptr<Slot> slot;try{slot=impl_->find(flightName(r->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
-    std::lock_guard lock(slot->mutex);
+    {std::lock_guard lock(slot->mutex);
     if(slot->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
-    if(auto s=slot->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok())return s;
-    slot->fill(out);return grpc::Status::OK;
+    const int before=slot->log.spawns_size(); // Spawn payloads into the log (a: their index there); dropped again if the step fails.
+    for(auto& c:commands)if((c.kind&0xffff)==wire::spawn){*slot->log.add_spawns()=r->commands(static_cast<int>(c.b)).spawn();c.a=slot->log.spawns_size()-1;c.b=0;}
+    if(auto s=slot->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok()){while(slot->log.spawns_size()>before)slot->log.mutable_spawns()->RemoveLast();return s;}
+    slot->fill(out);}
+    impl_->adopt(*slot);return grpc::Status::OK;
 }
 grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::FlightRequest* q,api::FlightSample* out){
     std::shared_ptr<Slot> slot;try{slot=impl_->find(flightName(q->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}

@@ -314,6 +314,13 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 `ListFlights` lista os vivos. Cada um tem a sua física, sensores, porta do plano de dados, tempo real e log, e aparece na
 cena como `flight` (o padrão) ou `flight.<id>`. O relógio simulado segue o voo publicado por último; o som, o último na Terra.
 
+**Separação em outro voo.** O comando `spawn` separa o estágio ativo e o faz voar como o voo `flight_id` (outro id): com a
+sua própria definição (o estágio 0 é a parte que caiu), o nariz a `nose_offset_meters` atrás do nariz do veículo, a partir
+do estado do voo no instante (velocidade mais ω × r, mesma atitude e taxas), com o propelente que restava (até o do seu
+estágio), o mesmo ar, gravidade, chaves físicas e sensores (com sementes novas). Ele começa no instante do comando e passa
+a andar por conta própria — o booster que volta, a nave que segue —; o log dele se reproduz sozinho e o do pai recria o
+filho no replay.
+
 **Começar em voo.** `start` (`StartState`) cria o voo já no ar em vez do pad: sobre o corpo central (`local`: posição
 geodésica, velocidade em relação ao solo em NED, rumo, arfagem e rolagem, taxas do corpo) ou no referencial inercial do voo
 (`inertial`: posição a partir do centro do corpo, velocidade, atitude corpo→inercial, taxas), no estágio e com o propelente

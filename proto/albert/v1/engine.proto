@@ -314,11 +314,17 @@ message FlightCommand {
     bool fail=8;                        // The engine fails: off, and refuses to ignite (needs an engine).
     double thruster_duty=10;            // A thruster's duty cycle, 0-1, until the next torque command.
     double surface_radians=11;          // A control surface's deflection command, clamped to its limit, reached at its rate.
+    Spawn spawn=12;                     // Separate the active stage as a flight of its own (gRPC only).
   }
   // ignite, cutoff, throttle, gimbal and fail: the engine; thruster_duty: the thruster; surface_radians: the surface.
   // 0 for every one of the stage, n for its n-th (the order of FlightSample.engines, thruster_duty and surfaces).
   uint32 index=9;
 }
+// Separates the active stage, which flies on as flight `flight_id` (another id): `definition` (its stage 0 the part that fell
+// off), its nose `nose_offset_meters` aft of this vehicle's nose, from this flight's state at that instant (the velocity plus
+// ω × r, the same attitude and rate), with the propellant left (up to its stage's), the same air, gravity, physics and
+// sensors (reseeded). It starts at the instant of the command and steps on its own; its log replays alone.
+message Spawn { string flight_id=1; VehicleDefinition definition=2; double nose_offset_meters=3; }
 message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; } // Up to 600000 ticks.
 message FlightEvent {
   // LIFTOFF: clamp release or the last leg leaving the ground; TOUCHDOWN: CG stop or a first leg down.
@@ -374,6 +380,7 @@ message FlightLog {
   string engine=1; CreateFlightRequest request=2; repeated bytes gfs=3; repeated SpaceWeatherDay space_weather=4;
   bytes steps=5; uint64 state_hash=6; uint64 tick=7; string atmosphere=8;
   bytes gravity=9; // Moon or Mars: the PDS table excerpt up to the flight's degree.
+  repeated Spawn spawns=10; // The spawn commands' payloads, in order (a replay creates the spawned flights again).
 }
 message FlightLogChunk { bytes data=1; } // A serialised FlightLog in pieces of up to 1 MiB.
 // Real time: Albert advances the flight on the wall clock (rate × real time) and pushes one
