@@ -341,7 +341,9 @@ instante em segundos de voo. Medem no fim do passo que completa o período (pass
 na ordem de queima, cada um descrevendo o conjunto inteiro enquanto é o mais baixo (massas cheio e vazio, CG, inércias
 principais, comprimento), seus motores (`EngineDefinition`: posição do bocal, direção, empuxo no vácuo, velocidade de
 exaustão, área de saída, aceleração mínima, curso e taxa do cardã), aerodinâmica (tabelas Mach × ângulo de sustentação,
-arrasto, força lateral e momentos, amortecimentos), superfícies de controle (`SurfaceDefinition`: limite, taxa e
+arrasto, força lateral e momentos, amortecimentos), nós de proteção térmica (`ThermalNodeDefinition`: posição, normal, área, capacidade térmica, emissividade, condução à
+estrutura, fator de aquecimento e limite; a amostra traz temperatura e fluxo de cada um e o evento `OVERHEAT`),
+superfícies de controle (`SurfaceDefinition`: limite, taxa e
 incrementos em tabelas Mach × ângulo × deflexão), propulsores de RCS (`ThrusterDefinition`), pernas e o torque ideal de
 atitude; posições em metros atrás do nariz.
 `GetVehicle` devolve cada preset como definição, para editar: voada como `CUSTOM` sem mudanças, dá o mesmo `state_hash` do

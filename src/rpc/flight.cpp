@@ -62,7 +62,7 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
     v.sunArea=d.solar_area_meters2();v.reflectivity=d.has_reflectivity()?d.reflectivity():1.3;v.jetDamping=!d.has_jet_damping()||d.jet_damping();v.inertiaRate=d.has_inertia_rate()?d.inertia_rate():1.;
     if(!(v.torque>=0)||!(v.diameter>0)||!(v.sunArea>=0)||!(v.reflectivity>=0)||!finite(v.inertiaRate)||!std::isfinite(v.torque))throw std::invalid_argument("Invalid vehicle torque, diameter, solar area, reflectivity or inertia rate");
     for(const auto& sd:d.stages()){
-        if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces and 64 thrusters a stage");
+        if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters and 256 thermal nodes a stage");
         ph::Stage st;st.name=sd.name().substr(0,128);st.propellant=sd.propellant_kilograms();st.massFull=sd.mass_full_kilograms();st.massEmpty=sd.mass_empty_kilograms();
         st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
         st.length=sd.length_meters();st.reference=sd.aerodynamic_reference_meters();st.noseRadius=sd.has_nose_radius_meters()?sd.nose_radius_meters():1.;
@@ -76,6 +76,9 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
         for(const auto& f:sd.surfaces()){ph::Surface x;x.name=f.name().substr(0,128);x.limit=f.limit_radians();x.rate=f.rate_radians_per_second();
             x.lift=table(f.lift(),"surface lift");x.drag=table(f.drag(),"surface drag");x.side=table(f.side(),"surface side force");x.roll=table(f.roll(),"surface roll");x.pitch=table(f.pitch(),"surface pitch");x.yaw=table(f.yaw(),"surface yaw");
             st.surfaces.push_back(std::move(x));}
+        for(const auto& n:sd.thermal_nodes()){ph::ThermalNode x;x.name=n.name().substr(0,128);x.position=get(n.position_meters());x.normal=get(n.normal());x.area=n.area_meters2();x.capacity=n.heat_capacity_joules_per_kelvin();
+            if(n.has_emissivity())x.emissivity=n.emissivity();if(n.has_absorptivity())x.absorptivity=n.absorptivity();x.conductance=n.conductance_watts_per_kelvin();if(n.has_structure_kelvin())x.structure=n.structure_kelvin();
+            if(n.has_heating_factor())x.factor=n.heating_factor();if(n.has_start_kelvin())x.start=n.start_kelvin();x.limit=n.limit_kelvin();st.thermal.push_back(std::move(x));}
         for(const auto& t:sd.thrusters())st.rcs.push_back({t.name().substr(0,128),get(t.position_meters()),get(t.direction()),t.thrust_newtons(),t.exhaust_velocity_meters_per_second()});
         const auto& a=sd.aerodynamics();auto& ae=st.aero;ae.area=a.reference_area_meters2();ae.length=a.reference_length_meters();ae.span=a.reference_span_meters();
         if(!(ae.area>=0)||!std::isfinite(ae.area)||!finite(ae.length)||!finite(ae.span))throw std::invalid_argument("Invalid aerodynamic references: "+st.name);
@@ -105,6 +108,9 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
         a->set_roll_damping(ae.rollDamping);a->set_pitch_damping(ae.pitchDamping);a->set_yaw_damping(ae.yawDamping);
         for(const auto& f:st.surfaces){auto* x=d->add_surfaces();x->set_name(f.name);x->set_limit_radians(f.limit);x->set_rate_radians_per_second(f.rate);
             put(f.lift,x->mutable_lift());put(f.drag,x->mutable_drag());put(f.side,x->mutable_side());put(f.roll,x->mutable_roll());put(f.pitch,x->mutable_pitch());put(f.yaw,x->mutable_yaw());}
+        for(const auto& n:st.thermal){auto* x=d->add_thermal_nodes();x->set_name(n.name);put(n.position,x->mutable_position_meters());put(n.normal,x->mutable_normal());x->set_area_meters2(n.area);
+            x->set_heat_capacity_joules_per_kelvin(n.capacity);x->set_emissivity(n.emissivity);x->set_absorptivity(n.absorptivity);x->set_conductance_watts_per_kelvin(n.conductance);
+            x->set_structure_kelvin(n.structure);x->set_heating_factor(n.factor);x->set_start_kelvin(n.start);x->set_limit_kelvin(n.limit);}
         for(const auto& t:st.rcs){auto* x=d->add_thrusters();x->set_name(t.name);put(t.position,x->mutable_position_meters());put(t.direction,x->mutable_direction());x->set_thrust_newtons(t.thrust);x->set_exhaust_velocity_meters_per_second(t.exhaust);}
     }
 }
@@ -339,7 +345,7 @@ struct Slot {
         return off.empty()?on:on+"; sem "+off;
     }
     // Spawned flights waiting to be created once the step that separated them is committed (outside this flight's lock).
-    std::vector<api::CreateFlightRequest> children;
+    std::vector<api::CreateFlightRequest> children;std::vector<bool> overheated; // overheated: thermal nodes reported, this stage.
     // The request of a flight spawned from `f` now: its definition, inertial start at its centre of mass, the propellant left.
     api::CreateFlightRequest child(const ph::Flight& f,const api::Spawn& sp,std::size_t k)const{
         if(sp.flight_id().empty()||flightName(sp.flight_id())==name)throw std::invalid_argument("A spawned flight needs an id of its own");
@@ -381,6 +387,7 @@ struct Slot {
         bool changed=std::any_of(commands.begin(),commands.end(),[](const Command& c){return (c.kind&0xffff)<=wire::release||(c.kind&0xffff)==wire::fail||(c.kind&0xffff)==wire::spawn;});
         const std::size_t pending=events.size();std::uint32_t bits=0;
         auto event=[&](api::FlightEvent::Kind kind,std::uint32_t bit){api::FlightEvent e;e.set_kind(kind);e.set_elapsed_seconds(ph::secondsSinceJ2000(next.state().time-start));e.set_stage(static_cast<unsigned>(next.state().stage));events.push_back(std::move(e));bits|=bit;changed=true;};
+        std::vector<bool> hot=overheated; // Nodes already reported, per the committed flight.
         const ph::Tt total=step*static_cast<ph::Tt>(ticks),chunk=step*4096;
         for(ph::Tt left=total;left>0;){
             if(cancelled()){events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
@@ -388,10 +395,13 @@ struct Slot {
             if((before.clamped&&!after.clamped)||(before.contact&&!after.contact))event(api::FlightEvent::LIFTOFF,wire::liftoff);
             if(before.burning&&!after.burning&&after.propellant<=0)event(api::FlightEvent::DEPLETED,wire::depleted);
             if((!before.landed&&after.landed)||(!before.contact&&after.contact))event(api::FlightEvent::TOUCHDOWN,wire::touchdown);
+            if(after.stage==before.stage){const auto& nodes=next.vehicle().stages[static_cast<std::size_t>(after.stage)].thermal;const auto& t=next.temperatures(); // A node past its limit.
+                for(std::size_t i=0;i<nodes.size();++i)if(nodes[i].limit>0&&t[i]>nodes[i].limit&&!(hot.size()>i&&hot[i])){event(api::FlightEvent::OVERHEAT,wire::overheat);events.back().set_index(static_cast<unsigned>(i));hot.resize(nodes.size());hot[i]=true;}}
         }
         if(cancelled()){events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
         ph::Imu sensor=*imu;const auto inc=next.increments();
         if(inc.seconds>0)reading=sensor.measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,next.sample().air.pressure);
+        if(next.state().stage!=flight->state().stage)hot.clear();overheated=std::move(hot);
         *flight=std::move(next);*imu=std::move(sensor);tick+=ticks;eventBits|=bits;note(commands,ticks);if(ticks)sense();
         for(auto& q:spawned)children.push_back(std::move(q));
         if(ticks)publish(changed||flight->state().stage!=shown);
@@ -426,7 +436,9 @@ struct Slot {
             x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);}
          const auto& fs=v.stages[static_cast<std::size_t>(s.stage)].surfaces;
          for(std::size_t i=0;i<fs.size();++i){auto* x=o->add_surfaces();x->set_name(fs[i].name);x->set_deflection_radians(flight->surfaces()[i].deflection);x->set_command_radians(flight->surfaces()[i].target);}
-         for(double u:flight->thrusters())o->add_thruster_duty(u);put(x.rcsForce,o->mutable_thruster_force_newtons());put(x.rcsMoment,o->mutable_thruster_moment_newton_meters());}
+         for(double u:flight->thrusters())o->add_thruster_duty(u);
+         const auto& nodes=v.stages[static_cast<std::size_t>(s.stage)].thermal;for(std::size_t i=0;i<nodes.size();++i){auto* t=o->add_thermal_nodes();t->set_name(nodes[i].name);
+            t->set_temperature_kelvin(flight->temperatures()[i]);t->set_heat_flux_watts_per_meter2(ph::nodeHeating(nodes[i],x.heatFlux,x.airBody));t->set_over_limit(nodes[i].limit>0&&flight->temperatures()[i]>nodes[i].limit);}put(x.rcsForce,o->mutable_thruster_force_newtons());put(x.rcsMoment,o->mutable_thruster_moment_newton_meters());}
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
         *o->mutable_physics()=physics;o->set_flight_id(name);
         if(gnss){auto* g=o->mutable_gnss();g->set_valid(gnssReading.valid);g->set_elapsed_seconds(gnssReading.time);put(gnssReading.position,g->mutable_position_ecef_meters());put(gnssReading.velocity,g->mutable_velocity_ecef_meters_per_second());}
@@ -537,7 +549,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
             m.period=v(g.has_period_seconds(),g.period_seconds(),m.period);tracker.emplace(m,seed^0x73746172ull);}
         sense();
     }
-    log=api::FlightLog{};record.clear();children.clear();lastRecord=std::string::npos;truncated=false;log.set_engine("Albert Engine "+std::string(ALBERT_VERSION));*log.mutable_request()=r;log.mutable_request()->set_utc_unix_seconds(p.utc);log.set_atmosphere(atmosphere);
+    log=api::FlightLog{};record.clear();children.clear();overheated.clear();lastRecord=std::string::npos;truncated=false;log.set_engine("Albert Engine "+std::string(ALBERT_VERSION));*log.mutable_request()=r;log.mutable_request()->set_utc_unix_seconds(p.utc);log.set_atmosphere(atmosphere);
     for(auto& b:grib)log.add_gfs(std::move(b));
     log.set_gravity(std::move(gravity.table));
     for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}

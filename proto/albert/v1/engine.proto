@@ -189,6 +189,12 @@ message SurfaceTable { repeated double mach=1; repeated double angle_degrees=2; 
 // against Mach, the angle of attack (sideslip for side force and yaw) and the deflection.
 message SurfaceDefinition { string name=1; double limit_radians=2; double rate_radians_per_second=3;
   SurfaceTable lift=4; SurfaceTable drag=5; SurfaceTable side=6; SurfaceTable roll=7; SurfaceTable pitch=8; SurfaceTable yaw=9; }
+// A thermal-protection node (a tile, a panel): heated by the stagnation flux times heating_factor and cos θ to the flow
+// (modified Newtonian), radiating to the sky and conducting to its structure; it reports OVERHEAT above limit_kelvin
+// (0: never). Unset: emissivity and absorptivity 0.85, structure and start 300 K, factor 1.
+message ThermalNodeDefinition { string name=1; Vector3 position_meters=2; Vector3 normal=3; double area_meters2=4; double heat_capacity_joules_per_kelvin=5;
+  optional double emissivity=6; optional double absorptivity=7; double conductance_watts_per_kelvin=8; optional double structure_kelvin=9;
+  optional double heating_factor=10; optional double start_kelvin=11; double limit_kelvin=12; }
 // A reaction-control thruster on the stage's propellant; with any, torque_newton_meters fires them.
 message ThrusterDefinition { string name=1; Vector3 position_meters=2; Vector3 direction=3; double thrust_newtons=4; double exhaust_velocity_meters_per_second=5; }
 message Aerodynamics {
@@ -216,6 +222,7 @@ message StageDefinition {
   double leg_stiffness_newtons_per_meter=15; double leg_damping_newton_seconds_per_meter=16; optional double friction=17; // Unset: 0.6.
   repeated SurfaceDefinition surfaces=18;   // Up to 32.
   repeated ThrusterDefinition thrusters=19; // Up to 64.
+  repeated ThermalNodeDefinition thermal_nodes=20; // Up to 256.
 }
 message VehicleDefinition {
   string name=1; repeated StageDefinition stages=2;  // 1-32 stages, up to 64 engines and 32 legs each, tables up to 128 x 128.
@@ -328,8 +335,9 @@ message Spawn { string flight_id=1; VehicleDefinition definition=2; double nose_
 message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; } // Up to 600000 ticks.
 message FlightEvent {
   // LIFTOFF: clamp release or the last leg leaving the ground; TOUCHDOWN: CG stop or a first leg down.
-  enum Kind { KIND_UNSPECIFIED=0; LIFTOFF=1; DEPLETED=2; TOUCHDOWN=3; }
-  Kind kind=1; double elapsed_seconds=2; uint32 stage=3;
+  // OVERHEAT: a thermal node above its limit (index: the node, FlightSample.thermal_nodes order).
+  enum Kind { KIND_UNSPECIFIED=0; LIFTOFF=1; DEPLETED=2; TOUCHDOWN=3; OVERHEAT=4; }
+  Kind kind=1; double elapsed_seconds=2; uint32 stage=3; uint32 index=4;
 }
 message FlightSample {
   uint64 tick=1; double elapsed_seconds=2; double utc_unix_seconds=3;
@@ -365,7 +373,9 @@ message FlightSample {
   // The latest measurement of each enabled sensor (valid false: none possible then), timed in elapsed seconds.
   GnssReading gnss=52; RadarAltimeterReading radar_altimeter=53; StarTrackerReading star_tracker=54;
   string flight_id=55;
+  repeated ThermalSample thermal_nodes=56; // The stage's thermal nodes now.
 }
+message ThermalSample { string name=1; double temperature_kelvin=2; double heat_flux_watts_per_meter2=3; bool over_limit=4; }
 message GnssReading { bool valid=1; double elapsed_seconds=2; Vector3 position_ecef_meters=3; Vector3 velocity_ecef_meters_per_second=4; }
 message RadarAltimeterReading { bool valid=1; double elapsed_seconds=2; double range_meters=3; }
 message StarTrackerReading { bool valid=1; double elapsed_seconds=2; Quaternion attitude=3; }

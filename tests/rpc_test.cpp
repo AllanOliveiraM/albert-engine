@@ -306,6 +306,21 @@ int main(int argc,char** argv){try{
                 {grpc::ClientContext c;api::StepRequest q;q.set_ticks(60000);require(flight->Step(&c,q,&x).ok()&&std::abs(x.geodetic().height_meters()-4e5)<2e4,"Still in orbit a minute later");}
                 o.mutable_start()->set_stage(5);{grpc::ClientContext c;require(flight->CreateFlight(&c,o,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A missing start stage accepted");}
             }
+            { // Reentry heating: the NESC ball at 70 km and 7 km/s, nose along the velocity, a windward node (limit 1000 K) and a lee one.
+                api::VehicleRequest vq;vq.set_vehicle(api::NESC_SPHERE);api::VehicleDefinition ball;{grpc::ClientContext c;require(flight->GetVehicle(&c,vq,&ball).ok(),"Ball");}
+                for(const double nx:{1.,-1.}){auto* n=ball.mutable_stages(0)->add_thermal_nodes();n->set_name(nx>0?"front":"back");n->mutable_normal()->set_x(nx);n->set_area_meters2(.01);
+                    n->set_heat_capacity_joules_per_kelvin(50);n->set_limit_kelvin(1000);}
+                api::CreateFlightRequest f=create;f.set_vehicle(api::CUSTOM);*f.mutable_definition()=ball;f.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);
+                auto* l=f.mutable_start()->mutable_local();l->mutable_position()->set_latitude_degrees(28);l->mutable_position()->set_longitude_degrees(-80);l->mutable_position()->set_height_meters(7e4);
+                l->mutable_velocity_ned_meters_per_second()->set_x(7000);l->mutable_velocity_ned_meters_per_second()->set_z(1000);l->set_pitch_degrees(-std::atan(1000./7000)*180/3.141592653589793);
+                {grpc::ClientContext c;require(flight->CreateFlight(&c,f,&x).ok()&&x.thermal_nodes_size()==2&&x.thermal_nodes(0).heat_flux_watts_per_meter2()>1e5&&x.thermal_nodes(1).heat_flux_watts_per_meter2()==0,"Windward and lee nodes");}
+                {grpc::ClientContext c;api::StepRequest q;q.set_ticks(5000);require(flight->Step(&c,q,&x).ok(),"Reentry steps");}
+                std::printf("reentry 5 s: front %.0f K, back %.0f K, %d events\n",x.thermal_nodes(0).temperature_kelvin(),x.thermal_nodes(1).temperature_kelvin(),x.events_size());
+                require(x.thermal_nodes(0).over_limit()&&x.thermal_nodes(1).temperature_kelvin()<300&&std::any_of(x.events().begin(),x.events().end(),[](const auto& e){return e.kind()==api::FlightEvent::OVERHEAT&&e.index()==0;}),"The front overheats, the back does not");
+                {grpc::ClientContext c;api::StepRequest q;q.set_ticks(1000);require(flight->Step(&c,q,&x).ok()&&std::none_of(x.events().begin(),x.events().end(),[](const auto& e){return e.kind()==api::FlightEvent::OVERHEAT;}),"Reported once");}
+                const auto hash=x.state_hash();auto log=[&]{grpc::ClientContext c;auto reader=flight->ExportFlight(&c,{});api::FlightLogChunk k;std::vector<api::FlightLogChunk> v;while(reader->Read(&k))v.push_back(k);require(reader->Finish().ok(),"Export");return v;}();
+                api::FlightSample again;grpc::ClientContext c;auto writer=flight->ReplayFlight(&c,&again);for(const auto& k:log)writer->Write(k);writer->WritesDone();require(writer->Finish().ok()&&again.state_hash()==hash,"Reentry replays with its temperatures");
+            }
             { // Turbulence: a different flight from the calm one, the same twice for one seed.
                 api::CreateFlightRequest t=create;t.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);auto hash=[&](double sigma,std::uint64_t seed){t.mutable_physics()->set_turbulence_meters_per_second(sigma);t.mutable_physics()->set_turbulence_seed(seed);
                     {grpc::ClientContext c;require(flight->CreateFlight(&c,t,&x).ok(),"Turbulent flight");}grpc::ClientContext c;api::StepRequest q;q.set_ticks(4000);q.add_commands()->set_ignite(true);require(flight->Step(&c,q,&x).ok(),"Turbulent steps");return x.state_hash();};

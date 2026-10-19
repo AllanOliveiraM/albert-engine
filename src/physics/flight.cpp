@@ -92,6 +92,9 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
             for(const Table3* t:{&f.lift,&f.drag,&f.side,&f.roll,&f.pitch,&f.yaw})
                 if(t->mach.empty()||t->angle.empty()||t->deflection.empty()||t->values.size()!=t->mach.size()*t->angle.size()*t->deflection.size())throw std::invalid_argument("Malformed surface table: "+st.name+" "+f.name);
         }
+        for(const auto& n:st.thermal)if(!finite({n.position.x,n.position.y,n.position.z,n.normal.x,n.normal.y,n.normal.z,n.area,n.capacity,n.emissivity,n.absorptivity,n.conductance,n.structure,n.factor,n.start,n.limit})
+            ||!(n.area>0)||!(n.capacity>0)||!(n.emissivity>=0&&n.emissivity<=1)||!(n.absorptivity>=0&&n.absorptivity<=1)||!(n.conductance>=0)||!(n.start>0)||!(n.structure>0)||!(n.limit>=0)||norm(n.normal)==0)
+            throw std::invalid_argument("Invalid thermal node: "+st.name+" "+n.name);
         for(auto& t:st.rcs){
             const double n=norm(t.direction);
             if(!(t.thrust>0)||!(t.exhaust>0)||!(n>0)||!std::isfinite(n+t.position.x+t.position.y+t.position.z+t.thrust+t.exhaust))throw std::invalid_argument("Invalid thruster: "+st.name+" "+t.name);
@@ -106,6 +109,7 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
         engines_.push_back({s_.burning,false,std::clamp(s_.throttle,e.minThrottle,1.),p,y,p,y});}
     s_.burning=s_.burning&&!engines_.empty();
     surfaces_.assign(vehicle_.stages[s_.stage].surfaces.size(),SurfaceState{});duty_.assign(vehicle_.stages[s_.stage].rcs.size(),0.);allocate();
+    for(const auto& n:vehicle_.stages[s_.stage].thermal)temperatures_.push_back(n.start);
     if(!(env_.turbulence>=0)||!std::isfinite(env_.turbulence))throw std::invalid_argument("Invalid turbulence");
     turbulence_=Turbulence(env_.turbulence,env_.turbulenceSeed);
     const Orientation o=env_.rotation.at(s_.time);
@@ -229,7 +233,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         Sample& x=*out;x.mass=ms.m;x.mach=mach;x.dynamicPressure=q;x.alpha=alpha;x.beta=beta;x.thrust=thrust;x.massFlow=flow;x.air=atm;x.geodetic=geo;
         x.fixedPosition=rf;x.fixedVelocity=o.fixed*relative;x.nedVelocity=ned*x.fixedVelocity;
         const M3 c=ned*o.fixed*b;x.nedAttitude=quaternion(c);x.euler={std::atan2(c.m[1][0],c.m[0][0]),-std::asin(std::clamp(c.m[2][0],-1.,1.)),std::atan2(c.m[2][1],c.m[2][2])};
-        x.aeroForce=fa;x.aeroMoment=ma;x.thrustForce=ft;x.rcsForce=fr;x.rcsMoment=mr;x.gravity=g;x.acceleration=r.a;x.specificForce=force/ms.m;x.heatFlux=heat;
+        x.airBody=air*-1.;x.aeroForce=fa;x.aeroMoment=ma;x.thrustForce=ft;x.rcsForce=fr;x.rcsMoment=mr;x.gravity=g;x.acceleration=r.a;x.specificForce=force/ms.m;x.heatFlux=heat;
         if(s.clamped||s.landed){x.acceleration=cross(o.omega,cross(o.omega,s.position));x.specificForce=bt*(x.acceleration-g);}
     }
     return r;
@@ -286,7 +290,7 @@ Tt Flight::advance(Tt dt){
             }
         }
         if(flow>0){const double t=s_.propellant/flow*1e9;if(t<=static_cast<double>(h)+1){h=std::clamp<Tt>(static_cast<Tt>(t),1,h);depleted=true;}} // Within 1 ns.
-        slew(static_cast<double>(h)*1e-9);integrate(h);left-=h;
+        slew(static_cast<double>(h)*1e-9);heat(static_cast<double>(h)*1e-9);integrate(h);left-=h;
         if(depleted){s_.propellant=0;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);return dt-left;}
         if(!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
             const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;Geodetic g=geodetic(env_.planet,rf);
@@ -333,6 +337,11 @@ void Flight::slew(double seconds){
             gustNed_=x*g.x+h*g.y+z*g.z;
         }else gustNed_={};
     }
+}
+void Flight::heat(double seconds){ // Explicit in the flow (the step's start), implicit in each node's temperature.
+    const auto& nodes=vehicle_.stages[s_.stage].thermal;if(nodes.empty()||!(seconds>0))return;
+    const Sample x=sample();const double sky=x.air.temperature>0?x.air.temperature:3.; // The air around, or deep space.
+    for(std::size_t i=0;i<nodes.size();++i)temperatures_[i]=nodeStep(nodes[i],temperatures_[i],nodeHeating(nodes[i],x.heatFlux,x.airBody),sky,seconds);
 }
 void Flight::surface(double d,int index){
     if(!std::isfinite(d))throw std::invalid_argument("Invalid deflection");
@@ -385,6 +394,7 @@ void Flight::separate(){
     s_.position+=shift;s_.velocity+=cross(matrix(s_.attitude)*s_.rate,shift);
     ++s_.stage;s_.propellant=next.propellant;s_.burning=false;s_.throttle=1;s_.gimbalPitch=s_.gimbalYaw=0;
     engines_.assign(next.engines.size(),EngineState{});surfaces_.assign(next.surfaces.size(),SurfaceState{});duty_.assign(next.rcs.size(),0.);allocate();
+    temperatures_.clear();for(const auto& n:next.thermal)temperatures_.push_back(n.start);
     if(s_.clamped||s_.landed){padPosition_=env_.rotation.at(s_.time).fixed*s_.position;}
 }
 void Flight::throttle(double t,int engine){
@@ -416,7 +426,7 @@ std::uint64_t Flight::hash()const{
     mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const double pad[]{padAttitude_.w,padAttitude_.x,padAttitude_.y,padAttitude_.z};mix(pad,sizeof pad);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
     for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed};mix(x,sizeof x);mix(b,sizeof b);}
     for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);}for(double u:duty_)mix(&u,8);
-    {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z};mix(t,sizeof t);}
+    {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z};mix(t,sizeof t);}for(double t:temperatures_)mix(&t,8);
     return h;
 }
 }

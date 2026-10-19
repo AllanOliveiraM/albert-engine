@@ -2,6 +2,7 @@
 #include "physics/atmosphere.hpp"
 #include "physics/earth.hpp"
 #include "physics/gravity.hpp"
+#include "physics/thermal.hpp"
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -57,6 +58,7 @@ struct Stage {
     // With thrusters the torque command fires them (duty cycles by bounded least squares on the least propellant, preferring
     // couples; they burn propellant and leave whatever force results); without, it is the vehicle's ideal torque.
     std::vector<Thruster> rcs;
+    std::vector<ThermalNode> thermal; // Thermal-protection nodes, heated by the flow as the vehicle flies.
 };
 // torque: ideal attitude torque limit (N m per axis). inertiaRate scales the İω term and
 // jetDamping enables the exhaust momentum flux: 1/true is the complete variable-mass model.
@@ -120,6 +122,7 @@ struct Sample {
     V3 aeroForce,aeroMoment,thrustForce,acceleration,gravity; // Body N, N m about the CG; inertial m/s².
     V3 rcsForce,rcsMoment;     // The thrusters' (body N, N m about the CG).
     double heatFlux=0;         // Convective stagnation-point heating, Sutton-Graves (W/m²).
+    V3 airBody;                // The flow: the air's velocity relative to the vehicle, body axes (m/s).
 };
 class Flight {
 public:
@@ -146,6 +149,7 @@ public:
     struct SurfaceState {double deflection=0,target=0;};
     const std::vector<SurfaceState>& surfaces()const{return surfaces_;}
     const std::vector<double>& thrusters()const{return duty_;} // Duty cycles.
+    const std::vector<double>& temperatures()const{return temperatures_;} // Thermal nodes (K), the stage's.
     std::vector<double> engineThrust()const; // Each engine's thrust now (N, after the ambient pressure).
     const State& state()const{return s_;}
     V3 sunFromVehicle()const{return sun(s_.time)-s_.position;} // Inertial (m).
@@ -170,7 +174,8 @@ private:
     Turbulence turbulence_;V3 gustNed_; // The gust over the step (NED, m/s).
     double flowOf(std::size_t i)const; // Engine i's propellant flow (kg/s).
     void allocate(); // Thruster duties for the torque command.
-    Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_;Tt step_=0,coast_=0;Increments increments_;
+    Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_;Tt step_=0,coast_=0;Increments increments_;
+    void heat(double seconds); // The thermal nodes over a step, from its start's flow.
     V3 padPosition_;Q padAttitude_; // ECEF and body→ECEF while clamped/landed.
     mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable ThirdBody p0_[2]{},p1_[2]{};mutable int bodies_=0;
 };
