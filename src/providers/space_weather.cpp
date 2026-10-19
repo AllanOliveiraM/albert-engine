@@ -53,7 +53,7 @@ std::shared_ptr<const physics::Msis> SpaceWeatherService::msis(double utc,std::v
 }
 std::shared_ptr<const physics::Msis> msisFrom(const std::vector<SpaceWeatherDay>& days,double utc){
     std::string note;auto t=std::make_shared<const physics::SpaceWeatherTable>(days);const auto w=t->at(utc,&note);
-    return w?std::make_shared<const physics::Msis>(*w,"NRLMSISE-00 (at start: "+note+", CelesTrak)",std::move(t)):nullptr;
+    return w?std::make_shared<const physics::Msis>(*w,"NRLMSISE-00/HWM14 (at start: "+note+", CelesTrak)",std::move(t)):nullptr;
 }
 SpaceWeatherService& spaceWeather(){static SpaceWeatherService value(dataDirectory()/"spaceweather");return value;}
 }

@@ -12,8 +12,8 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Referenciais | GCRF inercial; ITRF por IAU 2006/2000A (CIO) + ERA, matriz C2I a cada 60 s interpolada | movimento do polo ignorado (≤15 m); TT−UT1 fixo por voo |
 | Gravidade | EGM2008 tide-free em harmônicos esféricos (recursão de Cunningham), 20×20 por padrão, até 70×70; elipsoide WGS 84 | maré permanente não aplicada; graus acima de 70 omitidos |
 | Terceiros corpos | Sol (epv00) e Lua (moon98), aceleração de maré, 60 s interpolados; termo relativístico de Schwarzschild do corpo central (IERS 2010, 10.12) | sem planetas; sem Lense-Thirring nem de Sitter |
-| Atmosfera | NOAA GFS 0,25° ao vivo (41 níveis isobáricos até 0,01 hPa ≈ 80 km: altura geopotencial, temperatura, vento, umidade específica), interpolado no tempo, na horizontal e na vertical; acima (transição de 8 km) e fora do recorte de ±6° (transição de 0,5°), NRLMSISE-00 até 1000 km com F10.7 e Ap da CelesTrak (observados ou previstos); sem índices, US Standard Atmosphere 1976 (vácuo acima de 86 km); co-rotativa | NRLMSIS 2.x excluído pela licença (uso acadêmico, sem modificação); sem ventos acima do GFS (HWM pendente) |
-| Vento | do GFS no veículo; a velocidade do ar desconta vento e rotação da Terra | rajadas e turbulência não modeladas |
+| Atmosfera | NOAA GFS 0,25° ao vivo (41 níveis isobáricos até 0,01 hPa ≈ 80 km: altura geopotencial, temperatura, vento, umidade específica), interpolado no tempo, na horizontal e na vertical; acima (transição de 8 km) e fora do recorte de ±6° (transição de 0,5°), NRLMSISE-00 até 1000 km com F10.7 e Ap da CelesTrak (observados ou previstos) e ventos horizontais do HWM14 (climatologia do solo a ~450 km mais os ventos de perturbação geomagnética com o ap de 3 h); sem índices, US Standard Atmosphere 1976 (vácuo acima de 86 km); co-rotativa | NRLMSIS 2.x excluído pela licença (uso acadêmico, sem modificação); HWM14 é climatologia (sem fluxo solar; perturbação média, constante acima de ~225 km); onde o NRLMSISE-00 vale sozinho (fora do recorte ou sem GFS) o vento perto do solo também é do HWM14 |
+| Vento | do GFS no veículo, do HWM14 acima dele (mesma transição de 8 km); a velocidade do ar desconta vento e rotação da Terra | rajadas e turbulência não modeladas |
 | Aerodinâmica | tabelas bilineares (Mach, ângulo); arrasto oposto ao ar relativo, sustentação no plano x-z, força lateral em y; amortecimento opcional | fora da tabela o valor é mantido |
 | Propulsão | `F = F_vac·throttle − p_a·A_e`; `ṁ = F_vac·throttle/v_e`; cardã em arfagem e guinada | sem transiente de ignição |
 | Massa | propriedades do conjunto lineares no propelente restante; estagiamento move o CG | inércia principal (sem produtos) |
@@ -52,6 +52,9 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
   pressão ≤0,4% (a análise assimila a sondagem). Independente: a previsão de 18 UTC +6 h contra
   a sondagem de 2026-10-18 00 UTC em 10 níveis (925 a 100 hPa): viés −0,39 K, mediana de |ΔT|
   0,64 K, máximo 2,8 K, vento RMS 3,0 m/s, pressão ≤0,23%.
+- HWM14 (`tests/hwm14_test.cpp`): as 740 saídas de `Check/gfortran.txt` da distribuição do NRL (perfis de
+  altura, latitude, hora local, longitude, dia do ano e ap, e os três perfis do DWM07) com diferença máxima
+  de 0,0006 m/s (impressas com 3 casas); acima do GFS o vento é o do HWM14 (antes, zero).
 - NRLMSISE-00: os 17 casos de referência da distribuição do NRL nos 7 algarismos publicados;
   índices da CelesTrak (F10.7 do dia anterior, média de 81 dias, Ap diário e histórico de 3 h).
 - EGM2008 contra o gradiente do potencial somado com funções de Legendre normalizadas diretas

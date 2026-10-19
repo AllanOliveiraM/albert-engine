@@ -80,6 +80,12 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   (https://www.orekit.org, https://www.apache.org/licenses/LICENSE-2.0); alterações: só a
   versão em `double`, estrutura condensada, interface própria. Licença e NOTICE em
   `third_party/orekit/` e `licenses/Orekit` na distribuição.
+- HWM14 (Drob et al. 2015, doi:10.1002/2014EA000089; Naval Research Laboratory, obra do governo dos EUA):
+  porte em C++ de `hwm14.f90` (release HWM14.123114) em `src/physics/hwm14.cpp` e os dados
+  `hwm123114.bin`, `dwm07b104i.dat` e `gd2qd.dat` transcritos em `src/physics/hwm14_data.inc` (SHA-256 no
+  cabeçalho), da cópia do NRL (https://map.nrl.navy.mil/map/pub/nrl/HWM/HWM14/), que não traz licença; a
+  cópia do suplemento do artigo na Wiley está sob CC BY-NC-ND 4.0 e não foi usada. Saída de conferência
+  `Check/gfortran.txt` em `tests/hwm14_check.txt`.
 - CelesTrak (T. S. Kelso): índices de clima espacial `SW-Last5Years.csv`/`SW-All.csv`
   baixados em uso (https://celestrak.org/SpaceData/), com dados de NOAA/SWPC, GFZ Potsdam e
   NRCan; recorte de 2026-10-12 a 22 em `tests/weather_test.cpp`.

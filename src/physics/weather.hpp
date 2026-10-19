@@ -18,7 +18,8 @@ struct WeatherGrid {
 // Linear in time, bilinear horizontally, linear in geopotential height between levels
 // (pressure log-linear); geoid from EGM2008 and latitude-dependent normal gravity convert
 // ellipsoidal heights. Over the top 8 km of the grid, and within 0.5° of its edges, it
-// blends into the upper model (default: standard atmosphere), used alone above and outside.
+// blends into the upper model (default: standard atmosphere), winds included, used alone above
+// and outside.
 class Weather final:public AirModel {
 public:
     explicit Weather(WeatherGrid grid,std::shared_ptr<const AirModel> upper={});

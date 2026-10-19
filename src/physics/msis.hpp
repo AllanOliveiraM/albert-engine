@@ -27,8 +27,9 @@ private:
     double first_=0;std::vector<SpaceWeatherDay> days_;std::vector<bool> present_;
 };
 // NRLMSISE-00 (Picone et al. 2002) as an air model, 0 to 1000 km; total mass density with
-// anomalous oxygen (gtd7d), pressure from the number densities; no winds. With a table the
-// indices follow the instant; outside it (or without one) the fixed indices apply.
+// anomalous oxygen (gtd7d), pressure from the number densities; horizontal winds from HWM14 with
+// the 3-hour ap (the daily one without history). With a table the indices follow the instant;
+// outside it (or without one) the fixed indices apply.
 class Msis final:public AirModel {
 public:
     Msis(SpaceWeather weather,std::string source,std::shared_ptr<const SpaceWeatherTable> table={}):weather_(weather),source_(std::move(source)),table_(std::move(table)){}

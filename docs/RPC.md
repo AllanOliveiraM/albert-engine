@@ -263,7 +263,8 @@ NOAA GFS ao vivo quando o Albert segue o relógio real e o instante está a até
 (recorte de ±6° em torno do sítio, ~1,5 MB por voo, guardado por 48 h), senão o NRLMSISE-00
 (ou a US Standard Atmosphere 1976 sem índices solares); `LIVE_GFS` exige o GFS e falha com `UNAVAILABLE` sem ele;
 `STANDARD_ATMOSPHERE` força a de 1976. Fora desse caso, acima do GFS e sem ele, o ar vem do
-NRLMSISE-00 com os índices solares e geomagnéticos da CelesTrak para o instante do voo. A amostra informa a fonte (`atmosphere`) e o vento
+NRLMSISE-00 com os índices solares e geomagnéticos da CelesTrak para o instante do voo e com os ventos do HWM14
+(fonte `NRLMSISE-00/HWM14`; logs gravados antes dele não se repetem: o replay recusa a fonte antiga). A amostra informa a fonte (`atmosphere`) e o vento
 no veículo, e o painel **Voo** no canto inferior direito mostra estado, vento e fonte.
 
 `terrain_height` põe a base no relevo medido: a altura do sítio vira Copernicus DEM 30 m mais o

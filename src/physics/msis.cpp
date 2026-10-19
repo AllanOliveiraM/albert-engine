@@ -2,6 +2,7 @@
 // CS GROUP), itself following the NRL reference (Picone, Hedin, Drob; U.S. Government work).
 #include "physics/msis.hpp"
 #include "physics/earth.hpp"
+#include "physics/hwm14.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -255,6 +256,7 @@ Air Msis::at(std::int64_t tt,double latitude,double longitude,double height)cons
     const auto o=nrlmsise00(dayOfYear(floorDays(unix)),sec,std::max(height,-5000.)/1000,latitude*180/3.14159265358979323846,lon,lst,now?*now:weather_);
     double n=0;for(int i:{HE,O,N2,O2,AR,H,N})n+=o.density[static_cast<std::size_t>(i)];
     const double k=1.380649e-23,p=n*k*o.temperature,rho=o.density[MASS],mean=rho/n;
-    return{o.temperature,p,rho,std::sqrt(1.4*k*o.temperature/mean),{}};
+    const SpaceWeather& w=now?*now:weather_;const auto wind=hwm14(dayOfYear(floorDays(unix)),sec,std::max(height,0.)/1000,latitude*180/3.14159265358979323846,lon,w.history?w.ap[1]:w.ap[0]);
+    return{o.temperature,p,rho,std::sqrt(1.4*k*o.temperature/mean),{wind.north,wind.east,0}};
 }
 }

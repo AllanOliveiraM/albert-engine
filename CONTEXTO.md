@@ -58,6 +58,13 @@ desempenho fica para quando o Allan parar o resto do PC (os números acima tinha
 CPU estrangulada). Revisão do Codex de 7e95e29..e6fbfab: um P2 (cabeçalho COG com blocos absurdos
 dimensionava a decodificação: 65535² = 16 GiB) corrigido com teste; veículos, uniforms e remoção do
 OpenGL sem regressões. Próximo: passo de desempenho depois dessa medição.
+**HWM14 (18/10/2026):** porte de `hwm14.f90` do NRL em `src/physics/hwm14.*` (dados em `hwm14_data.inc`, gerados
+por um script de leitura dos três arquivos; precisão simples do DWM preservada), igual às 740 saídas de
+`tests/hwm14_check.txt` a 0,0006 m/s; o `Msis` dá o vento do HWM14 (ap de 3 h) e o `Weather` mistura o vento
+de cima na transição (antes zerava). Fonte `NRLMSISE-00/HWM14`: logs antigos não se repetem. ~8 µs por chamada.
+A seguir, pedido do Allan: subida do Saturn V AS-506 contra o relatório de voo, descida do Apollo 11, fotometria
+lunar (McEwen) com luz da Terra, depois som. Notas dos dados levantados em `$SCRATCH/as506-notes.md`,
+`a11-descent-notes.md`, `moon-photometry-notes.md` (scratchpad da sessão).
 **Escopo (18/10/2026):** o Allan adiou o refinamento de Marte (GRAM Suite, atmosfera sazonal e
 termosfera, Viking < 20%) para atualizações futuras; o foco é Terra e Lua. Não puxar itens de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.

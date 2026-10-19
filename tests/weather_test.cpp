@@ -1,5 +1,6 @@
 #include "providers/gfs.hpp"
 #include "providers/space_weather.hpp"
+#include "physics/hwm14.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -134,5 +135,12 @@ int main(int argc,char** argv){try{
     std::printf("300 km: %.0f K, %.3g kg/m3 (%s)\n",thermosphere.temperature,thermosphere.density,layered->source().c_str());
     require(thermosphere.density>5e-12&&thermosphere.density<1e-10&&thermosphere.temperature>700&&thermosphere.temperature<1300,"Thermosphere from NRLMSISE-00");
     near(layered->at(static_cast<std::int64_t>(t),lat,lon,5000).temperature,w.at(static_cast<std::int64_t>(t),lat,lon,5000).temperature,1e-9,"Weather below the blend");
+    { // Winds above the weather from HWM14 with the current 3-hour ap (2026-10-17 12 UTC is day 290), the weather's below.
+        const auto above=layered->at(static_cast<std::int64_t>(t),lat,lon,100e3).wind;const auto hwm=physics::hwm14(290,43200,100,lat/deg,lon/deg,sw->ap[1]);
+        std::printf("100 km: wind %.2f m/s north, %.2f m/s east (HWM14)\n",above.x,above.y);
+        near(above.x,hwm.north,1e-12,"HWM14 north wind above the weather");near(above.y,hwm.east,1e-12,"HWM14 east wind above the weather");
+        require(std::hypot(above.x,above.y)>1,"Wind above the weather");
+        near(layered->at(static_cast<std::int64_t>(t),lat,lon,5000).wind.y,w.at(static_cast<std::int64_t>(t),lat,lon,5000).wind.y,1e-12,"Weather winds below the blend");
+    }
     std::cout<<"weather_test: ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

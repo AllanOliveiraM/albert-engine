@@ -220,7 +220,7 @@ int main(int argc,char** argv){try{
             api::FlightSample again;const auto status=replay(log,again);if(!status.ok())std::cerr<<status.error_message()<<"\n";
             require(status.ok()&&again.state_hash()==hash&&again.tick()==5500&&again.measured_specific_force_meters_per_second2().x()==force,"Replay reproduces the flight");
             api::CreateFlightRequest weathered=create;weathered.set_weather(api::CreateFlightRequest::LIVE_GFS);weathered.set_utc_unix_seconds(1796083200.);weathered.mutable_site()->set_latitude_degrees(27.5);weathered.mutable_site()->set_longitude_degrees(-82.4);
-            {grpc::ClientContext c;require(flight->CreateFlight(&c,weathered,&s).ok()&&s.atmosphere()=="NOAA GFS fixture + NRLMSISE-00 (at start: F10.7 124.0, 81-day 110.0, Ap 6 (OBS), CelesTrak)","Embedded air");}
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,weathered,&s).ok()&&s.atmosphere()=="NOAA GFS fixture + NRLMSISE-00/HWM14 (at start: F10.7 124.0, 81-day 110.0, Ap 6 (OBS), CelesTrak)","Embedded air");}
             {grpc::ClientContext c;api::StepRequest r;r.set_ticks(20000);r.add_commands()->set_ignite(true);require(flight->Step(&c,r,&s).ok()&&s.wind_ned_meters_per_second().x()!=0,"Weathered flight");}
             const auto weatherLog=exported();api::FlightSample second;
             require(replay(weatherLog,second).ok()&&second.state_hash()==s.state_hash()&&second.atmosphere()==s.atmosphere(),"Replay with embedded GFS and space weather");

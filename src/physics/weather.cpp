@@ -53,6 +53,6 @@ Air Weather::at(std::int64_t tt,double latitude,double longitude,double height)c
     const Air g{m.temperature,p,p/(dryGas*tv),std::sqrt(1.4*dryGas*tv),{m.north,m.east,0}};
     if(w>=1)return g;
     const Air upper=above();auto mix=[&](double a,double b){return w*a+(1-w)*b;};
-    return{mix(g.temperature,upper.temperature),mix(g.pressure,upper.pressure),mix(g.density,upper.density),mix(g.sound,upper.sound),g.wind*w};
+    return{mix(g.temperature,upper.temperature),mix(g.pressure,upper.pressure),mix(g.density,upper.density),mix(g.sound,upper.sound),g.wind*w+upper.wind*(1-w)};
 }
 }
