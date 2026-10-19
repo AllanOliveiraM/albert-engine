@@ -166,7 +166,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     earth->castShadow = earth->receiveShadow = true;
     scene.add(earth);
 
-    moonMaterial_ = MeshPhongMaterial::create();
+    moonMaterial_ = MeshPhongMaterial::create();moonMaterial_->name="albert:moon"; // Lunar photometry (src/gpu/programs.cpp).
     moonMaterial_->specular = Color(0x050505);
     moonMaterial_->shininess = 3;
     moonMaterial_->alphaMap=opaqueMask_;moonMaterial_->alphaTest=.5f;
@@ -175,7 +175,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
     moonMaterial_->lightMap=surfaceFillTextures_[1];
     moon->castShadow = moon->receiveShadow = true;
     scene.add(moon);
-    moonTerrainMaterial_=MeshPhongMaterial::create(); // The Moon's, without the bump map.
+    moonTerrainMaterial_=MeshPhongMaterial::create();moonTerrainMaterial_->name="albert:moon"; // The Moon's, without the bump map.
     moonTerrainMaterial_->specular=Color(0x050505);moonTerrainMaterial_->shininess=3;moonTerrainMaterial_->alphaTest=.5f;
 
     sunMaterial_ = ShaderMaterial::create();sunMaterial_->name="albert:sun";
@@ -389,7 +389,7 @@ void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
         regionalHeights_[heightSlot]=images.gpu[2] ? images.gpu[2] : elevationTexture(std::move(*images.height));
     }
     if((images.body=="moon")) {
-        moonDetailMaterial_=MeshPhongMaterial::create();
+        moonDetailMaterial_=MeshPhongMaterial::create();moonDetailMaterial_->name="albert:moon";
         moonDetailMaterial_->map=regionalTextures_[slot];
         moonDetailMaterial_->lightMap=surfaceFillTextures_[1];
         moonDetailMaterial_->specular=Color(0x050505);moonDetailMaterial_->shininess=3;
@@ -397,7 +397,7 @@ void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
         // Terrain must populate depth in the opaque pass before orbit overlays.
         moonDetailMaterial_->transparent=false;moonDetailMaterial_->depthWrite=true;
         moonDetailMaterial_->alphaTest=.001f;
-        moonTerrainDetail_=MeshPhongMaterial::create();moonTerrainDetail_->map=regionalTextures_[slot];moonTerrainDetail_->lightMap=surfaceFillTextures_[1];
+        moonTerrainDetail_=MeshPhongMaterial::create();moonTerrainDetail_->name="albert:moon";moonTerrainDetail_->map=regionalTextures_[slot];moonTerrainDetail_->lightMap=surfaceFillTextures_[1];
         moonTerrainDetail_->specular=Color(0x050505);moonTerrainDetail_->shininess=3;
         patch=Mesh::create(geometry,moonDetailMaterial_);
     } else {

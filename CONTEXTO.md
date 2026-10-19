@@ -75,7 +75,12 @@ cedo). Voos de 1969 precisam do `SW-All.csv` (2,9 MB, 226 s nesta rede): o limit
 **Descida do Apollo 11 (18/10/2026):** `apolloLunarModule()` e `examples/apollo_descent.hpp` (Klumpp + alvos do LM-5,
 trabalha no referencial girante da Lua com `Reading::fixedPosition/fixedVelocity/contact`); parte 3 do `apollo_test`
 (GRGM1200A grau 8 do fixture): Δv a 0,4 m/s do plano, toque 2,4 s antes, portões altos e baixos dentro de ~7 s.
-A API ainda não cria voos fora do pad (descida só no teste). A seguir: fotometria lunar (McEwen) e luz da Terra.
+A API ainda não cria voos fora do pad (descida só no teste).
+**Fotometria lunar e luz da Terra (19/10/2026):** módulo WGSL `photometry` (`lunarFactor`, `earthLight`; antes de `lighting`),
+tipo 4 por nome `albert:moon`, `frame.earth` (f[104..107]), `SceneRenderer::earthshine`/`Display::setEarthshine`; direção
+de vista ortográfica corrigida (`viewDirection`, como o three.js); `lunarAdaptation` sobe a exposição na Lua além da quarta.
+Testes: disco integrado no shader contra ROLO e Lane e Irvine (atmosphere_test), limbo e lado noturno (gpu_scene_test).
+A seguir: som (pedido do Allan depois desses itens).
 **Escopo (18/10/2026):** o Allan adiou o refinamento de Marte (GRAM Suite, atmosfera sazonal e
 termosfera, Viking < 20%) para atualizações futuras; o foco é Terra e Lua. Não puxar itens de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.

@@ -15,6 +15,7 @@
 #include "model_fixture.hpp"
 #include "gpu/context.hpp"
 #include "gpu/scene.hpp"
+#include "lighting.hpp"
 #include "webgpu_programs.hpp"
 #include <string_view>
 #include <memory>
@@ -596,9 +597,17 @@ void regionalTone(){
     require(std::abs((d[0]+d[4])/2.-120)<=1&&std::abs((d[1]+d[5])/2.-130)<=1&&std::abs((d[2]+d[6])/2.-90)<=1&&d[8]==0,"Regional imagery takes the base map's mean colour");
     Image dark(std::vector<unsigned char>{10,10,10,255},1,1);albert::matchTone(dark,reference);require(dark.data()[0]==30,"Tone gains stay within 0.5-3");
 }
+// Dark adaptation at the Moon: none down to quarter phase; the night side seen from the Earth's direction (sun-Moon-camera
+// 180°, full Earth 60.27 radii away) is lit by earthshine alone, ~760 times fainter than the quarter (Allen's law at 90°).
+void lunarAdaptationLevels(){
+    require(albert::lunarAdaptation(0,180,180,60.27)==1.f&&albert::lunarAdaptation(90,90,90,60.27)==1.f,"No adaptation down to quarter phase");
+    const double quarter=std::pow(10.,-.4*(.026*90+4e-9*std::pow(90.,4))),night=albert::lunarAdaptation(180,0,0,60.27),crescent=albert::lunarAdaptation(150,30,30,60.27);
+    std::cout<<"lunar dark adaptation: crescent (150 deg) x"<<crescent<<", night side x"<<night<<" (quarter over earthshine "<<quarter/(.434/(60.27*60.27))<<")\n";
+    require(std::abs(night-quarter/(.434/(60.27*60.27)))<1&&crescent>1&&crescent<night&&albert::lunarAdaptation(180,0,0,30)<night,"Exposure follows the light the Moon sends");
+}
 int main(int argc,char** argv) {
     try {
-        controls();orbitPaths();regionalTone();
+        controls();orbitPaths();regionalTone();lunarAdaptationLevels();
         if(argc>1){
             std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';return 77;}
             if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";graphics(*gpu);require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}

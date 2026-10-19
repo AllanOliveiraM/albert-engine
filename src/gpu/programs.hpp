@@ -30,4 +30,6 @@ extern const char* const air;
 // Blinn-Phong, Lambert, three.js bump mapping; view space, light from `frame`. Every program's
 // module is prelude + atmosphereWgsl + air + lighting + its own WGSL.
 extern const char* const lighting;
+// Lunar photometry (McEwen's lunar-Lambert) and earthshine (frame.earth); math only, before `lighting` in every module.
+extern const char* const photometry;
 }

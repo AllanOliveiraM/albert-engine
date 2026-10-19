@@ -336,7 +336,8 @@ de gravação é erro (a peça vai para a fila de falhas, com espera); um cabeç
 no disco é apagado e baixado de novo; uma peça cuja descarga falhou volta quando a fila esvazia; e a
 thread do terreno nunca recebe exceção de uma fonte (o nó fica provisório). Em Marte (até 3 raios) a grade MOLA do pacote e blocos MEGDR de 128 postes por grau a
 partir do nível 7 (raio MOLA menos o elipsoide IAU; acima de 88° de latitude só a grade). A
-exposição fotográfica é a do corpo perto da câmera (Lua 2,1; demais pela distância ao Sol), e a luz
+exposição fotográfica é a do corpo perto da câmera (Lua 2,1; demais pela distância ao Sol; na Lua, passada a fase de
+quarto, ela sobe com a luz que a Lua manda, até 1000×, e o lado noturno aparece na luz da Terra: `lunarAdaptation`), e a luz
 do Sol da cena é a irradiância ali (2,4/d²): céu, luz do ar, terreno e veículos na mesma escala; as
 duas deslizam com o mesmo filtro, então o produto não salta na borda dos 3 raios. Com o
 terreno ativo os remendos regionais ficam ocultos e a imagem regional vai para os nós inteiramente
@@ -434,6 +435,12 @@ trigonométrica IAU_MOON do NASA/NAIF `pck00011`, validada contra CSPICE; não u
 PCK lunar binário de alta precisão. Mapas de relevo, vegetação, cidades e manchas
 solares são estáticos. Atmosfera (sem espalhamento múltiplo), reflexos inferidos do mapa e luz auxiliar
 lunar são recursos visuais, separados das posições/dimensões astronômicas.
+A superfície da Lua (materiais `albert:moon`) usa a fotometria lunar-Lambert de McEwen (1996) no lugar do
+Phong: sem escurecimento no limbo na Lua cheia, surto de oposição e a curva de fase medida (o disco
+integrado no shader fica a ≤0,045 mag do ROLO de 20° a 97° e a ≤0,11 mag de Lane e Irvine até 110°; Lua cheia
+10,2× a quarto); R30 = 0,866 × o albedo do mapa mantém o brilho do Lambert em i = 30°, e = 0. A luz da Terra
+(`earthLight`) ilumina todos os materiais embutidos além de 3 raios terrestres: fonte pontual de albedo geométrico
+0,434 com a curva de fase de Mallama e Hilton (0,162 W/m² na Lua com a Terra cheia).
 A opção de clarear o lado escuro da Lua usa a direção solar transformada para
 coordenadas lunares e atua somente no hemisfério sem iluminação direta, com
 transição no terminador. A face oculta e a face voltada à Terra não determinam

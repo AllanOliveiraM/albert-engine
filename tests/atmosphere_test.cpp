@@ -237,6 +237,46 @@ int main(){
             std::printf("near the ground: %.0f of 1024 short segments not finite\n",farValues[2]);
             near("Segments shorter than an f32 step at the ground stay finite",farValues[2],0,.5);
             if(!(v[44]>0&&std::isfinite(v[44])&&std::isfinite(v[40]))){std::printf("FAIL body below the model horizon is black or not finite\n");++failures;}else std::printf("ok   body below the model horizon sees the horizon's air\n");
+            { // Lunar photometry (McEwen's lunar-Lambert) summed over the disc in the shader against the Moon's measured phase curve,
+              // normalised at 30 degrees: ROLO (Kieffer and Stone 2005, 553.8 nm, zero libration, from rimopy's coefficients) and
+              // Lane and Irvine (1973, Table V, V band); and earthshine from the Earth 384,400 km away (60.27 radii).
+                float shine[128]{};shine[0]=shine[5]=shine[10]=shine[15]=1;shine[40]=1;shine[43]=1;shine[107]=1; // View identity, the sun towards +x, the Earth at the origin.
+                WGPUBuffer shineBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),shineBuffer,0,shine,sizeof shine);
+                const std::string lunarCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+albert::gpu::photometry+R"(
+@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
+fn disc(alpha: f32) -> f32 { // A uniform R30 = 0.064 disc seen along +z, the sun `alpha` degrees off the line of sight: I/F summed over its projection.
+    let n = 160; let l = vec3f(sin(radians(alpha)), 0.0, cos(radians(alpha))); var sum = 0.0;
+    for (var i = 0; i < n; i++) { for (var j = 0; j < n; j++) {
+        let x = (f32(i) + 0.5) / f32(n) * 2.0 - 1.0; let y = (f32(j) + 0.5) / f32(n) * 2.0 - 1.0; let s = x * x + y * y;
+        if (s < 1.0) { let p = vec3f(x, y, sqrt(1.0 - s)); let mu0 = dot(p, l); if (mu0 > 0.0) { sum += lunarFactor(mu0, p.z, alpha, 0.064); } } } }
+    return sum;
+}
+@compute @workgroup_size(1) fn main() {
+    let angles = array<f32, 16>(1.55, 7.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 97.0, 100.0, 110.0, 120.0, 0.0);
+    for (var k = 0; k < 16; k++) { probe[k / 4][k % 4] = disc(angles[k]); }
+    // Full phase along the equator, 0.5, 0.8 and 0.95 of the radius out, and the centre: no limb darkening.
+    probe[4] = vec4f(lunarFactor(0.866, 0.866, 0.0, 0.064), lunarFactor(0.6, 0.6, 0.0, 0.064), lunarFactor(0.3122, 0.3122, 0.0, 0.064), lunarFactor(1.0, 1.0, 0.0, 0.064));
+    // Earthshine at full Earth and at quadrature 60.27 radii out, and 1.2 radii out (the air's domain); towards the Earth.
+    probe[5] = vec4f(earthLight(vec3f(60.27, 0.0, 0.0)).w, earthLight(vec3f(0.0, 60.27, 0.0)).w, earthLight(vec3f(1.2, 0.0, 0.0)).w, 0.0);
+    probe[6] = vec4f(earthLight(vec3f(60.27, 0.0, 0.0)).xyz, 0.0);
+    probe[7] = vec4f(skyRadiance(vec3f(0.0, 0.0, 6400.0), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 0.0, 1.0)).transmittance, 0.0); // The tables bound as elsewhere.
+}
+)";
+                const auto lunar=run(lunarCode,shineBuffer);wgpuBufferRelease(shineBuffer);
+                const double angles[]{1.55,7,10,20,30,40,50,60,70,80,90,97,100,110,120};
+                auto at=[&](double alpha){for(int k=0;k<15;++k)if(angles[k]==alpha)return -2.5*std::log10(lunar[static_cast<std::size_t>(k)]/lunar[4]);return 1e9;}; // Magnitudes past 30 degrees.
+                const double rolo[][2]{{20,-.263},{40,.262},{50,.530},{60,.810},{70,1.109},{80,1.434},{90,1.793},{97,2.067}};
+                const double lane[][2]{{20,-.27},{40,.27},{50,.51},{60,.77},{70,1.04},{80,1.34},{90,1.68},{100,2.07},{110,2.52}};
+                for(const auto& r:rolo){std::printf("lunar phase %3.0f deg: %+.3f mag (ROLO %+.3f)\n",r[0],at(r[0]),r[1]);near("Lunar phase curve against ROLO (0.06 mag)",at(r[0]),r[1],.06);}
+                for(const auto& r:lane){std::printf("lunar phase %3.0f deg: %+.3f mag (Lane and Irvine %+.3f)\n",r[0],at(r[0]),r[1]);near("Lunar phase curve against Lane and Irvine (0.15 mag)",at(r[0]),r[1],.15);}
+                const double full=lunar[1]/lunar[10],opposition=-2.5*std::log10(lunar[0]/lunar[4]);
+                std::printf("full (7 deg) over quarter (90 deg) Moon: %.2f (ROLO 9.6, Lane and Irvine 9.8, Lambert 3.14); 1.55 deg: %+.3f mag (ROLO %+.3f)\n",full,opposition,-2.5*std::log10(2.50));
+                near("Full Moon about ten times the quarter",full,10.3,1.3);near("Opposition surge against ROLO at 1.55 deg (0.2 mag)",opposition,-2.5*std::log10(2.50),.2);
+                for(int i=0;i<3;++i)near("No limb darkening at full phase",lunar[16+i]/lunar[19],1,.01);
+                std::printf("earthshine at 384,400 km: full Earth %.4g, quadrature %.4g of the sunlight (0.162 W/m2 at full Earth: %.4g); 1.2 radii: %.3g\n",lunar[20],lunar[21],1.1948e-4,lunar[22]);
+                near("Earthshine at full Earth: 0.434 (R/d)^2",lunar[20],.434/(60.27*60.27),1e-6);near("... at quadrature, Mallama and Hilton's curve",lunar[21],.434*std::pow(10.,.4*90*(1.060e-3-2.054e-4*90))/(60.27*60.27),5e-7);
+                near("... none within the air's reach",lunar[22],0,0);near("... towards the Earth",lunar[24],-1,1e-6);
+            }
             // The scene renderer with this air: a camera 10 m above a grey globe of radius 1 (6378.137 km)
             // facing the horizon, the sun 30 degrees up behind it, a red box in front of the sky.
             using namespace threepp;

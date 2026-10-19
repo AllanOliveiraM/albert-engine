@@ -78,7 +78,7 @@ void pack(std::vector<std::byte>& out,std::size_t at,Uniform u,const UniformValu
 const char* const builtinWgsl=R"(
 struct Material { colour: vec4f, emissive: vec4f, params: vec4f, flags: vec4f, specular: vec4f, more: vec4f };
 // params: roughness, metalness or shininess, alphaTest, lightMapIntensity
-// flags: map sRGB, kind (0 basic, 1 phong, 2 standard, 3 lambert), has alphaMap, has lightMap
+// flags: map sRGB, kind (0 basic, 1 phong, 2 standard, 3 lambert, 4 lunar), has alphaMap, has lightMap
 // specular: Phong specular colour, bumpScale; more: has bumpMap, has roughnessMap, double sided, flat shading; emissive.w: bumpMap wraps
 @group(2) @binding(0) var<uniform> material: Material;
 @group(2) @binding(1) var map: texture_2d<f32>;
@@ -114,8 +114,10 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
     var n = geometryNormal; if (material.more.x > 0.5) { n = bumpNormal(v.position, geometryNormal, dBx, dBy, face); }
     if (material.flags.z > 0.5) { base.a = base.a * mask; }
     if (base.a < material.params.z) { discard; }
-    let light = airLight(v.world, v.worldNormal);
-    let mapped = select(vec3f(0.0), lightTexel * material.params.w, material.flags.w > 0.5); let extra = mapped + light.sky * frame.sunColor.rgb;
+    let light = airLight(v.world, v.worldNormal); let earth = earthLight(v.world);
+    let mapped = select(vec3f(0.0), lightTexel * material.params.w, material.flags.w > 0.5);
+    let shine = earth.w * max(dot(n, earth.xyz), 0.0) * frame.sunColor.rgb; // Earthshine on diffuse surfaces.
+    let extra = mapped + light.sky * frame.sunColor.rgb + shine;
     let shadow = shadowFactor(v.world, v.worldNormal) * light.sun;
     var colour: vec3f;
     let kind = material.flags.y;
@@ -126,7 +128,8 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
             roughness = mix(roughness, sqrt(sqrt(0.003 + 0.00512 * frame.weather.z)), 1.0 - smoothstep(0.35, 0.5, roughTexel.g)); }
         colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra, shadow)
             + airReflection(v.world, n, v.position, roughness, mix(vec3f(0.04), base.rgb, material.params.y)); // The sky on smooth water.
-    } else if (kind > 2.5) { colour = lambertLight(base.rgb, n, mapped * PI_L + light.sky * frame.sunColor.rgb, shadow); } // threepp keeps π on Lambert light maps.
+    } else if (kind > 3.5) { colour = lunarLight(base.rgb, n, v.position, mapped + light.sky * frame.sunColor.rgb, shadow, earth); }
+    else if (kind > 2.5) { colour = lambertLight(base.rgb, n, mapped * PI_L + light.sky * frame.sunColor.rgb + shine, shadow); } // threepp keeps π on Lambert light maps.
     else { colour = phongLight(base.rgb, material.specular.rgb, material.params.y, n, v.position, extra, shadow); }
     return vec4f(finish(airApply(v.world, colour + material.emissive.rgb)), base.a);
 }
@@ -262,7 +265,7 @@ struct SceneRenderer::Impl {
     const Compiled* program(const std::string& name){
         if(const auto it=compiled.find(name);it!=compiled.end())return &it->second;
         const Program* p=gpu::program(name);if(!p){report("no WebGPU program for material '"+name+"'");return nullptr;}
-        Compiled c;c.program=*p;const std::string source=std::string(prelude)+atmosphereWgsl+gpu::air+lighting+p->wgsl;
+        Compiled c;c.program=*p;const std::string source=std::string(prelude)+atmosphereWgsl+gpu::air+photometry+lighting+p->wgsl;
         WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code=sv(source);WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;md.label=sv(name);
         c.module=wgpuDeviceCreateShaderModule(device,&md);
         std::vector<WGPUBindGroupLayoutEntry> entries(1+2*p->textures.size());
@@ -405,6 +408,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
             if(auto* s=dynamic_cast<MeshStandardMaterial*>(&m)){f[8]=s->roughness;f[9]=s->metalness;f[13]=2;}
             else if(auto* p=dynamic_cast<MeshPhongMaterial*>(&m)){f[9]=p->shininess;f[13]=1;f[16]=p->specular.r;f[17]=p->specular.g;f[18]=p->specular.b;}
             else if(dynamic_cast<MeshLambertMaterial*>(&m)){f[13]=3;}
+            if(m.name=="albert:moon")f[13]=4; // Lunar photometry over the map's albedo.
             if(auto* fl=dynamic_cast<MaterialWithFlatShading*>(&m))f[23]=fl->flatShading?1.f:0.f;
             threepp::Texture *map=nullptr,*alpha=nullptr,*light=nullptr,*bump=nullptr,*rough=nullptr;
             if(auto* w=dynamic_cast<MaterialWithMap*>(&m))map=w->map.get();
@@ -537,6 +541,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     if(airTables&&air.clouds&&air.cloudShadow>0){cloudView=g.view(air.clouds,true,cloudSerial);f[100]=air.cloudKm;f[101]=std::min(air.cloudShadow,1.f);}
     f[103]=air.polarRatio>0?air.polarRatio:1.f;
     if(airTables)f[102]=std::max(air.surfaceWind,0.f); // The sea's roughness (Cox-Munk).
+    if(earthshine.earth&&earthshine.radius>0){Vector3 e;e.setFromMatrixPosition(*earthshine.earth->matrixWorld);f[104]=e.x;f[105]=e.y;f[106]=e.z;f[107]=earthshine.radius;}
     g.bindFrame(shadowing?g.shadowView:g.dummyShadowView,airTables,cloudView,cloudSerial);
     Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);f[32]=eye.x;f[33]=eye.y;f[34]=eye.z;f[35]=1;
     f[36]=static_cast<float>(width);f[37]=static_cast<float>(height);f[38]=camera.nearPlane;

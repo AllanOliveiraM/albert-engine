@@ -6,6 +6,7 @@
 #include <threepp/threepp.hpp>
 #include <threepp/materials/ShaderMaterial.hpp>
 #include <threepp/textures/DataTexture.hpp>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -133,6 +134,33 @@ struct Material { size: f32 };
             const std::size_t before=renderer.vertexBytes();frameOf(sc,cam);const std::size_t added=renderer.vertexBytes()-before;
             std::printf("shared attribute: %zu bytes resident for %zu\n",added,bytes);
             require(added>bytes/2&&added<bytes*3/2&&renderer.drawn()==8,"One GPU copy for a shared attribute"); // Not eight; other buffers may go meanwhile.
+        }
+        { // Lunar photometry by material name ("albert:moon"): a sphere lit from the camera's side is as bright at 0.9 of its
+          // radius as at the centre (no limb darkening at full phase), where Phong falls off as cos i; earthshine (an Earth
+          // 60.27 radii behind the camera, the sun behind the sphere) lights its night side, which stays black without it.
+            auto linear=[](int c){const double v=c/255.;return v<=.04045?v/12.92:std::pow((v+.055)/1.055,2.4);};
+            auto disc=[&](const char* name,Vector3 sunAt,float intensity,const Object3D* earth){
+                Scene sc;sc.background=Color(0,0,0);OrthographicCamera cam(-1.2f,1.2f,.8f,-.8f,.1f,100);cam.position.set(0,0,5);
+                auto mat=MeshPhongMaterial::create();mat->color=Color(.5f,.5f,.5f);mat->specular=Color(0,0,0);mat->name=name;
+                sc.add(Mesh::create(SphereGeometry::create(.75f,128,64),mat));auto sun=DirectionalLight::create(Color(1,1,1),intensity);sun->position.copy(sunAt);sc.add(sun);
+                renderer.toneMapping=false;renderer.earthshine={earth,earth?1.f:0.f};
+                WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);renderer.render(sc,cam,view,w,h,en);
+                WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);
+                renderer.toneMapping=true;renderer.earthshine={};
+                const auto shot=read(*gpu,target,w,h);auto at=[&](double x){const auto* q=&shot[(static_cast<std::size_t>(h/2)*w+static_cast<unsigned>(std::lround(w/2.+x*.75/1.2*w/2.)))*4];return linear(q[1]);};
+                return std::array<double,2>{at(0),at(.9)};};
+            const auto moon=disc("albert:moon",Vector3(0,0,10),.5f,nullptr),phong=disc("",Vector3(0,0,10),.5f,nullptr);
+            std::printf("full phase at 0.9 of the radius over the centre: lunar %.3f, Phong %.3f\n",moon[1]/moon[0],phong[1]/phong[0]);
+            require(std::abs(moon[1]/moon[0]-1)<.08&&phong[1]/phong[0]<.6,"Lunar photometry: no limb darkening at full phase");
+            Object3D earth;earth.position.set(0,0,60.27f);earth.updateMatrixWorld();
+            const auto lit=disc("albert:moon",Vector3(0,0,-10),6000,&earth),dark=disc("albert:moon",Vector3(0,0,-10),6000,nullptr);
+            // At full Earth from the near face (59.52 radii): 6000 × 0.434 / 59.52² × R30 / π × F(0) / (X(30°,0,30°) F(30°)), R30 = 0.866 × 0.5.
+            const double r30=.8660254*.5,pi=3.14159265358979;
+            auto lobes=[&](double alpha){const double a=alpha*pi/180,c=std::cos(a),g1=.14*r30-.262,g2=.44;
+                return (1+1.78/(1+std::tan(a/2)/.048))*(.45*(1-g1*g1)/std::pow(1+g1*g1+2*g1*c,1.5)+.55*(1-g2*g2)/std::pow(1+g2*g2+2*g2*c,1.5));};
+            const double expected=6000*.434/(59.52*59.52)*r30/pi/(.90383*lobes(30)*(1-3*.07716)/lobes(3));
+            std::printf("night side: %.3f with earthshine (expected %.3f), %.3f without\n",lit[0],expected,dark[0]);
+            require(std::abs(lit[0]/expected-1)<.04&&dark[0]<.002,"Earthshine lights the night side");
         }
         { // Multisampling resolves into the target: the first scene's flat colours survive it.
             renderer.samples=4;const auto p=frameOf(scene,camera);renderer.samples=1;

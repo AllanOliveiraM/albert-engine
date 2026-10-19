@@ -23,12 +23,17 @@ struct Frame {
     air: vec4f,              // Camera in the planet frame; w: strength (0: no air this frame).
     airSun: vec4f,           // Towards the sun in the planet frame; w: the model's ground offset (km, <= 0).
     weather: vec4f,          // x: cloud layer height over the air's ground (km); y: its opacity (0: none); z: surface wind (m/s, 0: none); w: polar/equatorial axis ratio.
+    earth: vec4f,            // The Earth's centre (world); w: its radius (world units), 0: no earthshine.
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var shadowMap: texture_depth_2d;
 @group(0) @binding(2) var shadowSampler: sampler_comparison;
 @group(1) @binding(0) var<uniform> object: Object;
+fn viewDirection(position: vec3f) -> vec3f { // Towards the eye from a view-space point: along +z under an orthographic projection.
+    if (frame.projection[3][3] > 0.5) { return vec3f(0.0, 0.0, 1.0); }
+    return normalize(-position);
+}
 // threepp's PCF directional shadow: normal bias in world space, depth bias, 3x3 comparisons.
 fn shadowFactor(world: vec3f, normal: vec3f) -> f32 {
     if (frame.shadow.x < 0.5 || object.flags.x < 0.5) { return 1.0; }
@@ -164,7 +169,7 @@ fn airApply(world: vec3f, colour: vec3f) -> vec3f { // Aerial perspective: an op
 // the diffuse irradiance. View-space normal and position; f0: reflectance at normal incidence.
 fn airReflection(world: vec3f, viewNormal: vec3f, viewPosition: vec3f, roughness: f32, f0: vec3f) -> vec3f {
     if (frame.air.w <= 0.0 || roughness >= 0.8) { return vec3f(0.0); }
-    let v = normalize(-viewPosition); let nv = clamp(dot(viewNormal, v), 0.0, 1.0);
+    let v = viewDirection(viewPosition); let nv = clamp(dot(viewNormal, v), 0.0, 1.0);
     let toWorld = transpose(mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz)); // The view's rotation inverted.
     let ray = normalize((frame.planet * vec4f(toWorld * reflect(-v, viewNormal), 0.0)).xyz);
     let f = f0 + (max(vec3f(1.0 - roughness), f0) - f0) * pow(1.0 - nv, 5.0);
@@ -173,6 +178,38 @@ fn airReflection(world: vec3f, viewNormal: vec3f, viewPosition: vec3f, roughness
 fn airFilter(world: vec3f) -> vec3f { // Transmittance only: light added over what is behind it.
     if (frame.air.w <= 0.0) { return vec3f(1.0); }
     return mix(vec3f(1.0), airSky(world).transmittance, frame.air.w);
+}
+)";
+const char* const photometry=R"(
+// McEwen's lunar-Lambert photometry at 0.56 µm (A precise lunar photometric function, LPSC 27, 841, 1996; the disk
+// term's factor 2 as in USGS ISIS): I/F = R30 X(i, e, α) / X(30°, 0°, 30°) F(α) / F(30°), R30 the reflectance at
+// i = 30°, e = 0, α = 30°. mu0, mu: cosines of incidence and emission; alpha: phase angle (degrees).
+fn lunarDisk(mu0: f32, mu: f32, alpha: f32) -> f32 {
+    let l = 1.0 + alpha * (-0.019 + alpha * (2.42e-4 - 1.46e-6 * alpha)); // L(α): no limb darkening at full phase.
+    return max(2.0 * l * mu0 / max(mu0 + mu, 1e-4) + (1.0 - l) * mu0, 0.0);
+}
+fn lunarLobes(alpha: f32, r30: f32) -> f32 { // Shadow hiding (B0 1.78, h 0.048) times two Henyey-Greenstein lobes.
+    let a = radians(alpha); let c = cos(a); let g1 = 0.14 * r30 - 0.262; let g2 = 0.44;
+    let p = 0.45 * (1.0 - g1 * g1) / pow(1.0 + g1 * g1 + 2.0 * g1 * c, 1.5) + 0.55 * (1.0 - g2 * g2) / pow(1.0 + g2 * g2 + 2.0 * g2 * c, 1.5);
+    return (1.0 + 1.78 / (1.0 + tan(a * 0.5) / 0.048)) * p;
+}
+fn lunarPhase(alpha: f32, r30: f32) -> f32 { // F(α), 1 at α = 0: Buratti's linear opposition slope below 3°.
+    let slope = -0.07716;
+    if (alpha < 3.0) { return 1.0 + slope * alpha; }
+    return lunarLobes(alpha, r30) * (1.0 + 3.0 * slope) / lunarLobes(3.0, r30);
+}
+fn lunarFactor(mu0: f32, mu: f32, alpha: f32, r30: f32) -> f32 { // I/F per unit R30.
+    return lunarDisk(mu0, mu, alpha) / 0.90383 * lunarPhase(alpha, r30) / lunarPhase(30.0, r30);
+}
+// Earthshine: sunlight the Earth reflects, a point source at its centre of geometric albedo 0.434 with Mallama and Hilton's
+// phase curve (PASP 130, 2018); beyond 3 Earth radii, fading in from 1.5 (nearer, the air's light stands for it).
+// xyz: towards the Earth (view space); w: the irradiance as a fraction of the sun's (0: none).
+fn earthLight(world: vec3f) -> vec4f {
+    if (frame.earth.w <= 0.0) { return vec4f(0.0); }
+    let d = frame.earth.xyz - world; let distance = length(d); let r = distance / frame.earth.w;
+    let beta = degrees(acos(clamp(dot(-d / distance, frame.sun.xyz), -1.0, 1.0))); // Sun-Earth-point.
+    let k = 0.434 * pow(10.0, 0.4 * beta * (1.060e-3 - 2.054e-4 * beta)) / (r * r) * smoothstep(1.5, 3.0, r) * frame.sun.w;
+    return vec4f(normalize((frame.view * vec4f(d, 0.0)).xyz), k);
 }
 )";
 const char* const lighting=R"(
@@ -197,11 +234,11 @@ fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geom
     let dxy = max(abs(dpdx(geometryNormal)), abs(dpdy(geometryNormal)));
     let roughness = min(max(roughnessIn, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
     let diffuse = albedo * (1.0 - metalness); let f0 = mix(vec3f(0.04), albedo, metalness);
-    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
+    let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
     return nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * diffuse / PI_L;
 }
 fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
-    let l = sunView(); let v = normalize(-position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
+    let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
     return nl * frame.sunColor.rgb * sun * (albedo / PI_L + blinnPhong(n, l, v, specular, shininess)) + (frame.ambient.rgb + extra) * albedo / PI_L;
 }
 // three.js perturbNormalArb with dHdxy_fwd (invariant under WebGPU's flipped framebuffer y).
@@ -220,6 +257,14 @@ fn heightAt(image: texture_2d<f32>, uv: vec2f, wraps: bool) -> f32 { // wraps: l
     let a = textureLoad(image, vec2i(x0, y0), 0).r; let b = textureLoad(image, vec2i(x1, y0), 0).r;
     let c = textureLoad(image, vec2i(x0, y1), 0).r; let d = textureLoad(image, vec2i(x1, y1), 0).r;
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+// The Moon's surface (materials named "albert:moon"): McEwen's photometry for the sunlight and the earthshine, with
+// R30 = 0.866 × the albedo (the Lambert brightness at i = 30°, e = 0); ambient and light maps stay diffuse.
+fn lunarLight(albedo: vec3f, n: vec3f, position: vec3f, extra: vec3f, sun: vec3f, earth: vec4f) -> vec3f {
+    let v = viewDirection(position); let mu = max(dot(n, v), 1e-3); let r30 = albedo * 0.8660254; let r = dot(r30, vec3f(0.2126, 0.7152, 0.0722));
+    let l = sunView(); let direct = lunarFactor(max(dot(n, l), 0.0), mu, degrees(acos(clamp(dot(l, v), -1.0, 1.0))), r) * frame.sun.w;
+    let bounce = select(0.0, lunarFactor(max(dot(n, earth.xyz), 0.0), mu, degrees(acos(clamp(dot(earth.xyz, v), -1.0, 1.0))), r) * earth.w, earth.w > 0.0);
+    return r30 / PI_L * frame.sunColor.rgb * (direct * sun + bounce) + (frame.ambient.rgb + extra) * albedo / PI_L;
 }
 fn lambertLight(albedo: vec3f, n: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
     let nl = clamp(dot(n, sunView()), 0.0, 1.0) * frame.sun.w;

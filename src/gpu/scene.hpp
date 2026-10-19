@@ -31,6 +31,8 @@ public:
         float surfaceWind=0; // m/s: water (texels under 0.5 in the roughness maps of materials named "albert:water") takes Cox-Munk's slopes (0: the maps').
         float polarRatio=1;} air; // The body's polar/equatorial axis ratio: the layer's map is in geodetic latitude.
     unsigned airSteps=4;
+    // Earthshine on lit materials (earthLight in the photometry module): the Earth and its radius in world units (0: none).
+    struct Earthshine {const threepp::Object3D* earth=nullptr;float radius=0;} earthshine;
     // Clears target (scene background) and depth, then draws, recording into encoder. Uniforms are
     // written through the queue: submit this encoder before the next render().
     void render(threepp::Scene& scene,threepp::Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder);

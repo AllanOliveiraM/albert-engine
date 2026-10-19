@@ -2470,7 +2470,13 @@ int albert::runRenderer(int argc, char** argv) {
             const float bodyAu=solids.contains(exposed)?sunPosition.distanceTo(solids.nodes().at(exposed)->position)*6378137.f/149597870700.f:1.f;
             // It glides with the exposure (same filter in log space), so their product never steps at the 3-radius boundary.
             sunlight->intensity=std::exp(std::lerp(std::log(sunlight->intensity),std::log(2.4f/(bodyAu*bodyAu)),-std::expm1(-dt/.65f)));
-            const float photographicExposure=(exposed==targets::Moon?2.1f:solids.contains(exposed)?std::clamp(1.05f*bodyAu*bodyAu,.25f,1200.f):1.05f)
+            // At the Moon the eye adapts in the dark: past quarter phase the exposure follows the light it sends (earthshine on the night side).
+            float adaptation=1;
+            if(exposed==targets::Moon){const Vector3 m=planets.moon->position,e=planets.earth->position;
+                auto angle=[](Vector3 a,Vector3 b){return std::acos(std::clamp(static_cast<double>(a.normalize().dot(b.normalize())),-1.,1.))*180/PI;};
+                adaptation=albert::lunarAdaptation(angle(sunPosition.clone().sub(m),camera->position.clone().sub(m)),angle(e.clone().sub(m),camera->position.clone().sub(m)),
+                    angle(sunPosition.clone().sub(e),m.clone().sub(e)),m.distanceTo(e)/planets.earth->scale.x);}
+            const float photographicExposure=(exposed==targets::Moon?2.1f*adaptation:solids.contains(exposed)?std::clamp(1.05f*bodyAu*bodyAu,.25f,1200.f):1.05f)
                 *(1.f+planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f)));
             graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
             // The body whose regional detail the view wants: the focus, or the body under a focused vehicle near
@@ -2600,6 +2606,7 @@ int albert::runRenderer(int argc, char** argv) {
                 if(marsAir)graphics.setAir(mars->second.get(),6378.137f,planets.atmosphereVisibility(),0.f,true);
                 else{Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
                     graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}}
+            graphics.setEarthshine(earth.get(),earth->scale.x); // The Earth mesh is a unit sphere.
             graphics.render(*scene, *camera);
             graphics.ui();
 #ifdef ALBERT_HAS_RPC
