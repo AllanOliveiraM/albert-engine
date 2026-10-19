@@ -25,6 +25,9 @@ Estado e cálculo em `double`, SI, passo fixo; nada depende do FPS.
 | Radiação solar | pressão de esfera (`Vehicle::sunArea`, `reflectivity`; 1361 W/m² a 1 au) com umbra e penumbra cônicas do corpo central | desligada por padrão; sem albedo nem infravermelho do planeta; atitude ignorada |
 | Solo | pad com a base do conjunto no solo, preso girando com o corpo até empuxo > peso; solo a uma altura elipsoidal fixa (do relevo medido com `terrain_height`); pernas de pouso (`Stage::legs`) como molas-amortecedores com atrito de Coulomb regularizado (linear abaixo de 5 cm/s), força e momento em cada pé; sem pernas, toque detectado no CG e o veículo para | solo plano em torno do sítio; sem deformação do regolito nem rebote do corpo |
 
+Chaves por voo (`Environment`: `sunMoon`, `relativity`, `atmosphere`, `wind`, `solarPressure`; na API, `PhysicsSettings`, e
+o grau 0 da gravidade como massa pontual) removem cada modelo para estudos e validação.
+
 Integração RK4 com passo fixo (1 ms por padrão); `advance` divide o passo no instante
 exato do fim do propelente e para ali (e também na liberação do pad e no toque), para que
 estagiamentos programados sejam exatos. Em voo balístico acima da atmosfera (sem empuxo nem torque

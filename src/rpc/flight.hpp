@@ -25,6 +25,7 @@ public:
     // flight or off the Earth (the acoustics are Earth air's).
     struct Sound {double utc=0;physics::acoustics::Emission emission;physics::Planet planet;std::shared_ptr<const physics::AirModel> air;};
     std::optional<Sound> sound()const;
+    void physicsDefaults(const ::albert::v1::PhysicsSettings& defaults); // For flights that leave switches unset (the Física menu).
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

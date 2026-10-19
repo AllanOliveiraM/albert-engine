@@ -18,7 +18,7 @@ struct Focus {ObjectId id;bool reset=false;};
 struct Orbit {double azimuthRadians=0,elevationRadians=0,distanceScale=1;};
 struct SetTime {std::optional<double> utcSeconds,rate;bool live=false,hold=false;}; // Unset fields keep their value; hold moves the instant without a discontinuity.
 // Latest state of the external flight, for the on-screen panel; active=false hides it.
-struct FlightTelemetry {bool active=false,burning=false,clamped=false,landed=false;std::string vehicle,atmosphere;double elapsed=0,height=0,speed=0,mach=0,dynamicPressure=0,mass=0,propellant=0,windNorth=0,windEast=0;int stage=0,stages=0;};
+struct FlightTelemetry {bool active=false,burning=false,clamped=false,landed=false;std::string vehicle,atmosphere,physics;double elapsed=0,height=0,speed=0,mach=0,dynamicPressure=0,mass=0,propellant=0,windNorth=0,windEast=0;int stage=0,stages=0;};
 using Command=std::variant<Create,Remove,Visibility,Append,Replace,Focus,Orbit,InstallModel,RemoveModel,CreateLayer,RemoveLayer,LayerVisibility,SetTime,FlightTelemetry>;
 enum class Code {Ok,Invalid,NotFound,Exhausted,Unavailable,Cancelled};
 struct Reply {Code code=Code::Ok;std::string message;std::uint64_t revision=0;};

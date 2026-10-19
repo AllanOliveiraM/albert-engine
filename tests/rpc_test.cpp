@@ -289,6 +289,14 @@ int main(int argc,char** argv){try{
                 (void)bridge.submit(SetTime{t0,{},false,false}).result.get();(void)bridge.submit(Remove{"mars"}).result.get();
             }
         }
+        { // Physics switches: unset ones resolved (all on by default) and reported; off ones change the flight; point mass.
+            api::CreateFlightRequest a=create;a.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);api::FlightSample x;
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,a,&x).ok()&&x.physics().has_wind()&&x.physics().third_bodies()&&x.physics().relativity()&&x.physics().atmosphere(),"Switches resolved on");}
+            a.mutable_physics()->set_atmosphere(false);a.set_gravity_degree(0);
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,a,&x).ok()&&!x.physics().atmosphere()&&x.air_density_kilograms_per_meter3()==0&&x.static_pressure_pascals()==0,"Atmosphere off: vacuum");}
+            {const auto snap=bridge.snapshot();(void)snap;}
+            a.set_gravity_degree(1);{grpc::ClientContext c;require(flight->CreateFlight(&c,a,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Degree 1 accepted");}
+        }
         { // Every preset as a definition (GetVehicle) flies as CUSTOM exactly as the preset; malformed definitions are refused.
             auto fly=[&](const api::CreateFlightRequest& r,bool engine){api::FlightSample x;
                 {grpc::ClientContext c;const auto st=flight->CreateFlight(&c,r,&x);if(!st.ok())std::cerr<<st.error_message()<<"\n";require(st.ok(),"Flight from a definition");}

@@ -12,6 +12,7 @@ public:
     ~Server();
     unsigned port() const;
     std::optional<FlightServices::Sound> flightSound()const; // See FlightServices::sound.
+    void physicsDefaults(const ::albert::v1::PhysicsSettings& defaults); // See FlightServices::physicsDefaults.
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

@@ -309,6 +309,11 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | `thruster_duty` | Ciclo de trabalho (0–1) de um propulsor de RCS, até o próximo comando de torque |
 | `surface_radians` | Deflexão comandada de uma superfície de controle, limitada e alcançada na taxa do atuador |
 
+**Modelos físicos por voo.** `physics` (`PhysicsSettings`) liga ou desliga as marés dos terceiros corpos, a relatividade,
+a atmosfera (desligada: vácuo), o vento e a pressão de radiação solar; campos não definidos vêm dos padrões do Albert (a
+página "Fisica" do menu; tudo ligado de fábrica) e o voo grava os resolvidos (amostra e log: o replay não depende dos
+padrões). `gravity_degree: 0` faz do corpo central uma massa pontual. A página mostra também os modelos do voo atual.
+
 **Veículos definidos pela API.** `vehicle: CUSTOM` com `definition` (`VehicleDefinition`) voa qualquer veículo: estágios
 na ordem de queima, cada um descrevendo o conjunto inteiro enquanto é o mais baixo (massas cheio e vazio, CG, inércias
 principais, comprimento), seus motores (`EngineDefinition`: posição do bocal, direção, empuxo no vácuo, velocidade de

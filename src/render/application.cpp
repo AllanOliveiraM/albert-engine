@@ -1199,13 +1199,16 @@ int albert::runRenderer(int argc, char** argv) {
 
         // Ajustes, kept in settings.json across runs (the sound always starts muted). The volumetric clouds and the ocean's
         // waves are the costly effects: on by default, a weaker machine turns them off.
-        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false;float fov=60,uiScale=1,sensitivity=1,volume=.8f;} preferences;
+        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
+            bool thirdBodies=true,relativity=true,flightAir=true,wind=true,solarPressure=true;} preferences; // The last five: the Fisica page's defaults for new flights.
         const auto preferencesFile=albert::dataDirectory()/"settings.json";
         try{std::ifstream in(preferencesFile);if(in){const auto j=json::parse(in);auto& p=preferences;auto& v=visualSettings;
             p.volumetricClouds=j.value("volumetric_clouds",p.volumetricClouds);p.oceanWaves=j.value("ocean_waves",p.oceanWaves);p.antialias=j.value("antialias",p.antialias);
             p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);
             p.fov=std::clamp(j.value("field_of_view",p.fov),35.f,90.f);p.uiScale=std::clamp(j.value("interface_scale",p.uiScale),.8f,1.6f);
             p.sensitivity=std::clamp(j.value("mouse_sensitivity",p.sensitivity),.25f,3.f);p.volume=std::clamp(j.value("volume",p.volume),0.f,1.f);
+            p.thirdBodies=j.value("physics_third_bodies",p.thirdBodies);p.relativity=j.value("physics_relativity",p.relativity);p.flightAir=j.value("physics_atmosphere",p.flightAir);
+            p.wind=j.value("physics_wind",p.wind);p.solarPressure=j.value("physics_solar_pressure",p.solarPressure);
             v.quality=std::clamp(j.value("quality",v.quality),0,1);v.shadows=j.value("shadows",v.shadows);v.atmosphere=j.value("atmosphere",v.atmosphere);
             v.terrain=j.value("terrain",v.terrain);v.clouds=j.value("live_clouds",v.clouds);v.nightLights=j.value("city_lights",v.nightLights);v.borders=j.value("borders",v.borders);
             showOrbits=j.value("orbits",showOrbits);showDebris=j.value("debris",showDebris);}}
@@ -1213,8 +1216,17 @@ int albert::runRenderer(int argc, char** argv) {
         auto savePreferences=[&]{try{const auto& p=preferences;const auto& v=visualSettings;std::filesystem::create_directories(preferencesFile.parent_path());std::ofstream out(preferencesFile);
             out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},
                 {"field_of_view",p.fov},{"interface_scale",p.uiScale},{"mouse_sensitivity",p.sensitivity},{"volume",p.volume},{"quality",v.quality},{"shadows",v.shadows},
-                {"atmosphere",v.atmosphere},{"terrain",v.terrain},{"live_clouds",v.clouds},{"city_lights",v.nightLights},{"borders",v.borders},{"orbits",showOrbits},{"debris",showDebris}}.dump(2)<<'\n';}
+                {"atmosphere",v.atmosphere},{"terrain",v.terrain},{"live_clouds",v.clouds},{"city_lights",v.nightLights},{"borders",v.borders},{"orbits",showOrbits},{"debris",showDebris},
+                {"physics_third_bodies",p.thirdBodies},{"physics_relativity",p.relativity},{"physics_atmosphere",p.flightAir},{"physics_wind",p.wind},{"physics_solar_pressure",p.solarPressure}}.dump(2)<<'\n';}
             catch(const std::exception&){}};
+        // The Fisica page's switches as the flight API's defaults (flights created without them).
+        auto applyPhysics=[&]{
+#ifdef ALBERT_HAS_RPC
+            if(!rpc)return;
+            albert::v1::PhysicsSettings m;const auto& p=preferences;
+            m.set_third_bodies(p.thirdBodies);m.set_relativity(p.relativity);m.set_atmosphere(p.flightAir);m.set_wind(p.wind);m.set_solar_radiation_pressure(p.solarPressure);rpc->physicsDefaults(m);
+#endif
+        };
         // Free camera (Ajustes, or F): flies from the current view; dragging looks, W/A/S/D, Space/E and Ctrl/Q move, Shift is
         // five times faster, the wheel scales the speed, which follows the height over the nearest surface.
         bool freeCamera=false;float freeSpeed=1.f;
@@ -1438,13 +1450,15 @@ int albert::runRenderer(int argc, char** argv) {
                 }
                 ImGui::TextDisabled(freeCamera?"Camera livre: arraste para olhar, W A S D movem. F ou Esc volta.":"Arraste para girar. Role para aproximar.");
                 ImGui::Spacing();
-                const char* pages[] = {"Cena", "Dados", "Ajustes", "Sobre"};
-                const float tabWidth = (ImGui::GetContentRegionAvail().x - 24) / 4;
-                for (int i = 0; i < 4; ++i) {
+                const char* pages[] = {"Cena", "Dados", "Fisica", "Ajustes", "Sobre"};
+                float labels = 0; // Each tab its label's width plus an even share of the rest.
+                for (const char* page : pages) labels += ImGui::CalcTextSize(page).x;
+                const float share = (ImGui::GetContentRegionAvail().x - 4 * ImGui::GetStyle().ItemSpacing.x - labels) / 5;
+                for (int i = 0; i < 5; ++i) {
                     if (i) ImGui::SameLine();
                     const bool selectedPage = menuPage == i;
                     if (selectedPage) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.09f,.29f,.36f,1));
-                    if (ImGui::Button(pages[i], ImVec2(tabWidth, 34))) menuPage = i;
+                    if (ImGui::Button(pages[i], ImVec2(ImGui::CalcTextSize(pages[i]).x + share, 34))) menuPage = i;
                     if (selectedPage) ImGui::PopStyleColor();
                 }
                 ImGui::Spacing();
@@ -1565,6 +1579,21 @@ int albert::runRenderer(int argc, char** argv) {
                         ImGui::TextDisabled("%.0f quadros por segundo", ImGui::GetIO().Framerate);
                     }
                 } else if (menuPage == 2) {
+                    auto hint=[](const char* text){ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));ImGui::TextWrapped("%s",text);ImGui::PopStyleColor();};
+                    auto check=[&](const char* label,bool& value,const char* note){if(ImGui::Checkbox(label,&value)){savePreferences();applyPhysics();}hint(note);};
+                    ImGui::TextDisabled("MODELOS DOS NOVOS VOOS");
+                    hint("Valem para os voos criados pela API sem escolher (PhysicsSettings); cada voo grava os que usou.");
+                    check("Mares do Sol e da Lua",preferences.thirdBodies,"A atracao de mare dos terceiros corpos (na Lua, a Terra e o Sol; em Marte, o Sol).");
+                    check("Relatividade geral",preferences.relativity,"O termo de Schwarzschild do corpo central: centimetros por orbita baixa.");
+                    check("Atmosfera do voo",preferences.flightAir,"Arrasto, sustentacao, aquecimento e a contrapressao nos bocais; desligada, vacuo.");
+                    check("Vento",preferences.wind,"O vento do tempo real (GFS) e do HWM14; desligado, o ar parado em relacao ao solo.");
+                    check("Pressao de radiacao solar",preferences.solarPressure,"Sobre a area solar do veiculo (definicao), com a sombra do corpo central.");
+                    ImGui::Spacing();ImGui::TextDisabled("VOO ATUAL");
+                    if(flightTelemetry){ImGui::TextWrapped("%s",flightTelemetry->vehicle.c_str());hint(flightTelemetry->physics.c_str());hint(("Ar: "+flightTelemetry->atmosphere).c_str());}
+                    else hint("Nenhum voo. Crie um pela API gRPC (docs/RPC.md): veiculos prontos ou definidos por voce.");
+                    ImGui::Spacing();ImGui::TextDisabled("SEMPRE NO MODELO");
+                    hint("Gravidade em harmonicos esfericos (grau do voo; 0: massa pontual), rotacao do corpo, empuxo com contrapressao e cardas, massa e inercia variaveis com amortecimento do jato, pernas com atrito, aquecimento de estagnacao. Motores, RCS e superficies de controle vem da definicao do veiculo.");
+                } else if (menuPage == 3) {
                     auto hint=[](const char* text){ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));ImGui::TextWrapped("%s",text);ImGui::PopStyleColor();};
                     auto check=[&](const char* label,bool& value,const char* note=nullptr){if(ImGui::Checkbox(label,&value))savePreferences();if(note)hint(note);};
                     auto slider=[&](const char* id,float& value,float lo,float hi,const char* format){ImGui::SetNextItemWidth(-1);if(ImGui::SliderFloat(id,&value,lo,hi,format))savePreferences();};
@@ -2767,7 +2796,7 @@ int albert::runRenderer(int argc, char** argv) {
             graphics.ui();
 #ifdef ALBERT_HAS_RPC
             if(rpcPort && !rpc && introductionElapsed>=introductionDuration) {
-                rpc=std::make_unique<albert::rpc::Server>(commands,*rpcPort,&catalog);
+                rpc=std::make_unique<albert::rpc::Server>(commands,*rpcPort,&catalog);applyPhysics();
                 std::cout<<"gRPC: 127.0.0.1:"<<rpc->port()<<std::endl;
             }
 #endif

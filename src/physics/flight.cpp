@@ -133,7 +133,8 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         g+=(s.position*(4*gm/r-dot(s.velocity,s.velocity))+s.velocity*(4*dot(s.position,s.velocity)))*(gm/(c2*r*r*r));}
     const M3 b=matrix(s.attitude),bt=transpose(b);
     const Geodetic geo=geodetic(env_.planet,rf);const M3 ned=nedFromFixed(geo.latitude,geo.longitude);
-    const Air atm=!env_.atmosphere?Air{}:env_.air?env_.air->at(s.time,geo.latitude,geo.longitude,geo.height):climatology(env_.center,geo.height);
+    Air atm=!env_.atmosphere?Air{}:env_.air?env_.air->at(s.time,geo.latitude,geo.longitude,geo.height):climatology(env_.center,geo.height);
+    if(!env_.wind)atm.wind={}; // Air at rest with the ground.
     const V3 relative=s.velocity-cross(o.omega,s.position),air=bt*(relative-back*(transpose(ned)*atm.wind));const double speed=norm(air);
     const double q=.5*atm.density*speed*speed,mach=atm.sound>0?speed/atm.sound:0.;
     const double alpha=speed>0?std::atan2(air.z,air.x):0.,beta=speed>0?std::asin(std::clamp(air.y/speed,-1.,1.)):0.;
@@ -173,7 +174,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         }
     }
     V3 fs; // Solar radiation pressure, 1361 W/m² at 1 au, shadowed by the central body.
-    if(vehicle_.sunArea>0&&env_.sunMoon){
+    if(vehicle_.sunArea>0&&env_.solarPressure){
         constexpr double au=149597870700.,pressure=1361./299792458.;const V3 d=sun(s.time)-s.position;const double dn=norm(d);
         const double nu=sunlight(s.position,d+s.position,env_.planet.radius);
         if(nu>0)fs=bt*(d*(-nu*pressure*au*au/(dn*dn*dn)*vehicle_.reflectivity*vehicle_.sunArea));

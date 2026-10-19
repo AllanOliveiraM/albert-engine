@@ -235,7 +235,8 @@ message CreateFlightRequest {
   optional double step_seconds=7;       // Default 0.001; 1e-5 to 0.1.
   bool focus_camera=8;
   optional double coast_step_seconds=9; // Longest step while ballistic above the atmosphere (86 km Earth, 150 km Mars); default 1, 0 disables, up to 10.
-  // Degree and order: EGM2008 2-70 (default 20); GRAIL GRGM1200A 2-600 and MRO GMM-3 2-120 (default 100), downloaded once.
+  // Degree and order: EGM2008 2-70 (default 20); GRAIL GRGM1200A 2-600 and MRO GMM-3 2-120 (default 100), downloaded once;
+  // 0: the central body as a point mass.
   optional uint32 gravity_degree=10;
   // AUTOMATIC: live NOAA GFS when Albert follows the real clock and the instant is within
   // 2 h of now, else (or if GFS is unreachable) the 1976 standard atmosphere. Elsewhere only
@@ -252,6 +253,16 @@ message CreateFlightRequest {
   enum Body { EARTH=0; MOON=1; MARS=2; }
   Body body=14;
   VehicleDefinition definition=15;      // CUSTOM only.
+  PhysicsSettings physics=16;           // Unset fields: Albert's defaults (its Física menu; all on unless changed there).
+}
+// The physics models a flight runs (docs/PHYSICS.md); each switch off removes that model. The flight's sample and its log
+// carry them resolved, so a replay does not depend on Albert's defaults.
+message PhysicsSettings {
+  optional bool third_bodies=1;             // Tides of the Sun and Moon (the Earth and Sun at the Moon; the Sun at Mars).
+  optional bool relativity=2;               // Schwarzschild term of the central body.
+  optional bool atmosphere=3;               // Air: drag, lift, heating and back pressure on nozzles (off: vacuum).
+  optional bool wind=4;                     // The weather's wind (off: air at rest with the ground).
+  optional bool solar_radiation_pressure=5; // On the vehicle's solar area.
 }
 // Inertial measurement unit and barometer errors (IEEE 952 terms, representative grades);
 // the seed makes the noise reproducible.
@@ -307,6 +318,7 @@ message FlightSample {
   repeated SurfaceSample surfaces=47;   // The stage's control surfaces.
   repeated double thruster_duty=48;     // The stage's thrusters' duty cycles (from the torque command or set directly).
   Vector3 thruster_force_newtons=49; Vector3 thruster_moment_newton_meters=50; // Theirs, body axes, about the CG.
+  PhysicsSettings physics=51;           // The models this flight runs, resolved.
 }
 message SurfaceSample { string name=1; double deflection_radians=2; double command_radians=3; }
 // One engine now: gimbal as moved (rate-limited toward its command); thrust after the ambient pressure.
