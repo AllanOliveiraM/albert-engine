@@ -279,6 +279,9 @@ message PhysicsSettings {
   optional bool atmosphere=3;               // Air: drag, lift, heating and back pressure on nozzles (off: vacuum).
   optional bool wind=4;                     // The weather's wind (off: air at rest with the ground).
   optional bool solar_radiation_pressure=5; // On the vehicle's solar area.
+  // Dryden turbulence (MIL-F-8785C): the vertical gust's intensity σ (m/s; 0 or unset: none; about 1 light, 2-3 moderate,
+  // 5 or more severe), with the low-altitude scale lengths and intensities by height; reproducible from the seed.
+  optional double turbulence_meters_per_second=6; uint64 turbulence_seed=7;
 }
 // Inertial measurement unit and barometer errors (IEEE 952 terms, representative grades);
 // the seed makes the noise reproducible.

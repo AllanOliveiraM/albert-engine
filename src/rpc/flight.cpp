@@ -304,7 +304,8 @@ struct FlightServices::Impl {
         std::string on,off;auto add=[&](bool x,const char* name){std::string& to=x?on:off;to+=to.empty()?"":", ";to+=name;};
         std::string g=degree==0?"gravidade de massa pontual":"gravidade "+std::to_string(degree)+"x"+std::to_string(degree);on=g;
         add(physics.third_bodies(),center==ph::Center::moon?"Terra e Sol":center==ph::Center::mars?"Sol":"Sol e Lua");add(physics.relativity(),"relatividade");
-        add(physics.atmosphere(),"atmosfera");add(physics.wind(),"vento");add(physics.solar_radiation_pressure()&&flight->vehicle().sunArea>0,"radiacao solar");
+        add(physics.atmosphere(),"atmosfera");add(physics.wind(),"vento");
+        if(physics.turbulence_meters_per_second()>0&&physics.atmosphere()){char t[64];std::snprintf(t,sizeof t,"turbulencia %.1f m/s",physics.turbulence_meters_per_second());on+=", ";on+=t;}add(physics.solar_radiation_pressure()&&flight->vehicle().sunArea>0,"radiacao solar");
         const auto& st=flight->vehicle().stages[static_cast<std::size_t>(flight->state().stage)];
         if(!st.engines.empty())on+=", "+std::to_string(st.engines.size())+(st.engines.size()==1?" motor":" motores");
         if(!st.rcs.empty())on+=", RCS ("+std::to_string(st.rcs.size())+")";if(!st.surfaces.empty())on+=", superficies ("+std::to_string(st.surfaces.size())+")";
@@ -411,6 +412,8 @@ grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,cons
     const auto& m=r.physics();auto on=[](bool has,bool value){return !has||value;}; // Logs from before the switches: all on.
     env.sunMoon=on(m.has_third_bodies(),m.third_bodies());env.relativity=on(m.has_relativity(),m.relativity());env.atmosphere=on(m.has_atmosphere(),m.atmosphere());
     env.wind=on(m.has_wind(),m.wind());env.solarPressure=on(m.has_solar_radiation_pressure(),m.solar_radiation_pressure());
+    env.turbulence=m.turbulence_meters_per_second();env.turbulenceSeed=m.turbulence_seed();
+    if(!(env.turbulence>=0&&env.turbulence<=50))return{grpc::StatusCode::INVALID_ARGUMENT,"Turbulence must be 0-50 m/s"};
     if(p.body==ph::Center::earth){env.air=air;env.planet.degree=static_cast<int>(p.degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(p.utc-946728000.));}
     std::optional<ph::Flight> made;
     try{made.emplace(p.vehicle,env,ph::Flight::pad(env,p.vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r.heading_degrees()*deg,p.pitch*deg));}
@@ -420,6 +423,7 @@ grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,cons
     stopPacing();std::lock_guard lock(mutex);
     flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;this->atmosphere=atmosphere;center=p.body;degree=p.degree;
     physics.set_third_bodies(env.sunMoon);physics.set_relativity(env.relativity);physics.set_atmosphere(env.atmosphere);physics.set_wind(env.wind);physics.set_solar_radiation_pressure(env.solarPressure);
+    physics.set_turbulence_meters_per_second(env.turbulence);physics.set_turbulence_seed(env.turbulenceSeed);
     { // The IMU starts with one sample at the pad.
         const auto g=r.imu().grade();imu.emplace(ph::imuModel(g==api::ImuSettings::TACTICAL?ph::ImuGrade::tactical:g==api::ImuSettings::INDUSTRIAL?ph::ImuGrade::industrial:ph::ImuGrade::ideal),r.imu().seed());
         const ph::Sample x=flight->sample();const double dt=p.seconds;
@@ -460,6 +464,7 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api
         if(!m->has_third_bodies())m->set_third_bodies(pick(d.has_third_bodies(),d.third_bodies()));if(!m->has_relativity())m->set_relativity(pick(d.has_relativity(),d.relativity()));
         if(!m->has_atmosphere())m->set_atmosphere(pick(d.has_atmosphere(),d.atmosphere()));if(!m->has_wind())m->set_wind(pick(d.has_wind(),d.wind()));
         if(!m->has_solar_radiation_pressure())m->set_solar_radiation_pressure(pick(d.has_solar_radiation_pressure(),d.solar_radiation_pressure()));
+        if(!m->has_turbulence_meters_per_second())m->set_turbulence_meters_per_second(d.turbulence_meters_per_second());
     }
     if(r->terrain_height()){ // Recorded as an explicit height: replay needs no terrain data.
         const auto& site=r->site();

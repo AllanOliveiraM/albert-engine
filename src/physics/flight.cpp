@@ -26,6 +26,32 @@ Environment environment(Center c,std::shared_ptr<const Gravity> field,int degree
     return e;
 }
 namespace {
+std::uint64_t mixSeed(std::uint64_t& x){std::uint64_t z=(x+=0x9e3779b97f4a7c15ull);z=(z^(z>>30))*0xbf58476d1ce4e5b9ull;z=(z^(z>>27))*0x94d049bb133111ebull;return z^(z>>31);}
+}
+Turbulence::Turbulence(double sigma,std::uint64_t seed):sigma_(sigma){for(auto& r:rng_)r=mixSeed(seed);}
+double Turbulence::normal(){ // xoshiro256** and Box-Muller (one value of the pair: simple, deterministic).
+    auto rotl=[](std::uint64_t x,int k){return x<<k|x>>(64-k);};
+    auto next=[&]{const std::uint64_t r=rotl(rng_[1]*5,7)*9,t=rng_[1]<<17;rng_[2]^=rng_[0];rng_[3]^=rng_[1];rng_[1]^=rng_[2];rng_[0]^=rng_[3];rng_[2]^=t;rng_[3]=rotl(rng_[3],45);return r;};
+    double a=static_cast<double>(next()>>11)*0x1.0p-53;while(a<=0)a=static_cast<double>(next()>>11)*0x1.0p-53;const double b=static_cast<double>(next()>>11)*0x1.0p-53;
+    return std::sqrt(-2*std::log(a))*std::cos(2*3.14159265358979323846*b);
+}
+void Turbulence::scales(double height,double sigma,double& lu,double& lw,double& su,double& sw){
+    const double ft=.3048,h=std::max(height/ft,10.);
+    auto low=[&](double x,double& Lu,double& Lw,double& Su){const double k=.177+.000823*x;Lw=x;Lu=x/std::pow(k,1.2);Su=sigma/std::pow(k,.4);};
+    double Lu,Lw,Su;if(h<=1000){low(h,Lu,Lw,Su);lu=Lu*ft;lw=Lw*ft;su=Su;sw=sigma;return;}
+    if(h>=2000){lu=lw=1750*ft;su=sw=sigma;return;}
+    low(1000,Lu,Lw,Su);const double f=(h-1000)/1000;lu=(Lu+(1750-Lu)*f)*ft;lw=(Lw+(1750-Lw)*f)*ft;su=Su+(sigma-Su)*f;sw=sigma;
+}
+V3 Turbulence::step(double dt,double airspeed,double height){
+    if(!(sigma_>0)||!(dt>0))return gust();
+    double lu,lw,su,sw;scales(height,sigma_,lu,lw,su,sw);const double V=std::max(airspeed,1.);
+    const double tu=lu/V,a=std::exp(-dt/tu);u_=a*u_+su*std::sqrt(1-a*a)*normal(); // Exact first-order update: variance σ_u².
+    // v and w: (1 + √3 T s)/(1 + T s)², gain σ sqrt(T/π), white noise of two-sided PSD π; Euler sub-steps of at most T/20.
+    auto pole=[&](double* x,double T,double s){const int n=std::max(1,static_cast<int>(std::ceil(dt/(T/20))));const double h=dt/n,k=s*std::sqrt(T/3.14159265358979323846);
+        for(int i=0;i<n;++i){const double e=k*std::sqrt(3.14159265358979323846/h)*normal();const double x0=x[0];x[0]+=h*(e-x[0])/T;x[1]+=h*(x0-x[1])/T;}};
+    pole(v_,lu/V,su);pole(w_,lw/V,sw);return gust();
+}
+namespace {
 void locate(const std::vector<double>& b,double x,std::size_t& i,double& t){ // Cell and fraction, clamped.
     if(b.size()<2){i=0;t=0;return;}
     x=std::clamp(x,b.front(),b.back());
@@ -76,6 +102,8 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
         engines_.push_back({s_.burning,false,std::clamp(s_.throttle,e.minThrottle,1.),p,y,p,y});}
     s_.burning=s_.burning&&!engines_.empty();
     surfaces_.assign(vehicle_.stages[s_.stage].surfaces.size(),SurfaceState{});duty_.assign(vehicle_.stages[s_.stage].rcs.size(),0.);allocate();
+    if(!(env_.turbulence>=0)||!std::isfinite(env_.turbulence))throw std::invalid_argument("Invalid turbulence");
+    turbulence_=Turbulence(env_.turbulence,env_.turbulenceSeed);
     const Orientation o=env_.rotation.at(s_.time);
     padPosition_=o.fixed*s_.position;padAttitude_=quaternion(o.fixed*matrix(s_.attitude));
 }
@@ -135,6 +163,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     const Geodetic geo=geodetic(env_.planet,rf);const M3 ned=nedFromFixed(geo.latitude,geo.longitude);
     Air atm=!env_.atmosphere?Air{}:env_.air?env_.air->at(s.time,geo.latitude,geo.longitude,geo.height):climatology(env_.center,geo.height);
     if(!env_.wind)atm.wind={}; // Air at rest with the ground.
+    if(atm.density>0)atm.wind+=gustNed_; // Turbulence over the step (none in vacuum).
     const V3 relative=s.velocity-cross(o.omega,s.position),air=bt*(relative-back*(transpose(ned)*atm.wind));const double speed=norm(air);
     const double q=.5*atm.density*speed*speed,mach=atm.sound>0?speed/atm.sound:0.;
     const double alpha=speed>0?std::atan2(air.z,air.x):0.,beta=speed>0?std::asin(std::clamp(air.y/speed,-1.,1.)):0.;
@@ -290,6 +319,15 @@ void Flight::slew(double seconds){
     for(std::size_t i=0;i<engines_.size();++i){auto& e=engines_[i];const double step=es[i].gimbalRate*seconds;
         if(es[i].gimbalRate>0){e.pitch+=std::clamp(e.targetPitch-e.pitch,-step,step);e.yaw+=std::clamp(e.targetYaw-e.yaw,-step,step);}}
     for(std::size_t i=0;i<surfaces_.size();++i)if(st.surfaces[i].rate>0){const double step=st.surfaces[i].rate*seconds;auto& f=surfaces_[i];f.deflection+=std::clamp(f.target-f.deflection,-step,step);}
+    if(turbulence_.sigma()>0&&env_.atmosphere&&!s_.clamped&&!s_.landed){ // Gusts in the air-relative velocity's axes, held over the step.
+        const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;const Geodetic geo=geodetic(env_.planet,rf);
+        if(geo.height<airTop(env_.center)+1e5){
+            const M3 ned=nedFromFixed(geo.latitude,geo.longitude);const V3 v=ned*(o.fixed*(s_.velocity-cross(o.omega,s_.position)));const double speed=norm(v);
+            const V3 g=turbulence_.step(seconds,speed,geo.height-(std::isfinite(env_.ground)?env_.ground:0.));
+            const V3 x=speed>.1?v/speed:V3{1,0,0},h=std::hypot(x.x,x.y)>1e-6?V3{-x.y,x.x,0}/std::hypot(x.x,x.y):V3{0,1,0},z=cross(x,h);
+            gustNed_=x*g.x+h*g.y+z*g.z;
+        }else gustNed_={};
+    }
 }
 void Flight::surface(double d,int index){
     if(!std::isfinite(d))throw std::invalid_argument("Invalid deflection");
@@ -373,6 +411,7 @@ std::uint64_t Flight::hash()const{
     mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
     for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed};mix(x,sizeof x);mix(b,sizeof b);}
     for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);}for(double u:duty_)mix(&u,8);
+    {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z};mix(t,sizeof t);}
     return h;
 }
 }

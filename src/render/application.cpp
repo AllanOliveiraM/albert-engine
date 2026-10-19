@@ -1200,7 +1200,7 @@ int albert::runRenderer(int argc, char** argv) {
         // Ajustes, kept in settings.json across runs (the sound always starts muted). The volumetric clouds and the ocean's
         // waves are the costly effects: on by default, a weaker machine turns them off.
         struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
-            bool thirdBodies=true,relativity=true,flightAir=true,wind=true,solarPressure=true;} preferences; // The last five: the Fisica page's defaults for new flights.
+            bool thirdBodies=true,relativity=true,flightAir=true,wind=true,solarPressure=true;float turbulence=0;} preferences; // The last six: the Fisica page's defaults for new flights.
         const auto preferencesFile=albert::dataDirectory()/"settings.json";
         try{std::ifstream in(preferencesFile);if(in){const auto j=json::parse(in);auto& p=preferences;auto& v=visualSettings;
             p.volumetricClouds=j.value("volumetric_clouds",p.volumetricClouds);p.oceanWaves=j.value("ocean_waves",p.oceanWaves);p.antialias=j.value("antialias",p.antialias);
@@ -1208,7 +1208,7 @@ int albert::runRenderer(int argc, char** argv) {
             p.fov=std::clamp(j.value("field_of_view",p.fov),35.f,90.f);p.uiScale=std::clamp(j.value("interface_scale",p.uiScale),.8f,1.6f);
             p.sensitivity=std::clamp(j.value("mouse_sensitivity",p.sensitivity),.25f,3.f);p.volume=std::clamp(j.value("volume",p.volume),0.f,1.f);
             p.thirdBodies=j.value("physics_third_bodies",p.thirdBodies);p.relativity=j.value("physics_relativity",p.relativity);p.flightAir=j.value("physics_atmosphere",p.flightAir);
-            p.wind=j.value("physics_wind",p.wind);p.solarPressure=j.value("physics_solar_pressure",p.solarPressure);
+            p.wind=j.value("physics_wind",p.wind);p.solarPressure=j.value("physics_solar_pressure",p.solarPressure);p.turbulence=std::clamp(j.value("physics_turbulence",p.turbulence),0.f,10.f);
             v.quality=std::clamp(j.value("quality",v.quality),0,1);v.shadows=j.value("shadows",v.shadows);v.atmosphere=j.value("atmosphere",v.atmosphere);
             v.terrain=j.value("terrain",v.terrain);v.clouds=j.value("live_clouds",v.clouds);v.nightLights=j.value("city_lights",v.nightLights);v.borders=j.value("borders",v.borders);
             showOrbits=j.value("orbits",showOrbits);showDebris=j.value("debris",showDebris);}}
@@ -1217,14 +1217,15 @@ int albert::runRenderer(int argc, char** argv) {
             out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},
                 {"field_of_view",p.fov},{"interface_scale",p.uiScale},{"mouse_sensitivity",p.sensitivity},{"volume",p.volume},{"quality",v.quality},{"shadows",v.shadows},
                 {"atmosphere",v.atmosphere},{"terrain",v.terrain},{"live_clouds",v.clouds},{"city_lights",v.nightLights},{"borders",v.borders},{"orbits",showOrbits},{"debris",showDebris},
-                {"physics_third_bodies",p.thirdBodies},{"physics_relativity",p.relativity},{"physics_atmosphere",p.flightAir},{"physics_wind",p.wind},{"physics_solar_pressure",p.solarPressure}}.dump(2)<<'\n';}
+                {"physics_third_bodies",p.thirdBodies},{"physics_relativity",p.relativity},{"physics_atmosphere",p.flightAir},{"physics_wind",p.wind},{"physics_solar_pressure",p.solarPressure},{"physics_turbulence",p.turbulence}}.dump(2)<<'\n';}
             catch(const std::exception&){}};
         // The Fisica page's switches as the flight API's defaults (flights created without them).
         auto applyPhysics=[&]{
 #ifdef ALBERT_HAS_RPC
             if(!rpc)return;
             albert::v1::PhysicsSettings m;const auto& p=preferences;
-            m.set_third_bodies(p.thirdBodies);m.set_relativity(p.relativity);m.set_atmosphere(p.flightAir);m.set_wind(p.wind);m.set_solar_radiation_pressure(p.solarPressure);rpc->physicsDefaults(m);
+            m.set_third_bodies(p.thirdBodies);m.set_relativity(p.relativity);m.set_atmosphere(p.flightAir);m.set_wind(p.wind);m.set_solar_radiation_pressure(p.solarPressure);
+            m.set_turbulence_meters_per_second(p.turbulence);rpc->physicsDefaults(m);
 #endif
         };
         // Free camera (Ajustes, or F): flies from the current view; dragging looks, W/A/S/D, Space/E and Ctrl/Q move, Shift is
@@ -1588,6 +1589,8 @@ int albert::runRenderer(int argc, char** argv) {
                     check("Atmosfera do voo",preferences.flightAir,"Arrasto, sustentacao, aquecimento e a contrapressao nos bocais; desligada, vacuo.");
                     check("Vento",preferences.wind,"O vento do tempo real (GFS) e do HWM14; desligado, o ar parado em relacao ao solo.");
                     check("Pressao de radiacao solar",preferences.solarPressure,"Sobre a area solar do veiculo (definicao), com a sombra do corpo central.");
+                    ImGui::SetNextItemWidth(-1);if(ImGui::SliderFloat("##Turbulencia",&preferences.turbulence,0,10,preferences.turbulence>0?"Turbulencia: %.1f m/s":"Turbulencia: nenhuma")){savePreferences();applyPhysics();}
+                    hint("Rajadas de Dryden (MIL-F-8785C) com a intensidade vertical escolhida: ~1 leve, 2-3 moderada, 5 ou mais severa.");
                     ImGui::Spacing();ImGui::TextDisabled("VOO ATUAL");
                     if(flightTelemetry){ImGui::TextWrapped("%s",flightTelemetry->vehicle.c_str());hint(flightTelemetry->physics.c_str());hint(("Ar: "+flightTelemetry->atmosphere).c_str());}
                     else hint("Nenhum voo. Crie um pela API gRPC (docs/RPC.md): veiculos prontos ou definidos por voce.");

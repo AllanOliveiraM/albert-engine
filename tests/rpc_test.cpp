@@ -296,6 +296,12 @@ int main(int argc,char** argv){try{
             {grpc::ClientContext c;require(flight->CreateFlight(&c,a,&x).ok()&&!x.physics().atmosphere()&&x.air_density_kilograms_per_meter3()==0&&x.static_pressure_pascals()==0,"Atmosphere off: vacuum");}
             {const auto snap=bridge.snapshot();(void)snap;}
             a.set_gravity_degree(1);{grpc::ClientContext c;require(flight->CreateFlight(&c,a,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Degree 1 accepted");}
+            { // Turbulence: a different flight from the calm one, the same twice for one seed.
+                api::CreateFlightRequest t=create;t.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);auto hash=[&](double sigma,std::uint64_t seed){t.mutable_physics()->set_turbulence_meters_per_second(sigma);t.mutable_physics()->set_turbulence_seed(seed);
+                    {grpc::ClientContext c;require(flight->CreateFlight(&c,t,&x).ok(),"Turbulent flight");}grpc::ClientContext c;api::StepRequest q;q.set_ticks(4000);q.add_commands()->set_ignite(true);require(flight->Step(&c,q,&x).ok(),"Turbulent steps");return x.state_hash();};
+                const auto calm=hash(0,1),gusty=hash(3,1),again=hash(3,1);require(gusty!=calm&&gusty==again&&x.physics().turbulence_meters_per_second()==3,"Turbulence changes the flight, reproducibly");
+                t.mutable_physics()->set_turbulence_meters_per_second(-1);grpc::ClientContext c;require(flight->CreateFlight(&c,t,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Negative turbulence accepted");
+            }
             // Sensors: a GNSS fix and a radar range at the pad (the stack's base on the ground), measured again after a step.
             api::CreateFlightRequest b=create;b.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);auto* q=b.mutable_sensors();q->mutable_gnss()->set_enabled(true);
             q->mutable_radar_altimeter()->set_enabled(true);q->mutable_star_tracker()->set_enabled(true);q->set_seed(9);

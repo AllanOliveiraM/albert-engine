@@ -340,6 +340,18 @@ int main(){try{
         require(!tracker.measure(0,q,look,away,.1,{}).valid&&!tracker.measure(0,q,away,look,.1,{}).valid&&!tracker.measure(0,q,away,away*-1.,.1,{0,0,.1}).valid,"Sun, body and rate exclusions");
         (void)sun;(void)body;
     }
+    // Dryden turbulence at 5 km (L 533 m, σ 2 m/s) and 100 m/s: each gust's variance σ², u's autocorrelation e⁻¹ after L/V; at
+    // 100 ft the MIL-F-8785C low-altitude scales.
+    {
+        Turbulence t(2,11);constexpr double dt=.02;constexpr int n=150000;std::vector<double> u(n);double su=0,sv=0,sw=0;
+        for(int i=0;i<n;++i){const V3 g=t.step(dt,100,5000);u[static_cast<std::size_t>(i)]=g.x;su+=g.x*g.x;sv+=g.y*g.y;sw+=g.z*g.z;}
+        const std::size_t lag=static_cast<std::size_t>(std::lround(533.4/100/dt));double c=0;for(std::size_t i=lag;i<u.size();++i)c+=u[i]*u[i-lag];
+        const double ru=c/static_cast<double>(u.size()-lag)/(su/n);
+        std::printf("Dryden at 5 km: sigma u %.3f, v %.3f, w %.3f m/s; u autocorrelation at L/V %.3f\n",std::sqrt(su/n),std::sqrt(sv/n),std::sqrt(sw/n),ru);
+        near(std::sqrt(su/n),2,.2,"Dryden u intensity");near(std::sqrt(sv/n),2,.2,"Dryden v intensity");near(std::sqrt(sw/n),2,.2,"Dryden w intensity");near(ru,std::exp(-1.),.06,"Dryden u correlation");
+        double lu,lw,s1,s2;Turbulence::scales(100*.3048,1,lu,lw,s1,s2);const double k=.177+.000823*100;
+        near(lw,100*.3048,1e-9,"Low-altitude L_w = h");near(lu,100/std::pow(k,1.2)*.3048,1e-9,"Low-altitude L_u");near(s1,1/std::pow(k,.4),1e-12,"Low-altitude sigma_u");
+    }
     // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
     // against 10 ms steps.
     {

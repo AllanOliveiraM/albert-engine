@@ -310,7 +310,8 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | `surface_radians` | Deflexão comandada de uma superfície de controle, limitada e alcançada na taxa do atuador |
 
 **Modelos físicos por voo.** `physics` (`PhysicsSettings`) liga ou desliga as marés dos terceiros corpos, a relatividade,
-a atmosfera (desligada: vácuo), o vento e a pressão de radiação solar; campos não definidos vêm dos padrões do Albert (a
+a atmosfera (desligada: vácuo), o vento e a pressão de radiação solar, e escolhe a turbulência de Dryden (intensidade e
+semente); campos não definidos vêm dos padrões do Albert (a
 página "Fisica" do menu; tudo ligado de fábrica) e o voo grava os resolvidos (amostra e log: o replay não depende dos
 padrões). `gravity_degree: 0` faz do corpo central uma massa pontual. A página mostra também os modelos do voo atual.
 

@@ -67,6 +67,21 @@ struct Vehicle {std::string name;std::vector<Stage> stages;double torque=0,inert
 // when r is inside it; sun relative to the body.
 double sunlight(V3 r,V3 sun,double bodyRadius);
 
+// Dryden turbulence (MIL-F-8785C): gusts along the air-relative velocity (u), across it horizontally (v) and the third axis
+// (w); u a first-order process, v and w the two-pole Dryden filter, driven by seeded white noise. sigma: the vertical gust's
+// intensity (m/s; 0: none); scale lengths and the u, v intensities from the height over the ground: below 1000 ft
+// L_w = h, L_u = L_v = h / (0.177 + 0.000823 h)^1.2 and σ_u = σ_v = σ / (0.177 + 0.000823 h)^0.4 (h in ft), above 2000 ft
+// all 1750 ft (533 m) and σ, linear between.
+class Turbulence {
+public:
+    explicit Turbulence(double sigma=0,std::uint64_t seed=1);
+    V3 step(double dt,double airspeed,double height); // Advances dt (s) and returns the gust (u, v, w; m/s).
+    V3 gust()const{return{u_,v_[1]+1.7320508075688772*(v_[0]-v_[1]),w_[1]+1.7320508075688772*(w_[0]-w_[1])};}
+    double sigma()const{return sigma_;}
+    static void scales(double height,double sigma,double& lu,double& lw,double& su,double& sw); // MIL-F-8785C: m, m/s.
+private:
+    double sigma_;std::uint64_t rng_[4];double u_=0,v_[2]{},w_[2]{};double normal();
+};
 struct Environment {
     Planet planet=earth;
     Rotation rotation=Rotation::iau(69.184);
@@ -74,6 +89,7 @@ struct Environment {
     bool atmosphere=true,sunMoon=true; // sunMoon: third bodies of the centre (see thirdBodies).
     bool relativity=true;             // Schwarzschild term of the central body (IERS 2010, 10.12).
     bool wind=true,solarPressure=true; // The air's wind (off: at rest with the ground); radiation pressure on Vehicle::sunArea.
+    double turbulence=0;std::uint64_t turbulenceSeed=1; // Dryden gusts' vertical intensity (m/s; 0: none) and their seed.
     std::shared_ptr<const Gravity> field; // Owns planet.field.
     std::shared_ptr<const AirModel> air; // Replaces the standard atmosphere when set.
     double ground=-std::numeric_limits<double>::infinity(); // Ellipsoidal height of the surface (m).
@@ -150,7 +166,8 @@ private:
     V3 tidal(const State& s)const;
     V3 sun(Tt t)const; // Relative to the centre, from the third-body cache.
     double bodies(Tt t)const;
-    void slew(double seconds); // Gimbals toward their commands at their rates.
+    void slew(double seconds); // Gimbals toward their commands at their rates; the gusts advance.
+    Turbulence turbulence_;V3 gustNed_; // The gust over the step (NED, m/s).
     double flowOf(std::size_t i)const; // Engine i's propellant flow (kg/s).
     void allocate(); // Thruster duties for the torque command.
     Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_;Tt step_=0,coast_=0;Increments increments_;
