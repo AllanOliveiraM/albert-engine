@@ -289,6 +289,25 @@ int main(int argc,char** argv){try{
                 (void)bridge.submit(SetTime{t0,{},false,false}).result.get();(void)bridge.submit(Remove{"mars"}).result.get();
             }
         }
+        { // Every preset as a definition (GetVehicle) flies as CUSTOM exactly as the preset; malformed definitions are refused.
+            auto fly=[&](const api::CreateFlightRequest& r,bool engine){api::FlightSample x;
+                {grpc::ClientContext c;const auto st=flight->CreateFlight(&c,r,&x);if(!st.ok())std::cerr<<st.error_message()<<"\n";require(st.ok(),"Flight from a definition");}
+                grpc::ClientContext c;api::StepRequest q;q.set_ticks(1500);if(engine)q.add_commands()->set_ignite(true);else q.add_commands()->set_release(true);
+                require(flight->Step(&c,q,&x).ok(),"Steps of a defined vehicle");return x.state_hash();};
+            for(const auto kind:{api::GENERIC_LAUNCHER,api::NESC_TWO_STAGE,api::NESC_SPHERE,api::GENERIC_LANDER,api::GENERIC_LUNAR_ASCENT,api::GENERIC_MARS_ASCENT,api::SATURN_V}){
+                api::VehicleRequest q;q.set_vehicle(kind);api::VehicleDefinition d;{grpc::ClientContext c;require(flight->GetVehicle(&c,q,&d).ok()&&d.stages_size()>0,"GetVehicle");}
+                api::CreateFlightRequest a=create;a.set_vehicle(kind);a.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);api::CreateFlightRequest b=a;b.set_vehicle(api::CUSTOM);*b.mutable_definition()=d;
+                const bool engine=d.stages(0).engines_size()>0;require(fly(a,engine)==fly(b,engine),"A preset's definition flies as the preset");
+            }
+            api::VehicleRequest q;q.set_vehicle(api::GENERIC_LAUNCHER);api::VehicleDefinition d;{grpc::ClientContext c;require(flight->GetVehicle(&c,q,&d).ok(),"GetVehicle");}
+            auto refused=[&](api::VehicleDefinition bad,const char* what){api::CreateFlightRequest r=create;r.set_vehicle(api::CUSTOM);*r.mutable_definition()=std::move(bad);
+                api::FlightSample x;grpc::ClientContext c;require(flight->CreateFlight(&c,r,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,what);};
+            {auto bad=d;bad.mutable_stages(0)->mutable_aerodynamics()->mutable_lift()->set_mach(1,-1);refused(bad,"Decreasing table breakpoints accepted");}
+            {auto bad=d;bad.mutable_stages(0)->mutable_engines(0)->set_vacuum_thrust_newtons(0);refused(bad,"An engine without thrust accepted");}
+            {auto bad=d;bad.mutable_stages(0)->set_mass_empty_kilograms(1);refused(bad,"Inconsistent masses accepted");}
+            {auto bad=d;bad.clear_stages();refused(bad,"A vehicle without stages accepted");}
+            {api::CreateFlightRequest r=create;*r.mutable_definition()=d;api::FlightSample x;grpc::ClientContext c;require(flight->CreateFlight(&c,r,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A definition with a preset accepted");}
+        }
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         {const auto snap=bridge.snapshot();require(std::none_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Vehicle left in the scene");}

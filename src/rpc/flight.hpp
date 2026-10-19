@@ -13,6 +13,7 @@ public:
     explicit FlightServices(core::Bridge& bridge,AirSources sources={});
     ~FlightServices() override;
     grpc::Status CreateFlight(grpc::ServerContext*,const ::albert::v1::CreateFlightRequest*,::albert::v1::FlightSample*) override;
+    grpc::Status GetVehicle(grpc::ServerContext*,const ::albert::v1::VehicleRequest*,::albert::v1::VehicleDefinition*) override;
     grpc::Status Step(grpc::ServerContext*,const ::albert::v1::StepRequest*,::albert::v1::FlightSample*) override;
     grpc::Status GetFlight(grpc::ServerContext*,const ::albert::v1::Empty*,::albert::v1::FlightSample*) override;
     grpc::Status EndFlight(grpc::ServerContext*,const ::albert::v1::Empty*,::albert::v1::Applied*) override;

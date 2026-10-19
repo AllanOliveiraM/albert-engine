@@ -34,22 +34,82 @@ core::Reply wait(core::Ticket t){
 grpc::Status failed(const core::Reply& r){return r.code==core::Code::Ok?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,r.message};}
 }
 namespace {
+// Vehicle definitions (api::VehicleDefinition) to and from the core's model; the core checks the physics (masses, inertias,
+// engines), this the shape and size of what arrives.
+ph::V3 get(const api::Vector3& v){return{v.x(),v.y(),v.z()};}
+ph::Table table(const api::AeroTable& t,const std::string& what){
+    if(t.mach_size()==0&&t.angle_degrees_size()==0&&t.values_size()==0)return{{0},{0},{0}};
+    if(t.mach_size()<1||t.angle_degrees_size()<1||t.mach_size()>128||t.angle_degrees_size()>128||t.values_size()!=t.mach_size()*t.angle_degrees_size())throw std::invalid_argument("Malformed "+what+" table");
+    ph::Table r{{t.mach().begin(),t.mach().end()},{t.angle_degrees().begin(),t.angle_degrees().end()},{t.values().begin(),t.values().end()}};
+    for(const auto* b:{&r.mach,&r.angle})for(std::size_t i=0;i<b->size();++i)if(!finite((*b)[i])||(i&&!((*b)[i]>(*b)[i-1])))throw std::invalid_argument(what+" table breakpoints must increase");
+    for(double v:r.values)if(!finite(v))throw std::invalid_argument("Non-finite "+what+" coefficient");
+    return r;
+}
+ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
+    if(d.stages_size()<1||d.stages_size()>32||d.name().size()>128)throw std::invalid_argument("A vehicle needs 1-32 stages and a name of at most 128 bytes");
+    ph::Vehicle v;v.name=d.name().empty()?"Custom vehicle":d.name();v.torque=d.attitude_torque_newton_meters();v.diameter=d.has_diameter_meters()?d.diameter_meters():1.;
+    v.sunArea=d.solar_area_meters2();v.reflectivity=d.has_reflectivity()?d.reflectivity():1.3;v.jetDamping=!d.has_jet_damping()||d.jet_damping();v.inertiaRate=d.has_inertia_rate()?d.inertia_rate():1.;
+    if(!(v.torque>=0)||!(v.diameter>0)||!(v.sunArea>=0)||!(v.reflectivity>=0)||!finite(v.inertiaRate)||!std::isfinite(v.torque))throw std::invalid_argument("Invalid vehicle torque, diameter, solar area, reflectivity or inertia rate");
+    for(const auto& sd:d.stages()){
+        if(sd.engines_size()>64||sd.legs_meters_size()>32)throw std::invalid_argument("At most 64 engines and 32 legs a stage");
+        ph::Stage st;st.name=sd.name().substr(0,128);st.propellant=sd.propellant_kilograms();st.massFull=sd.mass_full_kilograms();st.massEmpty=sd.mass_empty_kilograms();
+        st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
+        st.length=sd.length_meters();st.reference=sd.aerodynamic_reference_meters();st.noseRadius=sd.has_nose_radius_meters()?sd.nose_radius_meters():1.;
+        st.legStiffness=sd.leg_stiffness_newtons_per_meter();st.legDamping=sd.leg_damping_newton_seconds_per_meter();st.friction=sd.has_friction()?sd.friction():.6;
+        for(double x:{st.cgFull,st.cgEmpty,st.reference})if(!finite(x))throw std::invalid_argument("Non-finite position: "+st.name);
+        if(!(st.length>0)||!(st.noseRadius>0)||!(st.legStiffness>=0)||!(st.legDamping>=0)||!(st.friction>=0)||!std::isfinite(st.length+st.legStiffness+st.legDamping+st.friction))throw std::invalid_argument("Invalid length, nose radius or legs: "+st.name);
+        for(const auto& l:sd.legs_meters()){const ph::V3 p=get(l);if(!finite(p.x+p.y+p.z))throw std::invalid_argument("Non-finite leg: "+st.name);st.legs.push_back(p);}
+        if(!st.legs.empty()&&!(st.legStiffness>0))throw std::invalid_argument("Legs need a stiffness: "+st.name);
+        for(const auto& e:sd.engines())st.engines.push_back({e.name().substr(0,128),get(e.position_meters()),e.has_direction()?get(e.direction()):ph::V3{1,0,0},e.vacuum_thrust_newtons(),
+            e.exhaust_velocity_meters_per_second(),e.exit_area_meters2(),e.has_min_throttle()?e.min_throttle():1.,e.gimbal_radians(),e.gimbal_rate_radians_per_second()});
+        const auto& a=sd.aerodynamics();auto& ae=st.aero;ae.area=a.reference_area_meters2();ae.length=a.reference_length_meters();ae.span=a.reference_span_meters();
+        if(!(ae.area>=0)||!std::isfinite(ae.area)||!finite(ae.length)||!finite(ae.span))throw std::invalid_argument("Invalid aerodynamic references: "+st.name);
+        if(ae.length==0)ae.length=1;if(ae.span==0)ae.span=1;
+        ae.lift=table(a.lift(),"lift");ae.drag=table(a.drag(),"drag");ae.side=table(a.side(),"side force");ae.roll=table(a.roll(),"roll");ae.pitch=table(a.pitch(),"pitch");ae.yaw=table(a.yaw(),"yaw");
+        ae.rollDamping=a.roll_damping();ae.pitchDamping=a.pitch_damping();ae.yawDamping=a.yaw_damping();
+        if(!finite(ae.rollDamping+ae.pitchDamping+ae.yawDamping))throw std::invalid_argument("Non-finite damping: "+st.name);
+        v.stages.push_back(std::move(st));
+    }
+    return v;
+}
+void put(const ph::Table& t,api::AeroTable* o){for(double x:t.mach)o->add_mach(x);for(double x:t.angle)o->add_angle_degrees(x);for(double x:t.values)o->add_values(x);}
+void put(const ph::Vehicle& v,api::VehicleDefinition* o){
+    o->set_name(v.name);o->set_attitude_torque_newton_meters(v.torque);o->set_diameter_meters(v.diameter);o->set_solar_area_meters2(v.sunArea);o->set_reflectivity(v.reflectivity);
+    o->set_jet_damping(v.jetDamping);o->set_inertia_rate(v.inertiaRate);
+    for(const auto& st:v.stages){auto* d=o->add_stages();
+        d->set_name(st.name);d->set_propellant_kilograms(st.propellant);d->set_mass_full_kilograms(st.massFull);d->set_mass_empty_kilograms(st.massEmpty);d->set_cg_full_meters(st.cgFull);d->set_cg_empty_meters(st.cgEmpty);
+        put(st.inertiaFull,d->mutable_inertia_full_kilogram_meters2());put(st.inertiaEmpty,d->mutable_inertia_empty_kilogram_meters2());d->set_length_meters(st.length);
+        d->set_aerodynamic_reference_meters(st.reference);d->set_nose_radius_meters(st.noseRadius);for(const auto& l:st.legs)put(l,d->add_legs_meters());
+        d->set_leg_stiffness_newtons_per_meter(st.legStiffness);d->set_leg_damping_newton_seconds_per_meter(st.legDamping);d->set_friction(st.friction);
+        auto engines=st.engines;if(engines.empty()&&st.thrust>0)engines.push_back({st.name,{st.nozzle,0,0},{1,0,0},st.thrust,st.exhaust,st.exitArea,st.minThrottle,st.gimbal,0}); // The shorthand, as the core reads it.
+        for(const auto& e:engines){auto* x=d->add_engines();x->set_name(e.name);put(e.position,x->mutable_position_meters());put(e.direction,x->mutable_direction());x->set_vacuum_thrust_newtons(e.thrust);
+            x->set_exhaust_velocity_meters_per_second(e.exhaust);x->set_exit_area_meters2(e.exitArea);x->set_min_throttle(e.minThrottle);x->set_gimbal_radians(e.gimbal);x->set_gimbal_rate_radians_per_second(e.gimbalRate);}
+        const auto& ae=st.aero;auto* a=d->mutable_aerodynamics();a->set_reference_area_meters2(ae.area);a->set_reference_length_meters(ae.length);a->set_reference_span_meters(ae.span);
+        put(ae.lift,a->mutable_lift());put(ae.drag,a->mutable_drag());put(ae.side,a->mutable_side());put(ae.roll,a->mutable_roll());put(ae.pitch,a->mutable_pitch());put(ae.yaw,a->mutable_yaw());
+        a->set_roll_damping(ae.rollDamping);a->set_pitch_damping(ae.pitchDamping);a->set_yaw_damping(ae.yawDamping);
+    }
+}
+ph::Vehicle preset(const api::Vehicle kind,const std::optional<double> payloadKilograms){
+    switch(kind){
+    case api::GENERIC_LAUNCHER:{const double payload=payloadKilograms.value_or(5000.);
+        if(!(payload>=0&&payload<=30000))throw std::invalid_argument("Payload must be 0-30000 kg");return ph::genericLauncher(payload);}
+    case api::NESC_TWO_STAGE:return ph::nescTwoStage();
+    case api::NESC_SPHERE:return ph::nescSphere();
+    case api::GENERIC_LANDER:return ph::genericLander();
+    case api::GENERIC_LUNAR_ASCENT:return ph::genericLunarAscent();
+    case api::GENERIC_MARS_ASCENT:return ph::genericMarsAscent();
+    case api::SATURN_V:return ph::saturnV();
+    default:throw std::invalid_argument("Unknown vehicle");
+    }
+}
 struct Prepared {ph::Vehicle vehicle;double utc=0,pitch=90,seconds=.001,coast=1;unsigned degree=20;ph::Center body=ph::Center::earth;};
 // Air off Earth: the body's climatology.
 const char* climatology(ph::Center c){return c==ph::Center::moon?"Vacuum (no lunar atmosphere)":"NASA Glenn Mars mean atmosphere";}
 Prepared prepare(const api::CreateFlightRequest& r,double utc){
     Prepared p;
-    switch(r.vehicle()){
-    case api::GENERIC_LAUNCHER:{const double payload=r.has_payload_kilograms()?r.payload_kilograms():5000.;
-        if(!(payload>=0&&payload<=30000))throw std::invalid_argument("Payload must be 0-30000 kg");p.vehicle=ph::genericLauncher(payload);break;}
-    case api::NESC_TWO_STAGE:p.vehicle=ph::nescTwoStage();break;
-    case api::NESC_SPHERE:p.vehicle=ph::nescSphere();break;
-    case api::GENERIC_LANDER:p.vehicle=ph::genericLander();break;
-    case api::GENERIC_LUNAR_ASCENT:p.vehicle=ph::genericLunarAscent();break;
-    case api::GENERIC_MARS_ASCENT:p.vehicle=ph::genericMarsAscent();break;
-    case api::SATURN_V:p.vehicle=ph::saturnV();break;
-    default:throw std::invalid_argument("Unknown vehicle");
-    }
+    if(r.vehicle()==api::CUSTOM)p.vehicle=vehicleFrom(r.definition());
+    else if(r.has_definition())throw std::invalid_argument("A definition flies only as CUSTOM");
+    else p.vehicle=preset(r.vehicle(),r.has_payload_kilograms()?std::optional(r.payload_kilograms()):std::nullopt);
     if(!api::CreateFlightRequest::Body_IsValid(r.body()))throw std::invalid_argument("Unknown body");
     p.body=r.body()==api::CreateFlightRequest::MOON?ph::Center::moon:r.body()==api::CreateFlightRequest::MARS?ph::Center::mars:ph::Center::earth;const bool earth=p.body==ph::Center::earth;
     if(!earth&&r.weather()==api::CreateFlightRequest::LIVE_GFS)throw std::invalid_argument("Live weather exists only on Earth");
@@ -338,6 +398,10 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api
         atmosphere=(air?air->source():atmosphere)+unavailable;
     }
     return impl_->create(*r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},out);
+}
+grpc::Status FlightServices::GetVehicle(grpc::ServerContext*,const api::VehicleRequest* r,api::VehicleDefinition* out){
+    try{put(preset(r->vehicle(),r->has_payload_kilograms()?std::optional(r->payload_kilograms()):std::nullopt),out);return grpc::Status::OK;}
+    catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
 }
 std::optional<FlightServices::Sound> FlightServices::sound()const{const auto s=impl_->sound.load();return s?std::optional<Sound>(*s):std::nullopt;}
 grpc::Status FlightServices::ExportFlight(grpc::ServerContext*,const api::Empty*,grpc::ServerWriter<api::FlightLogChunk>* writer){

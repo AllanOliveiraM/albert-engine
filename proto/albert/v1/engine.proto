@@ -177,7 +177,44 @@ message Geodetic { double latitude_degrees=1; double longitude_degrees=2; double
 // GENERIC_MARS_ASCENT: two-stage Mars ascent vehicle on the MSR MAV mass budget (~450 kg, liquid).
 // SATURN_V: Apollo 11's AS-506 from its flight evaluation report, as five stages (S-IC; S-II with the aft interstage and
 // the escape tower, with the tower, alone; S-IVB): separate jettisons each; attitude by ideal torque (1e10 N m).
-enum Vehicle { VEHICLE_UNSPECIFIED=0; GENERIC_LAUNCHER=1; NESC_TWO_STAGE=2; NESC_SPHERE=3; GENERIC_LANDER=4; GENERIC_LUNAR_ASCENT=5; GENERIC_MARS_ASCENT=6; SATURN_V=7; }
+// CUSTOM: CreateFlightRequest.definition (any vehicle; FlightService.GetVehicle gives each preset as one, to edit).
+enum Vehicle { VEHICLE_UNSPECIFIED=0; GENERIC_LAUNCHER=1; NESC_TWO_STAGE=2; NESC_SPHERE=3; GENERIC_LANDER=4; GENERIC_LUNAR_ASCENT=5; GENERIC_MARS_ASCENT=6; SATURN_V=7; CUSTOM=8; }
+// A vehicle in full, as the physics core holds it (docs/PHYSICS.md). SI; positions in metres aft of the nose along body x
+// (y right, z down). Stages in firing order, each describing the whole stack while it is the lowest: separating it leaves
+// the next. Inertias are principal moments about the centre of mass; full and empty bound the active stage's propellant.
+message AeroTable { repeated double mach=1; repeated double angle_degrees=2; repeated double values=3; } // values[m * angles + a]; bilinear, clamped; unset: 0.
+message Aerodynamics {
+  double reference_area_meters2=1; double reference_length_meters=2; double reference_span_meters=3;
+  // Lift and pitch against angle of attack, side force and yaw against sideslip, drag against the total angle, roll against α.
+  AeroTable lift=4; AeroTable drag=5; AeroTable side=6; AeroTable roll=7; AeroTable pitch=8; AeroTable yaw=9;
+  double roll_damping=10; double pitch_damping=11; double yaw_damping=12; // Per radian of rate × length (span) / 2V.
+}
+message EngineDefinition {
+  string name=1; Vector3 position_meters=2; // The nozzle exit's centre.
+  optional Vector3 direction=3;             // Pushing the vehicle toward, at zero gimbal; unset: body x.
+  double vacuum_thrust_newtons=4; double exhaust_velocity_meters_per_second=5; double exit_area_meters2=6;
+  optional double min_throttle=7;           // Deepest throttle, above 0; unset: 1.
+  double gimbal_radians=8; double gimbal_rate_radians_per_second=9; // Rate 0: instant.
+}
+message StageDefinition {
+  string name=1; double propellant_kilograms=2;
+  double mass_full_kilograms=3; double mass_empty_kilograms=4; // Empty + propellant = full.
+  double cg_full_meters=5; double cg_empty_meters=6;
+  Vector3 inertia_full_kilogram_meters2=7; Vector3 inertia_empty_kilogram_meters2=8;
+  double length_meters=9; repeated EngineDefinition engines=10; Aerodynamics aerodynamics=11;
+  double aerodynamic_reference_meters=12;   // Point the aerodynamic moments are given about.
+  optional double nose_radius_meters=13;    // Stagnation heating; unset: 1.
+  repeated Vector3 legs_meters=14;          // Contact points on springs and dampers; none: touchdown at the CG.
+  double leg_stiffness_newtons_per_meter=15; double leg_damping_newton_seconds_per_meter=16; optional double friction=17; // Unset: 0.6.
+}
+message VehicleDefinition {
+  string name=1; repeated StageDefinition stages=2;  // 1-32 stages, up to 64 engines and 32 legs each, tables up to 128 x 128.
+  double attitude_torque_newton_meters=3;           // Ideal torque limit per axis (torque_newton_meters).
+  optional double diameter_meters=4;                // Shown in the scene; unset: 1.
+  double solar_area_meters2=5; optional double reflectivity=6; // Radiation pressure (0 area: none); unset reflectivity 1.3.
+  optional bool jet_damping=7; optional double inertia_rate=8; // Exhaust momentum flux and the İω term; unset: on and 1.
+}
+message VehicleRequest { Vehicle vehicle=1; optional double payload_kilograms=2; }
 message CreateFlightRequest {
   Vehicle vehicle=1;
   optional double payload_kilograms=2;   // GENERIC_LAUNCHER only; default 5000.
@@ -204,6 +241,7 @@ message CreateFlightRequest {
   // latitude over the 3396.19 x 3376.20 km ellipsoid. Site heights -10 to 25 km off Earth.
   enum Body { EARTH=0; MOON=1; MARS=2; }
   Body body=14;
+  VehicleDefinition definition=15;      // CUSTOM only.
 }
 // Inertial measurement unit and barometer errors (IEEE 952 terms, representative grades);
 // the seed makes the noise reproducible.
@@ -279,6 +317,7 @@ message RealtimeRequest {
 message RealtimeStatus { bool running=1; uint64 tick=2; uint64 late_ticks=3; double worst_lag_seconds=4; uint64 policy_events=5; }
 service FlightService {
   rpc CreateFlight(CreateFlightRequest) returns (FlightSample); // Replaces any current flight.
+  rpc GetVehicle(VehicleRequest) returns (VehicleDefinition);   // A preset as a definition (to fly as CUSTOM, edited or not).
   rpc Step(StepRequest) returns (FlightSample);
   rpc GetFlight(Empty) returns (FlightSample);
   rpc EndFlight(Empty) returns (Applied);                       // Removes the vehicle from the scene.

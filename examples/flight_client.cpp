@@ -3,15 +3,22 @@
 // Kennedy LC-39A; Moon: the lunar ascent stage from Tranquility Base; Mars: the Mars ascent
 // vehicle from Jezero crater (two burns, circularizing at a 250 km apoapsis).
 // Usage: albert_flight_client [address] [--fast] [--wire] [--utc=UNIX_SECONDS] [--body=moon|mars] [--apollo11]
+//        [--export-vehicle=launcher|saturn-v|lander|lunar-ascent|mars-ascent] [--definition=FILE.json]
 // Defaults: 127.0.0.1:50051, real time, the instant shown by Albert, the Earth. --wire (Earth)
 // flies over the binary data plane at 1 kHz (one exchange per tick) and then coasts to 10 minutes.
 // --apollo11: the Saturn V of Apollo 11 (AS-506) from LC-39A on 1969-07-16 by its flight program (saturn_v.hpp).
+// --export-vehicle prints a preset as a vehicle definition in JSON (to edit); --definition flies such a file from the Earth's
+// pad with the launcher's guidance (two stages, as the generic launcher).
 #include "albert/v1/engine.grpc.pb.h"
 #include "gravity_turn.hpp"
 #include "saturn_v.hpp"
 #include "wire.hpp"
 #include <grpcpp/grpcpp.h>
+#include <google/protobuf/util/json_util.h>
 #include <chrono>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -59,20 +66,32 @@ int apollo11(api::FlightService::Stub& flight,bool fast){
     return 0;
 }
 int main(int argc,char** argv){try{
-    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth";bool fast=false,binary=false,apollo=false;double utc=0;bool chosen=false;
+    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth",exported,definition;bool fast=false,binary=false,apollo=false;double utc=0;bool chosen=false;
     for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a=="--apollo11")apollo=true;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
-        else if(a.rfind("--body=",0)==0)world=a.substr(7);else address=a;}
+        else if(a.rfind("--body=",0)==0)world=a.substr(7);else if(a.rfind("--export-vehicle=",0)==0)exported=a.substr(17);else if(a.rfind("--definition=",0)==0)definition=a.substr(13);else address=a;}
     if(world!="earth"&&world!="moon"&&world!="mars")throw std::invalid_argument("--body: earth, moon or mars");
     if(binary&&world!="earth")throw std::invalid_argument("--wire flies the Earth case");
     auto channel=grpc::CreateChannel(address,grpc::InsecureChannelCredentials());
     if(!channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(30)))throw std::runtime_error("Abra AlbertEngine --rpc antes de executar o exemplo");
     auto flight=api::FlightService::NewStub(channel);
     if(apollo)return apollo11(*flight,fast);
+    if(!exported.empty()){ // A preset as JSON, to edit and fly with --definition.
+        const std::map<std::string,api::Vehicle> presets{{"launcher",api::GENERIC_LAUNCHER},{"saturn-v",api::SATURN_V},{"lander",api::GENERIC_LANDER},{"lunar-ascent",api::GENERIC_LUNAR_ASCENT},{"mars-ascent",api::GENERIC_MARS_ASCENT}};
+        const auto kind=presets.find(exported);if(kind==presets.end())throw std::invalid_argument("--export-vehicle: launcher, saturn-v, lander, lunar-ascent or mars-ascent");
+        api::VehicleRequest q;q.set_vehicle(kind->second);api::VehicleDefinition d;{grpc::ClientContext c;check(flight->GetVehicle(&c,q,&d));}
+        std::string json;google::protobuf::util::JsonPrintOptions o;o.add_whitespace=true;o.preserve_proto_field_names=true;
+        if(!google::protobuf::util::MessageToJsonString(d,&json,o).ok())throw std::runtime_error("JSON conversion failed");
+        std::printf("%s\n",json.c_str());return 0;
+    }
     constexpr double pi=3.14159265358979323846,deg=pi/180;
     api::CreateFlightRequest create;create.set_focus_camera(true);if(chosen)create.set_utc_unix_seconds(utc);create.set_terrain_height(true); // On the measured ground.
     auto* site=create.mutable_site();ex::Body body=ex::earth;
     ex::GravityTurn guidance(pi/2); // Kennedy LC-39A eastward.
-    if(world=="earth"){create.set_vehicle(api::GENERIC_LAUNCHER);create.set_heading_degrees(90);site->set_latitude_degrees(28.6082);site->set_longitude_degrees(-80.6041);}
+    if(world=="earth"){create.set_vehicle(api::GENERIC_LAUNCHER);create.set_heading_degrees(90);site->set_latitude_degrees(28.6082);site->set_longitude_degrees(-80.6041);
+        if(!definition.empty()){std::ifstream in(definition);if(!in)throw std::runtime_error("Cannot read "+definition);const std::string json{std::istreambuf_iterator<char>(in),{}};
+            if(const auto st=google::protobuf::util::JsonStringToMessage(json,create.mutable_definition());!st.ok())throw std::invalid_argument(definition+": "+std::string(st.message()));
+            create.set_vehicle(api::CUSTOM);}}
+    else if(!definition.empty())throw std::invalid_argument("--definition flies from the Earth");
     else if(world=="moon"){ // Tranquility Base, westward as Apollo 11: a 50 m rise, then steered to 18 km and a 15 x 85 km orbit.
         create.set_vehicle(api::GENERIC_LUNAR_ASCENT);create.set_body(api::CreateFlightRequest::MOON);create.set_heading_degrees(270);site->set_latitude_degrees(.67416);site->set_longitude_degrees(23.47314);
         body=ex::moon;guidance=ex::GravityTurn(270*deg,0,18.3e3,15e3,ex::moon,true,85e3,60,60);

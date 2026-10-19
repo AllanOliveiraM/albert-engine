@@ -307,6 +307,16 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | `fail` | O motor falha: apaga e não reacende (exige `engine`) |
 | `torque_newton_meters` | Torque ideal de atitude nos eixos do corpo, limitado por eixo |
 
+**Veículos definidos pela API.** `vehicle: CUSTOM` com `definition` (`VehicleDefinition`) voa qualquer veículo: estágios
+na ordem de queima, cada um descrevendo o conjunto inteiro enquanto é o mais baixo (massas cheio e vazio, CG, inércias
+principais, comprimento), seus motores (`EngineDefinition`: posição do bocal, direção, empuxo no vácuo, velocidade de
+exaustão, área de saída, aceleração mínima, curso e taxa do cardã), aerodinâmica (tabelas Mach × ângulo de sustentação,
+arrasto, força lateral e momentos, amortecimentos), pernas e o torque ideal de atitude; posições em metros atrás do nariz.
+`GetVehicle` devolve cada preset como definição, para editar: voada como `CUSTOM` sem mudanças, dá o mesmo `state_hash` do
+preset (`rpc_test`). O mapeamento JSON do protobuf serve de formato de arquivo: `albert_flight_client --export-vehicle=launcher`
+imprime o lançador em JSON e `--definition=arquivo.json` voa o arquivo do pad do Cabo com a guiagem do lançador (o mesmo
+lançador com nove motores num anel de 1,4 m, cada um com 1/9 do empuxo e da área, chegou a 181 × 210 km).
+
 `engine` em cada comando escolhe o motor de `ignite`, `cutoff`, `throttle`, `gimbal` e `fail`: 0 para todos os
 motores do estágio, n para o n-ésimo (a ordem de `FlightSample.engines`, que traz de cada um ligado, falho,
 aceleração, cardã movido e comandado e empuxo); nos demais comandos deve ser 0.
