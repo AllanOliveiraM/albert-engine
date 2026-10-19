@@ -70,6 +70,7 @@ public:
     // The cloud layer's map as drawn (live or the pack's) and its opacity there (the shell's 0.88 × shown).
     [[nodiscard]] threepp::Texture* cloudMap() const;
     [[nodiscard]] float cloudOpacity() const { return .88f*displayedClouds_; }
+    void setCloudShell(float visibility) { cloudShell_=visibility; } // 0-1: the flat layer's share where volumetric clouds take over.
     [[nodiscard]] const Terrain* earthTerrain() const { return earthTerrain_.get(); } // Null until assets load.
     [[nodiscard]] const Terrain* moonTerrain() const { return moonTerrain_.get(); }
 
@@ -105,7 +106,7 @@ private:
     std::array<std::shared_ptr<threepp::Texture>,2> surfaceFillTextures_;
     std::array<threepp::Vector3,2> surfaceFillDirections_;
     std::array<float,2> displayedFill_{};
-    float displayedAtmosphere_=1.f, displayedClouds_=0.f, displayedNight_=1.f;
+    float displayedAtmosphere_=1.f, displayedClouds_=0.f, displayedNight_=1.f, cloudShell_=1.f;
     std::optional<GeoRegion> earthDetailBounds_;
     std::array<std::shared_ptr<threepp::Texture>,3> imageDetail_;
     struct DetailedImage { int index; std::optional<threepp::Image> image; std::string error; int level=-1; };

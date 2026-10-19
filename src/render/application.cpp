@@ -1219,7 +1219,8 @@ int albert::runRenderer(int argc, char** argv) {
         // five times faster, the wheel scales the speed, which follows the height over the nearest surface.
         bool freeCamera=false;float freeSpeed=1.f;
         // Wind waves: the wind they follow (m/s toward east and north), their clock, and the tangent frame they are drawn in.
-        float seaWindEast=-7.f,seaWindNorth=0;double seaClock=0;struct SeaFrame {albert::physics::V3 position,east,north;};std::optional<SeaFrame> seaOrigin;
+        // cloudShare: the volumetric layer's share of the clouds, animated; cloudVolume: as drawn.
+        float seaWindEast=-7.f,seaWindNorth=0,cloudShare=0,cloudVolume=0;double seaClock=0;struct SeaFrame {albert::physics::V3 position,east,north;};std::optional<SeaFrame> seaOrigin;
         // arrival: direction from the target to the arriving camera, overriding the default.
         auto setFocus = [&](Focus next, bool resetZoom = false, std::optional<Vector3> arrival = {}, std::optional<float> distance = {}) {
             registry.get(targetId(next));
@@ -1575,7 +1576,7 @@ int albert::runRenderer(int argc, char** argv) {
                     check("Sombras",visualSettings.shadows);
                     check("Atmosfera",visualSettings.atmosphere);
                     check("Relevo detalhado",visualSettings.terrain,"Copernicus 30 m na Terra, LOLA na Lua, MOLA em Marte.");
-                    check("Nuvens volumetricas",preferences.volumetricClouds,"Nuvens em 3D perto da Terra; desligadas, fica a camada plana.");
+                    check("Nuvens volumetricas",preferences.volumetricClouds,"Nuvens em 3D perto da Terra, das nuvens em tempo real; desligadas, fica a camada plana.");
                     check("Ondas no mar",preferences.oceanWaves,"Ondas pelo vento perto da camera; desligadas, o mar so tem a rugosidade media.");
                     slider("##Campo de visao",preferences.fov,35,90,"Campo de visao: %.0f graus");
                     ImGui::Spacing();ImGui::TextDisabled("TERRA");
@@ -2699,7 +2700,8 @@ int albert::runRenderer(int argc, char** argv) {
                     if(std::hypot(seaWindEast,seaWindNorth)<.5f){seaWindEast=-.5f;seaWindNorth=0;}}
                 else{seaWindEast=-7.f;seaWindNorth=0;}
                 const float wind=std::hypot(seaWindEast,seaWindNorth);
-                graphics.setWeather(marsAir?nullptr:planets.cloudMap(),12.f,planets.cloudOpacity(),marsAir?0.f:wind,earth->scale.y); // The cloud shell's height over the ellipsoid.
+                // The cloud shadows' height over the ellipsoid: the shell's, or the volumetric layer's middle as it takes over.
+                graphics.setWeather(marsAir?nullptr:planets.cloudMap(),12.f+(3.5f-12.f)*cloudVolume,planets.cloudOpacity(),marsAir?0.f:wind,earth->scale.y);
                 if(marsAir)graphics.setAir(mars->second.get(),6378.137f,planets.atmosphereVisibility(),0.f,true);
                 else{Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
                     graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}}
@@ -2720,6 +2722,13 @@ int albert::runRenderer(int argc, char** argv) {
                     Vector3 at=toWorld((anchor-eye)*(1/r));at.add(camera->position);
                     graphics.setSea(true,seaClock,seaWindEast,seaWindNorth,at,toWorld(o.east).normalize(),toWorld(o.north).normalize(),static_cast<float>(r));
                 }else graphics.setSea(false,seaClock,seaWindEast,seaWindNorth,{},{},{},static_cast<float>(r));
+                // Volumetric clouds (Ajustes "Nuvens volumetricas") up to 50 km, handing over to the flat shell from 30 km; their noise
+                // drifts with the wind at their height, taken as 1.5 times the sea's (the 850 hPa wind over the 10 m one).
+                // The shell gives way only where the volume was drawn (the air's tables ready, a cloud map), so neither vanishes alone.
+                const double fade=std::clamp((here.height-30e3)/20e3,0.,1.);
+                cloudShare=albert::animateValue(cloudShare,preferences.volumetricClouds?static_cast<float>(1-fade*fade*(3-2*fade)):0.f,dt);
+                const float volume=cloudShare*planets.cloudOpacity()/.88f;cloudVolume=graphics.cloudsShown()?volume:0.f;
+                graphics.setClouds(volume>0,volume,seaClock,1.5f*seaWindEast,1.5f*seaWindNorth);planets.setCloudShell(1-cloudVolume);
             }
             graphics.setSamples(preferences.antialias?4:1);graphics.setVsync(preferences.vsync);ImGui::GetIO().FontGlobalScale=preferences.uiScale;
 #ifdef ALBERT_HAS_RPC

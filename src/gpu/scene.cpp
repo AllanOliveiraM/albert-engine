@@ -1,4 +1,5 @@
 #include "gpu/scene.hpp"
+#include "gpu/clouds.hpp"
 #include "gpu/ocean.hpp"
 #include "gpu/programs.hpp"
 #include "gpu/atmosphere.hpp"
@@ -9,7 +10,9 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <chrono>
 #include <cstring>
+#include <future>
 #include <map>
 #include <set>
 #include <string_view>
@@ -167,6 +170,7 @@ struct SceneRenderer::Impl {
     // Sun shadow map: depth from the light's orthographic camera, compared with PCF in the receivers.
     WGPUTexture shadowTexture=nullptr,dummyShadow=nullptr;WGPUTextureView shadowView=nullptr,dummyShadowView=nullptr;unsigned shadowSize=0;std::uint64_t shadowSerial=0,boundFrame=~0ull; // boundFrame: the shadow map serial in frameGroup (0: the dummy).
     const Atmosphere* boundAir=nullptr;std::uint64_t boundClouds=0;WGPUSampler airSampler=nullptr,cloudSampler=nullptr;WGPUTexture noVolume=nullptr;WGPUTextureView noVolumeView=nullptr;WGPUBuffer noAir=nullptr; // Placeholders without air.
+    std::unique_ptr<Clouds> clouds;std::future<Clouds::Noise> cloudNoise;std::array<double,3> cloudDrift{};double cloudSeconds=-1;bool clouded=false; // Noise made on a thread first. // Volumetric clouds, made when first shown; the noise's drift (km) and its clock.
     WGPUTexture noOcean=nullptr;WGPUTextureView noOceanView=nullptr;WGPUSampler oceanSampler=nullptr;const Ocean* boundOcean=nullptr;float slopeWind=-1;std::array<float,3> slopes{}; // Calm placeholders.
     WGPUSampler shadowSampler=nullptr;WGPUBindGroup casterFrame=nullptr;WGPURenderPipeline shadowPipeline=nullptr;WGPUPipelineLayout shadowLayout=nullptr;WGPUShaderModule shadowModule=nullptr;
     // Scene-pass GPU time: two timestamps resolved into a buffer, read back a few frames later.
@@ -177,15 +181,15 @@ struct SceneRenderer::Impl {
             WGPUBindGroupLayoutDescriptor d{};d.entryCount=1;d.entries=&e;return wgpuDeviceCreateBindGroupLayout(device,&d);};
         objectLayout=uniformLayout(true);
         { // Frame: uniforms, the shadow depth map and its comparison sampler; the air's parameters, tables and sampler.
-            WGPUBindGroupLayoutEntry e[14]{};const auto both=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;
+            WGPUBindGroupLayoutEntry e[14]{};const auto both=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment|WGPUShaderStage_Compute; // Compute: the clouds' march.
             e[0].binding=0;e[0].visibility=both;e[0].buffer.type=WGPUBufferBindingType_Uniform;
             e[1].binding=1;e[1].visibility=WGPUShaderStage_Fragment;e[1].texture.sampleType=WGPUTextureSampleType_Depth;e[1].texture.viewDimension=WGPUTextureViewDimension_2D;
             e[2].binding=2;e[2].visibility=WGPUShaderStage_Fragment;e[2].sampler.type=WGPUSamplerBindingType_Comparison;
             e[3].binding=3;e[3].visibility=both;e[3].buffer.type=WGPUBufferBindingType_Uniform;
             for(std::uint32_t i=4;i<8;++i){e[i].binding=i;e[i].visibility=both;e[i].texture.sampleType=WGPUTextureSampleType_Float;e[i].texture.viewDimension=i==5||i==6?WGPUTextureViewDimension_3D:WGPUTextureViewDimension_2D;}
             e[8].binding=8;e[8].visibility=both;e[8].sampler.type=WGPUSamplerBindingType_Filtering;
-            e[9].binding=9;e[9].visibility=WGPUShaderStage_Fragment;e[9].texture.sampleType=WGPUTextureSampleType_Float;e[9].texture.viewDimension=WGPUTextureViewDimension_2D; // The cloud map (shadows).
-            e[10].binding=10;e[10].visibility=WGPUShaderStage_Fragment;e[10].sampler.type=WGPUSamplerBindingType_Filtering;
+            e[9].binding=9;e[9].visibility=WGPUShaderStage_Fragment|WGPUShaderStage_Compute;e[9].texture.sampleType=WGPUTextureSampleType_Float;e[9].texture.viewDimension=WGPUTextureViewDimension_2D; // The cloud map (shadows, clouds).
+            e[10].binding=10;e[10].visibility=WGPUShaderStage_Fragment|WGPUShaderStage_Compute;e[10].sampler.type=WGPUSamplerBindingType_Filtering;
             for(std::uint32_t i=11;i<13;++i){e[i].binding=i;e[i].visibility=both;e[i].texture.sampleType=WGPUTextureSampleType_Float;e[i].texture.viewDimension=WGPUTextureViewDimension_2DArray;} // The ocean's fields.
             e[13].binding=13;e[13].visibility=both;e[13].sampler.type=WGPUSamplerBindingType_Filtering;
             WGPUBindGroupLayoutDescriptor d{};d.entryCount=14;d.entries=e;frameLayout=wgpuDeviceCreateBindGroupLayout(device,&d);
@@ -218,6 +222,7 @@ struct SceneRenderer::Impl {
         Program b;b.wgsl=builtinWgsl;b.attributes={{"normal",3},{"uv",2},{"uv2",2}};b.textures={"map","alphaMap","lightMap","bumpMap","roughnessMap"};define("albert:builtin",b);
     }
     ~Impl(){
+        clouds.reset();if(cloudNoise.valid())cloudNoise.wait();
         for(auto& [k,p]:pipelines)wgpuRenderPipelineRelease(p);for(auto& [k,p]:mipPipelines)wgpuRenderPipelineRelease(p);
         if(mipModule){wgpuShaderModuleRelease(mipModule);wgpuBindGroupLayoutRelease(mipLayout);wgpuPipelineLayoutRelease(mipPipelineLayout);}
         for(auto& [k,c]:compiled){wgpuShaderModuleRelease(c.module);wgpuBindGroupLayoutRelease(c.layout);wgpuPipelineLayoutRelease(c.pipelineLayout);}
@@ -496,6 +501,8 @@ SceneRenderer::~SceneRenderer()=default;
 unsigned SceneRenderer::drawn()const{return impl_->drawn;}
 std::size_t SceneRenderer::vertexBytes()const{std::size_t n=0;for(const auto& [k,a]:impl_->attributes)n+=a.buffer.bytes;return n;}
 double SceneRenderer::gpuMilliseconds()const{return impl_->gpuMs;}
+const Clouds* SceneRenderer::clouds()const{return impl_->clouds.get();}
+bool SceneRenderer::cloudsShown()const{return impl_->clouded;}
 void SceneRenderer::submitted(){auto& g=*impl_;if(g.mapPending){wgpuBufferMapAsync(g.readback,WGPUMapMode_Read,0,16,g.pendingMap);g.mapPending=false;}}
 void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder){
     auto& g=*impl_;++g.frame;g.drawn=0;const unsigned msaa=samples>1?4u:1u;g.ensureDepth(width,height,msaa);g.streamBudget=Impl::streamLimit;
@@ -572,6 +579,26 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     f[36]=static_cast<float>(width);f[37]=static_cast<float>(height);f[38]=camera.nearPlane;
     f[40]=sun.x;f[41]=sun.y;f[42]=sun.z;f[43]=sunOn;f[44]=sunColor.r;f[45]=sunColor.g;f[46]=sunColor.b;f[48]=ambient.r;f[49]=ambient.g;f[50]=ambient.b;f[52]=exposure;f[53]=toneMapping?1.f:0.f;
     wgpuQueueWriteBuffer(g.queue,g.frameBuffer,0,f,sizeof f);
+    // Volumetric clouds: marched now, laid over the opaque objects in the pass. Their noise drifts with the wind along east and
+    // north at the eye (planet frame: y polar, the map's u growing east), wrapped to its period, so it never jumps.
+    bool clouded=volume.enabled&&volume.strength>0&&airTables&&cloudSerial!=2&&!dynamic_cast<OrthographicCamera*>(&camera);
+    if(clouded&&!g.clouds){ // The noise off this thread; the clouds once it is ready (the cloud shell meanwhile).
+        if(!g.cloudNoise.valid())g.cloudNoise=std::async(std::launch::async,Clouds::noise);
+        if(g.cloudNoise.wait_for(std::chrono::seconds(0))==std::future_status::ready)g.clouds=std::make_unique<Clouds>(g.gpu,g.frameLayout,g.cloudNoise.get());else clouded=false;
+    }
+    g.clouded=clouded;
+    const bool timing=g.timestamps&&!g.mapping; // GPU time from the march (when there is one) to the end of the scene pass.
+    if(clouded){
+        const double step=g.cloudSeconds<0?0:std::clamp(volume.seconds-g.cloudSeconds,0.,1.);g.cloudSeconds=volume.seconds;
+        const double ux=f[92],uy=f[93],uz=f[94],ul=std::sqrt(ux*ux+uy*uy+uz*uz),el=std::hypot(uz,ux);
+        if(ul>0&&el>1e-6*ul){const double up[3]{ux/ul,uy/ul,uz/ul},east[3]{uz/el,0,-ux/el},north[3]{up[1]*east[2]-up[2]*east[1],up[2]*east[0]-up[0]*east[2],up[0]*east[1]-up[1]*east[0]};
+            for(int i=0;i<3;++i){double& d=g.cloudDrift[static_cast<std::size_t>(i)];d=std::fmod(d+(east[i]*volume.windEast+north[i]*volume.windNorth)*step*1e-3,Clouds::tile);if(d<0)d+=Clouds::tile;}}
+        Clouds::View v;v.width=width;v.height=height;v.divisor=volume.divisor?volume.divisor:std::clamp(static_cast<unsigned>(std::ceil(std::sqrt(width*height/3e5))),2u,4u); // ~300 000 rays.
+        v.steps=volume.steps;v.strength=std::min(volume.strength,1.f);v.baseKm=volume.baseKm;v.topKm=volume.topKm;
+        v.extinction=volume.extinction;v.flat=volume.flat;for(std::size_t i=0;i<3;++i)v.drift[i]=static_cast<float>(g.cloudDrift[i]);
+        WGPUPassTimestampWrites start{};start.querySet=g.timestamps;start.beginningOfPassWriteIndex=0;start.endOfPassWriteIndex=WGPU_QUERY_SET_INDEX_UNDEFINED;
+        g.clouds->march(encoder,g.frameGroup,v,timing?&start:nullptr);
+    }
     // Object uniforms, one 256-byte slot per draw, then one per shadow caster.
     const std::size_t count=background.size()+opaque.size()+blended.size()+(shadowing?casters.size():0);
     if(count*objectStride>g.objectCapacity){
@@ -611,8 +638,8 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     if(scene.background.isColor()){const Color c=scene.background.color();colour.clearValue={c.r,c.g,c.b,1};}else colour.clearValue={0,0,0,1};
     WGPURenderPassDepthStencilAttachment depth{};depth.view=g.depthView;depth.depthLoadOp=WGPULoadOp_Clear;depth.depthStoreOp=WGPUStoreOp_Discard;depth.depthClearValue=0;
     WGPURenderPassDescriptor pd{};pd.colorAttachmentCount=1;pd.colorAttachments=&colour;pd.depthStencilAttachment=&depth;
-    WGPUPassTimestampWrites times{};const bool timing=g.timestamps&&!g.mapping;
-    if(timing){times.querySet=g.timestamps;times.beginningOfPassWriteIndex=0;times.endOfPassWriteIndex=1;pd.timestampWrites=&times;}
+    WGPUPassTimestampWrites times{};
+    if(timing){times.querySet=g.timestamps;times.beginningOfPassWriteIndex=clouded?WGPU_QUERY_SET_INDEX_UNDEFINED:0;times.endOfPassWriteIndex=1;pd.timestampWrites=&times;}
     WGPURenderPassEncoder pass=wgpuCommandEncoderBeginRenderPass(encoder,&pd);
     wgpuRenderPassEncoderSetBindGroup(pass,0,g.frameGroup,0,nullptr);
     std::size_t index=0;
@@ -620,6 +647,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     WGPURenderPipeline lastPipe=nullptr;WGPUBindGroup lastGroup=nullptr;WGPUBuffer lastIndex=nullptr;std::array<WGPUBuffer,8> lastBuffers{};
     std::vector<WGPUBuffer> buffers;std::vector<int> strides;const std::string position="position";unsigned seenReallocations=g.reallocations;
     for(auto* list:{&background,&opaque,&blended})for(auto& item:*list){
+        if(clouded&&list==&blended&&&item==&blended.front()){g.clouds->composite(pass,g.gpu.format(),msaa);lastPipe=nullptr;} // Over the opaque objects, under the transparent ones.
         const std::uint32_t offset=offsets[index++];auto& geo=g.geometries[item.geometry->id];geo.used=g.frame;
         const auto* positions=item.geometry->getAttribute<float>("position");if(!positions)continue;
         const unsigned vertices=static_cast<unsigned>(positions->count());
@@ -645,6 +673,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         }else{const unsigned first=std::min(vertices,static_cast<unsigned>(std::max(0,range.start))),n=std::min(vertices-first,static_cast<unsigned>(range.count));if(n)wgpuRenderPassEncoderDraw(pass,n,1,first,0);}
         ++g.drawn;
     }
+    if(clouded&&blended.empty())g.clouds->composite(pass,g.gpu.format(),msaa);
     wgpuRenderPassEncoderEnd(pass);wgpuRenderPassEncoderRelease(pass);
     if(timing){ // Resolve now; map once this frame's commands have run (the callback fires on a later poll).
         wgpuCommandEncoderResolveQuerySet(encoder,g.timestamps,0,2,g.resolved,0);wgpuCommandEncoderCopyBufferToBuffer(encoder,g.resolved,0,g.readback,0,16);g.mapping=true;

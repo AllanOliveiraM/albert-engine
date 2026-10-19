@@ -35,6 +35,7 @@ double variance(const std::vector<float>& v,int layer,int channel){
 }
 }
 int main(){try{
+    std::setvbuf(stdout,nullptr,_IONBF,0); // Each line out before a driver's abort (CI keeps the output's tail).
     std::unique_ptr<albert::gpu::Context> gpu;try{gpu=std::make_unique<albert::gpu::Context>();}catch(const std::exception& e){std::printf("skipped: %s\n",e.what());return 77;}
     albert::gpu::Ocean ocean(*gpu);std::printf("Ocean on %s:\n",gpu->adapter().c_str());
     for(double wind:{10.,15.}){

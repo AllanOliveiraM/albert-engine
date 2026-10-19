@@ -53,7 +53,7 @@ assimetria da poeira por canal), reflexo do céu na água lisa e sombra das nuve
 veículos, rugosidade do mar pelo vento (Cox-Munk). Perfil na MX350 a 1080p: cena na GPU ≤ 10,7 ms
 (p99) e CPU ≤ 5,3 ms no Cabo, Alpes e Jezero; o quadro completo em tela nativa ainda não foi medido
 (no Xvfb a apresentação copia o quadro pela CPU). A imagem Landsat dos sítios toma o tom do mapa
-global na região. Ondas do vento (Tessendorf, três cascatas FFT, espuma) entregues em 19/10/2026 no sombreamento da água; faltam nuvens volumétricas e o deslocamento geométrico da malha do mar.
+global na região. Ondas do vento (Tessendorf, três cascatas FFT, espuma) entregues em 19/10/2026 no sombreamento da água; nuvens volumétricas entregues em 19/10/2026 (cobertura do mapa ao vivo, espalhamento simples e campo difuso δ-Eddington; fração de céu coberto vista de cima a ≤0,04 da cobertura, albedo de placa a ≤16% do δ-Eddington); falta o deslocamento geométrico da malha do mar.
 
 Estado em 18/10/2026: etapas 1–5 entregues. Os 22 programas e os materiais embutidos rodam em WGSL;
 o `visual_test` passa nos dois renderizadores (llvmpipe e MX350); sombra PCF, MSAA 4×, texturas em

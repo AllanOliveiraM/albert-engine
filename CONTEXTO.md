@@ -85,6 +85,13 @@ Testes: disco integrado no shader contra ROLO e Lane e Irvine (atmosphere_test),
 `FlightServices::sound()` publicado atomicamente com a cena (ler com o mutex travava: o passo espera o quadro), app começa mudo
 com "Som do voo" no menu. O Allan pediu silêncio nos testes: execuções automáticas sempre com `ALBERT_AUDIO=0`.
 Ponta a ponta (lançador genérico, câmera perto do pad): 128,8 dB a 128 m; 98,6 dB a 3,6 km com 11 s de atraso e Doppler 0,25.
+**Mar e nuvens volumétricas (19/10/2026):** `gpu::Ocean` (Tessendorf, 3 cascatas FFT em compute) e `gpu::Clouds` (marcha em
+compute antes do passe, composição antes dos transparentes com `frag_depth`; grupo do quadro visível ao compute; ruído feito na
+CPU e equalizado; luz: espalhamento simples + campo difuso δ-Eddington). Ajustes "Ondas no mar" e "Nuvens volumetricas"; as
+nuvens dependem de "Nuvens em tempo real" e do tempo simulado a menos de um dia de agora. Para ver na prévia sem rede: copiar
+`build/m0-cache/clouds` para o diretório de dados e usar UTC de ontem (`cloud-shot.py` no scratchpad). `clouds_test <prefixo>`
+grava vistas de cúmulos. O CI do Windows perdeu o dispositivo (WARP) no `ocean_test` do commit ba25d02: o contexto agora
+imprime o motivo da perda e o oceano, num adaptador de CPU, submete cada dispatch sozinho; confirmar no próximo CI.
 **Escopo (18/10/2026):** o Allan adiou o refinamento de Marte (GRAM Suite, atmosfera sazonal e
 termosfera, Viking < 20%) para atualizações futuras; o foco é Terra e Lua. Não puxar itens de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.

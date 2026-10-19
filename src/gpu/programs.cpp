@@ -119,15 +119,16 @@ fn horizonPoint(c: vec3f, toward: vec3f) -> vec3f { // The model sphere's horizo
     let h = toward - dot(toward, up) * up; let hl = max(length(h), 1e-9);
     return up * rc + (h / hl * (b0 / rc) - up * (rho / rc)) * rho;
 }
+// The cloud map's coordinates over a point (planet frame): its v is geodetic (as its shell's map), tan φ = tan β · a / b
+// from the frame's parametric β.
+fn cloudUv(p: vec3f) -> vec2f { return vec2f(atan2(p.z, -p.x) / (2.0 * AIR_PI), atan2(p.y, length(p.xz) * frame.weather.w) / AIR_PI + 0.5); }
 // Sunlight through the cloud layer over a point (planet frame, radius r): the layer's opacity where the
 // ray toward the sun crosses it (1 above it, or without clouds).
 fn cloudShadow(p: vec3f, r: f32) -> f32 {
     let top = bottomRadius() + frame.weather.x; let sun = frame.airSun.xyz;
     if (frame.weather.y <= 0.0 || r >= top) { return 1.0; }
-    let rmu = dot(p, sun); let crossing = normalize(p + sun * (-rmu + sqrt(max(rmu * rmu - (r - top) * (r + top), 0.0))));
-    // The layer's v is geodetic (as its shell's map): tan φ = tan β · a / b from the frame's parametric β.
-    let uv = vec2f(atan2(crossing.z, -crossing.x) / (2.0 * AIR_PI), atan2(crossing.y, length(crossing.xz) * frame.weather.w) / AIR_PI + 0.5);
-    return 1.0 - frame.weather.y * textureSampleLevel(airClouds, airCloudSampler, uv, 0.0).g;
+    let rmu = dot(p, sun); let crossing = p + sun * (-rmu + sqrt(max(rmu * rmu - (r - top) * (r + top), 0.0)));
+    return 1.0 - frame.weather.y * textureSampleLevel(airClouds, airCloudSampler, cloudUv(crossing), 0.0).g;
 }
 struct AirLight { sun: vec3f, sky: vec3f }; // Sunlight reaching a point (fraction of the sun's colour); sky irradiance (relative to it).
 fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {

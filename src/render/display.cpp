@@ -62,6 +62,9 @@ void albert::Display::setSea(bool on,double seconds,float east,float north,const
     auto& d=*impl_;if(on&&!d.ocean)d.ocean=std::make_unique<gpu::Ocean>(*d.context);
     auto& s=d.scene->sea;s.ocean=d.ocean.get();s.enabled=on;s.seconds=seconds;s.east=east;s.north=north;s.anchor=anchor;s.eastAxis=eastAxis;s.northAxis=northAxis;s.metersPerUnit=metersPerUnit;
 }
+void albert::Display::setClouds(bool on,float strength,double seconds,float east,float north){
+    auto& v=impl_->scene->volume;v.enabled=on&&strength>0&&!impl_->context->software();v.strength=strength;v.seconds=seconds;v.windEast=east;v.windNorth=north;v.divisor=0;v.steps=64;}
+bool albert::Display::cloudsShown()const{return impl_->scene->cloudsShown();}
 void albert::Display::setSamples(unsigned samples){impl_->scene->samples=samples>1?4u:1u;}
 void albert::Display::setVsync(bool on){impl_->context->setVsync(on);}
 void albert::Display::setEarthshine(const Object3D* earth,float radius){impl_->scene->earthshine={earth,earth?radius:0.f};}

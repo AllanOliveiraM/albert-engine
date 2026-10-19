@@ -89,10 +89,10 @@ struct Ocean::Impl {
     WGPUDevice device=nullptr;WGPUQueue queue=nullptr;WGPUBuffer params=nullptr,spectrum=nullptr,fields=nullptr;WGPUShaderModule module=nullptr;
     WGPUBindGroupLayout layout=nullptr;WGPUPipelineLayout pipelineLayout=nullptr;WGPUBindGroup group=nullptr;
     WGPUComputePipeline spectrumPass=nullptr,evolvePass=nullptr,rowsPass=nullptr,columnsPass=nullptr,assemblePass=nullptr;
-    float speed=-1,east=0,north=0;
+    float speed=-1,east=0,north=0;bool software=false;
 };
 Ocean::Ocean(Context& context):impl_(new Impl){
-    auto& d=*impl_;d.device=context.device();d.queue=context.queue();
+    auto& d=*impl_;d.device=context.device();d.queue=context.queue();d.software=context.software();
     auto buffer=[&](std::size_t bytes,WGPUBufferUsage usage){WGPUBufferDescriptor b{};b.size=bytes;b.usage=usage|WGPUBufferUsage_CopyDst;return wgpuDeviceCreateBuffer(d.device,&b);};
     const std::size_t grid=static_cast<std::size_t>(size)*size*cascades*16;
     d.params=buffer(32,WGPUBufferUsage_Uniform);d.spectrum=buffer(grid,WGPUBufferUsage_Storage);d.fields=buffer(2*grid,WGPUBufferUsage_Storage);
@@ -127,11 +127,13 @@ void Ocean::update(WGPUCommandEncoder encoder,double seconds,float east,float no
     auto& d=*impl_;const float speed=std::hypot(east,north);
     const float data[8]{speed,east,north,0,static_cast<float>(std::fmod(seconds,1e5)),choppiness,0,0};wgpuQueueWriteBuffer(d.queue,d.params,0,data,sizeof data);
     const bool respectrum=d.speed<0||std::abs(speed-d.speed)>.25f||std::acos(std::clamp((east*d.east+north*d.north)/std::max(speed*std::hypot(d.east,d.north),1e-6f),-1.f,1.f))>.05f;
-    WGPUComputePassEncoder p=wgpuCommandEncoderBeginComputePass(encoder,nullptr);wgpuComputePassEncoderSetBindGroup(p,0,d.group,0,nullptr);
-    auto run=[&](WGPUComputePipeline pl,unsigned x,unsigned y,unsigned z){wgpuComputePassEncoderSetPipeline(p,pl);wgpuComputePassEncoderDispatchWorkgroups(p,x,y,z);};
+    // A pass per dispatch; on a CPU adapter (WARP) each also goes in its own submission, under the driver's watchdog alone.
+    auto run=[&](WGPUComputePipeline pl,unsigned x,unsigned y,unsigned z){
+        WGPUCommandEncoder e=d.software?wgpuDeviceCreateCommandEncoder(d.device,nullptr):encoder;WGPUComputePassEncoder p=wgpuCommandEncoderBeginComputePass(e,nullptr);
+        wgpuComputePassEncoderSetBindGroup(p,0,d.group,0,nullptr);wgpuComputePassEncoderSetPipeline(p,pl);wgpuComputePassEncoderDispatchWorkgroups(p,x,y,z);wgpuComputePassEncoderEnd(p);wgpuComputePassEncoderRelease(p);
+        if(d.software){WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(d.queue,1,&c);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);}};
     if(respectrum){run(d.spectrumPass,size/16,size/16,cascades);d.speed=speed;d.east=east;d.north=north;}
     run(d.evolvePass,size/16,size/16,cascades);run(d.rowsPass,size,2,cascades);run(d.columnsPass,size,2,cascades);run(d.assemblePass,size/16,size/16,cascades);
-    wgpuComputePassEncoderEnd(p);wgpuComputePassEncoderRelease(p);
 }
 double Ocean::significantHeight(double u){const double wp=.877*g/(1.026*u);return 4*std::sqrt(.0081*g*g/(5*std::pow(wp,4)));}
 double Ocean::resolvedSlope(double u){double s=0;for(unsigned c=0;c<cascades;++c)s+=bandSlope(u,c);return s;}

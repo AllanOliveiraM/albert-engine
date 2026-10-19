@@ -492,7 +492,7 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     displayedClouds_=animateValue(displayedClouds_,settings.clouds ? 1.f : 0.f,seconds);
     displayedNight_=animateValue(displayedNight_,settings.nightLights ? 1.f : 0.f,seconds);
     atmosphereMaterial_->uniforms.at("visibility").setValue(displayedAtmosphere_);
-    cloudMaterial_->uniforms.at("visibility").setValue(displayedClouds_);
+    cloudMaterial_->uniforms.at("visibility").setValue(displayedClouds_*cloudShell_);
     nightMaterial_->uniforms.at("visibility").setValue(displayedNight_);
     nightMaterial_->uniforms.at("solarDirection").setValue(solarDirection);
     cloudMaterial_->uniforms.at("solarDirection").setValue(solarDirection);
@@ -515,7 +515,7 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     atmosphereMaterial_->uniforms.at("localCamera").setValue(localCamera);
     atmosphereMaterial_->uniforms.at("localSun").setValue(localSun);
     atmosphere_->visible = displayedAtmosphere_>0.f;
-    clouds_->visible = displayedClouds_>0.f;
+    clouds_->visible = displayedClouds_*cloudShell_>0.f;
     if(earthDetail_) earthDetail_->visible=settings.quality && localCamera.length()<2.2f;
     if(moonDetail_) moonDetail_->visible=settings.quality && cameraPosition.distanceTo(moon->position)<.8f;
     const auto earthMask=earthDetail_ && earthDetail_->visible ? surfaceMasks_[0] : opaqueMask_;

@@ -51,6 +51,11 @@ Context::Context(GLFWwindow* window){
     dd.requiredFeatureCount=features.size();dd.requiredFeatures=features.data();
     // Called from inside wgpu: never throw across it. Validation errors are bugs; they are counted and logged.
     dd.uncapturedErrorCallbackInfo.callback=[](const WGPUDevice*,WGPUErrorType,WGPUStringView m,void*,void*){++errorCount;std::fprintf(stderr,"WebGPU: %s\n",text(m).c_str());};
+    // A lost device (a driver reset, a hung GPU) is reported with its reason; destruction at exit is not.
+    dd.deviceLostCallbackInfo.mode=WGPUCallbackMode_AllowSpontaneous;
+    dd.deviceLostCallbackInfo.callback=[](const WGPUDevice*,WGPUDeviceLostReason reason,WGPUStringView m,void*,void*){
+        if(reason==WGPUDeviceLostReason_Destroyed||reason==WGPUDeviceLostReason_CallbackCancelled)return;
+        ++errorCount;std::fprintf(stderr,"WebGPU device lost (reason %d): %s\n",static_cast<int>(reason),text(m).c_str());std::fflush(stderr);};
     WGPURequestDeviceCallbackInfo dc{};dc.mode=WGPUCallbackMode_AllowProcessEvents;dc.userdata1=&device;
     dc.callback=[](WGPURequestDeviceStatus status,WGPUDevice d,WGPUStringView m,void* u,void*){auto& r=*static_cast<Result*>(u);if(status==WGPURequestDeviceStatus_Success)r.handle=d;else r.message=text(m);};
     wgpuAdapterRequestDevice(adapter_,&dd,dc);wgpuInstanceProcessEvents(instance_);

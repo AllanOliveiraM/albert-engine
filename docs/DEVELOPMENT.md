@@ -327,6 +327,22 @@ jacobiano dobra, cada cascata some quando um pixel cobre 1-2 texels dela e sua v
 (Cox-Munk menos o resolvido); o padrão é ancorado num plano tangente, com a âncora presa ao período de 512 m (não salta) e
 calculada em dupla precisão em relação ao olho. Até 30 km de altura. `ocean_test` lê o campo de volta: altura significativa
 2,38 m a 10 m/s e 5,03 m a 15 m/s contra 2,25 e 5,06 de Pierson-Moskowitz, inclinação resolvida a 4% da integral do espectro.
+Nuvens volumétricas (`gpu::Clouds`, Ajustes "Nuvens volumetricas"): a cobertura do mapa de nuvens ao vivo (o mesmo das sombras)
+entre a base a 1,5 km e um topo que sobe com ela (0,9 km de espessura em pouca cobertura, 3 a 4 km em mantos), em colunas de
+ruído Perlin-Worley equalizado (feito uma vez na CPU, período de 12 km, 1,5 km no detalhe) limiarizado em 1 - cobertura, de modo
+que a fração coberta vista de cima seja a do mapa; extinção de 75 /km (gotas de 10 µm, 0,5 g/m³). Marcha em compute a 1/2-1/4 da
+resolução (~300 mil raios, 64 passos) antes do passe da cena e composição sobre os opacos na profundidade ponderada pela
+transmitância (objetos mais próximos as escondem; onde são quase opacas, alfa ≥ 0,5, gravam a profundidade e escondem os
+transparentes atrás, como trajetórias e fronteiras). O ruído é feito numa thread (0,74 s): até ficar pronto, e enquanto as
+tabelas do ar não estão prontas, fica a camada plana (ela só cede onde o volume foi desenhado, `Display::cloudsShown`); a
+troca é animada. Desligadas em adaptador de CPU. O tempo de GPU do HUD inclui a marcha. Luz: espalhamento simples do Sol (fase de duas lobas Henyey-Greenstein, g
+0,85; marcha de 5 passos até o Sol; transmitância de Bruneton) e o campo difuso da coluna local pela solução δ-Eddington
+(Joseph, Wiscombe e Weinman 1976), iluminada pelo Sol e pela irradiância do céu, visto pela extinção reescalonada (1 - g²) σ;
+o ar entre o olho e as nuvens por cima. O ruído deriva com o vento (1,5 × o do mar). Até 30 km de altura, cedendo à camada
+plana até 50 km. `clouds_test`: transmitância de uma placa contra Beer-Lambert (exata), reflectância no nadir contra o albedo
+δ-Eddington (0,356, 0,594 e 0,835 contra 0,419, 0,616 e 0,811 para τ 10, 20 e 50), fração coberta vista de 100 km a ≤0,04 da
+cobertura (0,2 a 0,8), e a composição; com um prefixo como argumento grava vistas de cúmulos (`<prefixo>-*.ppm`) e mede o custo
+(0,8 ms a 320 × 180 raios na MX350).
 Som do voo (`src/render/sound.*`): começa mudo; a opção "Som do voo" do menu abre o dispositivo padrão (miniaudio 0.11.25,
 fixado por SHA-256 em `src/render/CMakeLists.txt`) e a câmera ouve o voo pela física de `physics/acoustics` (tempo retardado,
 absorção, Doppler). A síntese é a das auralizações da NASA: quadros de 8192 pontos com fase aleatória e a potência de cada

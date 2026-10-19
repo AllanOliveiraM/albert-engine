@@ -39,6 +39,10 @@ public:
     // waves' clock (s), the pattern's anchor and east/north axes (world) and metres per world unit; off: Cox-Munk only.
     void setSea(bool on,double seconds,float east,float north,const threepp::Vector3& anchor,const threepp::Vector3& eastAxis,const threepp::Vector3& northAxis,float metersPerUnit);
     void setVsync(bool on);
+    // Volumetric clouds on the cloud map setWeather gives (gpu::Clouds, made when first shown) at strength 0-1 over the scene;
+    // their noise drifts with the wind (m/s toward east and north) on its clock (s). Never on a CPU adapter (too slow).
+    void setClouds(bool on,float strength,double seconds,float east,float north);
+    [[nodiscard]] bool cloudsShown()const; // The last frame drew them (the air ready, a cloud map): only then may the shell give way.
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };
