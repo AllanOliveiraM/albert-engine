@@ -45,13 +45,22 @@ ph::Table table(const api::AeroTable& t,const std::string& what){
     for(double v:r.values)if(!finite(v))throw std::invalid_argument("Non-finite "+what+" coefficient");
     return r;
 }
+void increasing(const std::vector<double>& b,const std::string& what){for(std::size_t i=0;i<b.size();++i)if(!finite(b[i])||(i&&!(b[i]>b[i-1])))throw std::invalid_argument(what+" table breakpoints must increase");}
+ph::Table3 table(const api::SurfaceTable& t,const std::string& what){
+    if(t.mach_size()==0&&t.angle_degrees_size()==0&&t.deflection_degrees_size()==0&&t.values_size()==0)return{};
+    if(t.mach_size()<1||t.angle_degrees_size()<1||t.deflection_degrees_size()<1||t.mach_size()>64||t.angle_degrees_size()>64||t.deflection_degrees_size()>64
+        ||t.values_size()!=t.mach_size()*t.angle_degrees_size()*t.deflection_degrees_size())throw std::invalid_argument("Malformed "+what+" table");
+    ph::Table3 r{{t.mach().begin(),t.mach().end()},{t.angle_degrees().begin(),t.angle_degrees().end()},{t.deflection_degrees().begin(),t.deflection_degrees().end()},{t.values().begin(),t.values().end()}};
+    increasing(r.mach,what);increasing(r.angle,what);increasing(r.deflection,what);for(double v:r.values)if(!finite(v))throw std::invalid_argument("Non-finite "+what+" coefficient");
+    return r;
+}
 ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
     if(d.stages_size()<1||d.stages_size()>32||d.name().size()>128)throw std::invalid_argument("A vehicle needs 1-32 stages and a name of at most 128 bytes");
     ph::Vehicle v;v.name=d.name().empty()?"Custom vehicle":d.name();v.torque=d.attitude_torque_newton_meters();v.diameter=d.has_diameter_meters()?d.diameter_meters():1.;
     v.sunArea=d.solar_area_meters2();v.reflectivity=d.has_reflectivity()?d.reflectivity():1.3;v.jetDamping=!d.has_jet_damping()||d.jet_damping();v.inertiaRate=d.has_inertia_rate()?d.inertia_rate():1.;
     if(!(v.torque>=0)||!(v.diameter>0)||!(v.sunArea>=0)||!(v.reflectivity>=0)||!finite(v.inertiaRate)||!std::isfinite(v.torque))throw std::invalid_argument("Invalid vehicle torque, diameter, solar area, reflectivity or inertia rate");
     for(const auto& sd:d.stages()){
-        if(sd.engines_size()>64||sd.legs_meters_size()>32)throw std::invalid_argument("At most 64 engines and 32 legs a stage");
+        if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces and 64 thrusters a stage");
         ph::Stage st;st.name=sd.name().substr(0,128);st.propellant=sd.propellant_kilograms();st.massFull=sd.mass_full_kilograms();st.massEmpty=sd.mass_empty_kilograms();
         st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
         st.length=sd.length_meters();st.reference=sd.aerodynamic_reference_meters();st.noseRadius=sd.has_nose_radius_meters()?sd.nose_radius_meters():1.;
@@ -62,6 +71,10 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
         if(!st.legs.empty()&&!(st.legStiffness>0))throw std::invalid_argument("Legs need a stiffness: "+st.name);
         for(const auto& e:sd.engines())st.engines.push_back({e.name().substr(0,128),get(e.position_meters()),e.has_direction()?get(e.direction()):ph::V3{1,0,0},e.vacuum_thrust_newtons(),
             e.exhaust_velocity_meters_per_second(),e.exit_area_meters2(),e.has_min_throttle()?e.min_throttle():1.,e.gimbal_radians(),e.gimbal_rate_radians_per_second()});
+        for(const auto& f:sd.surfaces()){ph::Surface x;x.name=f.name().substr(0,128);x.limit=f.limit_radians();x.rate=f.rate_radians_per_second();
+            x.lift=table(f.lift(),"surface lift");x.drag=table(f.drag(),"surface drag");x.side=table(f.side(),"surface side force");x.roll=table(f.roll(),"surface roll");x.pitch=table(f.pitch(),"surface pitch");x.yaw=table(f.yaw(),"surface yaw");
+            st.surfaces.push_back(std::move(x));}
+        for(const auto& t:sd.thrusters())st.rcs.push_back({t.name().substr(0,128),get(t.position_meters()),get(t.direction()),t.thrust_newtons(),t.exhaust_velocity_meters_per_second()});
         const auto& a=sd.aerodynamics();auto& ae=st.aero;ae.area=a.reference_area_meters2();ae.length=a.reference_length_meters();ae.span=a.reference_span_meters();
         if(!(ae.area>=0)||!std::isfinite(ae.area)||!finite(ae.length)||!finite(ae.span))throw std::invalid_argument("Invalid aerodynamic references: "+st.name);
         if(ae.length==0)ae.length=1;if(ae.span==0)ae.span=1;
@@ -73,6 +86,7 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
     return v;
 }
 void put(const ph::Table& t,api::AeroTable* o){for(double x:t.mach)o->add_mach(x);for(double x:t.angle)o->add_angle_degrees(x);for(double x:t.values)o->add_values(x);}
+void put(const ph::Table3& t,api::SurfaceTable* o){for(double x:t.mach)o->add_mach(x);for(double x:t.angle)o->add_angle_degrees(x);for(double x:t.deflection)o->add_deflection_degrees(x);for(double x:t.values)o->add_values(x);}
 void put(const ph::Vehicle& v,api::VehicleDefinition* o){
     o->set_name(v.name);o->set_attitude_torque_newton_meters(v.torque);o->set_diameter_meters(v.diameter);o->set_solar_area_meters2(v.sunArea);o->set_reflectivity(v.reflectivity);
     o->set_jet_damping(v.jetDamping);o->set_inertia_rate(v.inertiaRate);
@@ -87,6 +101,9 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
         const auto& ae=st.aero;auto* a=d->mutable_aerodynamics();a->set_reference_area_meters2(ae.area);a->set_reference_length_meters(ae.length);a->set_reference_span_meters(ae.span);
         put(ae.lift,a->mutable_lift());put(ae.drag,a->mutable_drag());put(ae.side,a->mutable_side());put(ae.roll,a->mutable_roll());put(ae.pitch,a->mutable_pitch());put(ae.yaw,a->mutable_yaw());
         a->set_roll_damping(ae.rollDamping);a->set_pitch_damping(ae.pitchDamping);a->set_yaw_damping(ae.yawDamping);
+        for(const auto& f:st.surfaces){auto* x=d->add_surfaces();x->set_name(f.name);x->set_limit_radians(f.limit);x->set_rate_radians_per_second(f.rate);
+            put(f.lift,x->mutable_lift());put(f.drag,x->mutable_drag());put(f.side,x->mutable_side());put(f.roll,x->mutable_roll());put(f.pitch,x->mutable_pitch());put(f.yaw,x->mutable_yaw());}
+        for(const auto& t:st.rcs){auto* x=d->add_thrusters();x->set_name(t.name);put(t.position,x->mutable_position_meters());put(t.direction,x->mutable_direction());x->set_thrust_newtons(t.thrust);x->set_exhaust_velocity_meters_per_second(t.exhaust);}
     }
 }
 ph::Vehicle preset(const api::Vehicle kind,const std::optional<double> payloadKilograms){
@@ -261,11 +278,13 @@ struct FlightServices::Impl {
         if(commands.size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 commands per step"};
         ph::Flight next=*flight; // Commands apply atomically.
         try{for(const auto& c:commands){const int e=static_cast<int>(c.kind>>16)-1; // The engine in the high bits: 0 every one.
-            if(e>=0&&(c.kind&0xffff)!=wire::ignite&&(c.kind&0xffff)!=wire::cutoff&&(c.kind&0xffff)!=wire::throttle&&(c.kind&0xffff)!=wire::gimbal&&(c.kind&0xffff)!=wire::fail)throw std::invalid_argument("This command takes no engine");
+            const std::uint32_t k=c.kind&0xffff;
+            if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface)throw std::invalid_argument("This command takes no index");
             switch(c.kind&0xffff){
             case wire::ignite:next.ignite(e);break;case wire::cutoff:next.cutoff(e);break;case wire::separate:next.separate();break;case wire::release:next.release();break;
             case wire::throttle:next.throttle(c.a,e);break;case wire::gimbal:next.gimbal(c.a,c.b,e);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
             case wire::fail:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e);break;
+            case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;
             default:throw std::invalid_argument("Unknown command");}}}
         catch(const std::invalid_argument& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}catch(const std::logic_error& e){return{grpc::StatusCode::FAILED_PRECONDITION,e.what()};}
         // Integrated on the copy and committed whole: a cancelled call leaves the flight untouched.
@@ -313,7 +332,10 @@ struct FlightServices::Impl {
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         {const auto thrust=flight->engineThrust();const auto& es=v.stages[static_cast<std::size_t>(s.stage)].engines;
          for(std::size_t i=0;i<es.size();++i){const auto& e=flight->engines()[i];auto* x=o->add_engines();x->set_name(es[i].name);x->set_on(e.on&&s.burning);x->set_failed(e.failed);x->set_throttle(e.throttle);
-            x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);}}
+            x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);}
+         const auto& fs=v.stages[static_cast<std::size_t>(s.stage)].surfaces;
+         for(std::size_t i=0;i<fs.size();++i){auto* x=o->add_surfaces();x->set_name(fs[i].name);x->set_deflection_radians(flight->surfaces()[i].deflection);x->set_command_radians(flight->surfaces()[i].target);}
+         for(double u:flight->thrusters())o->add_thruster_duty(u);put(x.rcsForce,o->mutable_thruster_force_newtons());put(x.rcsMoment,o->mutable_thruster_moment_newton_meters());}
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
         o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());o->set_data_port(data?data->port():0);
         put(reading.specificForce,o->mutable_measured_specific_force_meters_per_second2());put(reading.rate,o->mutable_measured_angular_rate_radians_per_second());
@@ -450,8 +472,8 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
     std::vector<Impl::Command> commands;
     for(const auto& c:r->commands()){
-        if(c.engine()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine"};
-        const std::uint32_t e=c.engine()<<16; // In the kind's high bits (the replay log keeps the record format).
+        if(c.index()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine, thruster or surface"};
+        const std::uint32_t e=c.index()<<16; // In the kind's high bits (the replay log keeps the record format).
         switch(c.command_case()){
         case api::FlightCommand::kIgnite:if(c.ignite())commands.push_back({wire::ignite|e});break;
         case api::FlightCommand::kCutoff:if(c.cutoff())commands.push_back({wire::cutoff|e});break;
@@ -461,6 +483,8 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
         case api::FlightCommand::kGimbal:commands.push_back({wire::gimbal|e,c.gimbal().pitch_radians(),c.gimbal().yaw_radians()});break;
         case api::FlightCommand::kTorqueNewtonMeters:commands.push_back({wire::torque|e,c.torque_newton_meters().x(),c.torque_newton_meters().y(),c.torque_newton_meters().z()});break;
         case api::FlightCommand::kFail:if(c.fail())commands.push_back({wire::fail|e});break;
+        case api::FlightCommand::kThrusterDuty:commands.push_back({wire::thruster|e,c.thruster_duty()});break;
+        case api::FlightCommand::kSurfaceRadians:commands.push_back({wire::surface|e,c.surface_radians()});break;
         default:return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
         }
     }

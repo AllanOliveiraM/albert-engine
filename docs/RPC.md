@@ -305,21 +305,26 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | `throttle` | 0–1, limitado ao mínimo de cada motor |
 | `gimbal` | Cardã em arfagem/guinada (rad), limitado ao curso de cada motor e alcançado na taxa dos atuadores |
 | `fail` | O motor falha: apaga e não reacende (exige `engine`) |
-| `torque_newton_meters` | Torque ideal de atitude nos eixos do corpo, limitado por eixo |
+| `torque_newton_meters` | Torque de atitude nos eixos do corpo: dos propulsores de RCS do estágio, se houver (ciclos alocados, consumo); senão ideal, limitado por eixo |
+| `thruster_duty` | Ciclo de trabalho (0–1) de um propulsor de RCS, até o próximo comando de torque |
+| `surface_radians` | Deflexão comandada de uma superfície de controle, limitada e alcançada na taxa do atuador |
 
 **Veículos definidos pela API.** `vehicle: CUSTOM` com `definition` (`VehicleDefinition`) voa qualquer veículo: estágios
 na ordem de queima, cada um descrevendo o conjunto inteiro enquanto é o mais baixo (massas cheio e vazio, CG, inércias
 principais, comprimento), seus motores (`EngineDefinition`: posição do bocal, direção, empuxo no vácuo, velocidade de
 exaustão, área de saída, aceleração mínima, curso e taxa do cardã), aerodinâmica (tabelas Mach × ângulo de sustentação,
-arrasto, força lateral e momentos, amortecimentos), pernas e o torque ideal de atitude; posições em metros atrás do nariz.
+arrasto, força lateral e momentos, amortecimentos), superfícies de controle (`SurfaceDefinition`: limite, taxa e
+incrementos em tabelas Mach × ângulo × deflexão), propulsores de RCS (`ThrusterDefinition`), pernas e o torque ideal de
+atitude; posições em metros atrás do nariz.
 `GetVehicle` devolve cada preset como definição, para editar: voada como `CUSTOM` sem mudanças, dá o mesmo `state_hash` do
 preset (`rpc_test`). O mapeamento JSON do protobuf serve de formato de arquivo: `albert_flight_client --export-vehicle=launcher`
 imprime o lançador em JSON e `--definition=arquivo.json` voa o arquivo do pad do Cabo com a guiagem do lançador (o mesmo
 lançador com nove motores num anel de 1,4 m, cada um com 1/9 do empuxo e da área, chegou a 181 × 210 km).
 
-`engine` em cada comando escolhe o motor de `ignite`, `cutoff`, `throttle`, `gimbal` e `fail`: 0 para todos os
-motores do estágio, n para o n-ésimo (a ordem de `FlightSample.engines`, que traz de cada um ligado, falho,
-aceleração, cardã movido e comandado e empuxo); nos demais comandos deve ser 0.
+`index` em cada comando escolhe o motor de `ignite`, `cutoff`, `throttle`, `gimbal` e `fail`, o propulsor de
+`thruster_duty` e a superfície de `surface_radians`: 0 para todos os do estágio, n para o n-ésimo (a ordem de
+`FlightSample.engines` — ligado, falho, aceleração, cardã movido e comandado, empuxo —, `thruster_duty` e `surfaces`);
+nos demais comandos deve ser 0. A amostra traz também a força e o momento dos propulsores.
 
 A amostra traz sensores ideais no centro de massa (força específica do IMU — zero em
 queda livre, +g no pad —, taxa angular inercial, pressão estática e temperatura do ar),

@@ -25,12 +25,21 @@ Environment environment(Center c,std::shared_ptr<const Gravity> field,int degree
     if(c!=Center::earth){e.planet=planet(c,field.get(),degree);e.rotation=Rotation::body(c);e.field=std::move(field);}
     return e;
 }
+namespace {
+void locate(const std::vector<double>& b,double x,std::size_t& i,double& t){ // Cell and fraction, clamped.
+    if(b.size()<2){i=0;t=0;return;}
+    x=std::clamp(x,b.front(),b.back());
+    i=std::min<std::size_t>(std::upper_bound(b.begin(),b.end(),x)-b.begin(),b.size()-1)-1;t=(x-b[i])/(b[i+1]-b[i]);
+}
+}
+double Table3::operator()(double m,double a,double d)const{
+    std::size_t i,j,k;double u,v,w;locate(mach,m,i,u);locate(angle,a,j,v);locate(deflection,d,k,w);
+    const std::size_t n=angle.size(),p=deflection.size(),i1=mach.size()<2?i:i+1,j1=n<2?j:j+1,k1=p<2?k:k+1;
+    auto at=[&](std::size_t x,std::size_t y,std::size_t z){return values[(x*n+y)*p+z];};
+    auto plane=[&](std::size_t x){return(1-v)*((1-w)*at(x,j,k)+w*at(x,j,k1))+v*((1-w)*at(x,j1,k)+w*at(x,j1,k1));};
+    return(1-u)*plane(i)+u*plane(i1);
+}
 double Table::operator()(double m,double a)const{
-    auto locate=[](const std::vector<double>& b,double x,std::size_t& i,double& t){
-        if(b.size()<2){i=0;t=0;return;}
-        x=std::clamp(x,b.front(),b.back());
-        i=std::min<std::size_t>(std::upper_bound(b.begin(),b.end(),x)-b.begin(),b.size()-1)-1;t=(x-b[i])/(b[i+1]-b[i]);
-    };
     std::size_t i,j;double u,v;locate(mach,m,i,u);locate(angle,a,j,v);
     const std::size_t n=angle.size(),i1=mach.size()<2?i:i+1,j1=n<2?j:j+1;
     return(1-u)*((1-v)*values[i*n+j]+v*values[i*n+j1])+u*((1-v)*values[i1*n+j]+v*values[i1*n+j1]);
@@ -48,6 +57,16 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
                 throw std::invalid_argument("Invalid engine: "+st.name+" "+e.name);
             e.direction=e.direction/n;
         }
+        for(auto& f:st.surfaces){
+            if(!(f.limit>=0)||!(f.rate>=0)||!std::isfinite(f.limit+f.rate))throw std::invalid_argument("Invalid surface: "+st.name+" "+f.name);
+            for(const Table3* t:{&f.lift,&f.drag,&f.side,&f.roll,&f.pitch,&f.yaw})
+                if(t->mach.empty()||t->angle.empty()||t->deflection.empty()||t->values.size()!=t->mach.size()*t->angle.size()*t->deflection.size())throw std::invalid_argument("Malformed surface table: "+st.name+" "+f.name);
+        }
+        for(auto& t:st.rcs){
+            const double n=norm(t.direction);
+            if(!(t.thrust>0)||!(t.exhaust>0)||!(n>0)||!std::isfinite(n+t.position.x+t.position.y+t.position.z+t.thrust+t.exhaust))throw std::invalid_argument("Invalid thruster: "+st.name+" "+t.name);
+            t.direction=t.direction/n;
+        }
         for(const Table* t:{&st.aero.lift,&st.aero.drag,&st.aero.side,&st.aero.roll,&st.aero.pitch,&st.aero.yaw})
             if(t->mach.empty()||t->angle.empty()||t->values.size()!=t->mach.size()*t->angle.size())throw std::invalid_argument("Malformed coefficient table: "+st.name);
     }
@@ -56,6 +75,7 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
         const double p=std::clamp(s_.gimbalPitch,-e.gimbal,e.gimbal),y=std::clamp(s_.gimbalYaw,-e.gimbal,e.gimbal);
         engines_.push_back({s_.burning,false,std::clamp(s_.throttle,e.minThrottle,1.),p,y,p,y});}
     s_.burning=s_.burning&&!engines_.empty();
+    surfaces_.assign(vehicle_.stages[s_.stage].surfaces.size(),SurfaceState{});duty_.assign(vehicle_.stages[s_.stage].rcs.size(),0.);allocate();
     const Orientation o=env_.rotation.at(s_.time);
     padPosition_=o.fixed*s_.position;padAttitude_=quaternion(o.fixed*matrix(s_.attitude));
 }
@@ -73,7 +93,9 @@ State Flight::free(const Environment& e,const Vehicle& v,Tt t,Geodetic g,V3 ned,
 double Flight::flowOf(std::size_t i)const{const Engine& e=vehicle_.stages[s_.stage].engines[i];return s_.burning&&engines_[i].on?engines_[i].throttle*e.thrust/e.exhaust:0.;}
 double Flight::massFlow()const{
     if(!(s_.propellant>0))return 0;
-    double f=0;for(std::size_t i=0;i<engines_.size();++i)f+=flowOf(i);return f;
+    double f=0;for(std::size_t i=0;i<engines_.size();++i)f+=flowOf(i);
+    const auto& rcs=vehicle_.stages[s_.stage].rcs;for(std::size_t i=0;i<rcs.size();++i)f+=duty_[i]*rcs[i].thrust/rcs[i].exhaust;
+    return f;
 }
 std::vector<double> Flight::engineThrust()const{
     const double p=sample().air.pressure;const auto& es=vehicle_.stages[s_.stage].engines;std::vector<double> t(es.size());
@@ -118,11 +140,15 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     V3 fa,ma;
     if(q>0){
         const Aerodynamics& ae=st.aero;const double ad=alpha*degrees,bd=beta*degrees,k=q*ae.area;
-        const double cl=ae.lift(mach,ad),cd=ae.drag(mach,std::hypot(ad,bd)),ca=std::cos(alpha),sa=std::sin(alpha);
-        fa=k*(cl*V3{sa,0,-ca}+V3{0,ae.side(mach,bd),0})-k*cd/speed*air; // Drag along the air velocity.
+        double cl=ae.lift(mach,ad),cd=ae.drag(mach,std::hypot(ad,bd)),cy=ae.side(mach,bd),cr=ae.roll(mach,ad),cm=ae.pitch(mach,ad),cn=ae.yaw(mach,bd);
+        const auto& fs=st.surfaces; // Control surfaces' increments at their deflections.
+        for(std::size_t i=0;i<fs.size();++i){const double d=surfaces_[i].deflection*degrees;
+            cl+=fs[i].lift(mach,ad,d);cd+=fs[i].drag(mach,ad,d);cy+=fs[i].side(mach,bd,d);cr+=fs[i].roll(mach,ad,d);cm+=fs[i].pitch(mach,ad,d);cn+=fs[i].yaw(mach,bd,d);}
+        const double ca=std::cos(alpha),sa=std::sin(alpha);
+        fa=k*(cl*V3{sa,0,-ca}+V3{0,cy,0})-k*cd/speed*air; // Drag along the air velocity.
 
         const V3 w=s.rate-bt*o.omega;const double hl=ae.length/(2*speed),hs=ae.span/(2*speed);
-        ma={k*ae.span*(ae.roll(mach,ad)+ae.rollDamping*w.x*hs),k*ae.length*(ae.pitch(mach,ad)+ae.pitchDamping*w.y*hl),k*ae.span*(ae.yaw(mach,bd)+ae.yawDamping*w.z*hs)};
+        ma={k*ae.span*(cr+ae.rollDamping*w.x*hs),k*ae.length*(cm+ae.pitchDamping*w.y*hl),k*ae.span*(cn+ae.yawDamping*w.z*hs)};
         ma+=cross(V3{ms.cg-st.reference,0,0},fa);
     }
     V3 ft,mt;double thrust=0,flow=0,jet=0; // jet: Σ ṁ l², the exhaust's transverse momentum lever.
@@ -152,8 +178,11 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         const double nu=sunlight(s.position,d+s.position,env_.planet.radius);
         if(nu>0)fs=bt*(d*(-nu*pressure*au*au/(dn*dn*dn)*vehicle_.reflectivity*vehicle_.sunArea));
     }
-    const double lim=vehicle_.torque;
-    const V3 force=fa+ft+fs+fc,moment=ma+mt+mc+V3{std::clamp(s.torque.x,-lim,lim),std::clamp(s.torque.y,-lim,lim),std::clamp(s.torque.z,-lim,lim)};
+    V3 fr,mr; // Thrusters at their duty cycles while propellant lasts; without any, the torque command is ideal.
+    const double lim=st.rcs.empty()?vehicle_.torque:0.;
+    if(s.propellant>0)for(std::size_t i=0;i<st.rcs.size();++i)if(duty_[i]>0){const Thruster& t=st.rcs[i];const V3 f=t.direction*(duty_[i]*t.thrust);fr+=f;mr+=cross(V3{ms.cg-t.position.x,t.position.y,t.position.z},f);
+        flow+=duty_[i]*t.thrust/t.exhaust;}
+    const V3 force=fa+ft+fs+fc+fr,moment=ma+mt+mc+mr+V3{std::clamp(s.torque.x,-lim,lim),std::clamp(s.torque.y,-lim,lim),std::clamp(s.torque.z,-lim,lim)};
     // d(Iω)/dt with the propellant's inertia loss; the exhaust carries transverse angular
     // momentum ṁ l² ω through the nozzle (jet damping).
     const V3 iw{ms.inertia.x*s.rate.x,ms.inertia.y*s.rate.y,ms.inertia.z*s.rate.z};V3 rhs=moment-cross(s.rate,iw);
@@ -166,7 +195,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         Sample& x=*out;x.mass=ms.m;x.mach=mach;x.dynamicPressure=q;x.alpha=alpha;x.beta=beta;x.thrust=thrust;x.massFlow=flow;x.air=atm;x.geodetic=geo;
         x.fixedPosition=rf;x.fixedVelocity=o.fixed*relative;x.nedVelocity=ned*x.fixedVelocity;
         const M3 c=ned*o.fixed*b;x.nedAttitude=quaternion(c);x.euler={std::atan2(c.m[1][0],c.m[0][0]),-std::asin(std::clamp(c.m[2][0],-1.,1.)),std::atan2(c.m[2][1],c.m[2][2])};
-        x.aeroForce=fa;x.aeroMoment=ma;x.thrustForce=ft;x.gravity=g;x.acceleration=r.a;x.specificForce=force/ms.m;x.heatFlux=heat;
+        x.aeroForce=fa;x.aeroMoment=ma;x.thrustForce=ft;x.rcsForce=fr;x.rcsMoment=mr;x.gravity=g;x.acceleration=r.a;x.specificForce=force/ms.m;x.heatFlux=heat;
         if(s.clamped||s.landed){x.acceleration=cross(o.omega,cross(o.omega,s.position));x.specificForce=bt*(x.acceleration-g);}
     }
     return r;
@@ -203,7 +232,7 @@ Tt Flight::advance(Tt dt){
         Tt h=left;bool depleted=false;const double flow=massFlow();
         if(step_>0){
             Tt limit=step_;
-            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&!s_.contact&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0){ // Ballistic, torque-free, above the atmosphere and the ground.
+            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&!s_.contact&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0&&std::all_of(duty_.begin(),duty_.end(),[](double d){return d==0;})){ // Ballistic, torque-free, above the atmosphere and the ground.
                 const double speed=norm(s_.velocity),spin=norm(s_.rate),c=secondsSinceJ2000(coast_),h=geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height;
                 const double r=norm(s_.position),fall=.5*env_.planet.gm/(r*r)*c*c; // Gravity can close the gap as fast as speed.
                 if(h>airTop(env_.center)+speed*c&&!(h-env_.ground<=speed*c+fall+vehicle_.stages[s_.stage].length))
@@ -224,7 +253,7 @@ Tt Flight::advance(Tt dt){
         }
         if(flow>0){const double t=s_.propellant/flow*1e9;if(t<=static_cast<double>(h)+1){h=std::clamp<Tt>(static_cast<Tt>(t),1,h);depleted=true;}} // Within 1 ns.
         slew(static_cast<double>(h)*1e-9);integrate(h);left-=h;
-        if(depleted){s_.propellant=0;s_.burning=false;for(auto& e:engines_)e.on=false;return dt-left;}
+        if(depleted){s_.propellant=0;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);return dt-left;}
         if(!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
             const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;Geodetic g=geodetic(env_.planet,rf);
             if(const Stage& st=vehicle_.stages[s_.stage];!st.legs.empty()){ // Contact state of the legs for events and telemetry.
@@ -232,7 +261,7 @@ Tt Flight::advance(Tt dt){
                 for(const V3& leg:st.legs)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-leg.x,leg.y,leg.z})).height<env_.ground;
                 if(touching!=s_.contact){s_.contact=touching;return dt-left;} // Touchdown and lift-off end the call, so each transition keeps its instant.
             }
-            if(g.height<env_.ground){g.height=env_.ground;s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
+            if(g.height<env_.ground){g.height=env_.ground;s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
         }
     }
     return dt;
@@ -256,9 +285,53 @@ void Flight::cutoff(int engine){
 }
 void Flight::fail(int engine){auto& e=engines_[pick(engine,engines_.size())];e.failed=true;e.on=false;s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& x){return x.on;});}
 void Flight::slew(double seconds){
-    const auto& es=vehicle_.stages[s_.stage].engines;
+    const auto& st=vehicle_.stages[s_.stage];const auto& es=st.engines;
     for(std::size_t i=0;i<engines_.size();++i){auto& e=engines_[i];const double step=es[i].gimbalRate*seconds;
         if(es[i].gimbalRate>0){e.pitch+=std::clamp(e.targetPitch-e.pitch,-step,step);e.yaw+=std::clamp(e.targetYaw-e.yaw,-step,step);}}
+    for(std::size_t i=0;i<surfaces_.size();++i)if(st.surfaces[i].rate>0){const double step=st.surfaces[i].rate*seconds;auto& f=surfaces_[i];f.deflection+=std::clamp(f.target-f.deflection,-step,step);}
+}
+void Flight::surface(double d,int index){
+    if(!std::isfinite(d))throw std::invalid_argument("Invalid deflection");
+    const auto& fs=vehicle_.stages[s_.stage].surfaces;
+    auto set=[&](std::size_t i){auto& f=surfaces_[i];f.target=std::clamp(d,-fs[i].limit,fs[i].limit);if(!(fs[i].rate>0))f.deflection=f.target;};
+    if(index>=0)set(pick(index,fs.size()));else for(std::size_t i=0;i<fs.size();++i)set(i);
+}
+void Flight::thruster(double d,int index){
+    if(!std::isfinite(d))throw std::invalid_argument("Invalid duty cycle");
+    const double u=std::clamp(d,0.,1.);if(index>=0)duty_[pick(index,duty_.size())]=u;else std::fill(duty_.begin(),duty_.end(),u);
+}
+// Duties u in [0, 1] minimising |A u - torque|²/2 + ε (Σu + |u|²/2), A's columns the thrusters' torques about the CG and ε
+// 10⁻⁹ of the largest |Aᵢ|²: the torque within ~10⁻⁹, then the least propellant, then couples over lone thrusters (the
+// ridge). A strictly convex quadratic on a box, solved exactly by the primal active-set method: the minimiser on the free
+// set (Cholesky), a step to the first bound it crosses (that thruster then held there), and a held thruster freed when its
+// multiplier says so.
+void Flight::allocate(){
+    const Stage& st=vehicle_.stages[s_.stage];const std::size_t n=st.rcs.size();if(!n)return;
+    const double cg=mass(st,s_.propellant).cg;std::vector<V3> a(n);double big=0;
+    for(std::size_t i=0;i<n;++i){const Thruster& t=st.rcs[i];a[i]=cross(V3{cg-t.position.x,t.position.y,t.position.z},t.direction*t.thrust);big=std::max(big,dot(a[i],a[i]));}
+    std::fill(duty_.begin(),duty_.end(),0.);if(!(big>0))return;
+    const double eps=1e-9*big;std::vector<double> h(n*n),c(n),u(n,0.),z(n),l(n*n);std::vector<char> held(n,1); // All held at 0 to start.
+    for(std::size_t i=0;i<n;++i){c[i]=dot(a[i],s_.torque)-eps;for(std::size_t j=0;j<n;++j)h[i*n+j]=dot(a[i],a[j])+(i==j?eps:0.);}
+    for(std::size_t k=0;k<8*n+8;++k){
+        std::vector<std::size_t> f;for(std::size_t i=0;i<n;++i)if(!held[i])f.push_back(i);
+        const std::size_t m=f.size();bool interior=true;
+        if(m){ // The minimiser over the free thrusters, the held ones fixed: H_ff z = c_f - H_fh u_h.
+            for(std::size_t i=0;i<m;++i)for(std::size_t j=0;j<=i;++j){double x=h[f[i]*n+f[j]];for(std::size_t q=0;q<j;++q)x-=l[i*m+q]*l[j*m+q];l[i*m+j]=i==j?std::sqrt(std::max(x,1e-300)):x/l[j*m+j];}
+            for(std::size_t i=0;i<m;++i){double x=c[f[i]];for(std::size_t j=0;j<n;++j)if(held[j])x-=h[f[i]*n+j]*u[j];for(std::size_t q=0;q<i;++q)x-=l[i*m+q]*z[q];z[i]=x/l[i*m+i];}
+            for(std::size_t i=m;i-->0;){double x=z[i];for(std::size_t q=i+1;q<m;++q)x-=l[q*m+i]*z[q];z[i]=x/l[i*m+i];}
+            double step=1;std::size_t block=n;
+            for(std::size_t i=0;i<m;++i){const double x=u[f[i]],d=z[i]-x;
+                if(z[i]<0&&-x/d<step){step=-x/d;block=f[i];}else if(z[i]>1&&(1-x)/d<step){step=(1-x)/d;block=f[i];}}
+            for(std::size_t i=0;i<m;++i)u[f[i]]=std::clamp(u[f[i]]+step*(z[i]-u[f[i]]),0.,1.);
+            if(block<n){u[block]=u[block]<.5?0.:1.;held[block]=1;interior=false;}
+        }
+        if(!interior)continue;
+        std::size_t worst=n;double most=0; // Optimal on this set: free the held thruster whose multiplier is most wrong, if any.
+        for(std::size_t i=0;i<n;++i)if(held[i]){double g=-c[i];for(std::size_t j=0;j<n;++j)g+=h[i*n+j]*u[j];const double wrong=u[i]<=0?-g:g;if(wrong>most*(1+1e-12)&&wrong>1e-12*big){most=wrong;worst=i;}}
+        if(worst==n)break;
+        held[worst]=0;
+    }
+    duty_=u;
 }
 void Flight::release(){s_.clamped=false;}
 void Flight::separate(){
@@ -267,7 +340,7 @@ void Flight::separate(){
     const V3 shift=matrix(s_.attitude)*V3{old-next.cgFull,0,0};
     s_.position+=shift;s_.velocity+=cross(matrix(s_.attitude)*s_.rate,shift);
     ++s_.stage;s_.propellant=next.propellant;s_.burning=false;s_.throttle=1;s_.gimbalPitch=s_.gimbalYaw=0;
-    engines_.assign(next.engines.size(),EngineState{});
+    engines_.assign(next.engines.size(),EngineState{});surfaces_.assign(next.surfaces.size(),SurfaceState{});duty_.assign(next.rcs.size(),0.);allocate();
     if(s_.clamped||s_.landed){padPosition_=env_.rotation.at(s_.time).fixed*s_.position;}
 }
 void Flight::throttle(double t,int engine){
@@ -289,7 +362,7 @@ void Flight::gimbal(double p,double y,int engine){
 }
 void Flight::torque(V3 t){
     if(!std::isfinite(t.x)||!std::isfinite(t.y)||!std::isfinite(t.z))throw std::invalid_argument("Invalid torque");
-    s_.torque=t;
+    s_.torque=t;allocate();
 }
 std::uint64_t Flight::hash()const{
     std::uint64_t h=1469598103934665603ull;
@@ -298,6 +371,7 @@ std::uint64_t Flight::hash()const{
         s_.rate.x,s_.rate.y,s_.rate.z,s_.propellant,s_.heatLoad,s_.throttle,s_.gimbalPitch,s_.gimbalYaw,s_.torque.x,s_.torque.y,s_.torque.z,padPosition_.x,padPosition_.y,padPosition_.z};
     mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
     for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed};mix(x,sizeof x);mix(b,sizeof b);}
+    for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);}for(double u:duty_)mix(&u,8);
     return h;
 }
 }

@@ -183,6 +183,14 @@ enum Vehicle { VEHICLE_UNSPECIFIED=0; GENERIC_LAUNCHER=1; NESC_TWO_STAGE=2; NESC
 // (y right, z down). Stages in firing order, each describing the whole stack while it is the lowest: separating it leaves
 // the next. Inertias are principal moments about the centre of mass; full and empty bound the active stage's propellant.
 message AeroTable { repeated double mach=1; repeated double angle_degrees=2; repeated double values=3; } // values[m * angles + a]; bilinear, clamped; unset: 0.
+// values[(m * angles + a) * deflections + d]; trilinear, clamped; unset: 0.
+message SurfaceTable { repeated double mach=1; repeated double angle_degrees=2; repeated double deflection_degrees=3; repeated double values=4; }
+// A control surface: deflection limit and actuator rate (rate 0: instant); coefficient increments on the stage's references
+// against Mach, the angle of attack (sideslip for side force and yaw) and the deflection.
+message SurfaceDefinition { string name=1; double limit_radians=2; double rate_radians_per_second=3;
+  SurfaceTable lift=4; SurfaceTable drag=5; SurfaceTable side=6; SurfaceTable roll=7; SurfaceTable pitch=8; SurfaceTable yaw=9; }
+// A reaction-control thruster on the stage's propellant; with any, torque_newton_meters fires them.
+message ThrusterDefinition { string name=1; Vector3 position_meters=2; Vector3 direction=3; double thrust_newtons=4; double exhaust_velocity_meters_per_second=5; }
 message Aerodynamics {
   double reference_area_meters2=1; double reference_length_meters=2; double reference_span_meters=3;
   // Lift and pitch against angle of attack, side force and yaw against sideslip, drag against the total angle, roll against α.
@@ -206,6 +214,8 @@ message StageDefinition {
   optional double nose_radius_meters=13;    // Stagnation heating; unset: 1.
   repeated Vector3 legs_meters=14;          // Contact points on springs and dampers; none: touchdown at the CG.
   double leg_stiffness_newtons_per_meter=15; double leg_damping_newton_seconds_per_meter=16; optional double friction=17; // Unset: 0.6.
+  repeated SurfaceDefinition surfaces=18;   // Up to 32.
+  repeated ThrusterDefinition thrusters=19; // Up to 64.
 }
 message VehicleDefinition {
   string name=1; repeated StageDefinition stages=2;  // 1-32 stages, up to 64 engines and 32 legs each, tables up to 128 x 128.
@@ -254,9 +264,12 @@ message FlightCommand {
     Gimbal gimbal=6;                    // Clamped to each engine's limit; reached at its actuators' rate.
     Vector3 torque_newton_meters=7;     // Ideal attitude torque, body axes, clamped per axis.
     bool fail=8;                        // The engine fails: off, and refuses to ignite (needs an engine).
+    double thruster_duty=10;            // A thruster's duty cycle, 0-1, until the next torque command.
+    double surface_radians=11;          // A control surface's deflection command, clamped to its limit, reached at its rate.
   }
-  // ignite, cutoff, throttle, gimbal and fail: 0 for every engine of the stage, n for its n-th (FlightSample.engines order).
-  uint32 engine=9;
+  // ignite, cutoff, throttle, gimbal and fail: the engine; thruster_duty: the thruster; surface_radians: the surface.
+  // 0 for every one of the stage, n for its n-th (the order of FlightSample.engines, thruster_duty and surfaces).
+  uint32 index=9;
 }
 message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; } // Up to 600000 ticks.
 message FlightEvent {
@@ -291,7 +304,11 @@ message FlightSample {
   // Convective stagnation-point heating (Sutton-Graves, stage nose radius) and its integral.
   double heat_flux_watts_per_meter2=44; double heat_load_joules_per_meter2=45;
   repeated EngineSample engines=46;     // The stage's engines (thrust, throttle and gimbal above are the totals and the last commands to all).
+  repeated SurfaceSample surfaces=47;   // The stage's control surfaces.
+  repeated double thruster_duty=48;     // The stage's thrusters' duty cycles (from the torque command or set directly).
+  Vector3 thruster_force_newtons=49; Vector3 thruster_moment_newton_meters=50; // Theirs, body axes, about the CG.
 }
+message SurfaceSample { string name=1; double deflection_radians=2; double command_radians=3; }
 // One engine now: gimbal as moved (rate-limited toward its command); thrust after the ambient pressure.
 message EngineSample { string name=1; bool on=2; bool failed=3; double throttle=4; Gimbal gimbal=5; Gimbal gimbal_command=6; double thrust_newtons=7; }
 // Replay: the creation request (instant resolved), the air inputs (GFS GRIB2 of both hours,

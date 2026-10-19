@@ -287,6 +287,32 @@ int main(){try{
         Stage side=st;side.engines={{"side",{5,0,0},{0,2,0},1e3,3e3,0,1,0,0}};Flight d(Vehicle{"d",{side},0},e,s);d.ignite();
         near(d.sample().specificForce.y,1e3/1500,1e-12,"A sideways engine pushes along its direction");d.advance(second/100);near(norm(d.state().rate),0,0,"through the centre of mass, without turning");
     }
+    // Reaction control: four 100 N thrusters, a pair at each end pushing ±z, 4 m from the centre of mass: a pitch torque
+    // command is met by a couple (no net force) on the least propellant, saturates at their 800 N m, and burns T u / ve.
+    // A control surface adds its increments: ΔCm 0.01 a degree at 5° gives q S L 0.05; its deflection moves at its rate.
+    {
+        Environment e;e.planet={0,6378137.,0,0,6378137.,{},0};e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;e.relativity=false;
+        Stage st;st.name="rcs";st.propellant=100;st.massFull=1100;st.massEmpty=1000;st.cgFull=st.cgEmpty=5;st.inertiaFull=st.inertiaEmpty={300,4000,4000};st.length=10;
+        st.aero.lift=st.aero.drag=st.aero.side=st.aero.roll=st.aero.pitch=st.aero.yaw={{0},{0},{0}};
+        for(const double x:{1.,9.})for(const double z:{1.,-1.})st.rcs.push_back({"q",{x,0,0},{0,0,z},100,700});
+        State s;s.position={1e8,0,0};s.propellant=st.propellant;Flight f(Vehicle{"rcs",{st},0},e,s);
+        f.torque({0,400,0});Sample x=f.sample();
+        std::printf("RCS for 400 N m pitch: duties %.4f %.4f %.4f %.4f, moment %.6f N m, force %.2e N\n",f.thrusters()[0],f.thrusters()[1],f.thrusters()[2],f.thrusters()[3],x.rcsMoment.y,norm(x.rcsForce));
+        near(x.rcsMoment.y,400,1e-4,"Thrusters meet the torque");near(norm(x.rcsForce),0,1e-4,"as a couple");near(f.massFlow(),100./700,1e-8,"on the least propellant");
+        f.torque({0,2000,0});near(f.sample().rcsMoment.y,800,1e-4,"Torque saturates at the thrusters' reach");
+        f.thruster(0);require(f.thrusters()[0]==0&&f.thrusters()[1]==0,"Thrusters set directly");f.thruster(1,2);near(f.sample().rcsForce.z,100,1e-12,"One thruster's force");
+        { // Two arms on the same side, 4 m and 1 m (review regression: the active set stalled at a bound): the long one alone.
+            Stage lever=st;lever.rcs={{"long",{1,0,0},{0,0,-1},100,700},{"short",{4,0,0},{0,0,-1},100,700},{"long+",{1,0,0},{0,0,1},100,700}};
+            Flight g(Vehicle{"lever",{lever},0},e,s);g.torque({0,200,0});near(g.sample().rcsMoment.y,200,1e-4,"Torque from the long arm");near(g.thrusters()[0],.5,1e-6,"The long arm alone");near(g.thrusters()[1],0,0,"not the short");
+        }
+        Environment air;air.sunMoon=false;air.relativity=false;
+        Stage w=st;w.rcs.clear();w.aero.area=2;w.aero.length=3;Surface flap;flap.name="flap";flap.limit=.3;flap.rate=10*3.14159265358979/180;
+        flap.pitch={{0},{0},{-10,10},{-.1,.1}};w.surfaces={flap};
+        const Vehicle wv{"winged",{w},0};Flight g(wv,air,Flight::free(air,wv,0,{0,0,1e4},{300,0,0},{}));g.surface(5*3.14159265358979/180);
+        for(int i=0;i<250;++i)g.advance(second/1000);near(g.surfaces()[0].deflection*180/3.14159265358979,2.5,1e-9,"Surface at its rate (10°/s)");
+        g.advance(second/4);x=g.sample();near(g.surfaces()[0].deflection*180/3.14159265358979,5,1e-9,"Surface at its command");
+        near(x.aeroMoment.y,x.dynamicPressure*2*3*.05,1e-9*x.dynamicPressure,"Surface pitching moment q S L ΔCm");
+    }
     // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
     // against 10 ms steps.
     {

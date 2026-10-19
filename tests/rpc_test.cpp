@@ -124,12 +124,12 @@ int main(int argc,char** argv){try{
             require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"NaN throttle accepted");}
         {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&!s.burning()&&s.tick()==0,"A rejected step changed the flight");}
         require(s.engines_size()==1&&!s.engines(0).on()&&!s.engines(0).failed(),"The stage's engine in the sample");
-        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->set_ignite(true);k->set_engine(2);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A missing engine accepted");}
-        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->mutable_torque_newton_meters()->set_x(1);k->set_engine(1);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"An engine on a torque accepted");}
+        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->set_ignite(true);k->set_index(2);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A missing engine accepted");}
+        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->mutable_torque_newton_meters()->set_x(1);k->set_index(1);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"An engine on a torque accepted");}
         {grpc::ClientContext c;api::StepRequest r;r.add_commands()->set_fail(true);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Fail without an engine accepted");}
-        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->set_fail(true);k->set_engine(1);r.add_commands()->set_ignite(true);
+        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->set_fail(true);k->set_index(1);r.add_commands()->set_ignite(true);
             require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Ignition with every engine failed accepted");}
-        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->set_throttle(.8);k->set_engine(1);r.add_commands()->mutable_gimbal()->set_pitch_radians(.01);
+        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->set_throttle(.8);k->set_index(1);r.add_commands()->mutable_gimbal()->set_pitch_radians(.01);
             require(flight->Step(&c,r,&s).ok()&&s.engines(0).throttle()==.8&&s.engines(0).gimbal_command().pitch_radians()==.01&&s.tick()==0,"Engine commands");}
         {grpc::ClientContext c;api::StepRequest r;r.add_commands()->set_throttle(1);r.add_commands()->mutable_gimbal();require(flight->Step(&c,r,&s).ok()&&s.engines(0).throttle()==1,"Back to full throttle");}
         {grpc::ClientContext c;api::StepRequest r;r.set_ticks(3000);r.add_commands()->set_ignite(true);require(flight->Step(&c,r,&s).ok(),"Step failed");}
@@ -307,6 +307,19 @@ int main(int argc,char** argv){try{
             {auto bad=d;bad.mutable_stages(0)->set_mass_empty_kilograms(1);refused(bad,"Inconsistent masses accepted");}
             {auto bad=d;bad.clear_stages();refused(bad,"A vehicle without stages accepted");}
             {api::CreateFlightRequest r=create;*r.mutable_definition()=d;api::FlightSample x;grpc::ClientContext c;require(flight->CreateFlight(&c,r,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A definition with a preset accepted");}
+            { // Thrusters and a flap on the launcher's first stage: the torque command fires them, both take direct commands.
+                auto winged=d;auto* st=winged.mutable_stages(0);
+                for(const double x:{2.,40.})for(const double z:{1.,-1.}){auto* t=st->add_thrusters();t->set_name("q");t->mutable_position_meters()->set_x(x);t->mutable_direction()->set_z(z);t->set_thrust_newtons(500);t->set_exhaust_velocity_meters_per_second(700);}
+                auto* f=st->add_surfaces();f->set_name("flap");f->set_limit_radians(.5);auto* m=f->mutable_pitch();m->add_mach(0);m->add_angle_degrees(0);m->add_deflection_degrees(-10);m->add_deflection_degrees(10);m->add_values(-.1);m->add_values(.1);
+                api::CreateFlightRequest r=create;r.set_vehicle(api::CUSTOM);*r.mutable_definition()=winged;api::FlightSample x;
+                {grpc::ClientContext c;require(flight->CreateFlight(&c,r,&x).ok()&&x.thruster_duty_size()==4&&x.surfaces_size()==1,"Thrusters and surfaces in the sample");}
+                {grpc::ClientContext c;api::StepRequest q;q.add_commands()->mutable_torque_newton_meters()->set_y(1000);auto* k=q.add_commands();k->set_surface_radians(.1);k->set_index(1);
+                    const auto st=flight->Step(&c,q,&x);
+                    require(st.ok()&&std::abs(x.thruster_moment_newton_meters().y()-1000)<1e-3&&x.surfaces(0).deflection_radians()==.1,"Torque by thrusters, the flap set");}
+                {grpc::ClientContext c;api::StepRequest q;auto* k=q.add_commands();k->set_thruster_duty(1);k->set_index(5);require(flight->Step(&c,q,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A missing thruster accepted");}
+                {grpc::ClientContext c;api::StepRequest q;q.add_commands()->set_thruster_duty(0);auto* k=q.add_commands();k->set_thruster_duty(.25);k->set_index(2);
+                    require(flight->Step(&c,q,&x).ok()&&x.thruster_duty(0)==0&&x.thruster_duty(1)==.25,"Thrusters set directly");}
+            }
         }
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
