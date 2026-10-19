@@ -364,6 +364,7 @@ int main(){try{
         const Vehicle v{"taxi",{st},0};
         auto rolling=[&](double speed){const double sag=10000*9.79/3e6;return Flight(v,e,Flight::free(e,v,t0,{.5,-1.4,2-sag},{speed,0,0},{}));};
         auto run=[](Flight& f,double seconds){for(Tt t=0;t<static_cast<Tt>(seconds*1e9);)t+=f.advance(std::min<Tt>(second/1000,static_cast<Tt>(seconds*1e9)-t));};
+        near(Flight(v,e,Flight::pad(e,v,t0,{.5,-1.4,0},0,0)).sample().geodetic.height,2,1e-6,"A level aircraft on the pad stands on its wheels"); // Review regression.
         Flight roll=rolling(20);run(roll,10);const double v10=roll.sample().nedVelocity.x;
         std::printf("wheels: 20 m/s rolling 10 s -> %.3f m/s (mu_r g: %.3f)\n",v10,20-.015*9.79*10);near(v10,20-.015*9.79*10,.08,"Rolling resistance");
         Flight stop=rolling(20);stop.brake(1);run(stop,5);const double vs=stop.sample().nedVelocity.x;near(vs,0,.05,"Full brakes stop it");

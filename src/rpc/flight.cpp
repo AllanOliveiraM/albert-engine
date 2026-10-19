@@ -68,7 +68,7 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
     v.sunArea=d.solar_area_meters2();v.reflectivity=d.has_reflectivity()?d.reflectivity():1.3;v.jetDamping=!d.has_jet_damping()||d.jet_damping();v.inertiaRate=d.has_inertia_rate()?d.inertia_rate():1.;
     if(!(v.torque>=0)||!(v.diameter>0)||!(v.sunArea>=0)||!(v.reflectivity>=0)||!finite(v.inertiaRate)||!std::isfinite(v.torque))throw std::invalid_argument("Invalid vehicle torque, diameter, solar area, reflectivity or inertia rate");
     for(const auto& sd:d.stages()){
-        if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256||sd.wheels_size()>32||sd.hard_points_meters_size()>32)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters and 256 thermal nodes a stage");
+        if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256||sd.wheels_size()>32||sd.hard_points_meters_size()>32)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters, 256 thermal nodes, 32 wheels and 32 hard points a stage");
         ph::Stage st;st.name=sd.name().substr(0,128);st.propellant=sd.propellant_kilograms();st.massFull=sd.mass_full_kilograms();st.massEmpty=sd.mass_empty_kilograms();
         st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
         st.length=sd.length_meters();st.reference=sd.aerodynamic_reference_meters();st.noseRadius=sd.has_nose_radius_meters()?sd.nose_radius_meters():1.;
@@ -335,8 +335,8 @@ struct Slot {
         Sound s;s.utc=ph::utcFromTt(flight->state().time);s.planet=flight->environment().planet;s.air=flight->environment().air;auto& e=s.emission;
         e.time=s.utc;e.position=x.fixedPosition;e.velocity=x.fixedVelocity;
         const ph::V3 nose=flight->environment().rotation.at(flight->state().time).fixed*(ph::matrix(flight->state().attitude)*ph::V3{1,0,0});e.plume=nose*-1.;
-        double exhaust=0,area=0,flow=0; // The engines on as one plume: their exit area, flow-weighted exhaust velocity.
-        for(std::size_t i=0;i<st.engines.size();++i)if(flight->engines()[i].on){const auto& n=st.engines[i];const double f=flight->engines()[i].throttle*n.thrust/n.exhaust;exhaust+=f*n.exhaust;flow+=f;area+=n.exitArea;}
+        double exhaust=0,area=0,flow=0; // The rockets on as one plume: their exit area, flow-weighted exhaust velocity (jets have no noise model).
+        for(std::size_t i=0;i<st.engines.size();++i)if(flight->engines()[i].on&&!st.engines[i].breathing){const auto& n=st.engines[i];const double f=flight->engines()[i].throttle*n.thrust/n.exhaust;exhaust+=f*n.exhaust;flow+=f;area+=n.exitArea;}
         e.noise={x.thrust,flow>0?exhaust/flow:0.,std::sqrt(4*area/3.14159265358979323846),.0035};e.on=flight->state().burning&&x.thrust>0;
         return s;
     }
@@ -356,7 +356,8 @@ struct Slot {
         const auto& st=flight->vehicle().stages[static_cast<std::size_t>(flight->state().stage)];
         if(!st.engines.empty())on+=", "+std::to_string(st.engines.size())+(st.engines.size()==1?" motor":" motores");
         if(!st.rcs.empty())on+=", RCS ("+std::to_string(st.rcs.size())+")";if(!st.surfaces.empty())on+=", superficies ("+std::to_string(st.surfaces.size())+")";
-        if(!st.legs.empty())on+=", pernas";
+        if(!st.legs.empty())on+=", pernas";if(!st.wheels.empty())on+=", rodas ("+std::to_string(st.wheels.size())+")";
+        if(!st.hardPoints.empty())on+=", pontos de captura";if(flight->environment().water)on+=", agua";if(!flight->environment().structures.empty())on+=", estruturas ("+std::to_string(flight->environment().structures.size())+")";
         return off.empty()?on:on+"; sem "+off;
     }
     // Spawned flights waiting to be created once the step that separated them is committed (outside this flight's lock).
@@ -684,7 +685,7 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
     std::vector<Slot::Command> commands;
     for(int j=0;j<r->commands_size();++j){const auto& c=r->commands(j);
-        if(c.index()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine, thruster or surface"};
+        if(c.index()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine, wheel, surface or thruster"};
         const std::uint32_t e=c.index()<<16; // In the kind's high bits (the replay log keeps the record format).
         switch(c.command_case()){
         case api::FlightCommand::kIgnite:if(c.ignite())commands.push_back({wire::ignite|e});break;

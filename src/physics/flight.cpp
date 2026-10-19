@@ -101,7 +101,7 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
         for(const auto& w:st.wheels)if(!finite({w.position.x,w.position.y,w.position.z,w.stiffness,w.damping,w.rolling,w.braking,w.cornering,w.steer})||!(w.stiffness>0)||!(w.damping>=0)
             ||!(w.rolling>=0)||!(w.braking>=w.rolling)||!(w.cornering>=0)||!(w.steer>=0))throw std::invalid_argument("Invalid wheel: "+st.name+" "+w.name);
         for(const auto& n:st.thermal)if(!finite({n.position.x,n.position.y,n.position.z,n.normal.x,n.normal.y,n.normal.z,n.area,n.capacity,n.emissivity,n.absorptivity,n.conductance,n.structure,n.factor,n.start,n.limit})
-            ||!(n.area>0)||!(n.capacity>0)||!(n.emissivity>=0&&n.emissivity<=1)||!(n.absorptivity>=0&&n.absorptivity<=1)||!(n.conductance>=0)||!(n.start>0)||!(n.structure>0)||!(n.limit>=0)||norm(n.normal)==0)
+            ||!(n.area>0)||!(n.capacity>0)||!(n.factor>=0)||!(n.emissivity>=0&&n.emissivity<=1)||!(n.absorptivity>=0&&n.absorptivity<=1)||!(n.conductance>=0)||!(n.start>0)||!(n.structure>0)||!(n.limit>=0)||norm(n.normal)==0)
             throw std::invalid_argument("Invalid thermal node: "+st.name+" "+n.name);
         for(auto& t:st.rcs){
             const double n=norm(t.direction);
@@ -125,7 +125,11 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
     padPosition_=o.fixed*s_.position;padAttitude_=quaternion(o.fixed*matrix(s_.attitude));
 }
 State Flight::pad(const Environment& e,const Vehicle& v,Tt t,Geodetic site,double heading,double pitch,double roll){
-    const Stage& st=v.stages.at(0);site.height+=(st.length-st.cgFull)*std::sin(pitch); // Base on the ground.
+    // The lowest of the base, the legs and the wheels on the ground, in the pad's attitude.
+    const Stage& st=v.stages.at(0);const M3 b=bodyToNed({heading,pitch,roll});double low=1e300;
+    auto at=[&](V3 r){low=std::min(low,-(b*r).z);};at({st.cgFull-st.length,0,0});
+    for(const V3& l:st.legs)at({st.cgFull-l.x,l.y,l.z});for(const Wheel& w:st.wheels)at({st.cgFull-w.position.x,w.position.y,w.position.z});
+    site.height-=low;
     State s=free(e,v,t,site,{},{heading,pitch,roll});s.clamped=true;return s;
 }
 State Flight::free(const Environment& e,const Vehicle& v,Tt t,Geodetic g,V3 ned,V3 euler,V3 relative){
@@ -145,8 +149,8 @@ double Flight::massFlow()const{
     return f;
 }
 std::vector<double> Flight::engineThrust()const{
-    const double p=sample().air.pressure;const auto& es=vehicle_.stages[s_.stage].engines;std::vector<double> t(es.size());
-    const Sample x=es.empty()?Sample{}:sample();
+    const auto& es=vehicle_.stages[s_.stage].engines;std::vector<double> t(es.size());if(es.empty())return t;
+    const Sample x=sample();const double p=x.air.pressure;
     for(std::size_t i=0;i<es.size();++i)t[i]=!(s_.burning&&engines_[i].on)?0.:es[i].breathing?(x.air.density>0?engines_[i].spool*es[i].thrustTable(x.mach,x.geodetic.height*1e-3):0.)
         :std::max(0.,engines_[i].throttle*es[i].thrust-p*es[i].exitArea);
     return t;
@@ -338,17 +342,20 @@ Tt Flight::advance(Tt dt){
             }
             h=std::min(h,limit);
         }
-        if(const Stage& st=vehicle_.stages[s_.stage];(!st.legs.empty()||!st.wheels.empty())&&!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
-            // Legs or wheels on or near the ground: steps the springs, damping and regularised friction keep stable.
+        if(const Stage& st=vehicle_.stages[s_.stage];(!st.legs.empty()||!st.wheels.empty()||env_.water)&&!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
+            // Legs or wheels on or near the ground, or the hull near the water: steps the springs, damping, friction and buoyancy keep stable.
             const Orientation o=env_.rotation.at(s_.time);const Mass ms=mass(st,s_.propellant);double reach=0;
             for(const V3& leg:st.legs)reach=std::max(reach,norm(V3{ms.cg-leg.x,leg.y,leg.z}));
             for(const Wheel& w:st.wheels)reach=std::max(reach,norm(V3{ms.cg-w.position.x,w.position.y,w.position.z}));
+            if(env_.water)reach=std::max(reach,st.length+vehicle_.diameter);
             const double r=norm(s_.position),g=env_.planet.gm/(r*r),t=static_cast<double>(h)*1e-9,speed=norm(s_.velocity-cross(o.omega,s_.position));
             const double clearance=geodetic(env_.planet,o.fixed*s_.position).height-env_.ground-reach;
             if(s_.contact||clearance<speed*t+.5*g*t*t+1){
                 const double n=static_cast<double>(st.legs.size());double rate=std::max({std::sqrt(n*st.legStiffness/ms.m),n*st.legDamping/ms.m,st.legs.empty()?0.:st.friction*g/.05,1.});
                 double k=0,c=0,mu=0;for(const Wheel& w:st.wheels){k+=w.stiffness;c+=w.damping;mu=std::max({mu,w.braking,w.cornering});}
                 if(!st.wheels.empty())rate=std::max({rate,std::sqrt(k/ms.m),c/ms.m,mu*g/.05});
+                if(env_.water){const double rad=vehicle_.diameter/2,area=2*rad*st.length; // Buoyancy, heave damping and the explicit quadratic drag.
+                    rate=std::max({rate,std::sqrt(1025*g*3.14159265358979323846*rad*rad/ms.m),.2*1025*area*std::sqrt(g*rad)/ms.m,.5*1025*area*speed/ms.m});}
                 h=std::min(h,std::max<Tt>(1000,static_cast<Tt>(.5/rate*1e9))); // Half the RK4 bound on the stiffest mode.
             }
         }
@@ -356,22 +363,26 @@ Tt Flight::advance(Tt dt){
             const Orientation o=env_.rotation.at(s_.time);const V3 pf=o.fixed*s_.position;const Mass ms=mass(st,s_.propellant);double near=1e300,reach=0,rate=1;
             for(const V3& p:st.hardPoints)reach=std::max(reach,norm(V3{ms.cg-p.x,p.y,p.z}));
             for(const auto& x:env_.structures){const V3 ab=x.b-x.a;const double t=std::clamp(dot(pf-x.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);near=std::min(near,norm(pf-(x.a+ab*t))-x.radius);
-                rate=std::max({rate,std::sqrt(x.stiffness/ms.m),x.damping/ms.m,x.friction*9.81/.05});}
+                rate=std::max({rate,std::sqrt(x.stiffness/ms.m),x.damping/ms.m,x.friction*env_.planet.gm/dot(s_.position,s_.position)/.05});}
             if(near<reach+norm(s_.velocity-cross(o.omega,s_.position))*static_cast<double>(h)*1e-9+10)h=std::min(h,std::max<Tt>(1000,static_cast<Tt>(.5/rate*1e9)));
         }
         if(flow>0){const double t=s_.propellant/flow*1e9;if(t<=static_cast<double>(h)+1){h=std::clamp<Tt>(static_cast<Tt>(t),1,h);depleted=true;}} // Within 1 ns.
         slew(static_cast<double>(h)*1e-9);heat(static_cast<double>(h)*1e-9);integrate(h);left-=h;
+        if(!depleted&&s_.burning&&!(s_.propellant>0))depleted=true; // A jet whose flow rose within the step (its spool) ran dry in it.
         if(depleted){s_.propellant=0;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);return dt-left;}
         if(!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
             const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;Geodetic g=geodetic(env_.planet,rf);
-            if(const Stage& st=vehicle_.stages[s_.stage];(!st.legs.empty()||!st.wheels.empty())&&!env_.water){ // Contact state of the legs and wheels for events and telemetry.
-                const double c=mass(st,s_.propellant).cg;const M3 b=matrix(s_.attitude);bool touching=false;
-                for(const V3& leg:st.legs)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-leg.x,leg.y,leg.z})).height<env_.ground;
-                for(const Wheel& w:st.wheels)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-w.position.x,w.position.y,w.position.z})).height<env_.ground;
+            { // One contact state for events and telemetry: legs and wheels by geometry; water and structures, when near, by their force.
+                const Stage& st=vehicle_.stages[s_.stage];bool touching=false;
+                if((!st.legs.empty()||!st.wheels.empty())&&!env_.water){
+                    const double c=mass(st,s_.propellant).cg;const M3 b=matrix(s_.attitude);
+                    for(const V3& leg:st.legs)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-leg.x,leg.y,leg.z})).height<env_.ground;
+                    for(const Wheel& w:st.wheels)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-w.position.x,w.position.y,w.position.z})).height<env_.ground;
+                }
+                const bool wet=env_.water&&g.height-st.length-vehicle_.diameter<env_.ground,held=!st.hardPoints.empty()&&structureGap(rf)<st.length+10;
+                if(wet||held)touching=touching||norm(sample().contactForce)>0;
                 if(touching!=s_.contact){s_.contact=touching;return dt-left;} // Touchdown and lift-off end the call, so each transition keeps its instant.
             }
-            if(env_.water||(!vehicle_.stages[s_.stage].hardPoints.empty()&&!env_.structures.empty())){ // Water and structures: contact is a force on any slice or hard point.
-                const bool touching=norm(sample().contactForce)>0;if(touching!=s_.contact){s_.contact=touching;return dt-left;}}
             if(g.height<env_.ground&&!env_.water){g.height=env_.ground;s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
         }
     }
@@ -379,7 +390,7 @@ Tt Flight::advance(Tt dt){
 }
 namespace {
 std::size_t pick(int engine,std::size_t count){ // An engine's index, checked.
-    if(engine<0||static_cast<std::size_t>(engine)>=count)throw std::invalid_argument("No engine "+std::to_string(engine+1)+" on this stage");
+    if(engine<0||static_cast<std::size_t>(engine)>=count)throw std::invalid_argument("No engine, wheel, surface or thruster "+std::to_string(engine+1)+" on this stage");
     return static_cast<std::size_t>(engine);}
 }
 void Flight::ignite(int engine){
@@ -412,6 +423,10 @@ void Flight::slew(double seconds){
             gustNed_=x*g.x+h*g.y+z*g.z;
         }else gustNed_={};
     }
+}
+double Flight::structureGap(V3 fixed)const{ // From the centre of mass to the nearest structure's surface (m).
+    double gap=1e300;for(const auto& x:env_.structures){const V3 ab=x.b-x.a;const double t=std::clamp(dot(fixed-x.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);gap=std::min(gap,norm(fixed-(x.a+ab*t))-x.radius);}
+    return gap;
 }
 void Flight::heat(double seconds){ // Explicit in the flow (the step's start), implicit in each node's temperature.
     const auto& nodes=vehicle_.stages[s_.stage].thermal;if(nodes.empty()||!(seconds>0))return;

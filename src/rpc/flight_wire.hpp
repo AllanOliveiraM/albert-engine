@@ -10,7 +10,7 @@ enum Command:std::uint32_t {ignite=1,cutoff=2,separate=4,release=8,throttle=16,g
 enum Extra:std::uint32_t {thruster=256,surface=512,spawn=1024,brake=2048,steer=4096}; // gRPC only (thruster_duty, surface_radians, spawn, brake, steer_radians); kinds in the replay log.
 enum Status:std::uint32_t {ok=0,invalid=1,precondition=2,noFlight=3};
 enum Event:std::uint32_t {liftoff=1,depleted=2,touchdown=4,overheat=8}; // overheat: a thermal node above its limit.
-enum Flag:std::uint32_t {burning=1,clamped=2,landed=4,contact=8}; // contact: a landing leg on the ground.
+enum Flag:std::uint32_t {burning=1,clamped=2,landed=4,contact=8}; // contact: a leg or wheel on the ground, the hull in the water or a hard point on a structure.
 struct Request {
     char magic[4]{'A','L','B','Q'};std::uint32_t ticks=1,commands=0,engine=0; // engine: 0 every engine of the stage, n its n-th (ignite, cutoff, throttle, gimbal, fail).
     double throttleValue=1,gimbalPitch=0,gimbalYaw=0,torqueValue[3]{};

@@ -195,6 +195,7 @@ private:
     void allocate(); // Thruster duties for the torque command.
     Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_;std::vector<WheelState> wheels_;Tt step_=0,coast_=0;Increments increments_;
     void heat(double seconds); // The thermal nodes over a step, from its start's flow.
+    double structureGap(V3 fixed)const;
     V3 padPosition_;Q padAttitude_; // ECEF and body→ECEF while clamped/landed.
     mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable ThirdBody p0_[2]{},p1_[2]{};mutable int bodies_=0;
 };

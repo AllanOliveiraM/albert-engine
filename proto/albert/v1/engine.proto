@@ -353,7 +353,7 @@ message FlightCommand {
 message Spawn { string flight_id=1; VehicleDefinition definition=2; double nose_offset_meters=3; }
 message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; } // Up to 600000 ticks.
 message FlightEvent {
-  // LIFTOFF: clamp release or the last leg leaving the ground; TOUCHDOWN: CG stop or a first leg down.
+  // LIFTOFF: clamp release or the last contact (leg, wheel, water, structure) ending; TOUCHDOWN: CG stop or a first contact.
   // OVERHEAT: a thermal node above its limit (index: the node, FlightSample.thermal_nodes order).
   enum Kind { KIND_UNSPECIFIED=0; LIFTOFF=1; DEPLETED=2; TOUCHDOWN=3; OVERHEAT=4; }
   Kind kind=1; double elapsed_seconds=2; uint32 stage=3; uint32 index=4;
@@ -381,7 +381,7 @@ message FlightSample {
   Vector3 measured_specific_force_meters_per_second2=37; Vector3 measured_angular_rate_radians_per_second=38;
   Vector3 delta_velocity_meters_per_second=39; Vector3 delta_angle_radians=40; double measured_static_pressure_pascals=41;
   uint32 data_port=42; // Binary lockstep data plane on 127.0.0.1 (src/rpc/flight_wire.hpp).
-  bool leg_contact=43; // A landing leg on the ground (landed: stopped at the CG, vehicles without legs).
+  bool leg_contact=43; // In contact: a leg or wheel on the ground, a slice in the water or a hard point on a structure (landed: stopped at the CG, vehicles without them).
   // Convective stagnation-point heating (Sutton-Graves, stage nose radius) and its integral.
   double heat_flux_watts_per_meter2=44; double heat_load_joules_per_meter2=45;
   repeated EngineSample engines=46;     // The stage's engines (thrust, throttle and gimbal above are the totals and the last commands to all).
