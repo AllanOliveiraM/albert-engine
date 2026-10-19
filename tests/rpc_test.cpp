@@ -296,6 +296,16 @@ int main(int argc,char** argv){try{
             {grpc::ClientContext c;require(flight->CreateFlight(&c,a,&x).ok()&&!x.physics().atmosphere()&&x.air_density_kilograms_per_meter3()==0&&x.static_pressure_pascals()==0,"Atmosphere off: vacuum");}
             {const auto snap=bridge.snapshot();(void)snap;}
             a.set_gravity_degree(1);{grpc::ClientContext c;require(flight->CreateFlight(&c,a,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Degree 1 accepted");}
+            { // Starts in flight: over Florida at 10 km heading north at 200 m/s; in a 400 km circular orbit from the inertial frame.
+                api::CreateFlightRequest f=create;f.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);auto* l=f.mutable_start()->mutable_local();
+                l->mutable_position()->set_latitude_degrees(28);l->mutable_position()->set_longitude_degrees(-80);l->mutable_position()->set_height_meters(1e4);l->mutable_velocity_ned_meters_per_second()->set_x(200);
+                {grpc::ClientContext c;require(flight->CreateFlight(&c,f,&x).ok()&&!x.clamped()&&std::abs(x.geodetic().height_meters()-1e4)<1e-3&&std::abs(x.velocity_ned_meters_per_second().x()-200)<1e-6,"A start over the ground");}
+                api::CreateFlightRequest o=create;o.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);auto* i=o.mutable_start()->mutable_inertial();o.mutable_start()->set_stage(1);
+                const double r=6778137,v=std::sqrt(3.986004418e14/r);i->mutable_position_meters()->set_x(r);i->mutable_velocity_meters_per_second()->set_y(v);i->mutable_attitude()->set_w(1);
+                {grpc::ClientContext c;require(flight->CreateFlight(&c,o,&x).ok()&&x.stage()==1,"A start in orbit");}
+                {grpc::ClientContext c;api::StepRequest q;q.set_ticks(60000);require(flight->Step(&c,q,&x).ok()&&std::abs(x.geodetic().height_meters()-4e5)<2e4,"Still in orbit a minute later");}
+                o.mutable_start()->set_stage(5);{grpc::ClientContext c;require(flight->CreateFlight(&c,o,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A missing start stage accepted");}
+            }
             { // Turbulence: a different flight from the calm one, the same twice for one seed.
                 api::CreateFlightRequest t=create;t.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);auto hash=[&](double sigma,std::uint64_t seed){t.mutable_physics()->set_turbulence_meters_per_second(sigma);t.mutable_physics()->set_turbulence_seed(seed);
                     {grpc::ClientContext c;require(flight->CreateFlight(&c,t,&x).ok(),"Turbulent flight");}grpc::ClientContext c;api::StepRequest q;q.set_ticks(4000);q.add_commands()->set_ignite(true);require(flight->Step(&c,q,&x).ok(),"Turbulent steps");return x.state_hash();};

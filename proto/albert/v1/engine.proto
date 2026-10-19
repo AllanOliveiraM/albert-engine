@@ -255,7 +255,20 @@ message CreateFlightRequest {
   VehicleDefinition definition=15;      // CUSTOM only.
   PhysicsSettings physics=16;           // Unset fields: Albert's defaults (its Física menu; all on unless changed there).
   SensorSettings sensors=17;            // Beyond the IMU; each when enabled.
+  // In flight instead of on the pad (site then only gives the ground's height and the weather's place).
+  StartState start=18;
 }
+message StartState {
+  oneof where {
+    LocalStart local=1;       // Over the central body: geodetic place, velocity relative to the ground, attitude to the local horizon.
+    InertialStart inertial=2; // In the flight's inertial frame (GCRF at the Earth; ICRF axes at the Moon or Mars), from the body's centre.
+  }
+  uint32 stage=3;                          // The active stage (0: the first).
+  optional double propellant_kilograms=4;  // Left in it; unset: full.
+}
+message LocalStart { Geodetic position=1; Vector3 velocity_ned_meters_per_second=2; double heading_degrees=3; double pitch_degrees=4; double roll_degrees=5;
+  Vector3 angular_rate_radians_per_second=6; } // Body rates relative to the ground.
+message InertialStart { Vector3 position_meters=1; Vector3 velocity_meters_per_second=2; Quaternion attitude=3; Vector3 angular_rate_radians_per_second=4; } // Body to inertial; body rates.
 // Navigation sensors (docs/PHYSICS.md), reproducible from the seed; unset values: the defaults noted.
 message SensorSettings { GnssSettings gnss=1; RadarAltimeterSettings radar_altimeter=2; StarTrackerSettings star_tracker=3; uint64 seed=4; }
 // White noise 1.5 m horizontal, 3 m vertical, 0.05 m/s; Gauss-Markov drift 1 m over 300 s; 10 Hz; below 3000 km, no speed

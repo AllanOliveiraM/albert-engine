@@ -309,6 +309,11 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | `thruster_duty` | Ciclo de trabalho (0–1) de um propulsor de RCS, até o próximo comando de torque |
 | `surface_radians` | Deflexão comandada de uma superfície de controle, limitada e alcançada na taxa do atuador |
 
+**Começar em voo.** `start` (`StartState`) cria o voo já no ar em vez do pad: sobre o corpo central (`local`: posição
+geodésica, velocidade em relação ao solo em NED, rumo, arfagem e rolagem, taxas do corpo) ou no referencial inercial do voo
+(`inertial`: posição a partir do centro do corpo, velocidade, atitude corpo→inercial, taxas), no estágio e com o propelente
+escolhidos; o `site` passa a dar só a altura do solo e o lugar do tempo. Serve para começar direto numa reentrada ou numa órbita.
+
 **Modelos físicos por voo.** `physics` (`PhysicsSettings`) liga ou desliga as marés dos terceiros corpos, a relatividade,
 a atmosfera (desligada: vácuo), o vento e a pressão de radiação solar, e escolhe a turbulência de Dryden (intensidade e
 semente); campos não definidos vêm dos padrões do Albert (a

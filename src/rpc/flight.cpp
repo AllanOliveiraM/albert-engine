@@ -416,7 +416,25 @@ grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,cons
     if(!(env.turbulence>=0&&env.turbulence<=50))return{grpc::StatusCode::INVALID_ARGUMENT,"Turbulence must be 0-50 m/s"};
     if(p.body==ph::Center::earth){env.air=air;env.planet.degree=static_cast<int>(p.degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(p.utc-946728000.));}
     std::optional<ph::Flight> made;
-    try{made.emplace(p.vehicle,env,ph::Flight::pad(env,p.vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r.heading_degrees()*deg,p.pitch*deg));}
+    try{
+        if(!r.has_start())made.emplace(p.vehicle,env,ph::Flight::pad(env,p.vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r.heading_degrees()*deg,p.pitch*deg));
+        else{ // In flight: from the local horizon or the inertial frame, at the given stage and propellant.
+            const auto& w=r.start();if(w.stage()>=p.vehicle.stages.size())throw std::invalid_argument("No such stage to start in");
+            const double full=p.vehicle.stages[w.stage()].propellant,left=w.has_propellant_kilograms()?w.propellant_kilograms():full;
+            if(!(left>=0&&left<=full))throw std::invalid_argument("Propellant must be 0 to the stage's");
+            ph::State s;
+            if(w.has_local()){const auto& l=w.local();const auto& g=l.position();
+                if(!(std::abs(g.latitude_degrees())<=90)||!finite(g.longitude_degrees())||!(g.height_meters()>-1e4&&g.height_meters()<1e9)||!finite(l.heading_degrees()+l.pitch_degrees()+l.roll_degrees()))throw std::invalid_argument("Invalid local start");
+                s=ph::Flight::free(env,p.vehicle,t,{g.latitude_degrees()*deg,g.longitude_degrees()*deg,g.height_meters()},get(l.velocity_ned_meters_per_second()),{l.heading_degrees()*deg,l.pitch_degrees()*deg,l.roll_degrees()*deg},get(l.angular_rate_radians_per_second()));}
+            else if(w.has_inertial()){const auto& i=w.inertial();const auto& q=i.attitude();const double n=std::sqrt(q.w()*q.w()+q.x()*q.x()+q.y()*q.y()+q.z()*q.z());
+                s.time=t;s.position=get(i.position_meters());s.velocity=get(i.velocity_meters_per_second());s.rate=get(i.angular_rate_radians_per_second());
+                if(!(n>0)||!finite(n)||!finite(s.position.x+s.position.y+s.position.z+s.velocity.x+s.velocity.y+s.velocity.z+s.rate.x+s.rate.y+s.rate.z)||!(ph::norm(s.position)>1))throw std::invalid_argument("Invalid inertial start");
+                s.attitude={q.w()/n,q.x()/n,q.y()/n,q.z()/n};}
+            else throw std::invalid_argument("A start needs a local or inertial state");
+            for(const double x:{s.velocity.x,s.velocity.y,s.velocity.z})if(!finite(x))throw std::invalid_argument("Invalid start velocity");
+            s.stage=static_cast<int>(w.stage());s.propellant=left;made.emplace(p.vehicle,env,s);
+        }
+    }
     catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     made->steps(stepNs,static_cast<ph::Tt>(std::llround(p.coast*1e9)));
     if(cancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
