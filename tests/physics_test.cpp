@@ -373,6 +373,27 @@ int main(){try{
         near(t2,5e4*(1-std::exp(-1.)),500,"Jet spools to 63% at its time constant");near(jetFlight.massFlow(),t2*2e-5,1e-9,"Fuel flow TSFC x thrust");
         Environment vacuum=e;vacuum.atmosphere=false;Flight dry(v,vacuum,Flight::free(vacuum,v,t0,{.5,-1.4,2-10000*9.79/3e6},{},{}));dry.ignite();run(dry,3);near(dry.engineThrust()[0],0,0,"No air, no jet thrust");
     }
+    // Water and structures: an upright 9 m cylinder 3.7 m across (10 t) 2 m deep feels ρ g πR² 2 m of buoyancy and, let go,
+    // floats with its weight carried; a 1 t vehicle whose hard point is its centre of mass comes to rest on a catch bar.
+    {
+        Environment e;e.sunMoon=false;e.relativity=false;e.ground=0;e.water=true;const Tt t0=ttFromUtc(1792238400.);const double pi=3.14159265358979323846;
+        Stage st;st.name="hull";st.propellant=0;st.massFull=st.massEmpty=10000;st.cgFull=st.cgEmpty=4.5;st.inertiaFull=st.inertiaEmpty={2e4,8e4,8e4};st.length=9;
+        st.aero.lift=st.aero.drag=st.aero.side=st.aero.roll=st.aero.pitch=st.aero.yaw={{0},{0},{0}};Vehicle v{"hull",{st},0};v.diameter=3.7;
+        const double R=1.85,rho=1025;
+        Flight still(v,e,Flight::free(e,v,t0,{.5,-1.4,2.5},{},{0,pi/2,0}));const Sample x=still.sample();const double gl=e.planet.gm/dot(still.state().position,still.state().position);
+        near(norm(x.contactForce),rho*gl*pi*R*R*2,1e-6*rho*gl*pi*R*R*2,"Buoyancy of 2 m of an upright cylinder");
+        // Let go upright it tips over (a tall uniform cylinder is unstable) and floats on its side: buoyancy then carries its weight.
+        Flight drop(v,e,Flight::free(e,v,t0,{.5,-1.4,4.5-.5},{},{0,pi/2,0}));for(int i=0;i<60000;++i)drop.advance(second/1000);
+        const Sample y=drop.sample();const double weight=10000*e.planet.gm/dot(drop.state().position,drop.state().position);
+        std::printf("floating after 60 s: buoyancy %.1f N for a weight of %.1f N, pitch %.1f deg, heave %.4f m/s\n",norm(y.contactForce),weight,y.euler.y*180/pi,y.nedVelocity.z);
+        near(norm(y.contactForce)/weight,1,.01,"Floats: buoyancy carries the weight");near(y.nedVelocity.z,0,.02,"Heave damped");
+        Environment tower=e;tower.water=false;const double h=10;const V3 a=fixedPosition(earth,{.5,-1.4-1e-6,h}),b=fixedPosition(earth,{.5,-1.4+1e-6,h});
+        tower.structures={{"arm",a,b,.3,1e7,1e5,.5}};
+        Stage hung=st;hung.massFull=hung.massEmpty=1000;hung.inertiaFull=hung.inertiaEmpty={500,2000,2000};hung.hardPoints={{4.5,0,0}};
+        const Vehicle hv{"hung",{hung},0};Flight caught(hv,tower,Flight::free(tower,hv,t0,{.5,-1.4,h+.3+.2},{},{0,pi/2,0}));for(int i=0;i<5000;++i)caught.advance(second/1000);
+        const double rest=caught.sample().geodetic.height;std::printf("caught: centre of mass %.4f m over the bar's centre (radius 0.3, mg/k %.4f)\n",rest-h,1000*9.79/1e7);
+        near(rest-h,.3-1000*9.79/1e7,2e-3,"Rests on the catch bar");near(caught.sample().nedVelocity.z,0,1e-3,"At rest");
+    }
     // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
     // against 10 ms steps.
     {

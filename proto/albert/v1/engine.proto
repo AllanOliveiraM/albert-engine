@@ -232,6 +232,7 @@ message StageDefinition {
   repeated ThrusterDefinition thrusters=19; // Up to 64.
   repeated ThermalNodeDefinition thermal_nodes=20; // Up to 256.
   repeated WheelDefinition wheels=21;       // Up to 32.
+  repeated Vector3 hard_points_meters=22;   // Points that strike structures (catch pins); up to 32.
 }
 message VehicleDefinition {
   string name=1; repeated StageDefinition stages=2;  // 1-32 stages, up to 64 engines and 32 legs each, tables up to 128 x 128.
@@ -276,7 +277,14 @@ message CreateFlightRequest {
   // Several flights fly at once, each by its id (letters, digits, _ and -, up to 32; empty: "flight"); creating an existing
   // one replaces it. The scene shows "flight" as object "flight" and the others as "flight.<id>".
   string flight_id=19;
+  // The site's surface is water (sea water) at its height: the stack floats by buoyancy and is dragged by the water (splashdown).
+  bool water=20;
+  // Structures fixed to the ground (a tower's catch arms): segments with a radius, in metres east, north and up of the site,
+  // struck by the stages' hard points.
+  repeated StructureDefinition structures=21;
 }
+message StructureDefinition { string name=1; Vector3 start_enu_meters=2; Vector3 end_enu_meters=3; double radius_meters=4;
+  optional double stiffness_newtons_per_meter=5; optional double damping_newton_seconds_per_meter=6; optional double friction=7; } // Unset: 1e7, 1e5, 0.5.
 message FlightRequest { string flight_id=1; } // Empty: "flight".
 message FlightList { repeated string flight_ids=1; }
 message StartState {
@@ -386,6 +394,7 @@ message FlightSample {
   string flight_id=55;
   repeated ThermalSample thermal_nodes=56; // The stage's thermal nodes now.
   repeated WheelSample wheels=57;           // The stage's wheels.
+  Vector3 contact_force_newtons=58;         // From the ground, water and structures, body axes.
 }
 message WheelSample { string name=1; double brake=2; double steer_radians=3; }
 message ThermalSample { string name=1; double temperature_kelvin=2; double heat_flux_watts_per_meter2=3; bool over_limit=4; }

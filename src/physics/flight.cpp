@@ -74,7 +74,10 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
     if(vehicle_.stages.empty())throw std::invalid_argument("Vehicle without stages");
     auto finite=[](std::initializer_list<double> x){return std::all_of(x.begin(),x.end(),[](double v){return std::isfinite(v);});};
     if(!finite({vehicle_.torque,vehicle_.inertiaRate,vehicle_.diameter,vehicle_.sunArea,vehicle_.reflectivity}))throw std::invalid_argument("Non-finite vehicle value");
+    for(const auto& x:env_.structures)if(!finite({x.a.x,x.a.y,x.a.z,x.b.x,x.b.y,x.b.z,x.radius,x.stiffness,x.damping,x.friction})||!(x.radius>0)||!(x.stiffness>0)||!(x.damping>=0)||!(x.friction>=0))
+        throw std::invalid_argument("Invalid structure: "+x.name);
     for(auto& st:vehicle_.stages){
+        for(const V3& h:st.hardPoints)if(!finite({h.x,h.y,h.z}))throw std::invalid_argument("Invalid hard point: "+st.name);
         if(!finite({st.massFull,st.massEmpty,st.propellant,st.cgFull,st.cgEmpty,st.reference,st.length,st.noseRadius,st.legStiffness,st.legDamping,st.friction,st.aero.area,st.aero.length,st.aero.span,
             st.inertiaFull.x,st.inertiaFull.y,st.inertiaFull.z,st.inertiaEmpty.x,st.inertiaEmpty.y,st.inertiaEmpty.z}))throw std::invalid_argument("Non-finite stage value: "+st.name);
         if(!(st.massEmpty>0)||!(st.propellant>=0)||std::abs(st.massFull-st.massEmpty-st.propellant)>1e-6*st.massFull)throw std::invalid_argument("Inconsistent stage mass: "+st.name);
@@ -211,7 +214,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         const V3 fi=t*V3{yawed.x*cp-yawed.z*sp,yawed.y,yawed.x*sp+yawed.z*cp};ft+=fi;mt+=cross(V3{l,en.position.y,en.position.z},fi);
     }
     V3 fc,mc; // Legs on the ground: spring-damper normal force and friction, at each contact point.
-    if(!st.legs.empty()&&!s.clamped&&std::isfinite(env_.ground)){
+    if(!st.legs.empty()&&!s.clamped&&std::isfinite(env_.ground)&&!env_.water){
         const V3 wi=b*s.rate;
         for(const V3& leg:st.legs){
             const V3 r{ms.cg-leg.x,leg.y,leg.z},p=s.position+b*r;const Geodetic lg=geodetic(env_.planet,o.fixed*p);const double depth=env_.ground-lg.height;
@@ -223,7 +226,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
             const V3 fb=bt*f;fc+=fb;mc+=cross(r,fb);
         }
     }
-    if(!st.wheels.empty()&&!s.clamped&&std::isfinite(env_.ground)){ // Wheels: struts, and friction split along the wheel's heading and across.
+    if(!st.wheels.empty()&&!s.clamped&&std::isfinite(env_.ground)&&!env_.water){ // Wheels: struts, and friction split along the wheel's heading and across.
         const V3 wi=b*s.rate;
         for(std::size_t i=0;i<st.wheels.size();++i){const Wheel& w=st.wheels[i];
             const V3 r{ms.cg-w.position.x,w.position.y,w.position.z},p=s.position+b*r;const Geodetic lg=geodetic(env_.planet,o.fixed*p);const double depth=env_.ground-lg.height;
@@ -236,6 +239,35 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
             const double mu=w.rolling+wheels_[i].brake*(w.braking-w.rolling); // Linear below 5 cm/s, as the legs.
             const V3 f=n*fn-along*(mu*fn*va/std::max(std::abs(va),.05))-across*(w.cornering*fn*vc/std::max(std::abs(vc),.05));
             const V3 fb=bt*f;fc+=fb;mc+=cross(r,fb);
+        }
+    }
+    if(env_.water&&!s.clamped&&std::isfinite(env_.ground)){ // Water: the stack as a cylinder in 20 slices, each buoyed and dragged by its wet part.
+        constexpr int slices=20;constexpr double rho=1025,cd=1;const double rad=vehicle_.diameter/2,dl=st.length/slices,volume=3.14159265358979323846*rad*rad*dl;
+        const V3 wi=b*s.rate,axis=b*V3{1,0,0};const double gl=env_.planet.gm/dot(s.position,s.position);
+        for(int i=0;i<slices;++i){
+            const V3 r{ms.cg-(i+.5)*dl,0,0},p=s.position+b*r;const Geodetic lg=geodetic(env_.planet,o.fixed*p);const double depth=env_.ground-lg.height;
+            const V3 up=back*V3{std::cos(lg.latitude)*std::cos(lg.longitude),std::cos(lg.latitude)*std::sin(lg.longitude),std::sin(lg.latitude)};
+            const double c=std::abs(dot(axis,up)),e=.5*dl*c+rad*std::sqrt(std::max(0.,1-c*c)); // The slice's vertical half-extent.
+            const double wet=std::clamp((depth+e)/(2*e),0.,1.);if(!(wet>0))continue;
+            const V3 v=s.velocity+cross(wi,b*r)-cross(o.omega,p);const double speed=norm(v);
+            V3 f=up*(rho*gl*volume*wet);
+            if(speed>0){const double ca=std::abs(dot(axis,v))/speed; // Cross-flow on the side; the end caps take the axial part.
+                const double area=2*rad*dl*std::sqrt(std::max(0.,1-ca*ca))+(i==0||i==slices-1?3.14159265358979323846*rad*rad*ca:0.);f+=v*(-.5*rho*cd*area*speed*wet);
+                f+=up*(-.2*rho*2*rad*dl*std::sqrt(gl*rad)*dot(v,up)*wet);} // Heave lost to the waves it makes (radiation damping, ~ρ A √(g R)).
+            const V3 fb=bt*f;fc+=fb;mc+=cross(r,fb);
+        }
+    }
+    if(!st.hardPoints.empty()&&!env_.structures.empty()&&!s.clamped){ // Hard points against structures: spring, damper, regularised friction.
+        const V3 wi=b*s.rate;
+        for(const V3& h:st.hardPoints){
+            const V3 r{ms.cg-h.x,h.y,h.z},p=s.position+b*r,pf=o.fixed*p;
+            for(const auto& x:env_.structures){
+                const V3 ab=x.b-x.a;const double t=std::clamp(dot(pf-x.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);const V3 d=pf-(x.a+ab*t);const double dist=norm(d);
+                if(!(dist<x.radius)||!(dist>0))continue;
+                const V3 n=back*(d/dist),v=s.velocity+cross(wi,b*r)-cross(o.omega,p);const double vn=dot(v,n);const V3 vt=v-n*vn;
+                const double fn=std::max(0.,x.stiffness*(x.radius-dist)-x.damping*vn);const V3 f=n*fn-vt*(x.friction*fn/std::max(norm(vt),.05));
+                const V3 fb=bt*f;fc+=fb;mc+=cross(r,fb);
+            }
         }
     }
     V3 fs; // Solar radiation pressure, 1361 W/m² at 1 au, shadowed by the central body.
@@ -261,7 +293,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         Sample& x=*out;x.mass=ms.m;x.mach=mach;x.dynamicPressure=q;x.alpha=alpha;x.beta=beta;x.thrust=thrust;x.massFlow=flow;x.air=atm;x.geodetic=geo;
         x.fixedPosition=rf;x.fixedVelocity=o.fixed*relative;x.nedVelocity=ned*x.fixedVelocity;
         const M3 c=ned*o.fixed*b;x.nedAttitude=quaternion(c);x.euler={std::atan2(c.m[1][0],c.m[0][0]),-std::asin(std::clamp(c.m[2][0],-1.,1.)),std::atan2(c.m[2][1],c.m[2][2])};
-        x.airBody=air*-1.;x.aeroForce=fa;x.aeroMoment=ma;x.thrustForce=ft;x.rcsForce=fr;x.rcsMoment=mr;x.gravity=g;x.acceleration=r.a;x.specificForce=force/ms.m;x.heatFlux=heat;
+        x.airBody=air*-1.;x.contactForce=fc;x.aeroForce=fa;x.aeroMoment=ma;x.thrustForce=ft;x.rcsForce=fr;x.rcsMoment=mr;x.gravity=g;x.acceleration=r.a;x.specificForce=force/ms.m;x.heatFlux=heat;
         if(s.clamped||s.landed){x.acceleration=cross(o.omega,cross(o.omega,s.position));x.specificForce=bt*(x.acceleration-g);}
     }
     return r;
@@ -320,18 +352,27 @@ Tt Flight::advance(Tt dt){
                 h=std::min(h,std::max<Tt>(1000,static_cast<Tt>(.5/rate*1e9))); // Half the RK4 bound on the stiffest mode.
             }
         }
+        if(const Stage& st=vehicle_.stages[s_.stage];!st.hardPoints.empty()&&!env_.structures.empty()&&!s_.clamped){ // Near a structure: its stiff contact's step.
+            const Orientation o=env_.rotation.at(s_.time);const V3 pf=o.fixed*s_.position;const Mass ms=mass(st,s_.propellant);double near=1e300,reach=0,rate=1;
+            for(const V3& p:st.hardPoints)reach=std::max(reach,norm(V3{ms.cg-p.x,p.y,p.z}));
+            for(const auto& x:env_.structures){const V3 ab=x.b-x.a;const double t=std::clamp(dot(pf-x.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);near=std::min(near,norm(pf-(x.a+ab*t))-x.radius);
+                rate=std::max({rate,std::sqrt(x.stiffness/ms.m),x.damping/ms.m,x.friction*9.81/.05});}
+            if(near<reach+norm(s_.velocity-cross(o.omega,s_.position))*static_cast<double>(h)*1e-9+10)h=std::min(h,std::max<Tt>(1000,static_cast<Tt>(.5/rate*1e9)));
+        }
         if(flow>0){const double t=s_.propellant/flow*1e9;if(t<=static_cast<double>(h)+1){h=std::clamp<Tt>(static_cast<Tt>(t),1,h);depleted=true;}} // Within 1 ns.
         slew(static_cast<double>(h)*1e-9);heat(static_cast<double>(h)*1e-9);integrate(h);left-=h;
         if(depleted){s_.propellant=0;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);return dt-left;}
         if(!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
             const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;Geodetic g=geodetic(env_.planet,rf);
-            if(const Stage& st=vehicle_.stages[s_.stage];!st.legs.empty()||!st.wheels.empty()){ // Contact state of the legs and wheels for events and telemetry.
+            if(const Stage& st=vehicle_.stages[s_.stage];(!st.legs.empty()||!st.wheels.empty())&&!env_.water){ // Contact state of the legs and wheels for events and telemetry.
                 const double c=mass(st,s_.propellant).cg;const M3 b=matrix(s_.attitude);bool touching=false;
                 for(const V3& leg:st.legs)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-leg.x,leg.y,leg.z})).height<env_.ground;
                 for(const Wheel& w:st.wheels)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-w.position.x,w.position.y,w.position.z})).height<env_.ground;
                 if(touching!=s_.contact){s_.contact=touching;return dt-left;} // Touchdown and lift-off end the call, so each transition keeps its instant.
             }
-            if(g.height<env_.ground){g.height=env_.ground;s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
+            if(env_.water||(!vehicle_.stages[s_.stage].hardPoints.empty()&&!env_.structures.empty())){ // Water and structures: contact is a force on any slice or hard point.
+                const bool touching=norm(sample().contactForce)>0;if(touching!=s_.contact){s_.contact=touching;return dt-left;}}
+            if(g.height<env_.ground&&!env_.water){g.height=env_.ground;s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
         }
     }
     return dt;

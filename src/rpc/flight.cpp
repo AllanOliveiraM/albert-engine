@@ -68,7 +68,7 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
     v.sunArea=d.solar_area_meters2();v.reflectivity=d.has_reflectivity()?d.reflectivity():1.3;v.jetDamping=!d.has_jet_damping()||d.jet_damping();v.inertiaRate=d.has_inertia_rate()?d.inertia_rate():1.;
     if(!(v.torque>=0)||!(v.diameter>0)||!(v.sunArea>=0)||!(v.reflectivity>=0)||!finite(v.inertiaRate)||!std::isfinite(v.torque))throw std::invalid_argument("Invalid vehicle torque, diameter, solar area, reflectivity or inertia rate");
     for(const auto& sd:d.stages()){
-        if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256||sd.wheels_size()>32)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters and 256 thermal nodes a stage");
+        if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256||sd.wheels_size()>32||sd.hard_points_meters_size()>32)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters and 256 thermal nodes a stage");
         ph::Stage st;st.name=sd.name().substr(0,128);st.propellant=sd.propellant_kilograms();st.massFull=sd.mass_full_kilograms();st.massEmpty=sd.mass_empty_kilograms();
         st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
         st.length=sd.length_meters();st.reference=sd.aerodynamic_reference_meters();st.noseRadius=sd.has_nose_radius_meters()?sd.nose_radius_meters():1.;
@@ -80,6 +80,7 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
         for(const auto& e:sd.engines()){st.engines.push_back({e.name().substr(0,128),get(e.position_meters()),e.has_direction()?get(e.direction()):ph::V3{1,0,0},e.vacuum_thrust_newtons(),
             e.exhaust_velocity_meters_per_second(),e.exit_area_meters2(),e.has_min_throttle()?e.min_throttle():1.,e.gimbal_radians(),e.gimbal_rate_radians_per_second()});
             if(e.air_breathing()){auto& x=st.engines.back();x.breathing=true;x.thrustTable=jetTable(e.thrust_table(),"jet thrust");x.fuelTable=jetTable(e.fuel_table(),"jet fuel");x.spool=e.spool_seconds();}}
+        for(const auto& h:sd.hard_points_meters())st.hardPoints.push_back(get(h));
         for(const auto& w:sd.wheels())st.wheels.push_back({w.name().substr(0,128),get(w.position_meters()),w.stiffness_newtons_per_meter(),w.damping_newton_seconds_per_meter(),
             w.has_rolling()?w.rolling():.015,w.has_braking()?w.braking():.5,w.has_cornering()?w.cornering():.8,w.steer_limit_radians()});
         for(const auto& f:sd.surfaces()){ph::Surface x;x.name=f.name().substr(0,128);x.limit=f.limit_radians();x.rate=f.rate_radians_per_second();
@@ -114,6 +115,7 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
             x->set_exhaust_velocity_meters_per_second(e.exhaust);x->set_exit_area_meters2(e.exitArea);x->set_min_throttle(e.minThrottle);x->set_gimbal_radians(e.gimbal);x->set_gimbal_rate_radians_per_second(e.gimbalRate);
             if(e.breathing){x->set_air_breathing(true);x->set_spool_seconds(e.spool);for(const auto& [t,o]:{std::pair{&e.thrustTable,x->mutable_thrust_table()},std::pair{&e.fuelTable,x->mutable_fuel_table()}}){
                 for(double m:t->mach)o->add_mach(m);for(double a:t->angle)o->add_altitude_km(a);for(double v:t->values)o->add_values(v);}}}
+        for(const auto& h:st.hardPoints)put(h,d->add_hard_points_meters());
         for(const auto& w:st.wheels){auto* x=d->add_wheels();x->set_name(w.name);put(w.position,x->mutable_position_meters());x->set_stiffness_newtons_per_meter(w.stiffness);x->set_damping_newton_seconds_per_meter(w.damping);
             x->set_rolling(w.rolling);x->set_braking(w.braking);x->set_cornering(w.cornering);x->set_steer_limit_radians(w.steer);}
         const auto& ae=st.aero;auto* a=d->mutable_aerodynamics();a->set_reference_area_meters2(ae.area);a->set_reference_length_meters(ae.length);a->set_reference_span_meters(ae.span);
@@ -458,7 +460,7 @@ struct Slot {
         if(gnss){auto* g=o->mutable_gnss();g->set_valid(gnssReading.valid);g->set_elapsed_seconds(gnssReading.time);put(gnssReading.position,g->mutable_position_ecef_meters());put(gnssReading.velocity,g->mutable_velocity_ecef_meters_per_second());}
         if(radar){auto* g=o->mutable_radar_altimeter();g->set_valid(radarReading.valid);g->set_elapsed_seconds(radarReading.time);g->set_range_meters(radarReading.range);}
         if(tracker){auto* g=o->mutable_star_tracker();g->set_valid(trackerReading.valid);g->set_elapsed_seconds(trackerReading.time);put(trackerReading.attitude,g->mutable_attitude());}
-        o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());o->set_data_port(data?data->port():0);
+        o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());put(x.contactForce,o->mutable_contact_force_newtons());o->set_data_port(data?data->port():0);
         put(reading.specificForce,o->mutable_measured_specific_force_meters_per_second2());put(reading.rate,o->mutable_measured_angular_rate_radians_per_second());
         put(reading.deltaVelocity,o->mutable_delta_velocity_meters_per_second());put(reading.deltaAngle,o->mutable_delta_angle_radians());o->set_measured_static_pressure_pascals(reading.pressure);
     }
@@ -512,7 +514,14 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     const auto& m=r.physics();auto on=[](bool has,bool value){return !has||value;}; // Logs from before the switches: all on.
     env.sunMoon=on(m.has_third_bodies(),m.third_bodies());env.relativity=on(m.has_relativity(),m.relativity());env.atmosphere=on(m.has_atmosphere(),m.atmosphere());
     env.wind=on(m.has_wind(),m.wind());env.solarPressure=on(m.has_solar_radiation_pressure(),m.solar_radiation_pressure());
-    env.turbulence=m.turbulence_meters_per_second();env.turbulenceSeed=m.turbulence_seed();
+    env.turbulence=m.turbulence_meters_per_second();env.turbulenceSeed=m.turbulence_seed();env.water=r.water();
+    if(r.structures_size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 structures"};
+    { // Structures from the site's east, north and up into the body-fixed frame.
+        const double la=site.latitude_degrees()*deg,lo=site.longitude_degrees()*deg;const ph::V3 o=ph::fixedPosition(env.planet,{la,lo,site.height_meters()});const ph::M3 back=ph::transpose(ph::nedFromFixed(la,lo));
+        auto at=[&](const api::Vector3& v){return o+back*ph::V3{v.y(),v.x(),-v.z()};};
+        for(const auto& x:r.structures())env.structures.push_back({x.name().substr(0,128),at(x.start_enu_meters()),at(x.end_enu_meters()),x.radius_meters(),
+            x.has_stiffness_newtons_per_meter()?x.stiffness_newtons_per_meter():1e7,x.has_damping_newton_seconds_per_meter()?x.damping_newton_seconds_per_meter():1e5,x.has_friction()?x.friction():.5});
+    }
     if(!(env.turbulence>=0&&env.turbulence<=50))return{grpc::StatusCode::INVALID_ARGUMENT,"Turbulence must be 0-50 m/s"};
     if(p.body==ph::Center::earth){env.air=air;env.planet.degree=static_cast<int>(p.degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(p.utc-946728000.));}
     std::optional<ph::Flight> made;

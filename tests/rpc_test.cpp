@@ -323,6 +323,23 @@ int main(int argc,char** argv){try{
                 {grpc::ClientContext c;api::StepRequest q;q.set_ticks(3000);q.add_commands()->set_cutoff(true);q.add_commands()->set_brake(1);auto* k=q.add_commands();k->set_steer_radians(.2);k->set_index(1);
                     require(flight->Step(&c,q,&x).ok()&&x.wheels(0).brake()==1&&x.wheels(0).steer_radians()==.2&&x.wheels(1).steer_radians()==0&&x.velocity_ned_meters_per_second().x()<fast-5,"Brakes and the nose wheel");}
             }
+            { // Splashdown and a catch: the NESC ball hits water at 10 m/s (touchdown, never "landed", the water brakes it); with a hard
+              // point at its centre it comes to rest on a tower arm 20 m up.
+                api::VehicleRequest vq;vq.set_vehicle(api::NESC_SPHERE);api::VehicleDefinition ball;{grpc::ClientContext c;require(flight->GetVehicle(&c,vq,&ball).ok(),"Ball");}
+                api::CreateFlightRequest w=create;w.set_vehicle(api::CUSTOM);*w.mutable_definition()=ball;w.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);w.set_water(true);w.mutable_site()->set_height_meters(0);
+                auto* l=w.mutable_start()->mutable_local();l->mutable_position()->set_latitude_degrees(28);l->mutable_position()->set_longitude_degrees(-79);l->mutable_position()->set_height_meters(5);
+                l->mutable_velocity_ned_meters_per_second()->set_z(10);
+                {grpc::ClientContext c;require(flight->CreateFlight(&c,w,&x).ok(),"Over water");}
+                {grpc::ClientContext c;api::StepRequest q;q.set_ticks(2000);require(flight->Step(&c,q,&x).ok()&&!x.landed()&&std::any_of(x.events().begin(),x.events().end(),[](const auto& e){return e.kind()==api::FlightEvent::TOUCHDOWN;})
+                    &&x.geodetic().height_meters()<0&&x.velocity_ned_meters_per_second().z()<10,"Splashdown");}
+                api::CreateFlightRequest t=create;t.set_vehicle(api::CUSTOM);*t.mutable_definition()=ball;t.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);
+                auto* h=t.mutable_definition()->mutable_stages(0)->add_hard_points_meters();h->set_x(ball.stages(0).cg_full_meters());
+                auto* arm=t.add_structures();arm->set_name("arm");arm->mutable_start_enu_meters()->set_x(-3);arm->mutable_start_enu_meters()->set_z(20);arm->mutable_end_enu_meters()->set_x(3);arm->mutable_end_enu_meters()->set_z(20);arm->set_radius_meters(.2);
+                auto* s=t.mutable_start()->mutable_local();s->mutable_position()->set_latitude_degrees(28.6082);s->mutable_position()->set_longitude_degrees(-80.6041);s->mutable_position()->set_height_meters(t.site().height_meters()+20.3);
+                {grpc::ClientContext c;require(flight->CreateFlight(&c,t,&x).ok(),"Over the arm");}
+                {grpc::ClientContext c;api::StepRequest q;q.set_ticks(3000);require(flight->Step(&c,q,&x).ok()&&std::abs(x.velocity_ned_meters_per_second().z())<1e-2
+                    &&std::abs(x.geodetic().height_meters()-t.site().height_meters()-20.2)<.01&&x.contact_force_newtons().z()<-100,"Caught on the arm");} // Held up: body -z, level attitude.
+            }
             { // Reentry heating: the NESC ball at 70 km and 7 km/s, nose along the velocity, a windward node (limit 1000 K) and a lee one.
                 api::VehicleRequest vq;vq.set_vehicle(api::NESC_SPHERE);api::VehicleDefinition ball;{grpc::ClientContext c;require(flight->GetVehicle(&c,vq,&ball).ok(),"Ball");}
                 for(const double nx:{1.,-1.}){auto* n=ball.mutable_stages(0)->add_thermal_nodes();n->set_name(nx>0?"front":"back");n->mutable_normal()->set_x(nx);n->set_area_meters2(.01);

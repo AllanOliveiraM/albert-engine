@@ -323,6 +323,11 @@ estágio), o mesmo ar, gravidade, chaves físicas e sensores (com sementes novas
 a andar por conta própria — o booster que volta, a nave que segue —; o log dele se reproduz sozinho e o do pai recria o
 filho no replay.
 
+**Água e estruturas.** `water` faz da superfície do sítio água do mar (o veículo flutua, é freado pela água e nunca "pousa":
+amerissagem); `structures` põe segmentos fixos ao chão, em metros leste-norte-cima do sítio, com raio, mola, amortecedor e
+atrito — os braços de uma torre de captura —, tocados pelos `hard_points_meters` dos estágios; a amostra traz a força de
+contato.
+
 **Começar em voo.** `start` (`StartState`) cria o voo já no ar em vez do pad: sobre o corpo central (`local`: posição
 geodésica, velocidade em relação ao solo em NED, rumo, arfagem e rolagem, taxas do corpo) ou no referencial inercial do voo
 (`inertial`: posição a partir do centro do corpo, velocidade, atitude corpo→inercial, taxas), no estágio e com o propelente

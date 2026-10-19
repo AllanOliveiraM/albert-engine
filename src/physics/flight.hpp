@@ -62,6 +62,7 @@ struct Stage {
     // is detected at the CG and the vehicle stops.
     std::vector<V3> legs;double legStiffness=0,legDamping=0,friction=.6;
     std::vector<Wheel> wheels;
+    std::vector<V3> hardPoints; // Points (as legs) that strike the environment's structures: catch pins, hooks.
     std::vector<Surface> surfaces;
     // With thrusters the torque command fires them (duty cycles by bounded least squares on the least propellant, preferring
     // couples; they burn propellant and leave whatever force results); without, it is the vehicle's ideal torque.
@@ -103,6 +104,11 @@ struct Environment {
     std::shared_ptr<const Gravity> field; // Owns planet.field.
     std::shared_ptr<const AirModel> air; // Replaces the standard atmosphere when set.
     double ground=-std::numeric_limits<double>::infinity(); // Ellipsoidal height of the surface (m).
+    // water: that surface is water (sea water, 1025 kg/m³): the stack floats by its slices' buoyancy and drag; legs and wheels
+    // do not touch it. structures: segments fixed to the body (ECEF ends, m) with a radius, struck by the stages' hard points.
+    bool water=false;
+    struct Structure {std::string name;V3 a,b;double radius=.5,stiffness=1e7,damping=1e5,friction=.5;};
+    std::vector<Structure> structures;
 };
 // Earth (defaults), or the Moon / Mars with their rotation, climatology and a field of the given degree.
 Environment environment(Center c,std::shared_ptr<const Gravity> field={},int degree=0);
@@ -129,6 +135,7 @@ struct Sample {
     V3 specificForce;          // Non-gravitational acceleration, body axes (what an ideal IMU measures).
     V3 aeroForce,aeroMoment,thrustForce,acceleration,gravity; // Body N, N m about the CG; inertial m/s².
     V3 rcsForce,rcsMoment;     // The thrusters' (body N, N m about the CG).
+    V3 contactForce;           // From the ground, water and structures (body N).
     double heatFlux=0;         // Convective stagnation-point heating, Sutton-Graves (W/m²).
     V3 airBody;                // The flow: the air's velocity relative to the vehicle, body axes (m/s).
 };
