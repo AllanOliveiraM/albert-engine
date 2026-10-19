@@ -30,7 +30,7 @@ struct albert::Sound::Impl {
     std::array<std::atomic<float>,count> powers{};std::atomic<float> panTarget{0}; // Band powers (digital units²) for the next hop.
     std::array<int,size/2> band{};std::array<int,count> bins{};std::array<double,size> window{};
     std::vector<std::complex<double>> spectrum=std::vector<std::complex<double>>(size);std::vector<double> overlap=std::vector<double>(hop),ready=std::vector<double>(hop);
-    std::size_t position=hop;float pan=0;Random random;double adaptation=0;ma_device device{};bool open=false;
+    std::size_t position=hop;float pan=0;Random random;double adaptation=0;ma_device device{};bool open=false;std::atomic<float> volume{1};
     Impl(){
         for(auto& p:powers)p=0;
         // Each bin to the band holding its frequency; a band narrower than a bin takes the nearest one.
@@ -60,6 +60,7 @@ albert::Sound::Sound(bool device):impl_(std::make_unique<Impl>()){
 }
 albert::Sound::~Sound(){if(impl_->open)ma_device_uninit(&impl_->device);}
 bool albert::Sound::playing()const{return impl_->open;}
+void albert::Sound::setVolume(float v){impl_->volume.store(std::clamp(v,0.f,1.f),std::memory_order_relaxed);}
 double albert::Sound::adaptation()const{return impl_->adaptation;}
 void albert::Sound::hear(const ac::Spectrum& levels,bool audible,float pan,double seconds){
     auto& d=*impl_;double sum=0;
@@ -71,10 +72,10 @@ void albert::Sound::hear(const ac::Spectrum& levels,bool audible,float pan,doubl
     d.panTarget.store(std::clamp(pan,-1.f,1.f),std::memory_order_relaxed);
 }
 void albert::Sound::render(float* out,unsigned frames,unsigned channels){
-    auto& d=*impl_;constexpr float smooth=1.f/(.03f*rate);const float panTo=d.panTarget.load(std::memory_order_relaxed);
+    auto& d=*impl_;constexpr float smooth=1.f/(.03f*rate);const float panTo=d.panTarget.load(std::memory_order_relaxed),volume=d.volume.load(std::memory_order_relaxed);
     for(unsigned i=0;i<frames;++i){
         if(d.position>=hop)d.frame();
-        const float y=std::tanh(static_cast<float>(d.ready[d.position++])); // Soft limit.
+        const float y=std::tanh(static_cast<float>(d.ready[d.position++])*volume); // Soft limit.
         d.pan+=(panTo-d.pan)*smooth;const float a=(d.pan+1)*static_cast<float>(pi/4),left=std::cos(a)*1.4142135f,right=std::sin(a)*1.4142135f; // Equal power, unity in the centre.
         for(unsigned c=0;c<channels;++c)out[i*channels+c]=channels==1?y:c==0?y*left:c==1?y*right:0.f;
     }

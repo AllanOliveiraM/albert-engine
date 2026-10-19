@@ -17,13 +17,16 @@ public:
     const std::string& adapter()const{return adapterName_;}
     [[nodiscard]] bool software()const{return software_;} // A CPU adapter (llvmpipe, WARP).
     void resize(int width,int height);
+    // Vertical sync (FIFO, the default) or, off, the fastest present mode the surface offers (immediate, else mailbox).
+    void setVsync(bool on);
+    [[nodiscard]] bool vsync()const{return vsync_;}
     // The next surface image, or nullptr when it must be reconfigured (resize) or is lost.
     WGPUTextureView acquire();
     void present();
 private:
     WGPUInstance instance_=nullptr;WGPUSurface surface_=nullptr;WGPUAdapter adapter_=nullptr;WGPUDevice device_=nullptr;WGPUQueue queue_=nullptr;
     WGPUTextureFormat format_=WGPUTextureFormat_BGRA8Unorm;WGPUTexture current_=nullptr;WGPUTextureView view_=nullptr;std::string adapterName_;bool software_=false;
-    int width_=0,height_=0;
+    int width_=0,height_=0;bool vsync_=true;WGPUPresentMode unsynced_=WGPUPresentMode_Fifo;
 };
 std::string text(WGPUStringView s);
 unsigned errors(); // Uncaptured WebGPU errors so far (validation bugs).

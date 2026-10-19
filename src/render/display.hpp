@@ -33,6 +33,8 @@ public:
     // The weather the air shows (SceneRenderer::Air): cloud shadows, the sea's wind roughness.
     void setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio=1);
     void setEarthshine(const threepp::Object3D* earth,float radius); // Radius in world units; 0 or null: none.
+    void setSamples(unsigned samples); // Multisampling of the scene pass: 1 or 4.
+    void setVsync(bool on);
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

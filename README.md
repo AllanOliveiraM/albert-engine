@@ -276,6 +276,9 @@ programa de voo da época (examples/saturn_v.hpp). A partir do estado real na se
 Albert chega ao fim do S-II a 0,3 m/s da velocidade medida e corta o S-IVB 1,9 s depois do voo, numa
 órbita de 186,5 × 183,1 km (Apollo 11: 186,0 × 183,2 km).
 
+Em Ajustes ficam as opções de gráficos, Terra, vista, câmera e som (guardadas entre execuções), e a câmera livre: F liga,
+arrastar olha, W/A/S/D/Espaço/Ctrl voam, com a velocidade pela altura, como no Kerbal Space Program; F ou Esc volta.
+
 Com "Som do voo" ligado no menu (o Albert começa mudo), a câmera ouve o foguete: ruído pelo modelo da NASA (SP-8072),
 com o atraso da distância, a absorção do ar do caminho e o Doppler; a 1, 5 e 10 km de um Starship o nível fica a menos de
 1 dB do medido.

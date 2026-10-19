@@ -1197,6 +1197,27 @@ int albert::runRenderer(int argc, char** argv) {
             return minimum;
         };
 
+        // Ajustes, kept in settings.json across runs (the sound always starts muted). The volumetric clouds and the ocean's
+        // waves are the costly effects: on by default, a weaker machine turns them off.
+        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false;float fov=60,uiScale=1,sensitivity=1,volume=.8f;} preferences;
+        const auto preferencesFile=albert::dataDirectory()/"settings.json";
+        try{std::ifstream in(preferencesFile);if(in){const auto j=json::parse(in);auto& p=preferences;auto& v=visualSettings;
+            p.volumetricClouds=j.value("volumetric_clouds",p.volumetricClouds);p.oceanWaves=j.value("ocean_waves",p.oceanWaves);p.antialias=j.value("antialias",p.antialias);
+            p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);
+            p.fov=std::clamp(j.value("field_of_view",p.fov),35.f,90.f);p.uiScale=std::clamp(j.value("interface_scale",p.uiScale),.8f,1.6f);
+            p.sensitivity=std::clamp(j.value("mouse_sensitivity",p.sensitivity),.25f,3.f);p.volume=std::clamp(j.value("volume",p.volume),0.f,1.f);
+            v.quality=std::clamp(j.value("quality",v.quality),0,1);v.shadows=j.value("shadows",v.shadows);v.atmosphere=j.value("atmosphere",v.atmosphere);
+            v.terrain=j.value("terrain",v.terrain);v.clouds=j.value("live_clouds",v.clouds);v.nightLights=j.value("city_lights",v.nightLights);v.borders=j.value("borders",v.borders);
+            showOrbits=j.value("orbits",showOrbits);showDebris=j.value("debris",showDebris);}}
+        catch(const std::exception&){} // A damaged preference never prevents startup.
+        auto savePreferences=[&]{try{const auto& p=preferences;const auto& v=visualSettings;std::filesystem::create_directories(preferencesFile.parent_path());std::ofstream out(preferencesFile);
+            out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},
+                {"field_of_view",p.fov},{"interface_scale",p.uiScale},{"mouse_sensitivity",p.sensitivity},{"volume",p.volume},{"quality",v.quality},{"shadows",v.shadows},
+                {"atmosphere",v.atmosphere},{"terrain",v.terrain},{"live_clouds",v.clouds},{"city_lights",v.nightLights},{"borders",v.borders},{"orbits",showOrbits},{"debris",showDebris}}.dump(2)<<'\n';}
+            catch(const std::exception&){}};
+        // Free camera (Ajustes, or F): flies from the current view; dragging looks, W/A/S/D, Space/E and Ctrl/Q move, Shift is
+        // five times faster, the wheel scales the speed, which follows the height over the nearest surface.
+        bool freeCamera=false;float freeSpeed=1.f;
         // arrival: direction from the target to the arriving camera, overriding the default.
         auto setFocus = [&](Focus next, bool resetZoom = false, std::optional<Vector3> arrival = {}, std::optional<float> distance = {}) {
             registry.get(targetId(next));
@@ -1227,8 +1248,15 @@ int albert::runRenderer(int argc, char** argv) {
             transition.duration = albert::flightDuration(scaleChange,
                 travel/std::max(.01f,radiusFor(next)),resetZoom);
             if(!resetZoom)transition.duration*=1.15f;
+            freeCamera=false;camera->up.set(0,1,0); // A programmed flight ends the free camera.
 
             focus = next;registry.cameraChanged();
+        };
+        // Into the free camera from the current view; out of it, a flight back to the focus from where the eye is.
+        auto toggleFreeCamera=[&](bool on){
+            if(on==freeCamera)return;
+            if(on){transition.active=false;automaticOrbit=false;automaticOrbitAge=0.f;controls.autoRotate=false;freeCamera=true;return;}
+            freeCamera=false;camera->up.set(0,1,0);Vector3 back=camera->position;back.sub(targetFor(focus));setFocus(focus,false,back);
         };
 
         bool refreshing = false;
@@ -1281,6 +1309,8 @@ int albert::runRenderer(int argc, char** argv) {
             }
             constexpr auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize;
+            if(freeCamera&&!menuOpen&&!uiPopupWasOpen&&ImGui::IsKeyPressed(ImGuiKey_Escape,false))toggleFreeCamera(false);
+            else if(!ImGui::GetIO().WantCaptureKeyboard&&ImGui::IsKeyPressed(ImGuiKey_F,false))toggleFreeCamera(!freeCamera);
             if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !uiPopupWasOpen) {
                 if (menuOpen) menuOpen = false;
             }
@@ -1403,11 +1433,11 @@ int albert::runRenderer(int argc, char** argv) {
                     const auto state=registry.evaluate(focus,simulatedUtc);
                     ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : registry.get(focus).providerManaged ? "Posicoes reais; visual simplificado" : "Dados fornecidos pelo integrador");
                 }
-                ImGui::TextDisabled("Arraste para girar. Role para aproximar.");
+                ImGui::TextDisabled(freeCamera?"Camera livre: arraste para olhar, W A S D movem. F ou Esc volta.":"Arraste para girar. Role para aproximar.");
                 ImGui::Spacing();
-                const char* pages[] = {"Cena", "Dados", "Sobre"};
-                const float tabWidth = (ImGui::GetContentRegionAvail().x - 16) / 3;
-                for (int i = 0; i < 3; ++i) {
+                const char* pages[] = {"Cena", "Dados", "Ajustes", "Sobre"};
+                const float tabWidth = (ImGui::GetContentRegionAvail().x - 24) / 4;
+                for (int i = 0; i < 4; ++i) {
                     if (i) ImGui::SameLine();
                     const bool selectedPage = menuPage == i;
                     if (selectedPage) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.09f,.29f,.36f,1));
@@ -1419,23 +1449,8 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::Spacing();
                 if (menuPage == 0) {
                     ImGui::TextWrapped("Personalize sua vista");
+                    ImGui::TextDisabled("Graficos, Terra, camera e som ficam em Ajustes.");
                     ImGui::Spacing();
-                    if (earthControls) {
-                        if(focus!=targets::Earth)ImGui::TextDisabled("TERRA");
-                        ImGui::Checkbox("Atmosfera", &visualSettings.atmosphere);
-                        ImGui::Checkbox("Relevo detalhado", &visualSettings.terrain);
-                        ImGui::Checkbox("Nuvens em tempo real", &visualSettings.clouds);
-                        ImGui::TextDisabled("Observacoes de satelite, com atraso.");
-                        ImGui::Checkbox("Luzes das cidades", &visualSettings.nightLights);
-                        ImGui::Checkbox("Fronteiras dos paises", &visualSettings.borders);
-                    }
-                    if (focus == targets::Earth || focus == targets::Moon) ImGui::Checkbox("Sombras", &visualSettings.shadows);
-                    ImGui::Checkbox("Caminhos das orbitas", &showOrbits);
-                    ImGui::Checkbox("Cinturoes e nuvem de Oort", &showDebris);
-#ifdef ALBERT_HAS_RPC
-                    ImGui::Checkbox("Som do voo",&soundOn);
-                    if(soundOn)ImGui::TextDisabled("O ruido do foguete na camera, com o atraso e o ar do caminho.");
-#endif
                     if(showDebris&&systemView(focus))ImGui::TextDisabled("Populacoes ilustrativas, visiveis ao afastar.");
                     if (showOrbits) {
                         ImGui::TextDisabled("Distancias e tamanhos em escala real.");
@@ -1454,12 +1469,6 @@ int albert::runRenderer(int argc, char** argv) {
                         ImGui::Checkbox("Clarear o lado escuro",&assist);
                         if(assist){ImGui::SetNextItemWidth(-1);int brightness=static_cast<int>(std::round(intensity*100.f));if(ImGui::SliderInt("##Brilho auxiliar",&brightness,10,150,"Brilho auxiliar: %d%%"))intensity=brightness/100.f;ImGui::TextDisabled("Ajuda visual para a regiao sem Sol.");}
                     }
-                    ImGui::Spacing();
-                    ImGui::TextDisabled("QUALIDADE DA IMAGEM");
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::Combo("##Qualidade", &visualSettings.quality, "Mais leve\0Mais detalhes\0");
-                    ImGui::TextWrapped("Detalhes carregados automaticamente ao aproximar.");
-                    ImGui::TextDisabled("Mais leve reduz uso de memoria.");
                 } else if (menuPage == 1) {
                     ImGui::TextWrapped("Atualizacao automatica ativada");
                     ImGui::TextDisabled("Voce pode continuar explorando.");
@@ -1552,6 +1561,42 @@ int albert::runRenderer(int argc, char** argv) {
                         if (!refreshError.empty()) ImGui::TextWrapped("%s", refreshError.c_str());
                         ImGui::TextDisabled("%.0f quadros por segundo", ImGui::GetIO().Framerate);
                     }
+                } else if (menuPage == 2) {
+                    auto hint=[](const char* text){ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));ImGui::TextWrapped("%s",text);ImGui::PopStyleColor();};
+                    auto check=[&](const char* label,bool& value,const char* note=nullptr){if(ImGui::Checkbox(label,&value))savePreferences();if(note)hint(note);};
+                    auto slider=[&](const char* id,float& value,float lo,float hi,const char* format){ImGui::SetNextItemWidth(-1);if(ImGui::SliderFloat(id,&value,lo,hi,format))savePreferences();};
+                    ImGui::TextDisabled("GRAFICOS");
+                    ImGui::SetNextItemWidth(-1);if(ImGui::Combo("##Qualidade",&visualSettings.quality,"Qualidade: mais leve\0Qualidade: mais detalhes\0"))savePreferences();
+                    hint("Mais detalhes: ate 2x a resolucao da tela e sombras de 2048 px; carregados ao aproximar.");
+                    check("Antisserrilhado (4x)",preferences.antialias);
+                    check("Sincronia vertical",preferences.vsync,"Desligada, o quadro sai assim que fica pronto (pode rasgar a imagem).");
+                    check("Sombras",visualSettings.shadows);
+                    check("Atmosfera",visualSettings.atmosphere);
+                    check("Relevo detalhado",visualSettings.terrain,"Copernicus 30 m na Terra, LOLA na Lua, MOLA em Marte.");
+                    check("Nuvens volumetricas",preferences.volumetricClouds,"Nuvens em 3D perto da Terra; desligadas, fica a camada plana.");
+                    check("Ondas no mar",preferences.oceanWaves,"Ondas pelo vento perto da camera; desligadas, o mar so tem a rugosidade media.");
+                    slider("##Campo de visao",preferences.fov,35,90,"Campo de visao: %.0f graus");
+                    ImGui::Spacing();ImGui::TextDisabled("TERRA");
+                    check("Nuvens em tempo real",visualSettings.clouds,"Observacoes de satelite, com atraso.");
+                    check("Luzes das cidades",visualSettings.nightLights);
+                    check("Fronteiras dos paises",visualSettings.borders);
+                    ImGui::Spacing();ImGui::TextDisabled("VISTA");
+                    check("Caminhos das orbitas",showOrbits);
+                    check("Cinturoes e nuvem de Oort",showDebris);
+                    check("Girar devagar ao chegar",preferences.autoRotate);
+                    slider("##Escala da interface",preferences.uiScale,.8f,1.6f,"Interface: %.1fx");
+                    ImGui::Spacing();ImGui::TextDisabled("CAMERA");
+                    bool free=freeCamera;if(ImGui::Checkbox("Camera livre (F)",&free))toggleFreeCamera(free);
+                    hint("Arraste para olhar; W A S D, Espaco e Ctrl movem; Shift acelera; a roda ajusta a velocidade.");
+                    slider("##Sensibilidade",preferences.sensitivity,.25f,3,"Sensibilidade do mouse: %.2fx");
+                    check("Inverter o olhar vertical",preferences.invertY);
+#ifdef ALBERT_HAS_RPC
+                    ImGui::Spacing();ImGui::TextDisabled("SOM");
+                    ImGui::Checkbox("Som do voo",&soundOn);
+                    hint("O ruido do foguete na camera, com o atraso e o ar do caminho. Comeca mudo.");
+                    int volume=static_cast<int>(std::lround(preferences.volume*100));ImGui::SetNextItemWidth(-1);
+                    if(ImGui::SliderInt("##Volume",&volume,0,100,"Volume: %d%%")){preferences.volume=volume/100.f;savePreferences();}
+#endif
                 } else {
                     ImGui::TextWrapped("O universo, na sua tela.");
                     ImGui::TextWrapped("Explore corpos celestes em escala real, com posicoes astronomicas, imagens de observacao e estrelas catalogadas.");
@@ -2209,14 +2254,15 @@ int albert::runRenderer(int argc, char** argv) {
 
             // Provider failure holds built-ins; independent objects and camera still advance.
             albert::core::updateLocalSystem(registry,simulatedUtc,tdb,tabulatedComets);
-            const auto nextOriginId=transition.active?Focus("@flight"):targetId(focus);
+            const bool eyeOrigin=transition.active||freeCamera; // Flying, the floating origin follows the eye.
+            const auto nextOriginId=eyeOrigin?Focus("@flight"):targetId(focus);
             // During flight the floating origin follows the eye, preserving the
             // departure body's detail instead of rebasing immediately to a planet AU away.
-            const auto nextOrigin=transition.active?sceneOrigin+albert::core::Vector{
+            const auto nextOrigin=eyeOrigin?sceneOrigin+albert::core::Vector{
                 camera->position.x*albert::core::earthRadiusMeters,-camera->position.z*albert::core::earthRadiusMeters,camera->position.y*albert::core::earthRadiusMeters}:
                 registry.evaluate(nextOriginId,simulatedUtc).state.positionMeters;
             const auto shift=albert::renderPosition(sceneOrigin,nextOrigin);
-            if(transition.active||originId!=nextOriginId){camera->position.add(shift);controls.target.add(shift);originId=nextOriginId;}
+            if(eyeOrigin||originId!=nextOriginId){camera->position.add(shift);controls.target.add(shift);originId=nextOriginId;}
             if(transition.active)transition.startTarget.add(shift);
             sceneOrigin=nextOrigin;
             objects.sync(registry,simulatedUtc,sceneOrigin);
@@ -2309,10 +2355,42 @@ int albert::runRenderer(int argc, char** argv) {
 
                 if (transition.elapsed >= transition.duration) {
                     transition.active = false;
-                    automaticOrbit=focus.front()!='@';automaticOrbitAge=0.f;
+                    automaticOrbit=focus.front()!='@'&&preferences.autoRotate;automaticOrbitAge=0.f;
                     zoomTarget = zoomDisplayed = transition.arrivalDistance.value_or(distanceFor(focus));
                     controls.minDistance = minimumFor(focus);
                 }
+            } else if (freeCamera) {
+                // Free flight: the nearest surface gives the local up and the height, which sets the speed.
+                const auto& io=ImGui::GetIO();const float r=static_cast<float>(albert::core::earthRadiusMeters);
+                Object3D* closest=earth.get();float closestRadius=1.f,best=camera->position.distanceTo(earth->position)-1.f;const albert::Terrain* closestTerrain=planets.earthTerrain();
+                auto consider=[&](Object3D* body,float radius,const albert::Terrain* terrain){const float h=camera->position.distanceTo(body->position)-radius;
+                    if(h<best){best=h;closest=body;closestRadius=radius;closestTerrain=terrain;}};
+                consider(moon.get(),static_cast<float>(1737.4/6378.137),planets.moonTerrain());
+                for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id))consider(node.get(),static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters),solids.terrain(id));
+                auto floorUnder=[&](){closest->updateMatrixWorld();Vector3 eye=camera->position;closest->worldToLocal(eye);
+                    const auto ground=closestTerrain?closestTerrain->ground(eye):std::nullopt;return std::pair{eye,ground?static_cast<float>(*ground):closestRadius};};
+                const auto [eye,floor]=floorUnder();const float height=std::max(eye.length()-floor,0.f); // World units: the bodies are unscaled spheres.
+                Vector3 up=camera->position;up.sub(closest->position).normalize();
+                Vector3 forward;camera->getWorldDirection(forward);
+                if(!io.WantCaptureMouse&&ImGui::IsMouseDown(ImGuiMouseButton_Left)){ // Look: yaw about the local up, pitch about the right.
+                    const float look=.003f*preferences.sensitivity;forward.applyAxisAngle(up,-io.MouseDelta.x*look);Vector3 side=forward;side.cross(up).normalize();
+                    Vector3 pitched=forward;pitched.applyAxisAngle(side,-io.MouseDelta.y*look*(preferences.invertY?-1.f:1.f));if(std::abs(pitched.dot(up))<.995f)forward=pitched;}
+                if(!io.WantCaptureMouse&&io.MouseWheel!=0.f)freeSpeed=std::clamp(freeSpeed*std::pow(1.25f,io.MouseWheel),.01f,1000.f);
+                const float speed=std::max(2.f,.6f*height*r)/r*freeSpeed*(io.KeyShift?5.f:1.f);
+                Vector3 side=forward;side.cross(up).normalize();Vector3 move;
+                if(!io.WantCaptureKeyboard){
+                    if(ImGui::IsKeyDown(ImGuiKey_W))move.add(forward);
+                    if(ImGui::IsKeyDown(ImGuiKey_S))move.sub(forward);
+                    if(ImGui::IsKeyDown(ImGuiKey_D))move.add(side);
+                    if(ImGui::IsKeyDown(ImGuiKey_A))move.sub(side);
+                    if(ImGui::IsKeyDown(ImGuiKey_Space)||ImGui::IsKeyDown(ImGuiKey_E))move.add(up);
+                    if(ImGui::IsKeyDown(ImGuiKey_LeftCtrl)||ImGui::IsKeyDown(ImGuiKey_Q))move.sub(up);}
+                if(move.lengthSq()>0)camera->position.add(move.normalize().multiplyScalar(speed*dt));
+                { // Never below the drawn ground under the eye: 2 m over it.
+                    auto [now,under]=floorUnder();const float minimum=under+2.f/r;
+                    if(now.length()<minimum){now.multiplyScalar(minimum/std::max(now.length(),1e-12f));closest->localToWorld(now);camera->position.copy(now);}}
+                camera->up.copy(up);Vector3 look=camera->position;look.add(forward);camera->lookAt(look);
+                controls.target.copy(camera->position).add(forward.clone().multiplyScalar(std::max(height,100.f/r)));
             } else {
                 // Acompanha objetos em movimento.
                 Vector3 movement = target;
@@ -2325,20 +2403,23 @@ int albert::runRenderer(int argc, char** argv) {
             // Damping de rotacao e zoom do mouse
             controls.enabled =
                 introductionElapsed >= introductionDuration &&
-                !transition.active &&
+                !transition.active && !freeCamera &&
                 !ImGui::GetIO().WantCaptureMouse;
 
             const float interactionRadius=radiusFor(focus);
             const float relativeAltitude=interactionRadius>0 ? std::max(0.f,camera->position.distanceTo(controls.target)-interactionRadius)/interactionRadius : 1.f;
-            controls.rotateSpeed=.75f*std::clamp(relativeAltitude,.025f,1.f);
+            controls.rotateSpeed=.75f*std::clamp(relativeAltitude,.025f,1.f)*preferences.sensitivity;
+            if(camera->fov!=preferences.fov){camera->fov=preferences.fov;camera->updateProjectionMatrix();}
             controls.zoomSpeed=std::clamp(relativeAltitude,.18f,1.f);
             automaticOrbitAge=automaticOrbit ? automaticOrbitAge+dt : 0.f;
             controls.autoRotate=automaticOrbit&&controls.enabled;
             // OrbitControls uses frame-based increments: compensate for actual dt.
             controls.autoRotateSpeed=.12f*dt*60.f*albert::flightEase(automaticOrbitAge);
             controls.dampingFactor = 1.f - std::exp(-8.f * dt);
-            controls.update();
-            if (transition.active) {
+            if(!freeCamera)controls.update();
+            if (freeCamera) {
+                zoomTarget = zoomDisplayed = camera->position.distanceTo(controls.target);
+            } else if (transition.active) {
                 // Flush old drag inertia so it cannot alter a programmed flight.
                 controls.dampingFactor = 1.f;
                 controls.update();
@@ -2356,7 +2437,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
             // An external target near a solid surface: keep the eye above the ground under it (the
             // orbit offset can point below a pad).
-            if(!transition.active&&focus.front()!='@'&&objects.nodes().contains(focus)&&!registry.get(focus).builtin){
+            if(!transition.active&&!freeCamera&&focus.front()!='@'&&objects.nodes().contains(focus)&&!registry.get(focus).builtin){
                 const float base=static_cast<float>(registry.get(focus).radiusMeters/albert::core::earthRadiusMeters),margin=static_cast<float>(10./albert::core::earthRadiusMeters);
                 auto keepAbove=[&](Object3D& body,float radius,const albert::Terrain* terrain){
                     body.updateMatrixWorld();Vector3 eye=camera->position,aim=controls.target;body.worldToLocal(eye);body.worldToLocal(aim);
@@ -2617,11 +2698,13 @@ int albert::runRenderer(int argc, char** argv) {
                 else{Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
                     graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}}
             graphics.setEarthshine(earth.get(),earth->scale.x); // The Earth mesh is a unit sphere.
+            graphics.setSamples(preferences.antialias?4:1);graphics.setVsync(preferences.vsync);ImGui::GetIO().FontGlobalScale=preferences.uiScale;
 #ifdef ALBERT_HAS_RPC
             { // The flight's sound at the camera, at the shown instant (an Earth flight; physics/acoustics.hpp).
                 namespace ph=albert::physics;namespace ac=ph::acoustics;
                 const auto source=rpc?rpc->flightSound():std::nullopt;bool audible=false;ac::Spectrum levels{};float pan=0;
                 if(soundOn&&!sound&&!smokeTest)sound=std::make_unique<albert::Sound>(true);else if(!soundOn&&sound)sound.reset();
+                if(sound)sound->setVolume(preferences.volume);
                 if(source){
                     if(!emissions.empty()&&source->utc<emissions.back().time)emissions.clear(); // A new flight, or a replay.
                     if(emissions.empty()||source->utc>=emissions.back().time+.05)emissions.push_back(source->emission);

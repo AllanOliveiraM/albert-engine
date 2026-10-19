@@ -18,6 +18,7 @@ public:
     // Interleaved float frames at `rate`: the device's callback, and offline for tests.
     void render(float* out,unsigned frames,unsigned channels);
     bool playing()const; // A device is open.
+    void setVolume(float volume); // 0 to 1 (a gain on the output, before the soft limit's knee).
     double adaptation()const; // dB taken off for loudness.
 private:
     struct Impl;std::unique_ptr<Impl> impl_;

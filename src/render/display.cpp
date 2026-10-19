@@ -57,6 +57,8 @@ void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength
     if(!air&&body&&strength>0){air=std::make_unique<gpu::Atmosphere>(*d.context,mars?gpu::marsAtmosphere():gpu::earthAtmosphere());d.scene->airSteps=d.context->software()?1:4;}
     auto weather=d.scene->air;d.scene->air={air.get(),body,kmPerUnit,strength,groundKm,weather.clouds,weather.cloudKm,weather.cloudShadow,weather.surfaceWind,weather.polarRatio};
 }
+void albert::Display::setSamples(unsigned samples){impl_->scene->samples=samples>1?4u:1u;}
+void albert::Display::setVsync(bool on){impl_->context->setVsync(on);}
 void albert::Display::setEarthshine(const Object3D* earth,float radius){impl_->scene->earthshine={earth,earth?radius:0.f};}
 float albert::Display::exposure()const{return impl_->scene->exposure;}
 namespace {

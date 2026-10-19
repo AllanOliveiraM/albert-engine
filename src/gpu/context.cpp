@@ -61,6 +61,8 @@ Context::Context(GLFWwindow* window){
         // Not sRGB: shaders encode their output (tone mapping, then sRGB), so blending happens in
         // encoded space exactly as in the OpenGL renderer, and ImGui's sRGB colours pass through.
         for(std::size_t i=0;i<caps.formatCount;++i)if(caps.formats[i]==WGPUTextureFormat_BGRA8Unorm||caps.formats[i]==WGPUTextureFormat_RGBA8Unorm){format_=caps.formats[i];break;}
+        for(std::size_t i=0;i<caps.presentModeCount;++i){const auto m=caps.presentModes[i];
+            if(m==WGPUPresentMode_Immediate||(m==WGPUPresentMode_Mailbox&&unsynced_!=WGPUPresentMode_Immediate))unsynced_=m;}
         wgpuSurfaceCapabilitiesFreeMembers(caps);
         int w=0,h=0;glfwGetFramebufferSize(window,&w,&h);resize(w,h);
     }
@@ -74,8 +76,9 @@ Context::~Context(){
 void Context::resize(int width,int height){
     if(!surface_||width<=0||height<=0)return;width_=width;height_=height;
     WGPUSurfaceConfiguration c{};c.device=device_;c.format=format_;c.usage=WGPUTextureUsage_RenderAttachment;c.width=static_cast<std::uint32_t>(width);c.height=static_cast<std::uint32_t>(height);
-    c.alphaMode=WGPUCompositeAlphaMode_Auto;c.presentMode=WGPUPresentMode_Fifo;wgpuSurfaceConfigure(surface_,&c);
+    c.alphaMode=WGPUCompositeAlphaMode_Auto;c.presentMode=vsync_?WGPUPresentMode_Fifo:unsynced_;wgpuSurfaceConfigure(surface_,&c);
 }
+void Context::setVsync(bool on){if(on==vsync_)return;vsync_=on;resize(width_,height_);}
 WGPUTextureView Context::acquire(){
     if(!surface_||width_<=0)return nullptr;
     WGPUSurfaceTexture t{};wgpuSurfaceGetCurrentTexture(surface_,&t);

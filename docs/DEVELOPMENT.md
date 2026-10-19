@@ -312,6 +312,14 @@ interpolado em f32, mapa de rugosidade, light map e sombra PCF do Sol. Profundid
 (`depth32float`, infinito na perspectiva). Texturas grandes sobem em fatias de ~8 MB por quadro e os
 mipmaps são renderizados na GPU. `ALBERT_FRAME_STATS=1` imprime média, p99 e pior quadro a cada 300
 quadros, com o trabalho da CPU, a apresentação e o tempo da passada da cena na GPU (timestamps).
+Menu "Ajustes": qualidade, antisserrilhado (4× ou nenhum), sincronia vertical (sem ela, o modo imediato ou mailbox da
+superfície), sombras, atmosfera, relevo, nuvens volumétricas, ondas no mar, campo de visão, nuvens em tempo real, luzes,
+fronteiras, órbitas, cinturões, giro ao chegar, escala da interface, câmera livre, sensibilidade e inversão do mouse, som e
+volume; guardados em `settings.json` no diretório de dados (o som sempre começa mudo). A "Cena" fica com o que é da vista
+(camadas, clarear o lado escuro). Câmera livre (F ou Ajustes; F ou Esc volta com um voo ao foco): arrastar olha (giro em torno
+da vertical local, sem rolagem), W/A/S/D andam, Espaço/E e Ctrl/Q sobem e descem, Shift multiplica por 5, a roda ajusta a
+velocidade (0,6 × a altura sobre a superfície mais próxima por segundo, no mínimo 2 m/s); nunca abaixo de 2 m do relevo
+desenhado; a origem flutuante segue o olho como nos voos entre corpos.
 Som do voo (`src/render/sound.*`): começa mudo; a opção "Som do voo" do menu abre o dispositivo padrão (miniaudio 0.11.25,
 fixado por SHA-256 em `src/render/CMakeLists.txt`) e a câmera ouve o voo pela física de `physics/acoustics` (tempo retardado,
 absorção, Doppler). A síntese é a das auralizações da NASA: quadros de 8192 pontos com fase aleatória e a potência de cada
