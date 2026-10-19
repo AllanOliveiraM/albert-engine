@@ -91,7 +91,9 @@ CPU e equalizado; luz: espalhamento simples + campo difuso δ-Eddington). Ajuste
 nuvens dependem de "Nuvens em tempo real" e do tempo simulado a menos de um dia de agora. Para ver na prévia sem rede: copiar
 `build/m0-cache/clouds` para o diretório de dados e usar UTC de ontem (`cloud-shot.py` no scratchpad). `clouds_test <prefixo>`
 grava vistas de cúmulos. O CI do Windows perdeu o dispositivo (WARP) no `ocean_test` do commit ba25d02: o contexto agora
-imprime o motivo da perda e o oceano, num adaptador de CPU, submete cada dispatch sozinho; confirmar no próximo CI.
+imprime o motivo da perda e o oceano, num adaptador de CPU, submete cada dispatch sozinho. O traço do CI mostrou as cinco
+passadas completas e a perda logo depois (escrita no array de texturas ou a cópia dele, só no WARP): o app não roda ondas
+em adaptador de CPU e o `ocean_test` pula no WARP. Risco aberto: conferir as ondas numa GPU real no Windows (Direct3D 12).
 **Escopo (18/10/2026):** o Allan adiou o refinamento de Marte (GRAM Suite, atmosfera sazonal e
 termosfera, Viking < 20%) para atualizações futuras; o foco é Terra e Lua. Não puxar itens de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.

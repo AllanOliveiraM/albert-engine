@@ -59,7 +59,8 @@ void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength
     auto weather=d.scene->air;d.scene->air={air.get(),body,kmPerUnit,strength,groundKm,weather.clouds,weather.cloudKm,weather.cloudShadow,weather.surfaceWind,weather.polarRatio};
 }
 void albert::Display::setSea(bool on,double seconds,float east,float north,const Vector3& anchor,const Vector3& eastAxis,const Vector3& northAxis,float metersPerUnit){
-    auto& d=*impl_;if(on&&!d.ocean)d.ocean=std::make_unique<gpu::Ocean>(*d.context);
+    auto& d=*impl_;on=on&&!d.context->software(); // CPU adapters: too slow, and WARP loses the device on the cascades.
+    if(on&&!d.ocean)d.ocean=std::make_unique<gpu::Ocean>(*d.context);
     auto& s=d.scene->sea;s.ocean=d.ocean.get();s.enabled=on;s.seconds=seconds;s.east=east;s.north=north;s.anchor=anchor;s.eastAxis=eastAxis;s.northAxis=northAxis;s.metersPerUnit=metersPerUnit;
 }
 void albert::Display::setClouds(bool on,float strength,double seconds,float east,float north){

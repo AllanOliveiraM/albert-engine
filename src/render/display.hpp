@@ -36,7 +36,8 @@ public:
     void setEarthshine(const threepp::Object3D* earth,float radius); // Radius in world units; 0 or null: none.
     void setSamples(unsigned samples); // Multisampling of the scene pass: 1 or 4.
     // Wind waves on the water near the camera (gpu::Ocean, made when first on): the wind (m/s toward east and north), the
-    // waves' clock (s), the pattern's anchor and east/north axes (world) and metres per world unit; off: Cox-Munk only.
+    // waves' clock (s), the pattern's anchor and east/north axes (world) and metres per world unit; off (and on a CPU
+    // adapter): Cox-Munk only.
     void setSea(bool on,double seconds,float east,float north,const threepp::Vector3& anchor,const threepp::Vector3& eastAxis,const threepp::Vector3& northAxis,float metersPerUnit);
     void setVsync(bool on);
     // Volumetric clouds on the cloud map setWeather gives (gpu::Clouds, made when first shown) at strength 0-1 over the scene;
