@@ -175,7 +175,9 @@ message Geodetic { double latitude_degrees=1; double longitude_degrees=2; double
 // GENERIC_LANDER: Apollo LM descent-sized single stage on four sprung legs with friction.
 // GENERIC_LUNAR_ASCENT: Apollo LM ascent-sized stage (4.85 t, fixed 15.57 kN engine, RCS attitude).
 // GENERIC_MARS_ASCENT: two-stage Mars ascent vehicle on the MSR MAV mass budget (~450 kg, liquid).
-enum Vehicle { VEHICLE_UNSPECIFIED=0; GENERIC_LAUNCHER=1; NESC_TWO_STAGE=2; NESC_SPHERE=3; GENERIC_LANDER=4; GENERIC_LUNAR_ASCENT=5; GENERIC_MARS_ASCENT=6; }
+// SATURN_V: Apollo 11's AS-506 from its flight evaluation report, as five stages (S-IC; S-II with the aft interstage and
+// the escape tower, with the tower, alone; S-IVB): separate jettisons each; attitude by ideal torque (1e10 N m).
+enum Vehicle { VEHICLE_UNSPECIFIED=0; GENERIC_LAUNCHER=1; NESC_TWO_STAGE=2; NESC_SPHERE=3; GENERIC_LANDER=4; GENERIC_LUNAR_ASCENT=5; GENERIC_MARS_ASCENT=6; SATURN_V=7; }
 message CreateFlightRequest {
   Vehicle vehicle=1;
   optional double payload_kilograms=2;   // GENERIC_LAUNCHER only; default 5000.

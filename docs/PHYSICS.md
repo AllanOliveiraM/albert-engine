@@ -85,6 +85,20 @@ dinâmica, α/β, ângulos de Euler em NED e estado verdadeiro (inercial, ECEF, 
 - O guiamento de exemplo leva o lançador genérico a uma órbita ~182 × 212 km.
 - Coast de uma volta com passos de 1 s contra 10 ms: diferença <1 mm.
 
+Apollo 11 (`tests/apollo_test.cpp`): o Saturn V AS-506 pelo seu programa de voo (`examples/saturn_v.hpp`) na
+climatologia do Albert para 1969-07-16 13:32 UTC em 39A (NRLMSISE-00 e HWM14), contra o relatório de voo:
+
+- S-IC do pad, com o programa de arfagem do Apollo 12 (o do AS-506 não foi publicado; eles eram ajustados aos
+  ventos médios do mês): Mach 1 aos 65,8 s (voo 66,3), q máxima 35,5 kPa aos 82,0 s (35,2 aos 83,0), velocidade
+  inercial 1.980,1 m/s no corte central (1.979,0) e 2.761,0 m/s no corte (2.764,1). A trajetória fica com a do
+  Apollo 12, que voou esse programa: 68,8 km e 20,88° no corte (68,1 e 20,51); o Apollo 11, de julho, cortou a
+  66,1 km e 19,11°. Com a US Standard Atmosphere a q máxima vinha 7 s cedo (ar tropical mais denso aos 13 km).
+- S-II e S-IVB do estado reconstruído na separação (162,3 s), com uma guiagem de seno linear no lugar do IGM
+  (altura e razão de subida nulas na inserção, desvio do plano de 32,521° anulado; nenhum parâmetro ajustado):
+  corte do S-II a 187,2 km e 6.915,7 m/s (187,3 e 6.916,1), rumo 82,42° (82,39); corte do S-IVB aos 701,3 s
+  (699,34) com 134.952 kg (135.182), órbita de 186,5 × 183,1 km (186,0 × 183,2) a 32,521°. No meio do S-II a
+  trajetória fica 0,5° mais íngreme que a do IGM (176,2 km e 1,41° contra 180,2 e 0,90).
+
 Lua e Marte (`tests/central_bodies_test.cpp`, com os excertos de grau 8 das tabelas do PDS):
 
 - Leitura por faixa (5612 bytes até o grau 8), cache, recarga de cache corrompido,
@@ -143,6 +157,14 @@ cena; ver [RPC.md](RPC.md#voo-físico-em-lockstep).
   de 250 km, plana até ele e circulariza a 200 km de perigeu (~201 × 251 km, 12 kg de sobra).
 - `nescSphere`, `nescTwoStage`: modelos DAVE-ML da NESC convertidos para SI. O foguete da
   NESC é conceitual ("provavelmente inviável") e sem guiamento.
+- `saturnV`: o Saturn V do Apollo 11 (AS-506) pelo relatório de avaliação de voo (MPR-SAT-FE-69-9): massas
+  medidas nos eventos (2.899.008 kg na liberação; 827.292 kg no corte do S-IC; 658.363 kg na ignição do S-II;
+  213.888 kg no corte; 166.571 kg na ignição do S-IVB), S-IC de 40,11 MN no vácuo menos 56,94 m² × pressão
+  (Fig. 5-3: 34,3 MN na decolagem e 40,1 MN antes do corte central; a subida do empuxo com a aceleração fica
+  nessa área efetiva) e a vazão que queima o propelente até o corte aos 161,63 s; S-II a 423,2 s com a vazão
+  que esgota os 436.451 kg aos 548,22 s (5,10 MN, nas razões medidas após o corte central e a mudança de
+  mistura); S-IVB de 901.223 N a 428,7 s; coeficiente axial com jato do S-IC por Mach (Boeing D5-15481-1);
+  interestágio (3.982 kg) e torre de escape (4.042 kg) largados como estágios; atitude por torque ideal.
 - `genericLauncher`: lançador médio de dois estágios a querosene dimensionado por números
   públicos aproximados do Falcon 9 v1.2 (massas, empuxo, Isp, geometria); aerodinâmica de
   corpo esbelto com escoamento cruzado de Allen-Perkins. Aerodinamicamente instável: exige

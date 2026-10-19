@@ -19,9 +19,10 @@ struct Reading {
     double qw=1,qx=0,qy=0,qz=0;        // Body to NED.
     Vec rate,specificForce;            // Body axes: IMU (rad/s, m/s²).
     Vec position,velocity;             // GCRF (m, m/s).
-    int stage=0,stages=1;bool burning=false,clamped=false;double propellant=0;
+    double iw=1,ix=0,iy=0,iz=0;        // Body to GCRF.
+    int stage=0,stages=1;bool burning=false,clamped=false;double propellant=0,mass=0; // kg.
 };
-struct Commands {bool ignite=false,separate=false,cutoff=false;double gimbalPitch=0,gimbalYaw=0;Vec torque;};
+struct Commands {bool ignite=false,separate=false,cutoff=false;double gimbalPitch=0,gimbalYaw=0,throttle=-1;Vec torque;}; // throttle < 0: unchanged; separate before ignite.
 // The central body: gravitational parameter (m³/s²) and the radius perigees are counted from (m).
 struct Body {double mu,radius;};
 constexpr Body earth{3.986004418e14,6378137},moon{4.9028001e12,1737400},mars{4.282837e13,3396190};

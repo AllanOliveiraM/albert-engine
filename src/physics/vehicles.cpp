@@ -23,10 +23,9 @@ Props props(const std::vector<Part>& parts){
         p.inertia+=V3{axial,transverse,transverse};}
     return p;
 }
-Aerodynamics slender(double area,double length=70,double diameter=3.66){
+Aerodynamics slender(double area,double length=70,double diameter=3.66,const std::vector<double>& mach={0,.6,.9,1.05,1.2,1.5,2,3,4,6,10},const std::vector<double>& axial={.30,.31,.38,.58,.60,.55,.47,.37,.31,.26,.23}){
     // Axial coefficient at zero incidence (with base drag) versus Mach; CNα 2/rad;
     // crossflow drag 1.2 with the 0.6 finite-length factor over the planform (length × diameter).
-    const std::vector<double> mach{0,.6,.9,1.05,1.2,1.5,2,3,4,6,10},axial{.30,.31,.38,.58,.60,.55,.47,.37,.31,.26,.23};
     std::vector<double> ang;for(int i=-20;i<=20;i+=2)ang.push_back(i);
     const double planform=length*diameter/area;
     Aerodynamics r;r.area=area;r.length=length;r.span=length;
@@ -85,6 +84,46 @@ Vehicle genericLunarAscent(){
     s.inertiaFull=inertia(full);s.inertiaEmpty=inertia(empty);
     s.thrust=15570;s.exhaust=311*g0;s.exitArea=.33;s.nozzle=h;s.gimbal=0;s.minThrottle=1;s.length=h;s.aero=slender(pi*r*r,h,2*r);s.noseRadius=r; // Fixed APS: no gimbal, no throttle.
     return{"Generic lunar ascent stage (approximate)",{s},1400,1,true,2*r}; // Attitude by RCS (~1.4 kN m).
+}
+Vehicle saturnV(){
+    // AS-506 from the flight evaluation report (MPR-SAT-FE-69-9): masses of Table 20-1/3/5 at the events, thrust of
+    // Fig 5-3 and Tables 6-1, 7-1; shapes approximate (attitude flown by the ideal torque). Stack positions in metres aft of the nose.
+    constexpr double r=5.03,area=79.46; // Body radius (m); aerodynamic reference area (m², 396 in diameter).
+    const std::vector<Part> spacecraft{{4042,0,10,.6,true},{45693,10,29.5,1.95,true},{1939,29.5,30.4,3.3,false}}; // LES; CSM, LM, SLA; IU.
+    auto with=[](std::vector<Part> p,std::initializer_list<Part> more){p.insert(p.end(),more);return p;};
+    auto scaled=[](std::vector<Part> p,double total){double m=0;for(const auto& q:p)m+=q.mass;for(auto& q:p)q.mass*=total/m;return props(p);};
+    // Masses at the events (kg): holddown release, S-IC outboard cutoff; S-II ignition, cutoff; S-IVB ignition, empty.
+    constexpr double release=2899008,icCutoff=827292,iiStart=658363,iiCutoff=213888,ivbStart=166571,ivbPropellant=87315+19780,ring=3982,tower=4042;
+    // S-IC: 40.11 MN in vacuum less 56.94 m² × ambient pressure fits Fig 5-3 (34.3 MN at liftoff, 40.1 MN before centre cutoff);
+    // the flow that burns 2,071,716 kg by outboard cutoff at 161.63 s with the centre engine off from 135.2 s is 13,277 kg/s.
+    constexpr double icThrust=40.110e6,icFlow=(release-icCutoff)/(134.9+.8*26.43);
+    // S-II: 423.2 s (Table 6-1, 61 s after engine start) and the flow that burns the 436,451 kg from full thrust at 165.5 s
+    // to depletion at 548.22 s, with the thrust ratios of Table 6-1 after centre cutoff (460.62 s, 0.7961) and the
+    // mixture-ratio shift (498.0 s, 0.5996): 5.10 MN, 0.8% below the time slice's 5,141,516 N.
+    constexpr double iiPropellant=iiStart-ring-tower-iiCutoff,iiExhaust=423.2*g0;
+    constexpr double iiFlow=iiPropellant/((460.62-165.5)+4093107./5141516*(498.-460.62)+3082769./5141516*(548.22-498.)),iiThrust=iiFlow*iiExhaust;
+    // The aft interstage (192.3 s) and the launch escape tower (197.9 s) leave as stages of their own.
+    constexpr double withRing=iiFlow*(192.3-165.5),withTower=iiFlow*(197.9-192.3);
+    const std::vector<double> mach{0,.06,.3,.5,.75,1,1.2,1.5,2,2.5,3,3.5,4,5,6,7,7.5,8},axial{1.13,1.13,.35,.40,.51,.69,.82,.62,.51,.43,.36,.30,.26,.20,.14,.055,-.01,-.10}; // Powered, S-IC flight (Boeing D5-15481-1 Fig 3-2).
+    const auto upperAero=slender(area,85,2*r,{0},{.3});
+    // A stage: the stack while it is the lowest, its propellant as a solid column between `from` and `aft` (m aft of the nose).
+    auto stage=[&](const char* name,double full,double propellant,const std::vector<Part>& shape,double from,double aft,double thrust,double exhaust,double exit,double minThrottle,const Aerodynamics& aero){
+        Stage s;s.name=name;s.propellant=propellant;s.massFull=full;s.massEmpty=full-propellant;
+        const auto a=scaled(with(shape,{{propellant,from,aft-.05*(aft-from),r,true}}),full),b=scaled(shape,full-propellant);
+        s.cgFull=a.cg;s.cgEmpty=b.cg;s.inertiaFull=a.inertia;s.inertiaEmpty=b.inertia;s.reference=a.cg;
+        s.thrust=thrust;s.exhaust=exhaust;s.exitArea=exit;s.nozzle=aft;s.gimbal=5*pi/180;s.minThrottle=minThrottle;s.length=aft;s.aero=aero;s.noseRadius=r;return s;};
+    // Parts above each stage: upper stages full, the S-II's propellant still to burn in its later stages.
+    auto without=[](std::vector<Part> p){p.erase(p.begin());return p;}; // Less the escape tower, the first part.
+    const auto ivb=with(spacecraft,{{11273,30.4,48.2,3.3,false}}),ivbFull=with(ivb,{{ivbPropellant,32,47.4,3.3,true}});
+    auto ii=[&](std::vector<Part> above,double unburnt){return with(above,{{3663,48.2,53.4,r,false},{36158,53.4,78.3,r,false},{unburnt,55,77.1,r,true}});};
+    Vehicle v{"Saturn V AS-506 (Apollo 11)",{},1e10,1,true,2*r};
+    v.stages.push_back(stage("S-IC",release,release-icCutoff,with(ii(ivbFull,iiPropellant),{{ring,78.3,83.4,r,false},{130422,83.4,110.6,r,false}}),86,110.6,icThrust,icThrust/icFlow,56.94,.8,slender(area,110.6,2*r,mach,axial)));
+    v.stages.push_back(stage("S-II with aft interstage and escape tower",iiStart,withRing,with(ii(ivbFull,iiPropellant-withRing),{{ring,78.3,83.4,r,false}}),55,83.4,iiThrust,iiExhaust,15.1,.5,upperAero));
+    v.stages.push_back(stage("S-II with escape tower",iiStart-withRing-ring,withTower,ii(ivbFull,iiPropellant-withRing-withTower),55,78.3,iiThrust,iiExhaust,15.1,.5,upperAero));
+    v.stages.push_back(stage("S-II",iiStart-withRing-ring-withTower-tower,iiPropellant-withRing-withTower,ii(without(ivbFull),0),55,78.3,iiThrust,iiExhaust,15.1,.5,upperAero));
+    // S-IVB first burn: 901,223 N at 428.7 s (Table 7-1); free-molecular drag 2.8 on 33.47 m² (Boeing).
+    v.stages.push_back(stage("S-IVB",ivbStart,ivbPropellant,without(ivb),32,48.2,901223,428.7*g0,3.02,1,slender(33.47,48.2,6.6,{0},{2.8})));
+    return v;
 }
 Vehicle genericMarsAscent(){
     constexpr double r=.285,area=pi*r*r;

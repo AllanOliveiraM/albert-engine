@@ -18,4 +18,9 @@ Vehicle genericLunarAscent();
 // 0.57 m across, 3 m long) with throttleable liquid engines (8 kN Isp 310 s; 2.5 kN Isp 320 s): ~4.6
 // km/s, enough for low Mars orbit from the surface; approximate.
 Vehicle genericMarsAscent();
+// The Saturn V of Apollo 11 (AS-506) from the flight evaluation report (MPR-SAT-FE-69-9) as five stages: S-IC, S-II
+// carrying the aft interstage and the launch escape tower, S-II with the tower, S-II and S-IVB (to the parking orbit;
+// the propellant left serves translunar injection). Masses at the events and thrust as reconstructed after the flight;
+// the S-IC's acceleration-dependent thrust is folded into its exit area; attitude by ideal torque.
+Vehicle saturnV();
 }

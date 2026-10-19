@@ -254,7 +254,7 @@ personalizados e camadas raster ainda são próximas entregas.
 `FlightService` controla um veículo de seis graus de liberdade integrado pelo núcleo de
 física do Albert ([PHYSICS.md](PHYSICS.md)); o software externo faz o papel do
 computador de voo. `CreateFlight` põe o veículo preso no pad, com a base no solo, (`GENERIC_LAUNCHER`,
-`GENERIC_LANDER`, `GENERIC_LUNAR_ASCENT`, `GENERIC_MARS_ASCENT`, `NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
+`GENERIC_LANDER`, `GENERIC_LUNAR_ASCENT`, `GENERIC_MARS_ASCENT`, `SATURN_V`, `NESC_TWO_STAGE` ou `NESC_SPHERE`), no sítio, rumo e instante pedidos (padrão: o
 instante exibido), com passo fixo de 1 ms (de 10 µs a 100 ms). Em voo balístico acima
 de 86 km o Albert usa passos internos de até `coast_step_seconds` (padrão 1 s; 0 desliga),
 então chamadas longas propagam órbitas rapidamente; os ticks continuam exatos. A gravidade usa o
@@ -356,7 +356,15 @@ depois propaga uma volta inteira em nove chamadas (~0,1 s de cálculo).
 ./build/linux/src/rpc/albert_flight_client --fast     # o mais rápido possível
 ./build/linux/src/rpc/albert_flight_client --body=moon   # Tranquilidade → 18 × 85 km (Apollo 11)
 ./build/linux/src/rpc/albert_flight_client --body=mars   # Jezero → ~200 × 250 km, em duas queimas
+./build/linux/src/rpc/albert_flight_client --apollo11    # Saturn V AS-506 de 39A em 1969-07-16 → ~186 × 183 km
 ```
+
+O `SATURN_V` (Apollo 11, AS-506) tem cinco estágios: S-IC; S-II com o interestágio de trás e a torre de
+escape; S-II com a torre; S-II; S-IVB. `separate` larga cada um (o interestágio aos 192,3 s e a torre aos
+197,9 s, reacendendo o S-II no mesmo passo: mande `separate` antes de `ignite`); `throttle` faz o corte
+do motor central (0,8 no S-IC; 0,7961 no S-II) e a mudança de mistura do S-II (0,5996); atitude por torque
+ideal até 1e10 N m. O `--apollo11` voa o programa de [saturn_v.hpp](../examples/saturn_v.hpp) com os
+eventos do instrument unit e corta o S-IVB quando o semieixo maior chega ao da órbita de estacionamento.
 
 Na Lua o `GENERIC_LUNAR_ASCENT` sobe 50 m e segue pela taxa vertical até 18 km, cortando com
 perilúnio ≥ 15 km e apolúnio ≥ 85 km. Em Marte o `GENERIC_MARS_ASCENT` também é guiado desde a

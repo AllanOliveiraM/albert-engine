@@ -268,7 +268,13 @@ variável) e mostra o veículo na cena:
 ./build/linux/src/rpc/albert_flight_client               # Kennedy → órbita terrestre
 ./build/linux/src/rpc/albert_flight_client --body=moon   # Base da Tranquilidade → órbita lunar
 ./build/linux/src/rpc/albert_flight_client --body=mars   # cratera Jezero → órbita de Marte
+./build/linux/src/rpc/albert_flight_client --apollo11    # Saturn V do Apollo 11 → órbita de estacionamento
 ```
+
+O `--apollo11` voa o Saturn V AS-506, montado a partir do relatório de avaliação de voo da NASA, pelo
+programa de voo da época (examples/saturn_v.hpp). A partir do estado real na separação do S-IC, o
+Albert chega ao fim do S-II a 0,3 m/s da velocidade medida e corta o S-IVB 1,9 s depois do voo, numa
+órbita de 186,5 × 183,1 km (Apollo 11: 186,0 × 183,2 km).
 
 `albert_landing_client` faz o mesmo na Lua: o módulo de pouso genérico sai das pernas na Base da
 Tranquilidade (altura do LOLA), sobe a 150 m, paira e pousa a menos de 1 m/s:

@@ -30,7 +30,8 @@ std::vector<SpaceWeatherDay> parseSpaceWeather(const std::string& csv){
 }
 std::optional<physics::SpaceWeather> spaceWeatherAt(const std::vector<SpaceWeatherDay>& days,double utc,std::string* note){return physics::SpaceWeatherTable(days).at(utc,note);}
 SpaceWeatherService::SpaceWeatherService(std::filesystem::path cache,Transport transport,Now now):cache_(std::move(cache)),transport_(std::move(transport)),now_(std::move(now)){
-    if(!transport_)transport_=[](const std::string& url,DownloadProgress* p){return httpGet(url,p,{16*1024*1024,90});};
+    // 600 s in all: SW-All.csv (2.9 MB, for flights before the last five years) needs 226 s at 13 KB/s; stalls still end at 20 s.
+    if(!transport_)transport_=[](const std::string& url,DownloadProgress* p){return httpGet(url,p,{16*1024*1024,600});};
     if(!now_)now_=[]{return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();};
 }
 std::vector<SpaceWeatherDay> SpaceWeatherService::table(const std::string& name,double maximumAge){

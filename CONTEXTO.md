@@ -65,6 +65,13 @@ de cima na transição (antes zerava). Fonte `NRLMSISE-00/HWM14`: logs antigos n
 A seguir, pedido do Allan: subida do Saturn V AS-506 contra o relatório de voo, descida do Apollo 11, fotometria
 lunar (McEwen) com luz da Terra, depois som. Notas dos dados levantados em `$SCRATCH/as506-notes.md`,
 `a11-descent-notes.md`, `moon-photometry-notes.md` (scratchpad da sessão).
+**Saturn V AS-506 (18/10/2026):** `saturnV()` (cinco estágios: interestágio e torre de escape largados como estágios),
+programa `examples/saturn_v.hpp` (eventos do IU, tabela de arfagem do Apollo 12, seno linear com plano no lugar do IGM),
+`tests/apollo_test.cpp` em duas partes (S-IC do pad contra o Apollo 11 nas velocidades e o Apollo 12 na trajetória; S-II e
+S-IVB do estado do AS-506 na separação), `SATURN_V` na API e `albert_flight_client --apollo11` (voado ponta a ponta pelo
+gRPC no Xvfb 172.17.0.2:100: órbita 186,2 × 183,0 km). Lições: a S-II com o Isp de 423,2 s e vazão das massas (5,10 MN)
+em vez do empuxo do instante (+45 m/s); climatologia NRLMSISE-00/HWM14 de julho explica Mach 1 e q máxima (USSA76: 7 s
+cedo). Voos de 1969 precisam do `SW-All.csv` (2,9 MB, 226 s nesta rede): o limite total do download foi de 90 para 600 s.
 **Escopo (18/10/2026):** o Allan adiou o refinamento de Marte (GRAM Suite, atmosfera sazonal e
 termosfera, Viking < 20%) para atualizações futuras; o foco é Terra e Lua. Não puxar itens de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.

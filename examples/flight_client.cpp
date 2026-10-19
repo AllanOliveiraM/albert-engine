@@ -2,11 +2,13 @@
 // the simulated sensors and truth the flight API reports. Earth: the generic launcher from
 // Kennedy LC-39A; Moon: the lunar ascent stage from Tranquility Base; Mars: the Mars ascent
 // vehicle from Jezero crater (two burns, circularizing at a 250 km apoapsis).
-// Usage: albert_flight_client [address] [--fast] [--wire] [--utc=UNIX_SECONDS] [--body=moon|mars]
+// Usage: albert_flight_client [address] [--fast] [--wire] [--utc=UNIX_SECONDS] [--body=moon|mars] [--apollo11]
 // Defaults: 127.0.0.1:50051, real time, the instant shown by Albert, the Earth. --wire (Earth)
 // flies over the binary data plane at 1 kHz (one exchange per tick) and then coasts to 10 minutes.
+// --apollo11: the Saturn V of Apollo 11 (AS-506) from LC-39A on 1969-07-16 by its flight program (saturn_v.hpp).
 #include "albert/v1/engine.grpc.pb.h"
 #include "gravity_turn.hpp"
+#include "saturn_v.hpp"
 #include "wire.hpp"
 #include <grpcpp/grpcpp.h>
 #include <chrono>
@@ -21,19 +23,50 @@ ex::Vec vec(const api::Vector3& v){return{v.x(),v.y(),v.z()};}
 ex::Reading reading(const api::FlightSample& s){
     ex::Reading r;r.elapsed=s.elapsed_seconds();r.height=s.geodetic().height_meters();r.nedVelocity=vec(s.velocity_ned_meters_per_second());
     const auto& q=s.attitude_ned();r.qw=q.w();r.qx=q.x();r.qy=q.y();r.qz=q.z();
+    const auto& a=s.attitude();r.iw=a.w();r.ix=a.x();r.iy=a.y();r.iz=a.z();r.mass=s.mass_kilograms();
     r.rate=vec(s.angular_rate_radians_per_second());r.specificForce=vec(s.specific_force_meters_per_second2());
     r.position=vec(s.position_meters());r.velocity=vec(s.velocity_meters_per_second());
     r.stage=static_cast<int>(s.stage());r.stages=static_cast<int>(s.stages());r.burning=s.burning();r.clamped=s.clamped();r.propellant=s.propellant_kilograms();return r;
 }
+// Apollo 11's Saturn V from Launch Complex 39A at 1969-07-16 13:32:00 UTC to the parking orbit, by its flight program.
+int apollo11(api::FlightService::Stub& flight,bool fast){
+    api::CreateFlightRequest create;create.set_vehicle(api::SATURN_V);create.set_focus_camera(true);create.set_heading_degrees(90);
+    create.set_utc_unix_seconds(-14552880.+ex::SaturnV::release);create.mutable_site()->set_latitude_degrees(28.6084);create.mutable_site()->set_longitude_degrees(-80.6041);
+    api::FlightSample s;{grpc::ClientContext c;check(flight.CreateFlight(&c,create,&s));}
+    std::printf("%s, ar: %s, %s\n",s.vehicle().c_str(),s.atmosphere().c_str(),fast?"o mais rápido possível":"tempo real");
+    ex::SaturnV g;const auto wall=std::chrono::steady_clock::now();double report=0;
+    auto speed=[&]{const auto& v=s.velocity_meters_per_second();return std::hypot(v.x(),v.y(),v.z());};
+    while(g.phase()!=ex::SaturnV::Phase::orbit){
+        const ex::Commands c=g.step(reading(s));api::StepRequest step;step.set_ticks(20); // Guidance at 50 Hz.
+        if(c.separate)step.add_commands()->set_separate(true);
+        if(c.ignite)step.add_commands()->set_ignite(true);
+        if(c.cutoff)step.add_commands()->set_cutoff(true);
+        if(c.throttle>=0)step.add_commands()->set_throttle(c.throttle);
+        auto* t=step.add_commands()->mutable_torque_newton_meters();t->set_x(c.torque.x);t->set_y(c.torque.y);t->set_z(c.torque.z);
+        {grpc::ClientContext ctx;check(flight.Step(&ctx,step,&s));}
+        const double range=s.elapsed_seconds()+ex::SaturnV::release;
+        for(const auto& e:s.events())std::printf("%7.2f s  evento %s (estágio %u)\n",range,api::FlightEvent::Kind_Name(e.kind()).c_str(),e.stage()+1);
+        if(range>=report){report=std::floor(range/20)*20+20;
+            std::printf("%7.2f s  estágio %u  h %6.1f km  v inercial %6.0f m/s  q %6.0f Pa  %8.0f kg\n",range,s.stage()+1,s.geodetic().height_meters()/1e3,speed(),s.dynamic_pressure_pascals(),s.mass_kilograms());}
+        if(s.landed())throw std::runtime_error("O veículo voltou ao solo");
+        if(range>800)throw std::runtime_error("Órbita não alcançada em 800 s");
+        if(!fast)std::this_thread::sleep_until(wall+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(s.elapsed_seconds())));
+    }
+    const ex::Vec rp=vec(s.position_meters()),vp=vec(s.velocity_meters_per_second());const double a=ex::SaturnV::semiMajor(rp,vp),apo=ex::GravityTurn::apoapsis(rp,vp)+6378137.,peri=ex::GravityTurn::perigee(rp,vp)+6378137.;
+    std::printf("Corte do S-IVB a %.2f s (Apollo 11: 699,34 s): órbita %.1f x %.1f km sobre a esfera de 6378,165 km (Apollo 11: 186,0 x 183,2), a %.1f km, %.0f kg\n",
+        s.elapsed_seconds()+ex::SaturnV::release,(apo-6378165)/1e3,(peri-6378165)/1e3,a/1e3,s.mass_kilograms());
+    return 0;
+}
 int main(int argc,char** argv){try{
-    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth";bool fast=false,binary=false;double utc=0;bool chosen=false;
-    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
+    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth";bool fast=false,binary=false,apollo=false;double utc=0;bool chosen=false;
+    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a=="--apollo11")apollo=true;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
         else if(a.rfind("--body=",0)==0)world=a.substr(7);else address=a;}
     if(world!="earth"&&world!="moon"&&world!="mars")throw std::invalid_argument("--body: earth, moon or mars");
     if(binary&&world!="earth")throw std::invalid_argument("--wire flies the Earth case");
     auto channel=grpc::CreateChannel(address,grpc::InsecureChannelCredentials());
     if(!channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(30)))throw std::runtime_error("Abra AlbertEngine --rpc antes de executar o exemplo");
     auto flight=api::FlightService::NewStub(channel);
+    if(apollo)return apollo11(*flight,fast);
     constexpr double pi=3.14159265358979323846,deg=pi/180;
     api::CreateFlightRequest create;create.set_focus_camera(true);if(chosen)create.set_utc_unix_seconds(utc);create.set_terrain_height(true); // On the measured ground.
     auto* site=create.mutable_site();ex::Body body=ex::earth;

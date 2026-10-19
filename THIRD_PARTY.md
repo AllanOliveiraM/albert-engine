@@ -46,6 +46,12 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - Lowell Observatory / D. Schleicher (2010): função de fase de poeira composta
   Halley-Marcus, tabela em `src/core/comets.cpp`,
   https://asteroid.lowell.edu/comet/dustphase.html (Schleicher et al. 1998; Marcus 2007).
+- NASA Marshall Space Flight Center: Saturn V Launch Vehicle Flight Evaluation Report AS-506 Apollo 11 Mission
+  (MPR-SAT-FE-69-9, 1969), massas, empuxos, eventos e trajetória em `src/physics/vehicles.cpp`,
+  `examples/saturn_v.hpp` e `tests/apollo_test.cpp`; NASA SP-2000-4029 (Apollo by the Numbers), trajetórias do
+  Apollo 11 e do Apollo 12; Boeing D5-15481-1 (trajetória de referência AS-504, coeficiente axial) e
+  D5-15551(I)-7 (trajetória do AS-507, tabela de arfagem), documentos produzidos para a NASA. Obras do governo dos EUA
+  ou sob contrato, citadas como referência de dados.
 - NASA Engineering and Safety Center: check cases 6-DOF (NASA/TM-2015-218675),
   https://nescacademy.nasa.gov/flightsim/2015; valores de referência em
   `tests/nesc_fixture.inc` e modelos DAVE-ML da esfera e do foguete de dois estágios
