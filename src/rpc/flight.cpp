@@ -317,16 +317,17 @@ struct Slot {
         if(center==ph::Center::earth){auto h=std::make_shared<Sound>(heardSound());h->owner=this;heard.store(std::move(h));} // Read by the frame loop without the lock.
         else if(const auto h=heard.load();h&&h->owner==this)heard.store(nullptr); // Only its own sound: another flight may be heard.
         // The stack got shorter, or the same instant again (the keeper; appending would be refused as
-        // out of order): replace the cylinder, keeping the camera on it.
+        // out of order): replace the cylinder in place (the camera stays on it).
         if(flight->state().stage!=shown||s.utcSeconds<=publishedUtc){
-            const auto snap=bridge.snapshot();const bool followed=snap&&snap->camera.target==sceneId;
-            (void)bridge.submit(core::Remove{sceneId});
-            if(wait(bridge.submit(core::Create{object()})).code!=core::Code::Ok){shown=-1;return;} // Retried on the next publication.
-            shown=flight->state().stage;if(followed)(void)bridge.submit(core::Focus{sceneId,false});
+            if(wait(bridge.submit(core::Create{object(),true})).code!=core::Code::Ok){shown=-1;return;} // Retried on the next publication.
+            shown=flight->state().stage;
         }else (void)bridge.submit(core::Append{sceneId,{s}});
         publishedUtc=s.utcSeconds;publishedOrigin=at;
-        (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),{},false,true});
-        (void)bridge.submit(telemetry());
+        // The scene's instant and the app's flight panel from the flight the camera follows (any, when it follows none).
+        const auto snap=bridge.snapshot();const std::string followed=snap?snap->camera.target:std::string();
+        if(followed==sceneId||(followed!="flight"&&followed.rfind("flight.",0)!=0)){
+            (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),{},false,true});
+            (void)bridge.submit(telemetry());}
     }
     // The flight as a sound source (see FlightServices::sound); published with the scene, read without the mutex (the
     // frame loop must not wait on a step that waits on the frame loop).

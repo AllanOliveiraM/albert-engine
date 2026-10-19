@@ -11,7 +11,8 @@
 namespace albert::core {
 struct InstallModel {std::shared_ptr<const Model> model;};struct RemoveModel {std::string id;};
 struct CreateLayer {Layer layer;};struct RemoveLayer {std::string id;};struct LayerVisibility {std::string id;bool enabled;};
-struct Create {Object object;};struct Remove {ObjectId id;};struct Visibility {ObjectId id;bool enabled;};
+// Create's replace: an existing object's definition in place (Scene::create), the camera staying on it.
+struct Create {Object object;bool replace=false;};struct Remove {ObjectId id;};struct Visibility {ObjectId id;bool enabled;};
 struct Append {ObjectId id;std::vector<Sample> values;};
 struct Replace {ObjectId id;std::vector<Sample> values;};
 struct Focus {ObjectId id;bool reset=false;};

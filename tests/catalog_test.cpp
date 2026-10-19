@@ -25,7 +25,7 @@ int main(){try{
     std::jthread owner([&](std::stop_token stop){core::CameraState camera;
         while(!stop.stop_requested()){
             bridge.drain([&](core::Command& command){std::visit([&](auto& value){using T=std::decay_t<decltype(value)>;
-                if constexpr(std::is_same_v<T,core::Create>)registry.create(std::move(value.object));
+                if constexpr(std::is_same_v<T,core::Create>)registry.create(std::move(value.object),value.replace);
                 else if constexpr(std::is_same_v<T,core::Replace>)registry.replace(value.id,std::move(value.values));
                 else if constexpr(std::is_same_v<T,core::Remove>){registry.remove(value.id);if(camera.target==value.id)camera.target="earth";}
                 else if constexpr(std::is_same_v<T,core::Append>)registry.samples(value.id,std::move(value.values));

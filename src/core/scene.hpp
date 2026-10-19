@@ -54,7 +54,7 @@ public:
     static constexpr size_t maxObjects=2048,maxSamples=256;
     Scene();
     static constexpr std::size_t maxLayers=64,maxLayerInputPoints=2048,maxLayerPoints=16384,maxSceneLayerPoints=32768;
-    void create(Object object);
+    void create(Object object,bool replace=false); // replace: an existing object's definition, keeping its id and anchored layers.
     void createLayer(Layer);
     void removeLayer(const std::string& id);
     void layerVisible(const std::string& id,bool visible);

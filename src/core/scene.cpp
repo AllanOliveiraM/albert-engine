@@ -49,10 +49,11 @@ const Object& Scene::get(const ObjectId& id) const{
     const auto it=objects_.find(id);if(it==objects_.end())throw std::out_of_range("Unknown object: "+id);return it->second;
 }
 bool validObjectId(std::string_view id){return !id.empty()&&id.size()<=96&&id.front()!='@'&&std::all_of(id.begin(),id.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='-'||c=='_'||c=='.';});}
-void Scene::create(Object o){
+void Scene::create(Object o,bool replace){
     if(!validObjectId(o.id))throw std::invalid_argument("Invalid object ID");
-    if(objects_.contains(o.id))throw std::invalid_argument("Object ID already exists");
-    if(objects_.size()>=maxObjects)throw std::length_error("Scene object limit reached");
+    const auto old=objects_.find(o.id);
+    if(old!=objects_.end()&&(!replace||old->second.builtin))throw std::invalid_argument("Object ID already exists");
+    if(old==objects_.end()&&objects_.size()>=maxObjects)throw std::length_error("Scene object limit reached");
     if(o.appearance.shape==Shape::Model){
         const auto& model=*models_.at(o.appearance.modelId);const double scale=o.appearance.metersPerUnit;
         if(!std::isfinite(scale)||scale<=0||scale>1e10||model.radiusUnits*scale<.05||model.radiusUnits*scale>1e10)throw std::invalid_argument("Invalid model physical scale");
@@ -67,7 +68,7 @@ void Scene::create(Object o){
     if(o.samples.empty()||o.samples.size()>maxSamples)throw std::invalid_argument("Initial samples required");
     for(auto& s:o.samples)validate(s);
     for(size_t i=1;i<o.samples.size();++i)if(o.samples[i].utcSeconds<=o.samples[i-1].utcSeconds)throw std::invalid_argument("Samples must have increasing timestamps");
-    o.instance=revision_+1;const auto id=o.id;objects_.emplace(id,std::move(o));++revision_;
+    o.instance=revision_+1;const auto id=o.id;objects_.insert_or_assign(id,std::move(o));++revision_;
 }
 void Scene::createLayer(Layer layer){
     if(!validObjectId(layer.id)||layer.name.empty()||layer.name.size()>256||layer.source.size()>512||!layer.data||layer.data->positions.empty()||layer.data->positions.size()>maxLayerPoints||layer.color>0xffffff||!std::isfinite(layer.widthPixels)||layer.widthPixels<1||layer.widthPixels>32||!std::isfinite(layer.clearanceMeters)||layer.clearanceMeters<0||layer.clearanceMeters>1e6)throw std::invalid_argument("Invalid layer");

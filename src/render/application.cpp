@@ -2187,7 +2187,7 @@ int albert::runRenderer(int argc, char** argv) {
             commands.drain([&](albert::core::Command& command) {
                 std::visit([&](auto& value) {
                     using T=std::decay_t<decltype(value)>;
-                    if constexpr(std::is_same_v<T,albert::core::Create>) registry.create(std::move(value.object));
+                    if constexpr(std::is_same_v<T,albert::core::Create>) registry.create(std::move(value.object),value.replace);
                     else if constexpr(std::is_same_v<T,albert::core::Remove>) {if(registry.get(value.id).builtin)throw std::invalid_argument("Built-in objects cannot be removed");if(focus==value.id)setFocus(targets::Earth);registry.remove(value.id);visualSettings.auxiliary.erase(value.id);}
                     else if constexpr(std::is_same_v<T,albert::core::Visibility>) registry.visible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Append>) registry.samples(value.id,std::move(value.values));
