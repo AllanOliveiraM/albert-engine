@@ -269,12 +269,19 @@ variável) e mostra o veículo na cena:
 ./build/linux/src/rpc/albert_flight_client --body=moon   # Base da Tranquilidade → órbita lunar
 ./build/linux/src/rpc/albert_flight_client --body=mars   # cratera Jezero → órbita de Marte
 ./build/linux/src/rpc/albert_flight_client --apollo11    # Saturn V do Apollo 11 → órbita de estacionamento
+./build/linux/src/rpc/albert_flight_client --starship    # Starship de Starbase: nave em órbita, booster capturado na torre
 ```
 
 O `--apollo11` voa o Saturn V AS-506, montado a partir do relatório de avaliação de voo da NASA, pelo
 programa de voo da época (examples/saturn_v.hpp). A partir do estado real na separação do S-IC, o
 Albert chega ao fim do S-II a 0,3 m/s da velocidade medida e corta o S-IVB 1,9 s depois do voo, numa
 órbita de 186,5 × 183,1 km (Apollo 11: 186,0 × 183,2 km).
+
+O `--starship` voa um Starship montado só com a física genérica, por definições na API (nada dele no núcleo; valores
+públicos aproximados em examples/starship.hpp). A pilha sobe com 33 Raptors e separa a quente aos 151 s, a 77 km. A nave
+segue até uma órbita de 181 × 204 km. O Super Heavy vira outro voo e volta à torre: boostback, descida guiada pelas grid
+fins, queima de pouso em 13 e depois 3 motores e captura nos braços. Ele fica a 0,17 m do eixo da torre, com 42 t de
+sobra. `--follow-booster` leva a câmera para o booster na separação.
 
 Em Ajustes ficam as opções de gráficos, Terra, vista, câmera e som (guardadas entre execuções), e a câmera livre: F liga,
 arrastar olha, W/A/S/D/Espaço/Ctrl voam, com a velocidade pela altura, como no Kerbal Space Program; F ou Esc volta.

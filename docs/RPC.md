@@ -416,6 +416,7 @@ depois propaga uma volta inteira em nove chamadas (~0,1 s de cálculo).
 ./build/linux/src/rpc/albert_flight_client --body=moon   # Tranquilidade → 18 × 85 km (Apollo 11)
 ./build/linux/src/rpc/albert_flight_client --body=mars   # Jezero → ~200 × 250 km, em duas queimas
 ./build/linux/src/rpc/albert_flight_client --apollo11    # Saturn V AS-506 de 39A em 1969-07-16 → ~186 × 183 km
+./build/linux/src/rpc/albert_flight_client --starship    # Starship de Starbase → 181 × 204 km; booster capturado na torre
 ```
 
 O `SATURN_V` (Apollo 11, AS-506) tem cinco estágios: S-IC; S-II com o interestágio de trás e a torre de
@@ -424,6 +425,30 @@ escape; S-II com a torre; S-II; S-IVB. `separate` larga cada um (o interestágio
 do motor central (0,8 no S-IC; 0,7961 no S-II) e a mudança de mistura do S-II (0,5996); atitude por torque
 ideal até 1e10 N m. O `--apollo11` voa o programa de [saturn_v.hpp](../examples/saturn_v.hpp) com os
 eventos do instrument unit e corta o S-IVB quando o semieixo maior chega ao da órbita de estacionamento.
+
+O `--starship` ([starship_flight.hpp](../examples/starship_flight.hpp)) usa só peças genéricas da API, sem preset no
+núcleo.
+
+**Veículos e base**
+- **Veículos:** a pilha e o Super Heavy são `CUSTOM` com `VehicleDefinition` (de [starship.hpp](../examples/starship.hpp)):
+  - 33 motores, dos quais 13 com cardã de 15° a 20°/s;
+  - RCS de 8 propulsores;
+  - grid fins como duas superfícies, com incrementos de momento e arrasto por deflexão;
+  - pinos de captura como `hard_points`.
+- **Torre:** os braços são `structures`, quatro barras de aço amortecidas em pares, formando trilhos. O pino fica no sulco
+  entre as barras.
+
+**Voo**
+1. **Subida:** o programa genérico de subida dirige a pilha pelos cardãs, a 80% de empuxo a partir dos 40 s.
+2. **Separação:** com 450 t no booster, o `spawn` cria o voo `booster`. Os dois voos andam em passo travado, cada um com
+   seus comandos por `index`.
+3. **Boostback e descida:** o `BoosterReturn` fecha o boostback em 3 motores quando o pouso previsto passa na torre. O
+   previsor balístico inclui a queima de pouso. Na descida, as grid fins inclinam o corpo para que a sustentação de
+   escoamento cruzado leve o ponto de pouso à torre.
+4. **Pouso:** a queima de pouso vai até um portão a 80 m/s em 13 motores. A partir daí, 3 motores param o booster 10 m
+   acima dos braços, com o rolamento alinhando os pinos.
+5. **Captura:** o booster desce a 1 m/s. Os motores ficam no mínimo por 1 s enquanto os braços tomam a carga. O teste
+   `starship_mission` voa tudo e verifica a órbita, a captura e o repouso nos braços 30 s depois.
 
 Na Lua o `GENERIC_LUNAR_ASCENT` sobe 50 m e segue pela taxa vertical até 18 km, cortando com
 perilúnio ≥ 15 km e apolúnio ≥ 85 km. Em Marte o `GENERIC_MARS_ASCENT` também é guiado desde a

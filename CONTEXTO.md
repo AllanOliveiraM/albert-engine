@@ -102,8 +102,20 @@ conjunto ativo primal — a FISTA desperdiçava 12% e o primeiro conjunto ativo 
 superfícies (`Table3`), chaves físicas por voo (`PhysicsSettings`, página "Fisica" do menu com padrões em settings.json,
 resolvidas no log), sensores (GNSS, radar, rastreador de estrelas), turbulência de Dryden, começar em voo (`StartState`),
 vários voos por `flight_id` (`Slot` por voo: física, sensores, plano de dados, pacer, keeper, log; ids de cena `flight.<id>`)
-e `spawn` (o estágio separado vira outro voo com log próprio). Nós térmicos (`physics/thermal`, testados) ainda não ligados
-ao voo. Faltam: contato genérico (rodas, água, torre), motores a ar (aviões), térmico no voo, validação contra telemetria.
+e `spawn` (o estágio separado vira outro voo com log próprio), nós térmicos no voo (OVERHEAT), rodas e motores a ar, água
+e estruturas (pontos de captura). Voo completo de Starship em `examples/starship_flight.hpp` (teste `starship_mission`):
+- **Resultado:** separação aos 151 s a 77 km, nave em 181 × 204 km, booster capturado a 0,17 m do eixo com 42 t.
+- **Lições da guiagem:**
+  - a subida precisa dos cardãs; o torque ideal de 2e5 N m não vira a pilha;
+  - em q alto, inclinar o empuxo gera sustentação contrária, então a correção lateral fica com as grid fins e a
+    inclinação é limitada a T/2qSC;
+  - o previsor tem que incluir a queima de pouso;
+  - o laço lateral precisa de 1/4 da banda da atitude, senão o booster orbita a torre;
+  - o sinal do rolamento estava trocado;
+  - braços de cilindro único derrubam o pino: são trilhos de duas barras de 1e8 N/m com ζ ~0,8.
+- **Falta:** validação contra telemetria pública.
+- **Visto em 19/10:** três instâncias do app na MX350 esgotam a memória da GPU, e o wgpu entra em pânico sem tratamento.
+  Rodar no máximo duas.
 **Escopo (18/10/2026):** o Allan adiou o refinamento de Marte (GRAM Suite, atmosfera sazonal e
 termosfera, Viking < 20%) para atualizações futuras; o foco é Terra e Lua. Não puxar itens de Marte.
 Codex com cota só depois das 10:43 (horário local) de 18/10.

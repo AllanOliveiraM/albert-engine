@@ -46,6 +46,7 @@ public:
         const double a=-b.mu/(2*energy);return 2*a-perigee(r,v,b)-2*b.radius;
     }
     Phase phase()const{return phase_;}
+    void upper(const Reading& r){phase_=Phase::upper;h0_=r.height;rise0_=-r.nedVelocity.z;} // Steering from here (an upper stage lit by the client).
     static double perigee(Vec r,Vec v,Body b=earth){ // Above the body's radius (m).
         const double rn=norm(r),energy=dot(v,v)/2-b.mu/rn,h=norm(cross(r,v));
         const double a=-b.mu/(2*energy),e=std::sqrt(std::max(0.,1+2*energy*h*h/(b.mu*b.mu)));return a*(1-e)-b.radius;

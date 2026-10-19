@@ -3,15 +3,19 @@
 // Kennedy LC-39A; Moon: the lunar ascent stage from Tranquility Base; Mars: the Mars ascent
 // vehicle from Jezero crater (two burns, circularizing at a 250 km apoapsis).
 // Usage: albert_flight_client [address] [--fast] [--wire] [--utc=UNIX_SECONDS] [--body=moon|mars] [--apollo11]
-//        [--export-vehicle=launcher|saturn-v|lander|lunar-ascent|mars-ascent] [--definition=FILE.json]
+//        [--export-vehicle=launcher|saturn-v|lander|lunar-ascent|mars-ascent] [--definition=FILE.json] [--starship [--follow-booster]]
 // Defaults: 127.0.0.1:50051, real time, the instant shown by Albert, the Earth. --wire (Earth)
 // flies over the binary data plane at 1 kHz (one exchange per tick) and then coasts to 10 minutes.
 // --apollo11: the Saturn V of Apollo 11 (AS-506) from LC-39A on 1969-07-16 by its flight program (saturn_v.hpp).
 // --export-vehicle prints a preset as a vehicle definition in JSON (to edit); --definition flies such a file from the Earth's
 // pad with the launcher's guidance (two stages, as the generic launcher).
+// --starship: a Starship-class flight from Starbase, the ship to orbit and the booster back to a catch on the tower's arms
+// (starship_flight.hpp); --follow-booster keeps the camera on the booster from staging.
 #include "albert/v1/engine.grpc.pb.h"
 #include "gravity_turn.hpp"
 #include "saturn_v.hpp"
+#include "flight_api.hpp"
+#include "starship_flight.hpp"
 #include "wire.hpp"
 #include <grpcpp/grpcpp.h>
 #include <google/protobuf/util/json_util.h>
@@ -25,17 +29,7 @@
 #include <string>
 #include <thread>
 namespace api=albert::v1;namespace ex=albert::example;
-void check(const grpc::Status& s){if(!s.ok())throw std::runtime_error(s.error_message());}
-ex::Vec vec(const api::Vector3& v){return{v.x(),v.y(),v.z()};}
-ex::Reading reading(const api::FlightSample& s){
-    ex::Reading r;r.elapsed=s.elapsed_seconds();r.height=s.geodetic().height_meters();r.nedVelocity=vec(s.velocity_ned_meters_per_second());
-    const auto& q=s.attitude_ned();r.qw=q.w();r.qx=q.x();r.qy=q.y();r.qz=q.z();
-    const auto& a=s.attitude();r.iw=a.w();r.ix=a.x();r.iy=a.y();r.iz=a.z();r.mass=s.mass_kilograms();
-    r.fixedPosition=vec(s.position_ecef_meters());r.fixedVelocity=vec(s.velocity_ecef_meters_per_second());r.contact=s.leg_contact();
-    r.rate=vec(s.angular_rate_radians_per_second());r.specificForce=vec(s.specific_force_meters_per_second2());
-    r.position=vec(s.position_meters());r.velocity=vec(s.velocity_meters_per_second());
-    r.stage=static_cast<int>(s.stage());r.stages=static_cast<int>(s.stages());r.burning=s.burning();r.clamped=s.clamped();r.propellant=s.propellant_kilograms();return r;
-}
+using ex::check;using ex::vec;using ex::reading;
 // Apollo 11's Saturn V from Launch Complex 39A at 1969-07-16 13:32:00 UTC to the parking orbit, by its flight program.
 int apollo11(api::FlightService::Stub& flight,bool fast){
     api::CreateFlightRequest create;create.set_vehicle(api::SATURN_V);create.set_focus_camera(true);create.set_heading_degrees(90);
@@ -66,8 +60,8 @@ int apollo11(api::FlightService::Stub& flight,bool fast){
     return 0;
 }
 int main(int argc,char** argv){try{
-    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth",exported,definition;bool fast=false,binary=false,apollo=false;double utc=0;bool chosen=false;
-    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a=="--apollo11")apollo=true;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
+    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth",exported,definition;bool fast=false,binary=false,apollo=false,starship=false,follow=false;double utc=0;bool chosen=false;
+    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a=="--apollo11")apollo=true;else if(a=="--starship")starship=true;else if(a=="--follow-booster")follow=true;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
         else if(a.rfind("--body=",0)==0)world=a.substr(7);else if(a.rfind("--export-vehicle=",0)==0)exported=a.substr(17);else if(a.rfind("--definition=",0)==0)definition=a.substr(13);else address=a;}
     if(world!="earth"&&world!="moon"&&world!="mars")throw std::invalid_argument("--body: earth, moon or mars");
     if(binary&&world!="earth")throw std::invalid_argument("--wire flies the Earth case");
@@ -75,6 +69,8 @@ int main(int argc,char** argv){try{
     if(!channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(30)))throw std::runtime_error("Abra AlbertEngine --rpc antes de executar o exemplo");
     auto flight=api::FlightService::NewStub(channel);
     if(apollo)return apollo11(*flight,fast);
+    if(starship){auto camera=api::CameraService::NewStub(channel); // --follow-booster: the camera on the booster from staging.
+        ex::starship::mission(*flight,fast,follow?std::function<void()>([&]{grpc::ClientContext c;api::FocusRequest f;f.set_id("flight.booster");api::Applied a;check(camera->Focus(&c,f,&a));}):std::function<void()>());return 0;}
     if(!exported.empty()){ // A preset as JSON, to edit and fly with --definition.
         const std::map<std::string,api::Vehicle> presets{{"launcher",api::GENERIC_LAUNCHER},{"saturn-v",api::SATURN_V},{"lander",api::GENERIC_LANDER},{"lunar-ascent",api::GENERIC_LUNAR_ASCENT},{"mars-ascent",api::GENERIC_MARS_ASCENT}};
         const auto kind=presets.find(exported);if(kind==presets.end())throw std::invalid_argument("--export-vehicle: launcher, saturn-v, lander, lunar-ascent or mars-ascent");
