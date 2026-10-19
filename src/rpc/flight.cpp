@@ -15,7 +15,9 @@
 #include <condition_variable>
 #include <deque>
 #include <thread>
+#include <cctype>
 #include <cstring>
+#include <map>
 #include <cmath>
 #include <mutex>
 #include <optional>
@@ -23,7 +25,7 @@
 namespace albert::rpc {
 namespace {
 namespace api=::albert::v1;namespace ph=physics;
-constexpr double deg=3.14159265358979323846/180;constexpr const char* objectId="flight";
+constexpr double deg=3.14159265358979323846/180;
 void put(ph::V3 v,api::Vector3* o){o->set_x(v.x);o->set_y(v.y);o->set_z(v.z);}
 void put(ph::Q q,api::Quaternion* o){o->set_x(q.x);o->set_y(q.y);o->set_z(q.z);o->set_w(q.w);}
 bool finite(double v){return std::isfinite(v);}
@@ -154,9 +156,11 @@ Prepared prepare(const api::CreateFlightRequest& r,double utc){
     return p;
 }
 }
-struct FlightServices::Impl {
+// One flight (FlightServices keeps one per id): its physics, sensors, scene object, data plane, real-time pacer and log.
+struct Slot {
+    using Sound=FlightServices::Sound;
     struct Command {std::uint32_t kind;double a=0,b=0,c=0;};
-    core::Bridge& bridge;AirSources sources;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
+    core::Bridge& bridge;AirSources sources;std::string name,sceneId;std::atomic<std::shared_ptr<const Sound>>& heard;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
     // Navigation sensors, each measuring at the end of the step that completes its period.
     std::optional<ph::Gnss> gnss;std::optional<ph::RadarAltimeter> radar;std::optional<ph::StarTracker> tracker;
     ph::Gnss::Reading gnssReading;ph::RadarAltimeter::Reading radarReading;ph::StarTracker::Reading trackerReading;double gnssLast=0,radarLast=0,trackerLast=0;
@@ -188,12 +192,25 @@ struct FlightServices::Impl {
     // the camera and holds the clock at the flight's instant.
     bool atInstant()const{const auto snap=bridge.snapshot();return snap&&std::abs(snap->utcSeconds-ph::utcFromTt(flight->state().time))<1;}
     void stopKeeper(){{std::lock_guard l(keeperLock);keeperStop=true;}keeperWake.notify_all();if(keeper.joinable())keeper.join();}
-    Impl(core::Bridge& b,AirSources s):bridge(b),sources(std::move(s)){
-        if(!sources.weather)sources.weather=[](double lat,double lon,double utc){auto d=providers::gfs().fetch(lat,lon,utc);return LiveAir{d.model,std::move(d.grib)};};
-        if(!sources.upper)sources.upper=[](double utc){UpperAir a;try{a.model=providers::spaceWeather().msis(utc,&a.days);}catch(const std::exception&){a={};}return a;};
-        if(!sources.gravity)sources.gravity=[](ph::Center c,int degree){return providers::gravityModels().load(c,degree);};
-        if(!sources.relief)sources.relief=[](ph::Center c,double lat,double lon){DownloadProgress p;return providers::planetaryRelief().height(c,lat,lon,p);};
+    Slot(core::Bridge& b,AirSources s,std::string id,std::atomic<std::shared_ptr<const Sound>>& sound)
+        :bridge(b),sources(std::move(s)),name(std::move(id)),sceneId(name=="flight"?name:"flight."+name),heard(sound){
+        data=std::make_unique<wire::Server>([this](const wire::Request& q,wire::Response& r){
+            std::vector<Command> commands; // Fixed order: fail, cutoff, separate, release, ignite, throttle, gimbal, torque.
+            const std::uint32_t engine=std::min<std::uint32_t>(q.engine,0xffff)<<16; // Out of range: refused by the flight.
+            for(const std::uint32_t k:{wire::fail,wire::cutoff,wire::separate,wire::release,wire::ignite})if(q.commands&k)commands.push_back({k==wire::separate||k==wire::release?k:k|engine});
+            if(q.commands&wire::throttle)commands.push_back({wire::throttle|engine,q.throttleValue});
+            if(q.commands&wire::gimbal)commands.push_back({wire::gimbal|engine,q.gimbalPitch,q.gimbalYaw});
+            if(q.commands&wire::torque)commands.push_back({wire::torque,q.torqueValue[0],q.torqueValue[1],q.torqueValue[2]});
+            std::lock_guard lock(mutex);
+            if(!flight){r=wire::Response{};r.status=wire::noFlight;return true;}
+            if(pacing){auto& rt=realtime;rt.queue.push_back({tick+rt.actuator,std::move(commands)});rt.command=std::chrono::steady_clock::now();rt.policyApplied=false;return false;}
+            const auto st=run(commands,q.ticks,[]{return false;});fill(r);
+            r.status=st.ok()?wire::ok:st.error_code()==grpc::StatusCode::INVALID_ARGUMENT?wire::invalid:wire::precondition;
+            return true;
+        });
+        keeper=std::thread([this]{keep();}); // After the data plane, whose constructor may throw.
     }
+    ~Slot(){stopPacing();stopKeeper();data.reset();}
     // Replay log: the creation and every committed step (u32 ticks, u32 count, then per command u32 kind and three doubles).
     api::FlightLog log;std::string record;
     // Real time: the pacing thread, its settings, delayed commands and samples.
@@ -259,30 +276,29 @@ struct FlightServices::Impl {
     }
     core::Object object()const{
         const auto& v=flight->vehicle();const double length=v.stages[flight->state().stage].length;
-        core::Object o;o.id=objectId;o.name=v.name;o.source="Albert flight physics";o.appearance={core::Shape::Cylinder,{v.diameter,length,v.diameter},0xe8e8e8};
+        core::Object o;o.id=sceneId;o.name=name=="flight"?v.name:v.name+" ("+name+")";o.source="Albert flight physics";o.appearance={core::Shape::Cylinder,{v.diameter,length,v.diameter},0xe8e8e8};
         o.radiusMeters=length/2;o.defaultDistanceMeters=6*length;o.minDistanceMeters=length;o.samples.push_back(scene());return o;
     }
     void publish(bool force){
         const auto now=std::chrono::steady_clock::now();
         if(!force&&now-published<std::chrono::milliseconds(33))return;
         published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
-        sound.store(center==ph::Center::earth?std::make_shared<const Sound>(heard()):nullptr); // Read by the frame loop without the lock.
+        heard.store(center==ph::Center::earth?std::make_shared<const Sound>(heardSound()):nullptr); // Read by the frame loop without the lock.
         // The stack got shorter, or the same instant again (the keeper; appending would be refused as
         // out of order): replace the cylinder, keeping the camera on it.
         if(flight->state().stage!=shown||s.utcSeconds<=publishedUtc){
-            const auto snap=bridge.snapshot();const bool followed=snap&&snap->camera.target==objectId;
-            (void)bridge.submit(core::Remove{objectId});
+            const auto snap=bridge.snapshot();const bool followed=snap&&snap->camera.target==sceneId;
+            (void)bridge.submit(core::Remove{sceneId});
             if(wait(bridge.submit(core::Create{object()})).code!=core::Code::Ok){shown=-1;return;} // Retried on the next publication.
-            shown=flight->state().stage;if(followed)(void)bridge.submit(core::Focus{objectId,false});
-        }else (void)bridge.submit(core::Append{objectId,{s}});
+            shown=flight->state().stage;if(followed)(void)bridge.submit(core::Focus{sceneId,false});
+        }else (void)bridge.submit(core::Append{sceneId,{s}});
         publishedUtc=s.utcSeconds;publishedOrigin=at;
         (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),{},false,true});
         (void)bridge.submit(telemetry());
     }
     // The flight as a sound source (see FlightServices::sound); published with the scene, read without the mutex (the
     // frame loop must not wait on a step that waits on the frame loop).
-    std::atomic<std::shared_ptr<const Sound>> sound;
-    Sound heard()const{
+    Sound heardSound()const{
         const ph::Sample x=flight->sample();const auto& st=flight->vehicle().stages[flight->state().stage];
         Sound s;s.utc=ph::utcFromTt(flight->state().time);s.planet=flight->environment().planet;s.air=flight->environment().air;auto& e=s.emission;
         e.time=s.utc;e.position=x.fixedPosition;e.velocity=x.fixedVelocity;
@@ -299,7 +315,6 @@ struct FlightServices::Impl {
     grpc::Status create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
         std::vector<std::string> grib,std::vector<ph::SpaceWeatherDay> days,providers::GravityModel gravity,const std::function<bool()>& cancelled,api::FlightSample* out);
     ph::Center center=ph::Center::earth;unsigned degree=0;api::PhysicsSettings physics; // The flight's models, resolved.
-    std::mutex defaultsLock;api::PhysicsSettings defaults;                        // Albert's (the Física menu), for unset fields.
     std::string models()const{ // The models in words, for the app's Física page.
         std::string on,off;auto add=[&](bool x,const char* name){std::string& to=x?on:off;to+=to.empty()?"":", ";to+=name;};
         std::string g=degree==0?"gravidade de massa pontual":"gravidade "+std::to_string(degree)+"x"+std::to_string(degree);on=g;
@@ -378,7 +393,7 @@ struct FlightServices::Impl {
          for(std::size_t i=0;i<fs.size();++i){auto* x=o->add_surfaces();x->set_name(fs[i].name);x->set_deflection_radians(flight->surfaces()[i].deflection);x->set_command_radians(flight->surfaces()[i].target);}
          for(double u:flight->thrusters())o->add_thruster_duty(u);put(x.rcsForce,o->mutable_thruster_force_newtons());put(x.rcsMoment,o->mutable_thruster_moment_newton_meters());}
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
-        *o->mutable_physics()=physics;
+        *o->mutable_physics()=physics;o->set_flight_id(name);
         if(gnss){auto* g=o->mutable_gnss();g->set_valid(gnssReading.valid);g->set_elapsed_seconds(gnssReading.time);put(gnssReading.position,g->mutable_position_ecef_meters());put(gnssReading.velocity,g->mutable_velocity_ecef_meters_per_second());}
         if(radar){auto* g=o->mutable_radar_altimeter();g->set_valid(radarReading.valid);g->set_elapsed_seconds(radarReading.time);g->set_range_meters(radarReading.range);}
         if(tracker){auto* g=o->mutable_star_tracker();g->set_valid(trackerReading.valid);g->set_elapsed_seconds(trackerReading.time);put(trackerReading.attitude,g->mutable_attitude());}
@@ -387,25 +402,29 @@ struct FlightServices::Impl {
         put(reading.deltaVelocity,o->mutable_delta_velocity_meters_per_second());put(reading.deltaAngle,o->mutable_delta_angle_radians());o->set_measured_static_pressure_pascals(reading.pressure);
     }
 };
-FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(std::make_unique<Impl>(bridge,std::move(sources))){
-    impl_->data=std::make_unique<wire::Server>([this](const wire::Request& q,wire::Response& r){
-        std::vector<Impl::Command> commands; // Fixed order: fail, cutoff, separate, release, ignite, throttle, gimbal, torque.
-        const std::uint32_t engine=std::min<std::uint32_t>(q.engine,0xffff)<<16; // Out of range: refused by the flight.
-        for(const std::uint32_t k:{wire::fail,wire::cutoff,wire::separate,wire::release,wire::ignite})if(q.commands&k)commands.push_back({k==wire::separate||k==wire::release?k:k|engine});
-        if(q.commands&wire::throttle)commands.push_back({wire::throttle|engine,q.throttleValue});
-        if(q.commands&wire::gimbal)commands.push_back({wire::gimbal|engine,q.gimbalPitch,q.gimbalYaw});
-        if(q.commands&wire::torque)commands.push_back({wire::torque,q.torqueValue[0],q.torqueValue[1],q.torqueValue[2]});
-        std::lock_guard lock(impl_->mutex);
-        if(!impl_->flight){r=wire::Response{};r.status=wire::noFlight;return true;}
-        if(impl_->pacing){auto& rt=impl_->realtime;rt.queue.push_back({impl_->tick+rt.actuator,std::move(commands)});rt.command=std::chrono::steady_clock::now();rt.policyApplied=false;return false;}
-        const auto s=impl_->run(commands,q.ticks,[]{return false;});impl_->fill(r);
-        r.status=s.ok()?wire::ok:s.error_code()==grpc::StatusCode::INVALID_ARGUMENT?wire::invalid:wire::precondition;
-        return true;
-    });
-    impl_->keeper=std::thread([i=impl_.get()]{i->keep();}); // After the data plane, whose constructor may throw.
+struct FlightServices::Impl {
+    core::Bridge& bridge;AirSources sources;std::mutex lock;std::map<std::string,std::shared_ptr<Slot>> slots;
+    std::mutex defaultsLock;api::PhysicsSettings defaults; // Albert's (the Fisica page), for unset switches.
+    std::atomic<std::shared_ptr<const Sound>> sound;       // The flight last published on the Earth (the app plays one).
+    Impl(core::Bridge& b,AirSources s):bridge(b),sources(std::move(s)){
+        if(!sources.weather)sources.weather=[](double lat,double lon,double utc){auto d=providers::gfs().fetch(lat,lon,utc);return LiveAir{d.model,std::move(d.grib)};};
+        if(!sources.upper)sources.upper=[](double utc){UpperAir a;try{a.model=providers::spaceWeather().msis(utc,&a.days);}catch(const std::exception&){a={};}return a;};
+        if(!sources.gravity)sources.gravity=[](ph::Center c,int degree){return providers::gravityModels().load(c,degree);};
+        if(!sources.relief)sources.relief=[](ph::Center c,double lat,double lon){DownloadProgress p;return providers::planetaryRelief().height(c,lat,lon,p);};
+    }
+    std::shared_ptr<Slot> find(const std::string& id){std::lock_guard l(lock);const auto it=slots.find(id);return it==slots.end()?nullptr:it->second;}
+    std::shared_ptr<Slot> make(const std::string& id){std::lock_guard l(lock);auto& x=slots[id];if(!x)x=std::make_shared<Slot>(bridge,sources,id,sound);return x;}
+};
+namespace {
+std::string flightName(const std::string& id){ // Empty: the default flight; else letters, digits, _ and -.
+    if(id.empty())return "flight";
+    if(id.size()>32||!std::all_of(id.begin(),id.end(),[](char c){return std::isalnum(static_cast<unsigned char>(c))||c=='_'||c=='-';}))throw std::invalid_argument("A flight id is 1-32 letters, digits, _ or -");
+    return id;
 }
-FlightServices::~FlightServices(){impl_->stopPacing();impl_->stopKeeper();impl_->data.reset();}
-grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
+}
+FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(std::make_unique<Impl>(bridge,std::move(sources))){}
+FlightServices::~FlightServices(){std::map<std::string,std::shared_ptr<Slot>> gone;{std::lock_guard l(impl_->lock);gone.swap(impl_->slots);}}
+grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
     std::vector<std::string> grib,std::vector<ph::SpaceWeatherDay> days,providers::GravityModel gravity,const std::function<bool()>& cancelled,api::FlightSample* out){
     const auto& site=r.site();const ph::Tt t=ph::ttFromUtc(p.utc),stepNs=static_cast<ph::Tt>(std::llround(p.seconds*1e9));
     ph::Environment env=ph::environment(p.body,gravity.gravity,static_cast<int>(p.degree));env.ground=site.height_meters();
@@ -467,16 +486,18 @@ grpc::Status FlightServices::Impl::create(const api::CreateFlightRequest& r,cons
     for(auto& b:grib)log.add_gfs(std::move(b));
     log.set_gravity(std::move(gravity.table));
     for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}
-    shown=0;(void)wait(bridge.submit(core::Remove{objectId}));
+    shown=0;(void)wait(bridge.submit(core::Remove{sceneId}));
     if(auto s=failed(wait(bridge.submit(core::Create{object()})));!s.ok())return s;
     publishedOrigin=origin(flight->state().time).position;publishedUtc=ph::utcFromTt(flight->state().time); // The keeper's reference.
     if(auto s=failed(wait(bridge.submit(core::SetTime{ph::utcFromTt(t),0.,false})));!s.ok())return s;
-    if(r.focus_camera())(void)wait(bridge.submit(core::Focus{objectId,true}));
+    if(r.focus_camera())(void)wait(bridge.submit(core::Focus{sceneId,true}));
     (void)bridge.submit(telemetry()); // The app's flight panel and Fisica page, before the first step.
     published=std::chrono::steady_clock::now();fill(out);return grpc::Status::OK;
 }
 grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api::CreateFlightRequest* request,api::FlightSample* out){
-    api::CreateFlightRequest resolved=*request;const api::CreateFlightRequest* r=&resolved;
+    api::CreateFlightRequest resolved=*request;const api::CreateFlightRequest* r=&resolved;std::string id;
+    try{id=flightName(request->flight_id());}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    resolved.set_flight_id(id);
     { // Unset physics switches from Albert's defaults, recorded: the log replays without them.
         std::lock_guard l(impl_->defaultsLock);const auto& d=impl_->defaults;auto* m=resolved.mutable_physics();auto pick=[](bool has,bool value){return !has||value;};
         if(!m->has_third_bodies())m->set_third_bodies(pick(d.has_third_bodies(),d.third_bodies()));if(!m->has_relativity())m->set_relativity(pick(d.has_relativity(),d.relativity()));
@@ -514,7 +535,7 @@ grpc::Status FlightServices::CreateFlight(grpc::ServerContext* context,const api
         }
         atmosphere=(air?air->source():atmosphere)+unavailable;
     }
-    return impl_->create(*r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},out);
+    return impl_->make(id)->create(*r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},out);
 }
 grpc::Status FlightServices::GetVehicle(grpc::ServerContext*,const api::VehicleRequest* r,api::VehicleDefinition* out){
     try{put(preset(r->vehicle(),r->has_payload_kilograms()?std::optional(r->payload_kilograms()):std::nullopt),out);return grpc::Status::OK;}
@@ -522,11 +543,13 @@ grpc::Status FlightServices::GetVehicle(grpc::ServerContext*,const api::VehicleR
 }
 void FlightServices::physicsDefaults(const api::PhysicsSettings& d){std::lock_guard l(impl_->defaultsLock);impl_->defaults=d;}
 std::optional<FlightServices::Sound> FlightServices::sound()const{const auto s=impl_->sound.load();return s?std::optional<Sound>(*s):std::nullopt;}
-grpc::Status FlightServices::ExportFlight(grpc::ServerContext*,const api::Empty*,grpc::ServerWriter<api::FlightLogChunk>* writer){
-    std::string bytes;
-    {std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
-        if(impl_->truncated)return{grpc::StatusCode::FAILED_PRECONDITION,"Flight log exceeded 256 MiB; replay unavailable"};
-        api::FlightLog log=impl_->log;log.set_steps(impl_->record);log.set_state_hash(impl_->flight->hash());log.set_tick(impl_->tick);bytes=log.SerializeAsString();}
+grpc::Status FlightServices::ExportFlight(grpc::ServerContext*,const api::FlightRequest* q,grpc::ServerWriter<api::FlightLogChunk>* writer){
+    std::string bytes;std::shared_ptr<Slot> slot;
+    try{slot=impl_->find(flightName(q->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+    {std::lock_guard lock(slot->mutex);if(!slot->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+        if(slot->truncated)return{grpc::StatusCode::FAILED_PRECONDITION,"Flight log exceeded 256 MiB; replay unavailable"};
+        api::FlightLog log=slot->log;log.set_steps(slot->record);log.set_state_hash(slot->flight->hash());log.set_tick(slot->tick);bytes=log.SerializeAsString();}
     for(std::size_t at=0;at<bytes.size();at+=1u<<19){api::FlightLogChunk c;c.set_data(bytes.substr(at,1u<<19));if(!writer->Write(c))return{grpc::StatusCode::CANCELLED,"Client stopped reading"};} // 512 KiB: below the 1 MiB message limit.
     return grpc::Status::OK;
 }
@@ -534,7 +557,8 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
     std::string bytes;api::FlightLogChunk c;
     while(reader->Read(&c)){bytes+=c.data();if(bytes.size()>(512u<<20))return{grpc::StatusCode::RESOURCE_EXHAUSTED,"Flight log above 512 MiB"};}
     api::FlightLog log;if(!log.ParseFromString(bytes))return{grpc::StatusCode::INVALID_ARGUMENT,"Malformed flight log"};
-    const auto& r=log.request();Prepared p;
+    const auto& r=log.request();Prepared p;std::shared_ptr<Slot> slot;
+    try{slot=impl_->make(flightName(r.flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     try{p=prepare(r,r.utc_unix_seconds());}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     // Air from the embedded inputs only: never the network.
     std::shared_ptr<const physics::AirModel> air;std::vector<ph::SpaceWeatherDay> days;std::vector<std::string> grib(log.gfs().begin(),log.gfs().end());
@@ -552,22 +576,22 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
     const std::string expected=p.body!=ph::Center::earth?climatology(p.body):air?air->source():"U.S. Standard Atmosphere 1976";
     if(log.atmosphere().rfind(expected,0)!=0)return{grpc::StatusCode::FAILED_PRECONDITION,"The log does not carry the air data it used ("+log.atmosphere()+")"};
     api::FlightSample created;
-    if(auto s=impl_->create(r,p,std::move(air),log.atmosphere(),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},&created);!s.ok())return s;
+    if(auto s=slot->create(r,p,std::move(air),log.atmosphere(),std::move(grib),std::move(days),std::move(gravity),[&]{return context->IsCancelled();},&created);!s.ok())return s;
     const std::string& steps=log.steps();
     for(std::size_t at=0;at<steps.size();){
         auto get=[&](void* d,std::size_t n){if(at+n>steps.size())throw std::invalid_argument("Truncated flight log");std::memcpy(d,steps.data()+at,n);at+=n;};
-        std::uint32_t repeat=0,ticks=0,count=0;std::vector<Impl::Command> commands;
+        std::uint32_t repeat=0,ticks=0,count=0;std::vector<Slot::Command> commands;
         try{get(&repeat,4);get(&ticks,4);get(&count,4);if(count>64||repeat==0)throw std::invalid_argument("Malformed flight log step");commands.resize(count);for(auto& k:commands){get(&k.kind,4);get(&k.a,8);get(&k.b,8);get(&k.c,8);}}
         catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
-        for(std::uint32_t i=0;i<repeat;++i){std::lock_guard lock(impl_->mutex);
-            if(auto s=impl_->run(commands,ticks,[&]{return context->IsCancelled();});!s.ok())return s;}
+        for(std::uint32_t i=0;i<repeat;++i){std::lock_guard lock(slot->mutex);
+            if(auto s=slot->run(commands,ticks,[&]{return context->IsCancelled();});!s.ok())return s;}
     }
-    std::lock_guard lock(impl_->mutex);impl_->fill(out);
+    std::lock_guard lock(slot->mutex);slot->fill(out);
     if(out->state_hash()!=log.state_hash()||out->tick()!=log.tick())return{grpc::StatusCode::DATA_LOSS,"Replay diverged from the recorded state"};
     return grpc::Status::OK;
 }
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
-    std::vector<Impl::Command> commands;
+    std::vector<Slot::Command> commands;
     for(const auto& c:r->commands()){
         if(c.index()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine, thruster or surface"};
         const std::uint32_t e=c.index()<<16; // In the kind's high bits (the replay log keeps the record format).
@@ -585,29 +609,44 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
         default:return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
         }
     }
-    std::lock_guard lock(impl_->mutex);
-    if(impl_->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
-    if(auto s=impl_->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok())return s;
-    impl_->fill(out);return grpc::Status::OK;
+    std::shared_ptr<Slot> slot;try{slot=impl_->find(flightName(r->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+    std::lock_guard lock(slot->mutex);
+    if(slot->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
+    if(auto s=slot->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok())return s;
+    slot->fill(out);return grpc::Status::OK;
 }
-grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::Empty*,api::FlightSample* out){
-    std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};impl_->fill(out);return grpc::Status::OK;
+grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::FlightRequest* q,api::FlightSample* out){
+    std::shared_ptr<Slot> slot;try{slot=impl_->find(flightName(q->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+    std::lock_guard lock(slot->mutex);if(!slot->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};slot->fill(out);return grpc::Status::OK;
 }
-grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::Empty*,api::Applied* out){
-    impl_->stopPacing();std::lock_guard lock(impl_->mutex);if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
-    impl_->flight.reset();impl_->sound.store(nullptr);(void)impl_->bridge.submit(core::FlightTelemetry{});const auto reply=wait(impl_->bridge.submit(core::Remove{objectId}));out->set_revision(reply.revision);
+grpc::Status FlightServices::ListFlights(grpc::ServerContext*,const api::Empty*,api::FlightList* out){
+    std::lock_guard l(impl_->lock);for(const auto& [id,slot]:impl_->slots)out->add_flight_ids(id);return grpc::Status::OK;
+}
+grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::FlightRequest* q,api::Applied* out){
+    std::shared_ptr<Slot> slot;std::string id;try{id=flightName(q->flight_id());slot=impl_->find(id);}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+    slot->stopPacing();core::Reply reply;
+    {std::lock_guard lock(slot->mutex);if(!slot->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+        slot->flight.reset();impl_->sound.store(nullptr);(void)impl_->bridge.submit(core::FlightTelemetry{});reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));out->set_revision(reply.revision);}
+    {std::lock_guard l(impl_->lock);if(const auto it=impl_->slots.find(id);it!=impl_->slots.end()&&it->second==slot)impl_->slots.erase(it);} // Its threads stop with the last reference.
     return reply.code==core::Code::Ok||reply.code==core::Code::NotFound?grpc::Status::OK:grpc::Status{grpc::StatusCode::UNAVAILABLE,reply.message};
 }
 grpc::Status FlightServices::StartRealtime(grpc::ServerContext*,const api::RealtimeRequest* r,api::RealtimeStatus* out){
     const double rate=r->rate()==0?1.:r->rate();
     if(!(rate>0&&rate<=100)||!(r->command_timeout_seconds()>=0)||r->sensor_delay_ticks()>100000||r->actuator_delay_ticks()>100000)return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid real-time settings"};
-    std::lock_guard control(impl_->control);impl_->stopLocked();std::lock_guard lock(impl_->mutex);
-    if(!impl_->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
-    auto& rt=impl_->realtime;rt=Impl::Realtime{};rt.rate=rate;rt.sensor=r->sensor_delay_ticks();rt.actuator=r->actuator_delay_ticks();rt.every=r->sample_every_ticks()?r->sample_every_ticks():10;
+    std::shared_ptr<Slot> slot;try{slot=impl_->find(flightName(r->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+    std::lock_guard control(slot->control);slot->stopLocked();std::lock_guard lock(slot->mutex);
+    if(!slot->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+    auto& rt=slot->realtime;rt=Slot::Realtime{};rt.rate=rate;rt.sensor=r->sensor_delay_ticks();rt.actuator=r->actuator_delay_ticks();rt.every=r->sample_every_ticks()?r->sample_every_ticks():10;
     rt.timeout=r->command_timeout_seconds();rt.missing=r->missing();rt.command=std::chrono::steady_clock::now();
-    impl_->pacing=true;impl_->pacer=std::thread([this]{impl_->pace();});impl_->status(out);return grpc::Status::OK;
+    slot->pacing=true;slot->pacer=std::thread([s=slot.get()]{s->pace();});slot->status(out);return grpc::Status::OK;
 }
-grpc::Status FlightServices::StopRealtime(grpc::ServerContext*,const api::Empty*,api::RealtimeStatus* out){
-    impl_->stopPacing();std::lock_guard lock(impl_->mutex);impl_->status(out);return grpc::Status::OK;
+grpc::Status FlightServices::StopRealtime(grpc::ServerContext*,const api::FlightRequest* q,api::RealtimeStatus* out){
+    std::shared_ptr<Slot> slot;try{slot=impl_->find(flightName(q->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
+    if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
+    slot->stopPacing();std::lock_guard lock(slot->mutex);slot->status(out);return grpc::Status::OK;
 }
 }

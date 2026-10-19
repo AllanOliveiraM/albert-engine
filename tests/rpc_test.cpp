@@ -355,6 +355,18 @@ int main(int argc,char** argv){try{
                     require(flight->Step(&c,q,&x).ok()&&x.thruster_duty(0)==0&&x.thruster_duty(1)==.25,"Thrusters set directly");}
             }
         }
+        { // Two flights at once: the default and "booster", each its own scene object, data port and steps; ended apart.
+            api::CreateFlightRequest b=create;b.set_flight_id("booster");b.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);api::FlightSample one,two;
+            {grpc::ClientContext c;const auto st=flight->CreateFlight(&c,b,&two);if(!st.ok())std::cerr<<st.error_message()<<"\n";require(st.ok()&&two.flight_id()=="booster","A second flight");}
+            {grpc::ClientContext c;require(flight->GetFlight(&c,{},&one).ok()&&one.flight_id()=="flight"&&one.data_port()!=two.data_port(),"Both flights, apart");}
+            {grpc::ClientContext c;api::StepRequest q;q.set_flight_id("booster");q.set_ticks(2000);q.add_commands()->set_ignite(true);require(flight->Step(&c,q,&two).ok()&&two.tick()==2000,"Steps of the second");}
+            {grpc::ClientContext c;api::FlightSample again;require(flight->GetFlight(&c,{},&again).ok()&&again.tick()==one.tick(),"The first untouched");}
+            {const auto snap=bridge.snapshot();require(std::any_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight.booster";})&&std::any_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Both vehicles in the scene");}
+            {grpc::ClientContext c;api::FlightList l;require(flight->ListFlights(&c,{},&l).ok()&&l.flight_ids_size()==2,"Two flights listed");}
+            {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("booster");require(flight->EndFlight(&c,q,&applied).ok(),"End the second");}
+            {grpc::ClientContext c;api::FlightList l;require(flight->ListFlights(&c,{},&l).ok()&&l.flight_ids_size()==1&&l.flight_ids(0)=="flight","One flight left");}
+            {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("no spaces");api::FlightSample x;require(flight->GetFlight(&c,q,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A bad id accepted");}
+        }
         {grpc::ClientContext c;require(flight->EndFlight(&c,{},&applied).ok(),"EndFlight failed");}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         {const auto snap=bridge.snapshot();require(std::none_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Vehicle left in the scene");}

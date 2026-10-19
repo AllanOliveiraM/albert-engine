@@ -309,6 +309,11 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | `thruster_duty` | Ciclo de trabalho (0–1) de um propulsor de RCS, até o próximo comando de torque |
 | `surface_radians` | Deflexão comandada de uma superfície de controle, limitada e alcançada na taxa do atuador |
 
+**Vários voos.** Cada voo tem um `flight_id` (letras, dígitos, `_` e `-`, até 32; vazio: `flight`) em `CreateFlight`,
+`Step`, `GetFlight`, `EndFlight`, `ExportFlight`, `StartRealtime` e `StopRealtime`; criar um id existente o substitui,
+`ListFlights` lista os vivos. Cada um tem a sua física, sensores, porta do plano de dados, tempo real e log, e aparece na
+cena como `flight` (o padrão) ou `flight.<id>`. O relógio simulado segue o voo publicado por último; o som, o último na Terra.
+
 **Começar em voo.** `start` (`StartState`) cria o voo já no ar em vez do pad: sobre o corpo central (`local`: posição
 geodésica, velocidade em relação ao solo em NED, rumo, arfagem e rolagem, taxas do corpo) ou no referencial inercial do voo
 (`inertial`: posição a partir do centro do corpo, velocidade, atitude corpo→inercial, taxas), no estágio e com o propelente

@@ -257,7 +257,12 @@ message CreateFlightRequest {
   SensorSettings sensors=17;            // Beyond the IMU; each when enabled.
   // In flight instead of on the pad (site then only gives the ground's height and the weather's place).
   StartState start=18;
+  // Several flights fly at once, each by its id (letters, digits, _ and -, up to 32; empty: "flight"); creating an existing
+  // one replaces it. The scene shows "flight" as object "flight" and the others as "flight.<id>".
+  string flight_id=19;
 }
+message FlightRequest { string flight_id=1; } // Empty: "flight".
+message FlightList { repeated string flight_ids=1; }
 message StartState {
   oneof where {
     LocalStart local=1;       // Over the central body: geodetic place, velocity relative to the ground, attitude to the local horizon.
@@ -314,7 +319,7 @@ message FlightCommand {
   // 0 for every one of the stage, n for its n-th (the order of FlightSample.engines, thruster_duty and surfaces).
   uint32 index=9;
 }
-message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; } // Up to 600000 ticks.
+message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; } // Up to 600000 ticks.
 message FlightEvent {
   // LIFTOFF: clamp release or the last leg leaving the ground; TOUCHDOWN: CG stop or a first leg down.
   enum Kind { KIND_UNSPECIFIED=0; LIFTOFF=1; DEPLETED=2; TOUCHDOWN=3; }
@@ -353,6 +358,7 @@ message FlightSample {
   PhysicsSettings physics=51;           // The models this flight runs, resolved.
   // The latest measurement of each enabled sensor (valid false: none possible then), timed in elapsed seconds.
   GnssReading gnss=52; RadarAltimeterReading radar_altimeter=53; StarTrackerReading star_tracker=54;
+  string flight_id=55;
 }
 message GnssReading { bool valid=1; double elapsed_seconds=2; Vector3 position_ecef_meters=3; Vector3 velocity_ecef_meters_per_second=4; }
 message RadarAltimeterReading { bool valid=1; double elapsed_seconds=2; double range_meters=3; }
@@ -379,16 +385,18 @@ message RealtimeRequest {
   double rate=1; uint32 sensor_delay_ticks=2; uint32 actuator_delay_ticks=3; double command_timeout_seconds=4;
   enum Missing { HOLD=0; NEUTRAL=1; CUTOFF=2; } // NEUTRAL: gimbal and torque to zero; CUTOFF: engine off.
   Missing missing=5; uint32 sample_every_ticks=6;  // Defaults: rate 1, every 10 ticks.
+  string flight_id=7;
 }
 message RealtimeStatus { bool running=1; uint64 tick=2; uint64 late_ticks=3; double worst_lag_seconds=4; uint64 policy_events=5; }
 service FlightService {
   rpc CreateFlight(CreateFlightRequest) returns (FlightSample); // Replaces any current flight.
   rpc GetVehicle(VehicleRequest) returns (VehicleDefinition);   // A preset as a definition (to fly as CUSTOM, edited or not).
   rpc Step(StepRequest) returns (FlightSample);
-  rpc GetFlight(Empty) returns (FlightSample);
-  rpc EndFlight(Empty) returns (Applied);                       // Removes the vehicle from the scene.
-  rpc ExportFlight(Empty) returns (stream FlightLogChunk);
+  rpc GetFlight(FlightRequest) returns (FlightSample);
+  rpc EndFlight(FlightRequest) returns (Applied);               // Removes the vehicle from the scene.
+  rpc ListFlights(Empty) returns (FlightList);
+  rpc ExportFlight(FlightRequest) returns (stream FlightLogChunk);
   rpc ReplayFlight(stream FlightLogChunk) returns (FlightSample); // Becomes the current flight.
   rpc StartRealtime(RealtimeRequest) returns (RealtimeStatus);
-  rpc StopRealtime(Empty) returns (RealtimeStatus);
+  rpc StopRealtime(FlightRequest) returns (RealtimeStatus);
 }
