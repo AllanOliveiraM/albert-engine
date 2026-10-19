@@ -212,10 +212,13 @@ message Gimbal { double pitch_radians=1; double yaw_radians=2; } // + pitch: nos
 message FlightCommand {
   oneof command {
     bool ignite=1; bool cutoff=2; bool separate=3; bool release=4;
-    double throttle=5;                  // Clamped to the stage's deepest throttle and 1.
-    Gimbal gimbal=6;                    // Clamped to the stage's limit.
+    double throttle=5;                  // Clamped to each engine's deepest throttle and 1.
+    Gimbal gimbal=6;                    // Clamped to each engine's limit; reached at its actuators' rate.
     Vector3 torque_newton_meters=7;     // Ideal attitude torque, body axes, clamped per axis.
+    bool fail=8;                        // The engine fails: off, and refuses to ignite (needs an engine).
   }
+  // ignite, cutoff, throttle, gimbal and fail: 0 for every engine of the stage, n for its n-th (FlightSample.engines order).
+  uint32 engine=9;
 }
 message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; } // Up to 600000 ticks.
 message FlightEvent {
@@ -249,7 +252,10 @@ message FlightSample {
   bool leg_contact=43; // A landing leg on the ground (landed: stopped at the CG, vehicles without legs).
   // Convective stagnation-point heating (Sutton-Graves, stage nose radius) and its integral.
   double heat_flux_watts_per_meter2=44; double heat_load_joules_per_meter2=45;
+  repeated EngineSample engines=46;     // The stage's engines (thrust, throttle and gimbal above are the totals and the last commands to all).
 }
+// One engine now: gimbal as moved (rate-limited toward its command); thrust after the ambient pressure.
+message EngineSample { string name=1; bool on=2; bool failed=3; double throttle=4; Gimbal gimbal=5; Gimbal gimbal_command=6; double thrust_newtons=7; }
 // Replay: the creation request (instant resolved), the air inputs (GFS GRIB2 of both hours,
 // space-weather days) and every step with its commands in order. Replaying needs no network
 // and ends with the same state_hash.

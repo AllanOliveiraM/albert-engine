@@ -123,6 +123,15 @@ int main(int argc,char** argv){try{
         {grpc::ClientContext c;api::StepRequest r;r.set_ticks(5);r.add_commands()->set_ignite(true);r.add_commands()->set_throttle(std::nan(""));
             require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"NaN throttle accepted");}
         {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&!s.burning()&&s.tick()==0,"A rejected step changed the flight");}
+        require(s.engines_size()==1&&!s.engines(0).on()&&!s.engines(0).failed(),"The stage's engine in the sample");
+        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->set_ignite(true);k->set_engine(2);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A missing engine accepted");}
+        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->mutable_torque_newton_meters()->set_x(1);k->set_engine(1);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"An engine on a torque accepted");}
+        {grpc::ClientContext c;api::StepRequest r;r.add_commands()->set_fail(true);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Fail without an engine accepted");}
+        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->set_fail(true);k->set_engine(1);r.add_commands()->set_ignite(true);
+            require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Ignition with every engine failed accepted");}
+        {grpc::ClientContext c;api::StepRequest r;auto* k=r.add_commands();k->set_throttle(.8);k->set_engine(1);r.add_commands()->mutable_gimbal()->set_pitch_radians(.01);
+            require(flight->Step(&c,r,&s).ok()&&s.engines(0).throttle()==.8&&s.engines(0).gimbal_command().pitch_radians()==.01&&s.tick()==0,"Engine commands");}
+        {grpc::ClientContext c;api::StepRequest r;r.add_commands()->set_throttle(1);r.add_commands()->mutable_gimbal();require(flight->Step(&c,r,&s).ok()&&s.engines(0).throttle()==1,"Back to full throttle");}
         {grpc::ClientContext c;api::StepRequest r;r.set_ticks(3000);r.add_commands()->set_ignite(true);require(flight->Step(&c,r,&s).ok(),"Step failed");}
         require(s.tick()==3000&&std::abs(s.elapsed_seconds()-3)<1e-9&&!s.clamped()&&s.geodetic().height_meters()>10&&s.events_size()==1&&s.events(0).kind()==api::FlightEvent::LIFTOFF,"Liftoff");
         require(std::abs(s.delta_velocity_meters_per_second().x()-s.measured_specific_force_meters_per_second2().x()*3)<1e-9&&s.measured_static_pressure_pascals()==s.static_pressure_pascals(),"Ideal IMU over the step");

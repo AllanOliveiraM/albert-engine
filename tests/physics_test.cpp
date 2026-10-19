@@ -260,6 +260,33 @@ int main(){try{
         near(inc.angle.y,h0/(1.6*100*std::pow(2000.,1.6))*(std::pow(2000.,1.6)-std::pow(1000.,1.6)),1e-9,"Angle increment");
         require(c.increments().seconds==0,"Increments reset when read");
     }
+    // Engines one by one, in free space: the one-engine shorthand is that engine; a three-engine cluster with its +y engine out
+    // turns the vehicle about z by T·y (cross product of the lever and the thrust) and draws two engines' flow; gimbals reach
+    // their command at their actuators' rate; a sideways engine at the centre of mass pushes without turning.
+    {
+        Environment e;e.planet={0,6378137.,0,0,6378137.,{},0};e.rotation=Rotation::uniform(0);e.atmosphere=false;e.sunMoon=false;e.relativity=false;
+        Stage st;st.name="cluster";st.propellant=500;st.massFull=1500;st.massEmpty=1000;st.cgFull=st.cgEmpty=5;st.inertiaFull=st.inertiaEmpty={300,4000,4000};st.length=10;
+        st.aero.lift=st.aero.drag=st.aero.side=st.aero.roll=st.aero.pitch=st.aero.yaw={{0},{0},{0}};
+        State s;s.position={1e8,0,0};s.propellant=st.propellant;
+        Stage shorthand=st;shorthand.thrust=1e4;shorthand.exhaust=3e3;shorthand.nozzle=9;shorthand.gimbal=.1;
+        Stage explicit_=st;explicit_.engines={{"cluster",{9,0,0},{1,0,0},1e4,3e3,0,1,.1,0}};
+        Flight a(Vehicle{"a",{shorthand},0},e,s),b(Vehicle{"a",{explicit_},0},e,s);
+        for(Flight* f:{&a,&b}){f->ignite();f->gimbal(.05,-.02);Tt t=0;while(t<2*second)t+=f->advance(std::min(second/1000,2*second-t));}
+        require(a.hash()==b.hash(),"The one-engine shorthand is that engine");
+        Stage cluster=st;for(double y:{-1.,0.,1.})cluster.engines.push_back({"e",{9,y,0},{1,0,0},1e4,3e3,0,.4,.2,.1});
+        Flight c(Vehicle{"c",{cluster},0},e,s);c.ignite();c.fail(2);
+        bool refused=false;try{c.ignite(2);}catch(const std::logic_error&){refused=true;}require(refused,"A failed engine stays off");
+        refused=false;try{c.ignite(3);}catch(const std::invalid_argument&){refused=true;}require(refused,"No fourth engine");
+        near(c.massFlow(),2e4/3e3,1e-12,"Flow of the two engines left");near(c.sample().thrustForce.x,2e4,1e-9,"Thrust of the two engines left");
+        c.advance(second/1000);const double jet=c.massFlow()*16; // With jet damping: I dω/dt = T y - Σṁl² ω.
+        near(c.state().rate.z,1e4/jet*(1-std::exp(-jet*1e-3/4000)),1e-14,"Engine out: yaw rate from T y / I");near(c.state().rate.y,0,1e-15,"No pitch");
+        c.gimbal(.15,0,0);for(int i=0;i<1000;++i)c.advance(second/1000);
+        near(c.engines()[0].pitch,.1,1e-12,"Gimbal at its rate (0.1 rad/s)");near(c.engines()[1].pitch,0,0,"Only the commanded engine moves");
+        for(int i=0;i<1000;++i)c.advance(second/1000);near(c.engines()[0].pitch,.15,1e-12,"Gimbal at its command");
+        c.throttle(.5,1);near(c.massFlow(),1.5e4/3e3,1e-12,"Throttle one engine");c.throttle(.1);near(c.engines()[0].throttle,.4,0,"Clamped to its deepest throttle");
+        Stage side=st;side.engines={{"side",{5,0,0},{0,2,0},1e3,3e3,0,1,0,0}};Flight d(Vehicle{"d",{side},0},e,s);d.ignite();
+        near(d.sample().specificForce.y,1e3/1500,1e-12,"A sideways engine pushes along its direction");d.advance(second/100);near(norm(d.state().rate),0,0,"through the centre of mass, without turning");
+    }
     // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
     // against 10 ms steps.
     {

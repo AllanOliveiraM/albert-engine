@@ -299,12 +299,17 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 
 | Comando | Efeito |
 | --- | --- |
-| `ignite`, `cutoff` | Liga/desliga o motor do estágio ativo |
+| `ignite`, `cutoff` | Liga/desliga os motores do estágio ativo |
 | `separate` | Solta o estágio ativo; o CG passa ao conjunto superior |
 | `release` | Solta as garras do pad (também ocorre sozinho quando o empuxo supera o peso) |
-| `throttle` | 0–1, limitado ao mínimo do motor |
-| `gimbal` | Cardã em arfagem/guinada (rad), limitado ao curso do motor |
+| `throttle` | 0–1, limitado ao mínimo de cada motor |
+| `gimbal` | Cardã em arfagem/guinada (rad), limitado ao curso de cada motor e alcançado na taxa dos atuadores |
+| `fail` | O motor falha: apaga e não reacende (exige `engine`) |
 | `torque_newton_meters` | Torque ideal de atitude nos eixos do corpo, limitado por eixo |
+
+`engine` em cada comando escolhe o motor de `ignite`, `cutoff`, `throttle`, `gimbal` e `fail`: 0 para todos os
+motores do estágio, n para o n-ésimo (a ordem de `FlightSample.engines`, que traz de cada um ligado, falho,
+aceleração, cardã movido e comandado e empuxo); nos demais comandos deve ser 0.
 
 A amostra traz sensores ideais no centro de massa (força específica do IMU — zero em
 queda livre, +g no pad —, taxa angular inercial, pressão estática e temperatura do ar),
@@ -319,9 +324,9 @@ segui-lo. `EndFlight` remove o veículo.
 
 **Plano de dados binário.** Para laços de controle de alta taxa, `data_port` na amostra é uma
 porta TCP local (127.0.0.1) com quadros fixos little-endian definidos em
-[flight_wire.hpp](../src/rpc/flight_wire.hpp): um pedido de 64 bytes (bits de comando — corte,
+[flight_wire.hpp](../src/rpc/flight_wire.hpp): um pedido de 64 bytes (bits de comando — falha, corte,
 separação, liberação, ignição, aceleração, cardã, torque, aplicados nessa ordem e de forma
-atômica — e `ticks`) e uma resposta de 376 bytes (IMU medido, pressão, estado verdadeiro, atitude
+atômica —, `ticks` e `engine`, o motor dos comandos de motor: 0 para todos) e uma resposta de 376 bytes (IMU medido, pressão, estado verdadeiro, atitude
 em GCRF e NED, dados de ar, massa, eventos e hash). O mesmo núcleo do `Step` atende os dois
 caminhos; o gRPC fica para criar, consultar e encerrar. Um cliente por vez; `wire::Connection`
 em [wire.hpp](../src/rpc/wire.hpp) é um cliente pronto. Medido: ~30 µs por troca de um tick de

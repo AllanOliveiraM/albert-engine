@@ -21,14 +21,20 @@ struct Aerodynamics {
     Table lift,drag,side,roll,pitch,yaw;
     double rollDamping=0,pitchDamping=0,yawDamping=0;
 };
+// One engine: the centre of its nozzle exit (x m aft of the nose, y right, z down) and the direction it pushes the vehicle at
+// zero gimbal (body axes; normalised); vacuum thrust (N), effective exhaust velocity (m/s), nozzle exit area (m²: thrust
+// falls by the ambient pressure on it); deepest throttle; gimbal limit (rad, pitch about body y, yaw about body z) and the
+// actuators' rate (rad/s, 0: instant).
+struct Engine {std::string name;V3 position,direction{1,0,0};double thrust=0,exhaust=0,exitArea=0,minThrottle=1,gimbal=0,gimbalRate=0;};
 // Mass properties of the whole stack while this stage is the lowest, linear in its
 // remaining propellant between full and empty. Positions are metres aft of the nose.
 struct Stage {
     std::string name;
     double propellant=0,massFull=0,massEmpty=0,cgFull=0,cgEmpty=0,reference=0;
     V3 inertiaFull,inertiaEmpty;                      // Principal moments about the CG (kg m²).
-    double thrust=0,exhaust=0,exitArea=0;             // Vacuum N, effective exhaust m/s, nozzle exit m².
-    double nozzle=0,gimbal=0,minThrottle=1;           // Pivot (m aft), max deflection (rad), deepest throttle.
+    std::vector<Engine> engines;                      // All drawing on the stage's propellant; empty: the one engine below.
+    double thrust=0,exhaust=0,exitArea=0;             // Shorthand for one engine on the axis: vacuum N, effective exhaust m/s, exit m²,
+    double nozzle=0,gimbal=0,minThrottle=1;           // its pivot (m aft), max deflection (rad) and deepest throttle.
     double length=1;                                  // Stack length (m), for display.
     Aerodynamics aero;double noseRadius=1; // Stagnation-point radius for heating (m).
     // Landing legs: contact points (x m aft of the nose, y, z) on spring-dampers against the
@@ -66,8 +72,8 @@ struct State {
     double propellant=0;       // Remaining in the active stage (kg).
     double heatLoad=0;         // Stagnation-point heat absorbed since the start (J/m²).
     int stage=0;
-    bool burning=false,clamped=false,landed=false,contact=false; // contact: a leg on the ground.
-    double throttle=1,gimbalPitch=0,gimbalYaw=0; // Gimbal + pitch: nose up; + yaw: nose right.
+    bool burning=false,clamped=false,landed=false,contact=false; // burning: an engine on; contact: a leg on the ground.
+    double throttle=1,gimbalPitch=0,gimbalYaw=0; // The last command to every engine. Gimbal + pitch: nose up; + yaw: nose right.
     V3 torque;                 // Commanded body torque (N m).
 };
 // Derived quantities at a state; what sensors observe.
@@ -95,8 +101,13 @@ public:
     // pad, propellant depletion or touchdown and returns the time advanced (0 at release).
     Tt advance(Tt dt);
     void steps(Tt fixed,Tt coast=0){step_=fixed;coast_=coast;}
-    void ignite();void cutoff();void separate();void release();
-    void throttle(double t);void gimbal(double pitch,double yaw);void torque(V3 t);
+    // Engine commands: engine -1 for every engine of the stage, else its index. A failed engine stays off (engine out).
+    void ignite(int engine=-1);void cutoff(int engine=-1);void fail(int engine);void separate();void release();
+    void throttle(double t,int engine=-1);void gimbal(double pitch,double yaw,int engine=-1);void torque(V3 t);
+    // Each engine of the stage: on, failed, throttle, gimbal as moved (rad) and as commanded.
+    struct EngineState {bool on=false,failed=false;double throttle=1,pitch=0,yaw=0,targetPitch=0,targetYaw=0;};
+    const std::vector<EngineState>& engines()const{return engines_;}
+    std::vector<double> engineThrust()const; // Each engine's thrust now (N, after the ambient pressure).
     const State& state()const{return s_;}
     const Vehicle& vehicle()const{return vehicle_;}
     const Environment& environment()const{return env_;}
@@ -115,7 +126,9 @@ private:
     V3 tidal(const State& s)const;
     V3 sun(Tt t)const; // Relative to the centre, from the third-body cache.
     double bodies(Tt t)const;
-    Vehicle vehicle_;Environment env_;State s_;Tt step_=0,coast_=0;Increments increments_;
+    void slew(double seconds); // Gimbals toward their commands at their rates.
+    double flowOf(std::size_t i)const; // Engine i's propellant flow (kg/s).
+    Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;Tt step_=0,coast_=0;Increments increments_;
     V3 padPosition_;Q padAttitude_; // ECEF and body→ECEF while clamped/landed.
     mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable ThirdBody p0_[2]{},p1_[2]{};mutable int bodies_=0;
 };

@@ -1,6 +1,7 @@
 #include "physics/flight.hpp"
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include <stdexcept>
 namespace albert::physics {
 namespace {
@@ -36,14 +37,25 @@ double Table::operator()(double m,double a)const{
 }
 Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std::move(vehicle)),env_(std::move(environment)),s_(state){
     if(vehicle_.stages.empty())throw std::invalid_argument("Vehicle without stages");
-    for(const auto& st:vehicle_.stages){
+    for(auto& st:vehicle_.stages){
         if(!(st.massEmpty>0)||!(st.propellant>=0)||std::abs(st.massFull-st.massEmpty-st.propellant)>1e-6*st.massFull)throw std::invalid_argument("Inconsistent stage mass: "+st.name);
         for(V3 i:{st.inertiaFull,st.inertiaEmpty})if(!(i.x>0&&i.y>0&&i.z>0))throw std::invalid_argument("Non-positive inertia: "+st.name);
-        if(st.thrust>0&&!(st.exhaust>0))throw std::invalid_argument("Engine without exhaust velocity: "+st.name);
+        if(st.engines.empty()&&st.thrust>0)st.engines.push_back({st.name,{st.nozzle,0,0},{1,0,0},st.thrust,st.exhaust,st.exitArea,st.minThrottle,st.gimbal,0}); // The shorthand.
+        for(auto& e:st.engines){
+            const double n=norm(e.direction);
+            if(!(e.thrust>0)||!(e.exhaust>0))throw std::invalid_argument("Engine without thrust or exhaust velocity: "+st.name+" "+e.name);
+            if(!(n>0)||!std::isfinite(n)||!std::isfinite(e.position.x)||!std::isfinite(e.position.y)||!std::isfinite(e.position.z)||!(e.exitArea>=0)||!(e.minThrottle>0&&e.minThrottle<=1)||!(e.gimbal>=0)||!(e.gimbalRate>=0))
+                throw std::invalid_argument("Invalid engine: "+st.name+" "+e.name);
+            e.direction=e.direction/n;
+        }
         for(const Table* t:{&st.aero.lift,&st.aero.drag,&st.aero.side,&st.aero.roll,&st.aero.pitch,&st.aero.yaw})
             if(t->mach.empty()||t->angle.empty()||t->values.size()!=t->mach.size()*t->angle.size())throw std::invalid_argument("Malformed coefficient table: "+st.name);
     }
     if(s_.stage<0||s_.stage>=static_cast<int>(vehicle_.stages.size()))throw std::invalid_argument("Invalid stage");
+    for(const Engine& e:vehicle_.stages[s_.stage].engines){ // As the state's commands to every engine.
+        const double p=std::clamp(s_.gimbalPitch,-e.gimbal,e.gimbal),y=std::clamp(s_.gimbalYaw,-e.gimbal,e.gimbal);
+        engines_.push_back({s_.burning,false,std::clamp(s_.throttle,e.minThrottle,1.),p,y,p,y});}
+    s_.burning=s_.burning&&!engines_.empty();
     const Orientation o=env_.rotation.at(s_.time);
     padPosition_=o.fixed*s_.position;padAttitude_=quaternion(o.fixed*matrix(s_.attitude));
 }
@@ -58,9 +70,15 @@ State Flight::free(const Environment& e,const Vehicle& v,Tt t,Geodetic g,V3 ned,
     const M3 b=back*fromNed*bodyToNed(euler);s.attitude=quaternion(b);s.rate=transpose(b)*o.omega+relative;
     return s;
 }
+double Flight::flowOf(std::size_t i)const{const Engine& e=vehicle_.stages[s_.stage].engines[i];return s_.burning&&engines_[i].on?engines_[i].throttle*e.thrust/e.exhaust:0.;}
 double Flight::massFlow()const{
-    const Stage& st=vehicle_.stages[s_.stage];
-    return s_.burning&&s_.propellant>0&&st.thrust>0?s_.throttle*st.thrust/st.exhaust:0.;
+    if(!(s_.propellant>0))return 0;
+    double f=0;for(std::size_t i=0;i<engines_.size();++i)f+=flowOf(i);return f;
+}
+std::vector<double> Flight::engineThrust()const{
+    const double p=sample().air.pressure;const auto& es=vehicle_.stages[s_.stage].engines;std::vector<double> t(es.size());
+    for(std::size_t i=0;i<es.size();++i)t[i]=s_.burning&&engines_[i].on?std::max(0.,engines_[i].throttle*es[i].thrust-p*es[i].exitArea):0.;
+    return t;
 }
 double Flight::bodies(Tt t)const{ // Third bodies at 60 s nodes, linear between them; returns the weight.
     constexpr Tt bucket=60*second;const Tt k=floorDiv(t,bucket);
@@ -107,11 +125,13 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         ma={k*ae.span*(ae.roll(mach,ad)+ae.rollDamping*w.x*hs),k*ae.length*(ae.pitch(mach,ad)+ae.pitchDamping*w.y*hl),k*ae.span*(ae.yaw(mach,bd)+ae.yawDamping*w.z*hs)};
         ma+=cross(V3{ms.cg-st.reference,0,0},fa);
     }
-    V3 ft,mt;double thrust=0,flow=0;
-    if(s.burning&&st.thrust>0){ // Steps end at depletion, so the engine state holds through all RK4 stages.
-        thrust=std::max(0.,s.throttle*st.thrust-atm.pressure*st.exitArea);flow=s.throttle*st.thrust/st.exhaust;
-        const double cp=std::cos(s.gimbalPitch),sp=std::sin(s.gimbalPitch),cy=std::cos(s.gimbalYaw),sy=std::sin(s.gimbalYaw);
-        ft=thrust*V3{cp*cy,-sy,sp*cy};mt=cross(V3{ms.cg-st.nozzle,0,0},ft);
+    V3 ft,mt;double thrust=0,flow=0,jet=0; // jet: Σ ṁ l², the exhaust's transverse momentum lever.
+    if(s.burning)for(std::size_t i=0;i<engines_.size();++i){ // Steps end at depletion, so the engines hold through all RK4 stages.
+        const EngineState& e=engines_[i];if(!e.on)continue;const Engine& en=st.engines[i];
+        const double t=std::max(0.,e.throttle*en.thrust-atm.pressure*en.exitArea),f=e.throttle*en.thrust/en.exhaust,l=ms.cg-en.position.x;thrust+=t;flow+=f;jet+=f*l*l;
+        // Yaw about body z, then pitch about body y, of the engine's direction.
+        const double cp=std::cos(e.pitch),sp=std::sin(e.pitch),cy=std::cos(e.yaw),sy=std::sin(e.yaw);const V3 d=en.direction,yawed{d.x*cy+d.y*sy,-d.x*sy+d.y*cy,d.z};
+        const V3 fi=t*V3{yawed.x*cp-yawed.z*sp,yawed.y,yawed.x*sp+yawed.z*cp};ft+=fi;mt+=cross(V3{l,en.position.y,en.position.z},fi);
     }
     V3 fc,mc; // Legs on the ground: spring-damper normal force and friction, at each contact point.
     if(!st.legs.empty()&&!s.clamped&&std::isfinite(env_.ground)){
@@ -138,7 +158,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     // momentum ṁ l² ω through the nozzle (jet damping).
     const V3 iw{ms.inertia.x*s.rate.x,ms.inertia.y*s.rate.y,ms.inertia.z*s.rate.z};V3 rhs=moment-cross(s.rate,iw);
     if(flow>0){const V3 di=(st.inertiaFull-st.inertiaEmpty)*(vehicle_.inertiaRate*flow/st.propellant);rhs+=V3{di.x*s.rate.x,di.y*s.rate.y,di.z*s.rate.z};
-        if(vehicle_.jetDamping){const double l=ms.cg-st.nozzle;rhs+=-flow*l*l*V3{0,s.rate.y,s.rate.z};}}
+        if(vehicle_.jetDamping)rhs+=-jet*V3{0,s.rate.y,s.rate.z};}
     // Sutton-Graves convective stagnation heating, k for air and for the Martian CO2 mix (kg^½/m).
     const double heat=atm.density>0?(env_.center==Center::mars?1.9027e-4:1.7415e-4)*std::sqrt(atm.density/st.noseRadius)*speed*speed*speed:0.;
     Rate r{s.velocity,g+b*(force/ms.m),spin(s.attitude,s.rate),{rhs.x/ms.inertia.x,rhs.y/ms.inertia.y,rhs.z/ms.inertia.z},-flow,force/ms.m,heat};
@@ -203,8 +223,8 @@ Tt Flight::advance(Tt dt){
             }
         }
         if(flow>0){const double t=s_.propellant/flow*1e9;if(t<=static_cast<double>(h)+1){h=std::clamp<Tt>(static_cast<Tt>(t),1,h);depleted=true;}} // Within 1 ns.
-        integrate(h);left-=h;
-        if(depleted){s_.propellant=0;s_.burning=false;return dt-left;}
+        slew(static_cast<double>(h)*1e-9);integrate(h);left-=h;
+        if(depleted){s_.propellant=0;s_.burning=false;for(auto& e:engines_)e.on=false;return dt-left;}
         if(!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
             const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;Geodetic g=geodetic(env_.planet,rf);
             if(const Stage& st=vehicle_.stages[s_.stage];!st.legs.empty()){ // Contact state of the legs for events and telemetry.
@@ -212,19 +232,34 @@ Tt Flight::advance(Tt dt){
                 for(const V3& leg:st.legs)touching=touching||geodetic(env_.planet,o.fixed*(s_.position+b*V3{c-leg.x,leg.y,leg.z})).height<env_.ground;
                 if(touching!=s_.contact){s_.contact=touching;return dt-left;} // Touchdown and lift-off end the call, so each transition keeps its instant.
             }
-            if(g.height<env_.ground){g.height=env_.ground;s_.landed=true;s_.burning=false;padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
+            if(g.height<env_.ground){g.height=env_.ground;s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
         }
     }
     return dt;
 }
-void Flight::ignite(){
-    const Stage& st=vehicle_.stages[s_.stage];
-    if(!(st.thrust>0))throw std::logic_error("Stage has no engine");
+namespace {
+std::size_t pick(int engine,std::size_t count){ // An engine's index, checked.
+    if(engine<0||static_cast<std::size_t>(engine)>=count)throw std::invalid_argument("No engine "+std::to_string(engine+1)+" on this stage");
+    return static_cast<std::size_t>(engine);}
+}
+void Flight::ignite(int engine){
+    if(engines_.empty())throw std::logic_error("Stage has no engine");
     if(!(s_.propellant>0))throw std::logic_error("Stage has no propellant");
     if(s_.landed)throw std::logic_error("Vehicle has landed");
+    if(engine>=0){auto& e=engines_[pick(engine,engines_.size())];if(e.failed)throw std::logic_error("Engine has failed");e.on=true;}
+    else{bool any=false;for(auto& e:engines_)if(!e.failed){e.on=true;any=true;}if(!any)throw std::logic_error("Every engine has failed");}
     s_.burning=true;
 }
-void Flight::cutoff(){s_.burning=false;}
+void Flight::cutoff(int engine){
+    if(engine>=0)engines_[pick(engine,engines_.size())].on=false;else for(auto& e:engines_)e.on=false;
+    s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& e){return e.on;});
+}
+void Flight::fail(int engine){auto& e=engines_[pick(engine,engines_.size())];e.failed=true;e.on=false;s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& x){return x.on;});}
+void Flight::slew(double seconds){
+    const auto& es=vehicle_.stages[s_.stage].engines;
+    for(std::size_t i=0;i<engines_.size();++i){auto& e=engines_[i];const double step=es[i].gimbalRate*seconds;
+        if(es[i].gimbalRate>0){e.pitch+=std::clamp(e.targetPitch-e.pitch,-step,step);e.yaw+=std::clamp(e.targetYaw-e.yaw,-step,step);}}
+}
 void Flight::release(){s_.clamped=false;}
 void Flight::separate(){
     if(s_.stage+1>=static_cast<int>(vehicle_.stages.size()))throw std::logic_error("No stage to separate");
@@ -232,15 +267,25 @@ void Flight::separate(){
     const V3 shift=matrix(s_.attitude)*V3{old-next.cgFull,0,0};
     s_.position+=shift;s_.velocity+=cross(matrix(s_.attitude)*s_.rate,shift);
     ++s_.stage;s_.propellant=next.propellant;s_.burning=false;s_.throttle=1;s_.gimbalPitch=s_.gimbalYaw=0;
+    engines_.assign(next.engines.size(),EngineState{});
     if(s_.clamped||s_.landed){padPosition_=env_.rotation.at(s_.time).fixed*s_.position;}
 }
-void Flight::throttle(double t){
+void Flight::throttle(double t,int engine){
     if(!std::isfinite(t))throw std::invalid_argument("Invalid throttle");
-    s_.throttle=std::clamp(t,vehicle_.stages[s_.stage].minThrottle,1.);
+    const auto& es=vehicle_.stages[s_.stage].engines;
+    auto set=[&](std::size_t i){engines_[i].throttle=std::clamp(t,es[i].minThrottle,1.);};
+    if(engine>=0){set(pick(engine,es.size()));return;}
+    double low=es.empty()?1.:es[0].minThrottle;for(std::size_t i=0;i<es.size();++i){set(i);low=std::min(low,es[i].minThrottle);}
+    s_.throttle=std::clamp(t,low,1.);
 }
-void Flight::gimbal(double p,double y){
+void Flight::gimbal(double p,double y,int engine){
     if(!std::isfinite(p)||!std::isfinite(y))throw std::invalid_argument("Invalid gimbal");
-    const double g=vehicle_.stages[s_.stage].gimbal;s_.gimbalPitch=std::clamp(p,-g,g);s_.gimbalYaw=std::clamp(y,-g,g);
+    const auto& es=vehicle_.stages[s_.stage].engines;
+    auto set=[&](std::size_t i){auto& e=engines_[i];const double g=es[i].gimbal;e.targetPitch=std::clamp(p,-g,g);e.targetYaw=std::clamp(y,-g,g);
+        if(!(es[i].gimbalRate>0)){e.pitch=e.targetPitch;e.yaw=e.targetYaw;}};
+    if(engine>=0){set(pick(engine,es.size()));return;}
+    double g=0;for(std::size_t i=0;i<es.size();++i){set(i);g=std::max(g,es[i].gimbal);}
+    s_.gimbalPitch=std::clamp(p,-g,g);s_.gimbalYaw=std::clamp(y,-g,g);
 }
 void Flight::torque(V3 t){
     if(!std::isfinite(t.x)||!std::isfinite(t.y)||!std::isfinite(t.z))throw std::invalid_argument("Invalid torque");
@@ -252,6 +297,7 @@ std::uint64_t Flight::hash()const{
     const double d[]{s_.position.x,s_.position.y,s_.position.z,s_.velocity.x,s_.velocity.y,s_.velocity.z,s_.attitude.w,s_.attitude.x,s_.attitude.y,s_.attitude.z,
         s_.rate.x,s_.rate.y,s_.rate.z,s_.propellant,s_.heatLoad,s_.throttle,s_.gimbalPitch,s_.gimbalYaw,s_.torque.x,s_.torque.y,s_.torque.z,padPosition_.x,padPosition_.y,padPosition_.z};
     mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
+    for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed};mix(x,sizeof x);mix(b,sizeof b);}
     return h;
 }
 }

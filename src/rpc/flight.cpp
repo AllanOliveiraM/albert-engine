@@ -182,7 +182,9 @@ struct FlightServices::Impl {
         Sound s;s.utc=ph::utcFromTt(flight->state().time);s.planet=flight->environment().planet;s.air=flight->environment().air;auto& e=s.emission;
         e.time=s.utc;e.position=x.fixedPosition;e.velocity=x.fixedVelocity;
         const ph::V3 nose=flight->environment().rotation.at(flight->state().time).fixed*(ph::matrix(flight->state().attitude)*ph::V3{1,0,0});e.plume=nose*-1.;
-        e.noise={x.thrust,st.exhaust,std::sqrt(4*st.exitArea/3.14159265358979323846),.0035};e.on=flight->state().burning&&x.thrust>0;
+        double exhaust=0,area=0,flow=0; // The engines on as one plume: their exit area, flow-weighted exhaust velocity.
+        for(std::size_t i=0;i<st.engines.size();++i)if(flight->engines()[i].on){const auto& n=st.engines[i];const double f=flight->engines()[i].throttle*n.thrust/n.exhaust;exhaust+=f*n.exhaust;flow+=f;area+=n.exitArea;}
+        e.noise={x.thrust,flow>0?exhaust/flow:0.,std::sqrt(4*area/3.14159265358979323846),.0035};e.on=flight->state().burning&&x.thrust>0;
         return s;
     }
     core::FlightTelemetry telemetry()const{
@@ -198,13 +200,16 @@ struct FlightServices::Impl {
         if(ticks>600000)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 600000 ticks per step"};
         if(commands.size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 commands per step"};
         ph::Flight next=*flight; // Commands apply atomically.
-        try{for(const auto& c:commands)switch(c.kind){
-            case wire::ignite:next.ignite();break;case wire::cutoff:next.cutoff();break;case wire::separate:next.separate();break;case wire::release:next.release();break;
-            case wire::throttle:next.throttle(c.a);break;case wire::gimbal:next.gimbal(c.a,c.b);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
-            default:throw std::invalid_argument("Unknown command");}}
+        try{for(const auto& c:commands){const int e=static_cast<int>(c.kind>>16)-1; // The engine in the high bits: 0 every one.
+            if(e>=0&&(c.kind&0xffff)!=wire::ignite&&(c.kind&0xffff)!=wire::cutoff&&(c.kind&0xffff)!=wire::throttle&&(c.kind&0xffff)!=wire::gimbal&&(c.kind&0xffff)!=wire::fail)throw std::invalid_argument("This command takes no engine");
+            switch(c.kind&0xffff){
+            case wire::ignite:next.ignite(e);break;case wire::cutoff:next.cutoff(e);break;case wire::separate:next.separate();break;case wire::release:next.release();break;
+            case wire::throttle:next.throttle(c.a,e);break;case wire::gimbal:next.gimbal(c.a,c.b,e);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
+            case wire::fail:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e);break;
+            default:throw std::invalid_argument("Unknown command");}}}
         catch(const std::invalid_argument& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}catch(const std::logic_error& e){return{grpc::StatusCode::FAILED_PRECONDITION,e.what()};}
         // Integrated on the copy and committed whole: a cancelled call leaves the flight untouched.
-        bool changed=std::any_of(commands.begin(),commands.end(),[](const Command& c){return c.kind<=wire::release;});
+        bool changed=std::any_of(commands.begin(),commands.end(),[](const Command& c){return (c.kind&0xffff)<=wire::release||(c.kind&0xffff)==wire::fail;});
         const std::size_t pending=events.size();std::uint32_t bits=0;
         auto event=[&](api::FlightEvent::Kind kind,std::uint32_t bit){api::FlightEvent e;e.set_kind(kind);e.set_elapsed_seconds(ph::secondsSinceJ2000(next.state().time-start));e.set_stage(static_cast<unsigned>(next.state().stage));events.push_back(std::move(e));bits|=bit;changed=true;};
         const ph::Tt total=step*static_cast<ph::Tt>(ticks),chunk=step*4096;
@@ -246,6 +251,9 @@ struct FlightServices::Impl {
         o->set_stage(static_cast<unsigned>(s.stage));o->set_stages(static_cast<unsigned>(v.stages.size()));o->set_propellant_kilograms(s.propellant);o->set_mass_kilograms(x.mass);o->set_thrust_newtons(x.thrust);
         o->set_burning(s.burning);o->set_clamped(s.clamped);o->set_landed(s.landed);o->set_leg_contact(s.contact);o->set_heat_load_joules_per_meter2(s.heatLoad);o->set_heat_flux_watts_per_meter2(x.heatFlux);o->set_throttle(s.throttle);
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
+        {const auto thrust=flight->engineThrust();const auto& es=v.stages[static_cast<std::size_t>(s.stage)].engines;
+         for(std::size_t i=0;i<es.size();++i){const auto& e=flight->engines()[i];auto* x=o->add_engines();x->set_name(es[i].name);x->set_on(e.on&&s.burning);x->set_failed(e.failed);x->set_throttle(e.throttle);
+            x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);}}
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
         o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());o->set_data_port(data?data->port():0);
         put(reading.specificForce,o->mutable_measured_specific_force_meters_per_second2());put(reading.rate,o->mutable_measured_angular_rate_radians_per_second());
@@ -254,10 +262,11 @@ struct FlightServices::Impl {
 };
 FlightServices::FlightServices(core::Bridge& bridge,AirSources sources):impl_(std::make_unique<Impl>(bridge,std::move(sources))){
     impl_->data=std::make_unique<wire::Server>([this](const wire::Request& q,wire::Response& r){
-        std::vector<Impl::Command> commands; // Fixed order: cutoff, separate, release, ignite, throttle, gimbal, torque.
-        for(const std::uint32_t k:{wire::cutoff,wire::separate,wire::release,wire::ignite})if(q.commands&k)commands.push_back({k});
-        if(q.commands&wire::throttle)commands.push_back({wire::throttle,q.throttleValue});
-        if(q.commands&wire::gimbal)commands.push_back({wire::gimbal,q.gimbalPitch,q.gimbalYaw});
+        std::vector<Impl::Command> commands; // Fixed order: fail, cutoff, separate, release, ignite, throttle, gimbal, torque.
+        const std::uint32_t engine=std::min<std::uint32_t>(q.engine,0xffff)<<16; // Out of range: refused by the flight.
+        for(const std::uint32_t k:{wire::fail,wire::cutoff,wire::separate,wire::release,wire::ignite})if(q.commands&k)commands.push_back({k==wire::separate||k==wire::release?k:k|engine});
+        if(q.commands&wire::throttle)commands.push_back({wire::throttle|engine,q.throttleValue});
+        if(q.commands&wire::gimbal)commands.push_back({wire::gimbal|engine,q.gimbalPitch,q.gimbalYaw});
         if(q.commands&wire::torque)commands.push_back({wire::torque,q.torqueValue[0],q.torqueValue[1],q.torqueValue[2]});
         std::lock_guard lock(impl_->mutex);
         if(!impl_->flight){r=wire::Response{};r.status=wire::noFlight;return true;}
@@ -376,15 +385,20 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
 }
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
     std::vector<Impl::Command> commands;
-    for(const auto& c:r->commands())switch(c.command_case()){
-        case api::FlightCommand::kIgnite:if(c.ignite())commands.push_back({wire::ignite});break;
-        case api::FlightCommand::kCutoff:if(c.cutoff())commands.push_back({wire::cutoff});break;
-        case api::FlightCommand::kSeparate:if(c.separate())commands.push_back({wire::separate});break;
-        case api::FlightCommand::kRelease:if(c.release())commands.push_back({wire::release});break;
-        case api::FlightCommand::kThrottle:commands.push_back({wire::throttle,c.throttle()});break;
-        case api::FlightCommand::kGimbal:commands.push_back({wire::gimbal,c.gimbal().pitch_radians(),c.gimbal().yaw_radians()});break;
-        case api::FlightCommand::kTorqueNewtonMeters:commands.push_back({wire::torque,c.torque_newton_meters().x(),c.torque_newton_meters().y(),c.torque_newton_meters().z()});break;
+    for(const auto& c:r->commands()){
+        if(c.engine()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine"};
+        const std::uint32_t e=c.engine()<<16; // In the kind's high bits (the replay log keeps the record format).
+        switch(c.command_case()){
+        case api::FlightCommand::kIgnite:if(c.ignite())commands.push_back({wire::ignite|e});break;
+        case api::FlightCommand::kCutoff:if(c.cutoff())commands.push_back({wire::cutoff|e});break;
+        case api::FlightCommand::kSeparate:if(c.separate())commands.push_back({wire::separate|e});break;
+        case api::FlightCommand::kRelease:if(c.release())commands.push_back({wire::release|e});break;
+        case api::FlightCommand::kThrottle:commands.push_back({wire::throttle|e,c.throttle()});break;
+        case api::FlightCommand::kGimbal:commands.push_back({wire::gimbal|e,c.gimbal().pitch_radians(),c.gimbal().yaw_radians()});break;
+        case api::FlightCommand::kTorqueNewtonMeters:commands.push_back({wire::torque|e,c.torque_newton_meters().x(),c.torque_newton_meters().y(),c.torque_newton_meters().z()});break;
+        case api::FlightCommand::kFail:if(c.fail())commands.push_back({wire::fail|e});break;
         default:return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
+        }
     }
     std::lock_guard lock(impl_->mutex);
     if(impl_->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
