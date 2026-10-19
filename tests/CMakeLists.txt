@@ -126,6 +126,12 @@ add_executable(acoustics_test acoustics_test.cpp)
 target_link_libraries(acoustics_test PRIVATE albert_physics albert_erfa)
 add_test(NAME acoustics COMMAND acoustics_test)
 
+add_executable(ocean_test ocean_test.cpp)
+albert_copy_wgpu(ocean_test)
+target_link_libraries(ocean_test PRIVATE albert_gpu)
+add_test(NAME webgpu_ocean COMMAND ocean_test)
+set_tests_properties(webgpu_ocean PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "ALBERT_GPU=software")
+
 add_executable(hwm14_test hwm14_test.cpp)
 target_link_libraries(hwm14_test PRIVATE albert_physics)
 add_test(NAME hwm14 COMMAND hwm14_test ${CMAKE_CURRENT_SOURCE_DIR}/hwm14_check.txt)

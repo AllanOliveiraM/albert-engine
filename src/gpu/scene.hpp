@@ -1,9 +1,10 @@
 #pragma once
 #include "gpu/context.hpp"
+#include "threepp/math/Vector3.hpp"
 #include <memory>
 namespace threepp {class Texture;class Scene;class Camera;class Object3D;}
 namespace albert::gpu {
-class Atmosphere;
+class Atmosphere;class Ocean;
 // Draws a threepp scene with WebGPU, as threepp's GLRenderer would: frustum culling, opaque then
 // transparent objects sorted by renderOrder and depth, threepp blending, depth and face state,
 // one directional and one ambient light. Reversed Z on depth32float: infinite for perspective
@@ -33,6 +34,9 @@ public:
     unsigned airSteps=4;
     // Earthshine on lit materials (earthLight in the photometry module): the Earth and its radius in world units (0: none).
     struct Earthshine {const threepp::Object3D* earth=nullptr;float radius=0;} earthshine;
+    // Wind waves on water materials (seaAt in the photometry module, with the air): the simulation, the wind (m/s toward east
+    // and north) and the waves' clock (s); the pattern's anchor and east/north axes (world) and metres per world unit.
+    struct Sea {Ocean* ocean=nullptr;bool enabled=false;double seconds=0;float east=0,north=0,metersPerUnit=6378137;threepp::Vector3 anchor,eastAxis,northAxis;} sea;
     // Clears target (scene background) and depth, then draws, recording into encoder. Uniforms are
     // written through the queue: submit this encoder before the next render().
     void render(threepp::Scene& scene,threepp::Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder);

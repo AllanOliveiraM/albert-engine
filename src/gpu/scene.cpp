@@ -1,4 +1,5 @@
 #include "gpu/scene.hpp"
+#include "gpu/ocean.hpp"
 #include "gpu/programs.hpp"
 #include "gpu/atmosphere.hpp"
 #include <webgpu/wgpu.h>
@@ -124,8 +125,17 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
     if (kind < 0.5) { colour = base.rgb * select(vec3f(1.0), mapped / PI_L, material.flags.w > 0.5); return vec4f(finish(colour + material.emissive.rgb), base.a); } // Unlit, no air.
     else if (kind > 1.5 && kind < 2.5) {
         var roughness = material.params.x * select(1.0, roughTexel.g, material.more.y > 0.5);
-        if (material.more.y > 1.5 && frame.weather.z > 0.0 && frame.air.w > 0.0) { // Water ("albert:water" maps, texels under 0.5): Cox-Munk slopes for the surface wind.
-            roughness = mix(roughness, sqrt(sqrt(0.003 + 0.00512 * frame.weather.z)), 1.0 - smoothstep(0.35, 0.5, roughTexel.g)); }
+        if (material.more.y > 1.5 && frame.weather.z > 0.0 && frame.air.w > 0.0) { // Water ("albert:water" maps, texels under 0.5): Cox-Munk slopes for the surface wind,
+            // less what the wind waves near the camera resolve (their normal), and their foam.
+            let water = 1.0 - smoothstep(0.35, 0.5, roughTexel.g); var variance = 0.003 + 0.00512 * frame.weather.z;
+            let footprint = max(length(dpdx(v.world)), length(dpdy(v.world))) * frame.oceanEast.w; // Metres per pixel.
+            let sea = seaAt(v.world, footprint);
+            if (sea.resolved > 0.0 && water > 0.0) {
+                var wave = normalize((frame.view * vec4f(sea.normal, 0.0)).xyz); let eye = viewDirection(v.position);
+                wave = normalize(wave + eye * max(0.05 - dot(wave, eye), 0.0)); // A slope turned from the eye at grazing views: back to the visible side.
+                n = normalize(mix(n, wave, water)); variance = max(variance - sea.resolved, 5e-4);
+                base = vec4f(mix(base.rgb, vec3f(0.8), sea.foam * water), base.a); }
+            roughness = mix(roughness, sqrt(sqrt(variance)), water); }
         colour = standardLight(base.rgb, roughness, material.params.y, n, geometryNormal, v.position, extra, shadow)
             + airReflection(v.world, n, v.position, roughness, mix(vec3f(0.04), base.rgb, material.params.y)); // The sky on smooth water.
     } else if (kind > 3.5) { colour = lunarLight(base.rgb, n, v.position, mapped + light.sky * frame.sunColor.rgb, shadow, earth); }
@@ -157,6 +167,7 @@ struct SceneRenderer::Impl {
     // Sun shadow map: depth from the light's orthographic camera, compared with PCF in the receivers.
     WGPUTexture shadowTexture=nullptr,dummyShadow=nullptr;WGPUTextureView shadowView=nullptr,dummyShadowView=nullptr;unsigned shadowSize=0;std::uint64_t shadowSerial=0,boundFrame=~0ull; // boundFrame: the shadow map serial in frameGroup (0: the dummy).
     const Atmosphere* boundAir=nullptr;std::uint64_t boundClouds=0;WGPUSampler airSampler=nullptr,cloudSampler=nullptr;WGPUTexture noVolume=nullptr;WGPUTextureView noVolumeView=nullptr;WGPUBuffer noAir=nullptr; // Placeholders without air.
+    WGPUTexture noOcean=nullptr;WGPUTextureView noOceanView=nullptr;WGPUSampler oceanSampler=nullptr;const Ocean* boundOcean=nullptr;float slopeWind=-1;std::array<float,3> slopes{}; // Calm placeholders.
     WGPUSampler shadowSampler=nullptr;WGPUBindGroup casterFrame=nullptr;WGPURenderPipeline shadowPipeline=nullptr;WGPUPipelineLayout shadowLayout=nullptr;WGPUShaderModule shadowModule=nullptr;
     // Scene-pass GPU time: two timestamps resolved into a buffer, read back a few frames later.
     WGPUQuerySet timestamps=nullptr;WGPUBuffer resolved=nullptr,readback=nullptr;bool mapping=false,mapPending=false;double gpuMs=-1;WGPUBufferMapCallbackInfo pendingMap{};
@@ -166,7 +177,7 @@ struct SceneRenderer::Impl {
             WGPUBindGroupLayoutDescriptor d{};d.entryCount=1;d.entries=&e;return wgpuDeviceCreateBindGroupLayout(device,&d);};
         objectLayout=uniformLayout(true);
         { // Frame: uniforms, the shadow depth map and its comparison sampler; the air's parameters, tables and sampler.
-            WGPUBindGroupLayoutEntry e[11]{};const auto both=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;
+            WGPUBindGroupLayoutEntry e[14]{};const auto both=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;
             e[0].binding=0;e[0].visibility=both;e[0].buffer.type=WGPUBufferBindingType_Uniform;
             e[1].binding=1;e[1].visibility=WGPUShaderStage_Fragment;e[1].texture.sampleType=WGPUTextureSampleType_Depth;e[1].texture.viewDimension=WGPUTextureViewDimension_2D;
             e[2].binding=2;e[2].visibility=WGPUShaderStage_Fragment;e[2].sampler.type=WGPUSamplerBindingType_Comparison;
@@ -175,7 +186,9 @@ struct SceneRenderer::Impl {
             e[8].binding=8;e[8].visibility=both;e[8].sampler.type=WGPUSamplerBindingType_Filtering;
             e[9].binding=9;e[9].visibility=WGPUShaderStage_Fragment;e[9].texture.sampleType=WGPUTextureSampleType_Float;e[9].texture.viewDimension=WGPUTextureViewDimension_2D; // The cloud map (shadows).
             e[10].binding=10;e[10].visibility=WGPUShaderStage_Fragment;e[10].sampler.type=WGPUSamplerBindingType_Filtering;
-            WGPUBindGroupLayoutDescriptor d{};d.entryCount=11;d.entries=e;frameLayout=wgpuDeviceCreateBindGroupLayout(device,&d);
+            for(std::uint32_t i=11;i<13;++i){e[i].binding=i;e[i].visibility=both;e[i].texture.sampleType=WGPUTextureSampleType_Float;e[i].texture.viewDimension=WGPUTextureViewDimension_2DArray;} // The ocean's fields.
+            e[13].binding=13;e[13].visibility=both;e[13].sampler.type=WGPUSamplerBindingType_Filtering;
+            WGPUBindGroupLayoutDescriptor d{};d.entryCount=14;d.entries=e;frameLayout=wgpuDeviceCreateBindGroupLayout(device,&d);
         }
         frameBuffer=buffer(512,WGPUBufferUsage_Uniform);
         {WGPUTextureDescriptor d{};d.size={1,1,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_TextureBinding;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
@@ -184,7 +197,10 @@ struct SceneRenderer::Impl {
          sd.compare=WGPUCompareFunction_LessEqual;sd.lodMaxClamp=1;sd.maxAnisotropy=1;shadowSampler=wgpuDeviceCreateSampler(device,&sd);
          sd.compare=WGPUCompareFunction_Undefined;airSampler=wgpuDeviceCreateSampler(device,&sd);
          sd.addressModeU=WGPUAddressMode_Repeat;cloudSampler=wgpuDeviceCreateSampler(device,&sd); // Longitude wraps.
-         d.size={1,1,1};d.format=WGPUTextureFormat_RGBA8Unorm;d.dimension=WGPUTextureDimension_3D;noVolume=wgpuDeviceCreateTexture(device,&d);noVolumeView=wgpuTextureCreateView(noVolume,nullptr);}
+         d.size={1,1,1};d.format=WGPUTextureFormat_RGBA8Unorm;d.dimension=WGPUTextureDimension_3D;noVolume=wgpuDeviceCreateTexture(device,&d);noVolumeView=wgpuTextureCreateView(noVolume,nullptr);
+         d.size={1,1,3};d.format=WGPUTextureFormat_RGBA16Float;d.dimension=WGPUTextureDimension_2D;noOcean=wgpuDeviceCreateTexture(device,&d); // Zero: calm.
+         WGPUTextureViewDescriptor v{};v.format=d.format;v.dimension=WGPUTextureViewDimension_2DArray;v.mipLevelCount=1;v.arrayLayerCount=3;v.aspect=WGPUTextureAspect_All;noOceanView=wgpuTextureCreateView(noOcean,&v);
+         sd.addressModeU=sd.addressModeV=WGPUAddressMode_Repeat;oceanSampler=wgpuDeviceCreateSampler(device,&sd);}
         noAir=buffer(Atmosphere::parameterBytes,WGPUBufferUsage_Uniform);
         zeros=buffer(64,WGPUBufferUsage_Vertex);
         WGPUTextureDescriptor t{};t.size={1,1,1};t.format=WGPUTextureFormat_RGBA8Unorm;t.usage=WGPUTextureUsage_TextureBinding|WGPUTextureUsage_CopyDst;t.mipLevelCount=1;t.sampleCount=1;t.dimension=WGPUTextureDimension_2D;
@@ -215,18 +231,19 @@ struct SceneRenderer::Impl {
         wgpuSamplerRelease(linear);wgpuTextureViewRelease(white);wgpuTextureRelease(whiteTexture);wgpuTextureViewRelease(black);wgpuTextureRelease(blackTexture);
         if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);if(colourView)wgpuTextureViewRelease(colourView);if(colour)wgpuTextureRelease(colour);
     }
-    WGPUBindGroup frameWith(WGPUTextureView shadow,const Atmosphere* a,WGPUTextureView clouds){ // a: ready tables, or null for placeholders.
-        WGPUBindGroupEntry e[11]{};e[0].binding=0;e[0].buffer=frameBuffer;e[0].size=512;e[1].binding=1;e[1].textureView=shadow;e[2].binding=2;e[2].sampler=shadowSampler;
+    WGPUBindGroup frameWith(WGPUTextureView shadow,const Atmosphere* a,WGPUTextureView clouds,const Ocean* ocean){ // a: ready tables, or null for placeholders.
+        WGPUBindGroupEntry e[14]{};e[0].binding=0;e[0].buffer=frameBuffer;e[0].size=512;e[1].binding=1;e[1].textureView=shadow;e[2].binding=2;e[2].sampler=shadowSampler;
         e[3].binding=3;e[3].buffer=a?a->parameters():noAir;e[3].size=Atmosphere::parameterBytes;
         const WGPUTextureView tables[4]{a?a->transmittance():white,a?a->scattering():noVolumeView,a?a->mie():noVolumeView,a?a->irradiance():white};
         for(std::uint32_t i=0;i<4;++i){e[4+i].binding=4+i;e[4+i].textureView=tables[i];}
         e[8].binding=8;e[8].sampler=airSampler;e[9].binding=9;e[9].textureView=clouds;e[10].binding=10;e[10].sampler=cloudSampler;
-        WGPUBindGroupDescriptor d{};d.layout=frameLayout;d.entryCount=11;d.entries=e;return wgpuDeviceCreateBindGroup(device,&d);
+        e[11].binding=11;e[11].textureView=ocean?ocean->derivatives():noOceanView;e[12].binding=12;e[12].textureView=ocean?ocean->displacement():noOceanView;e[13].binding=13;e[13].sampler=oceanSampler;
+        WGPUBindGroupDescriptor d{};d.layout=frameLayout;d.entryCount=14;d.entries=e;return wgpuDeviceCreateBindGroup(device,&d);
     }
-    void bindFrame(WGPUTextureView shadow,const Atmosphere* a,WGPUTextureView clouds,std::uint64_t cloudSerial){
-        if(!casterFrame)casterFrame=frameWith(dummyShadowView,nullptr,black); // The shadow pass cannot sample the map it writes.
-        const std::uint64_t key=shadow==dummyShadowView?0:shadowSerial;if(frameGroup&&boundFrame==key&&boundAir==a&&boundClouds==cloudSerial)return;
-        if(frameGroup)wgpuBindGroupRelease(frameGroup);boundFrame=key;boundAir=a;boundClouds=cloudSerial;frameGroup=frameWith(shadow,a,clouds);
+    void bindFrame(WGPUTextureView shadow,const Atmosphere* a,WGPUTextureView clouds,std::uint64_t cloudSerial,const Ocean* ocean){
+        if(!casterFrame)casterFrame=frameWith(dummyShadowView,nullptr,black,nullptr); // The shadow pass cannot sample the map it writes.
+        const std::uint64_t key=shadow==dummyShadowView?0:shadowSerial;if(frameGroup&&boundFrame==key&&boundAir==a&&boundClouds==cloudSerial&&boundOcean==ocean)return;
+        if(frameGroup)wgpuBindGroupRelease(frameGroup);boundFrame=key;boundAir=a;boundClouds=cloudSerial;boundOcean=ocean;frameGroup=frameWith(shadow,a,clouds,ocean);
     }
     WGPURenderPipeline shadowCaster(){ // Depth only, positions through the sun's view-projection.
         if(shadowPipeline)return shadowPipeline;
@@ -542,7 +559,15 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     f[103]=air.polarRatio>0?air.polarRatio:1.f;
     if(airTables)f[102]=std::max(air.surfaceWind,0.f); // The sea's roughness (Cox-Munk).
     if(earthshine.earth&&earthshine.radius>0){Vector3 e;e.setFromMatrixPosition(*earthshine.earth->matrixWorld);f[104]=e.x;f[105]=e.y;f[106]=e.z;f[107]=earthshine.radius;}
-    g.bindFrame(shadowing?g.shadowView:g.dummyShadowView,airTables,cloudView,cloudSerial);
+    // Wind waves: this instant's fields before the pass, the pattern's frame and each band's slope variance.
+    const Ocean* ocean=nullptr;
+    if(sea.ocean&&sea.enabled&&airTables){
+        sea.ocean->update(encoder,sea.seconds,sea.east,sea.north);ocean=sea.ocean;const float wind=std::hypot(sea.east,sea.north);
+        if(std::abs(wind-g.slopeWind)>.1f){for(unsigned c=0;c<3;++c)g.slopes[c]=static_cast<float>(Ocean::bandSlope(wind,c));g.slopeWind=wind;}
+        f[104+4]=sea.anchor.x;f[109]=sea.anchor.y;f[110]=sea.anchor.z;f[111]=1;f[112]=sea.eastAxis.x;f[113]=sea.eastAxis.y;f[114]=sea.eastAxis.z;f[115]=sea.metersPerUnit;
+        f[116]=sea.northAxis.x;f[117]=sea.northAxis.y;f[118]=sea.northAxis.z;f[120]=g.slopes[0];f[121]=g.slopes[1];f[122]=g.slopes[2];
+    }
+    g.bindFrame(shadowing?g.shadowView:g.dummyShadowView,airTables,cloudView,cloudSerial,ocean);
     Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);f[32]=eye.x;f[33]=eye.y;f[34]=eye.z;f[35]=1;
     f[36]=static_cast<float>(width);f[37]=static_cast<float>(height);f[38]=camera.nearPlane;
     f[40]=sun.x;f[41]=sun.y;f[42]=sun.z;f[43]=sunOn;f[44]=sunColor.r;f[45]=sunColor.g;f[46]=sunColor.b;f[48]=ambient.r;f[49]=ambient.g;f[50]=ambient.b;f[52]=exposure;f[53]=toneMapping?1.f:0.f;

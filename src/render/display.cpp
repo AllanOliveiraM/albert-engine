@@ -3,6 +3,7 @@
 #include "webgpu_programs.hpp"
 #include "gpu/atmosphere.hpp"
 #include "gpu/context.hpp"
+#include "gpu/ocean.hpp"
 #include "gpu/scene.hpp"
 #include "gpu/window.hpp"
 #include "threepp/threepp.hpp"
@@ -19,7 +20,7 @@
 using namespace threepp;
 struct albert::Display::Impl {
     std::function<void()> draw;
-    std::unique_ptr<gpu::Window> window;std::unique_ptr<gpu::Context> context;std::unique_ptr<gpu::SceneRenderer> scene;std::unique_ptr<gpu::Atmosphere> earthAir,marsAir;
+    std::unique_ptr<gpu::Window> window;std::unique_ptr<gpu::Context> context;std::unique_ptr<gpu::SceneRenderer> scene;std::unique_ptr<gpu::Atmosphere> earthAir,marsAir;std::unique_ptr<gpu::Ocean> ocean;
     WGPUCommandEncoder encoder=nullptr;WGPUTextureView target=nullptr;bool drawnTarget=false,styled=false;float dpi=1;
     void framebuffer(unsigned& w,unsigned& h)const{int x=0,y=0;glfwGetFramebufferSize(window->handle(),&x,&y);w=static_cast<unsigned>(std::max(x,1));h=static_cast<unsigned>(std::max(y,1));}
     void pass(WGPULoadOp load){ // A colour-only pass on the surface (clear, or ImGui over the scene).
@@ -41,7 +42,7 @@ albert::Display::Display(const std::string& title,WindowSize size,const std::fil
     d.dpi=monitor::contentScale().first;
 }
 albert::Display::~Display(){
-    auto& d=*impl_;ImGui_ImplWGPU_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();d.scene.reset();d.earthAir.reset();d.marsAir.reset();d.context.reset();d.window.reset();
+    auto& d=*impl_;ImGui_ImplWGPU_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();d.scene.reset();d.earthAir.reset();d.marsAir.reset();d.ocean.reset();d.context.reset();d.window.reset();
 }
 PeripheralsEventSource& albert::Display::events(){return *impl_->window;}
 bool albert::Display::isOpen()const{return impl_->window->isOpen();}
@@ -56,6 +57,10 @@ void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength
     auto& d=*impl_;auto& air=mars?d.marsAir:d.earthAir; // Each precomputed once, when first needed.
     if(!air&&body&&strength>0){air=std::make_unique<gpu::Atmosphere>(*d.context,mars?gpu::marsAtmosphere():gpu::earthAtmosphere());d.scene->airSteps=d.context->software()?1:4;}
     auto weather=d.scene->air;d.scene->air={air.get(),body,kmPerUnit,strength,groundKm,weather.clouds,weather.cloudKm,weather.cloudShadow,weather.surfaceWind,weather.polarRatio};
+}
+void albert::Display::setSea(bool on,double seconds,float east,float north,const Vector3& anchor,const Vector3& eastAxis,const Vector3& northAxis,float metersPerUnit){
+    auto& d=*impl_;if(on&&!d.ocean)d.ocean=std::make_unique<gpu::Ocean>(*d.context);
+    auto& s=d.scene->sea;s.ocean=d.ocean.get();s.enabled=on;s.seconds=seconds;s.east=east;s.north=north;s.anchor=anchor;s.eastAxis=eastAxis;s.northAxis=northAxis;s.metersPerUnit=metersPerUnit;
 }
 void albert::Display::setSamples(unsigned samples){impl_->scene->samples=samples>1?4u:1u;}
 void albert::Display::setVsync(bool on){impl_->context->setVsync(on);}

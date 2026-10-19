@@ -1218,6 +1218,8 @@ int albert::runRenderer(int argc, char** argv) {
         // Free camera (Ajustes, or F): flies from the current view; dragging looks, W/A/S/D, Space/E and Ctrl/Q move, Shift is
         // five times faster, the wheel scales the speed, which follows the height over the nearest surface.
         bool freeCamera=false;float freeSpeed=1.f;
+        // Wind waves: the wind they follow (m/s toward east and north), their clock, and the tangent frame they are drawn in.
+        float seaWindEast=-7.f,seaWindNorth=0;double seaClock=0;struct SeaFrame {albert::physics::V3 position,east,north;};std::optional<SeaFrame> seaOrigin;
         // arrival: direction from the target to the arriving camera, overriding the default.
         auto setFocus = [&](Focus next, bool resetZoom = false, std::optional<Vector3> arrival = {}, std::optional<float> distance = {}) {
             registry.get(targetId(next));
@@ -2690,14 +2692,35 @@ int albert::runRenderer(int argc, char** argv) {
                 const auto mars=solids.nodes().find("mars");const bool marsAir=mars!=solids.nodes().end()
                     &&camera->position.distanceTo(mars->second->position)<3.f*static_cast<float>(albert::core::surfaceRadius("mars")/albert::core::earthRadiusMeters);
                 solids.showAir("mars",marsAir,planets.atmosphereVisibility());
-                // The sea's wind: a live-weather flight's near the ground, else the ocean mean (~7 m/s); Mars has neither.
-                float wind=7.f;if(flightTelemetry&&flightTelemetry->active&&steadyNow-flightTelemetryAt<std::chrono::seconds(10)&&flightTelemetry->height<1000&&flightTelemetry->atmosphere.find("GFS")!=std::string::npos)
-                    wind=std::max(.5f,static_cast<float>(std::hypot(flightTelemetry->windNorth,flightTelemetry->windEast)));
+                // The sea's wind: a live-weather flight's near the ground, else the ocean mean (~7 m/s, a trade wind from the
+                // east); Mars has neither.
+                if(flightTelemetry&&flightTelemetry->active&&steadyNow-flightTelemetryAt<std::chrono::seconds(10)&&flightTelemetry->height<1000&&flightTelemetry->atmosphere.find("GFS")!=std::string::npos){
+                    seaWindEast=static_cast<float>(flightTelemetry->windEast);seaWindNorth=static_cast<float>(flightTelemetry->windNorth);
+                    if(std::hypot(seaWindEast,seaWindNorth)<.5f){seaWindEast=-.5f;seaWindNorth=0;}}
+                else{seaWindEast=-7.f;seaWindNorth=0;}
+                const float wind=std::hypot(seaWindEast,seaWindNorth);
                 graphics.setWeather(marsAir?nullptr:planets.cloudMap(),12.f,planets.cloudOpacity(),marsAir?0.f:wind,earth->scale.y); // The cloud shell's height over the ellipsoid.
                 if(marsAir)graphics.setAir(mars->second.get(),6378.137f,planets.atmosphereVisibility(),0.f,true);
                 else{Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();const auto ground=terrain?terrain->ground(eye):std::nullopt;
                     graphics.setAir(planets.earth.get(),6378.137f,planets.atmosphereVisibility(),ground?std::min(0.f,static_cast<float>((*ground-1)*6378.137)):0.f);}}
             graphics.setEarthshine(earth.get(),earth->scale.x); // The Earth mesh is a unit sphere.
+            { // Wind waves on the Earth's water near the eye (Ajustes "Ondas no mar"): the pattern anchored on the sea under the eye, the
+              // anchor snapped to its 512 m period (so it never jumps) in a tangent plane redrawn after 200 km; computed in double
+              // relative to the eye so the floating origin keeps it exact.
+                namespace ph=albert::physics;const double r=albert::core::earthRadiusMeters;const auto& c=camera->position;seaClock+=dt;
+                const ph::V3 gcrf{c.x*r+sceneOrigin.x,-c.z*r+sceneOrigin.y,c.y*r+sceneOrigin.z};const ph::Tt tt=ph::ttFromUtc(simulatedUtc);
+                const ph::M3 fixed=ph::Rotation::iau(ph::secondsSinceJ2000(tt)-(simulatedUtc-946728000.)).at(tt).fixed;const ph::V3 eye=fixed*gcrf;
+                const ph::Geodetic here=ph::geodetic(ph::earth,eye);const bool on=preferences.oceanWaves&&here.height<30e3&&here.height>-100;
+                if(on){
+                    if(!seaOrigin||ph::norm(eye-seaOrigin->position)>200e3){const double sl=std::sin(here.latitude),cl=std::cos(here.latitude),so=std::sin(here.longitude),co=std::cos(here.longitude);
+                        seaOrigin=SeaFrame{ph::fixedPosition(ph::earth,{here.latitude,here.longitude,0}),{-so,co,0},{-sl*co,-sl*so,cl}};}
+                    const auto& o=*seaOrigin;const ph::V3 d=eye-o.position;
+                    const ph::V3 anchor=o.position+o.east*(512*std::round(ph::dot(d,o.east)/512))+o.north*(512*std::round(ph::dot(d,o.north)/512));
+                    auto toWorld=[&](ph::V3 a){const ph::V3 g=ph::transpose(fixed)*a;return Vector3(static_cast<float>(g.x),static_cast<float>(g.z),static_cast<float>(-g.y));}; // ECEF → world axes.
+                    Vector3 at=toWorld((anchor-eye)*(1/r));at.add(camera->position);
+                    graphics.setSea(true,seaClock,seaWindEast,seaWindNorth,at,toWorld(o.east).normalize(),toWorld(o.north).normalize(),static_cast<float>(r));
+                }else graphics.setSea(false,seaClock,seaWindEast,seaWindNorth,{},{},{},static_cast<float>(r));
+            }
             graphics.setSamples(preferences.antialias?4:1);graphics.setVsync(preferences.vsync);ImGui::GetIO().FontGlobalScale=preferences.uiScale;
 #ifdef ALBERT_HAS_RPC
             { // The flight's sound at the camera, at the shown instant (an Earth flight; physics/acoustics.hpp).

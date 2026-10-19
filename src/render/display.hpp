@@ -1,6 +1,7 @@
 #pragma once
 #include "threepp/canvas/WindowSize.hpp"
 #include "threepp/input/PeripheralsEventSource.hpp"
+#include "threepp/math/Vector3.hpp"
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -34,6 +35,9 @@ public:
     void setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio=1);
     void setEarthshine(const threepp::Object3D* earth,float radius); // Radius in world units; 0 or null: none.
     void setSamples(unsigned samples); // Multisampling of the scene pass: 1 or 4.
+    // Wind waves on the water near the camera (gpu::Ocean, made when first on): the wind (m/s toward east and north), the
+    // waves' clock (s), the pattern's anchor and east/north axes (world) and metres per world unit; off: Cox-Munk only.
+    void setSea(bool on,double seconds,float east,float north,const threepp::Vector3& anchor,const threepp::Vector3& eastAxis,const threepp::Vector3& northAxis,float metersPerUnit);
     void setVsync(bool on);
 private:
     struct Impl;std::unique_ptr<Impl> impl_;

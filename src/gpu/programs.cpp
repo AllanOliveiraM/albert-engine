@@ -24,6 +24,10 @@ struct Frame {
     airSun: vec4f,           // Towards the sun in the planet frame; w: the model's ground offset (km, <= 0).
     weather: vec4f,          // x: cloud layer height over the air's ground (km); y: its opacity (0: none); z: surface wind (m/s, 0: none); w: polar/equatorial axis ratio.
     earth: vec4f,            // The Earth's centre (world); w: its radius (world units), 0: no earthshine.
+    ocean: vec4f,            // Wind waves: the pattern's anchor (world); w > 0 when on.
+    oceanEast: vec4f,        // East at the anchor (world, unit); w: metres per world unit.
+    oceanNorth: vec4f,       // North at the anchor (world, unit).
+    oceanSlopes: vec4f,      // Mean square slope in each cascade's band (512, 128, 32 m).
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -171,7 +175,8 @@ fn airReflection(world: vec3f, viewNormal: vec3f, viewPosition: vec3f, roughness
     if (frame.air.w <= 0.0 || roughness >= 0.8) { return vec3f(0.0); }
     let v = viewDirection(viewPosition); let nv = clamp(dot(viewNormal, v), 0.0, 1.0);
     let toWorld = transpose(mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz)); // The view's rotation inverted.
-    let ray = normalize((frame.planet * vec4f(toWorld * reflect(-v, viewNormal), 0.0)).xyz);
+    var ray = normalize((frame.planet * vec4f(toWorld * reflect(-v, viewNormal), 0.0)).xyz);
+    let up = normalize(airPoint(world)); ray = normalize(ray + up * max(0.02 - dot(ray, up), 0.0)); // A wave's back reflects other waves: the sky just over the horizon.
     let f = f0 + (max(vec3f(1.0 - roughness), f0) - f0) * pow(1.0 - nv, 5.0);
     return f * skyRadiance(airPoint(world), ray, frame.airSun.xyz).radiance * frame.sunColor.rgb * (1.0 - smoothstep(0.5, 0.8, roughness)) * frame.air.w;
 }
@@ -181,6 +186,27 @@ fn airFilter(world: vec3f) -> vec3f { // Transmittance only: light added over wh
 }
 )";
 const char* const photometry=R"(
+// Wind waves (gpu::Ocean, bindings 11-13): the cascades' slopes at a world point, each faded out as a pixel comes to cover one
+// to two of its texels (`footprint`: metres per pixel; no mipmaps, so its slopes then return to the roughness, as LEAN
+// mapping would); the normal (world), the slope variance they resolve there, and the foam where the Jacobian folds the surface.
+@group(0) @binding(11) var oceanDerivatives: texture_2d_array<f32>;
+@group(0) @binding(12) var oceanDisplacement: texture_2d_array<f32>;
+@group(0) @binding(13) var oceanSampler: sampler;
+struct Sea { normal: vec3f, resolved: f32, foam: f32 };
+fn seaAt(world: vec3f, footprint: f32) -> Sea {
+    var s = Sea(vec3f(0.0), 0.0, 0.0); if (frame.ocean.w <= 0.0) { return s; }
+    let east = frame.oceanEast.xyz; let north = frame.oceanNorth.xyz; let o = (world - frame.ocean.xyz) * frame.oceanEast.w;
+    let p = vec2f(dot(o, east), dot(o, north)); let patches = array<f32, 3>(512.0, 128.0, 32.0); let variance = frame.oceanSlopes;
+    var slope = vec2f(0.0); var fold = vec2f(0.0);
+    for (var c = 0; c < 3; c++) {
+        let weight = 1.0 - smoothstep(1.0, 2.0, footprint * 256.0 / patches[c]); if (weight <= 0.0) { continue; }
+        let d = textureSampleLevel(oceanDerivatives, oceanSampler, p / patches[c], c, 0.0);
+        slope += weight * d.xy; fold += weight * d.zw; s.resolved += weight * variance[c];
+    }
+    s.normal = normalize(cross(east, north) - slope.x * east - slope.y * north);
+    let jacobian = (1.0 + fold.x) * (1.0 + fold.y); s.foam = 1.0 - smoothstep(0.15, 0.65, jacobian);
+    return s;
+}
 // McEwen's lunar-Lambert photometry at 0.56 µm (A precise lunar photometric function, LPSC 27, 841, 1996; the disk
 // term's factor 2 as in USGS ISIS): I/F = R30 X(i, e, α) / X(30°, 0°, 30°) F(α) / F(30°), R30 the reflectance at
 // i = 30°, e = 0, α = 30°. mu0, mu: cosines of incidence and emission; alpha: phase angle (degrees).

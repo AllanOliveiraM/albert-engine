@@ -320,6 +320,13 @@ volume; guardados em `settings.json` no diretório de dados (o som sempre começ
 da vertical local, sem rolagem), W/A/S/D andam, Espaço/E e Ctrl/Q sobem e descem, Shift multiplica por 5, a roda ajusta a
 velocidade (0,6 × a altura sobre a superfície mais próxima por segundo, no mínimo 2 m/s); nunca abaixo de 2 m do relevo
 desenhado; a origem flutuante segue o olho como nos voos entre corpos.
+Ondas no mar (`gpu::Ocean`, Ajustes "Ondas no mar"): espectro de Pierson-Moskowitz do vento (o do voo com GFS, senão 7 m/s de
+leste) com espalhamento cos², três cascatas periódicas de 256² (512, 128 e 32 m) avançadas por ω² = g k e trazidas ao espaço
+por FFT inversa em compute (4 dispatches por quadro); a água (`albert:water`) toma a normal das inclinações e a espuma onde o
+jacobiano dobra, cada cascata some quando um pixel cobre 1-2 texels dela e sua variância de inclinação volta à rugosidade
+(Cox-Munk menos o resolvido); o padrão é ancorado num plano tangente, com a âncora presa ao período de 512 m (não salta) e
+calculada em dupla precisão em relação ao olho. Até 30 km de altura. `ocean_test` lê o campo de volta: altura significativa
+2,38 m a 10 m/s e 5,03 m a 15 m/s contra 2,25 e 5,06 de Pierson-Moskowitz, inclinação resolvida a 4% da integral do espectro.
 Som do voo (`src/render/sound.*`): começa mudo; a opção "Som do voo" do menu abre o dispositivo padrão (miniaudio 0.11.25,
 fixado por SHA-256 em `src/render/CMakeLists.txt`) e a câmera ouve o voo pela física de `physics/acoustics` (tempo retardado,
 absorção, Doppler). A síntese é a das auralizações da NASA: quadros de 8192 pontos com fase aleatória e a potência de cada
