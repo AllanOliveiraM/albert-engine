@@ -205,6 +205,7 @@ public:
     Vec up()const{return up_;}
     double catchHeight(const State& s)const{return arms_+rest_-(cg(s.propellant)-pin_);} // Of the centre of mass, pins on the arms, upright.
     double hoverAbove=10;
+    bool armsClosed=true; // The arms around it: going down onto them waits for that.
 protected:
     double share(double p)const{return std::clamp(p/propellant_,0.,1.);}
     double cg(double p)const{return empty_.cg+(full_.cg-empty_.cg)*share(p);}
@@ -294,7 +295,7 @@ public:
             const Vec a=up_*up+side;c.throttle=std::clamp(s.mass*norm(a)/(engines_*raptorSea),.4,1.);aim(c,s,unit(a));if(engines_==3)roll(c,s);
             if(engines_==3&&(above<2||vz>-1))phase_=Phase::hover;break;}
         case Phase::hover:case Phase::descend: // Over the tower, then down at 1 m/s until the pins rest on the arms.
-            if(phase_==Phase::hover&&settled(s,flat))phase_=Phase::descend;
+            if(phase_==Phase::hover&&armsClosed&&settled(s,flat))phase_=Phase::descend;
             overArms(c,s,flat,over,phase_==Phase::descend,3);
             if(norm(s.contact)>0){c.throttle=.4;phase_=Phase::caught;caught_=t;}break;
         case Phase::caught: // The engines at their least for a second while the arms take the load, then off.

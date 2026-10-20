@@ -57,7 +57,7 @@ public:
             if(engines_==2&&(above<2||vz>-1))phase_=Phase::hover;
             break;}
         case Phase::hover:case Phase::descend: // Over the tower, then down at 1 m/s until the pins rest on the arms.
-            if(phase_==Phase::hover&&settled(s,flat))phase_=Phase::descend;
+            if(phase_==Phase::hover&&armsClosed&&settled(s,flat))phase_=Phase::descend;
             {const double demand=overArms(c,s,flat,over,phase_==Phase::descend,engines_,centre());c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
                 // As light as it gets, 2 Raptors at their least lift more than its weight: down to 1 (and up again when short).
                 if(engines_>1&&demand<.45*engines_*raptorSea){c.cutoff={engines_};--engines_;}else if(engines_<3&&demand>.9*engines_*raptorSea){++engines_;c.ignite={engines_};}}

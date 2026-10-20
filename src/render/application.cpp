@@ -211,17 +211,18 @@ Vec3 geodetic(double latDeg, double lonDeg, double h = 0) {
 double jdTT(double utc){return albert::astro::julianTT(utc);}
 double jdTDB(double utc){return albert::astro::julianTDB(utc);}
 
-Matrix4 earthOrientation(double utc) {
+// Celestial (GCRS) to terrestrial (ITRS) at a Julian UTC date.
+void terrestrial(double utc, double m[3][3]) {
     double tt = jdTT(utc);
     double ut1 = utc + DUT1 / 86400.0;
-
-    double m[3][3];
-
     eraC2t06a(
         2400000.5, tt - 2400000.5,
         2400000.5, ut1 - 2400000.5,
         XP, YP, m
     );
+}
+
+Matrix4 earthOrientation(const double m[3][3]) {
 
     auto transform = [&](Vec3 p) -> Vec3 {
         return {
@@ -2240,6 +2241,9 @@ int albert::runRenderer(int argc, char** argv) {
             // Posicionamento fisico dos corpos
             double utc = 2440587.5+simulatedUtc/86400.;
             double tdb = jdTDB(utc);
+            double c2t[3][3];terrestrial(utc,c2t); // The Earth's frame: its globe's and the objects fixed on it.
+            registry.builtinFrame("earth",simulatedUtc,{c2t[0][0],c2t[0][1],c2t[0][2],c2t[1][0],c2t[1][1],c2t[1][2],c2t[2][0],c2t[2][1],c2t[2][2]},
+                2*std::numbers::pi*1.00273781191135448/86400.);
 
             registry.builtinState("earth",{simulatedUtc,{0,0,0}});
             try {
@@ -2353,7 +2357,7 @@ int albert::runRenderer(int argc, char** argv) {
                 pendingEvent.reset();
             }
 
-            auto rotation = earthOrientation(utc);
+            auto rotation = earthOrientation(c2t);
             earth->setRotationFromMatrix(rotation);
             bordersObject->setRotationFromMatrix(rotation);
 

@@ -326,7 +326,18 @@ filho no replay.
 **Água e estruturas.** `water` faz da superfície do sítio água do mar (o veículo flutua, é freado pela água e nunca "pousa":
 amerissagem); `structures` põe segmentos fixos ao chão, em metros leste-norte-cima do sítio, com raio, mola, amortecedor e
 atrito — os braços de uma torre de captura —, tocados pelos `hard_points_meters` dos estágios; a amostra traz a força de
-contato.
+contato. Com `hinge_enu_meters`, a estrutura gira em torno de `hinge_axis` (padrão: para cima) até o ângulo de
+`FlightCommand.structure_radians` (`index`: a estrutura; 0: todas as articuladas), dentro de `min_radians`/`max_radians` e na
+taxa `swing_rate_radians_per_second`, a partir de `start_radians`; a amostra traz os ângulos (`structure_radians`). Cada voo
+tem sua cópia das estruturas (um voo gerado herda os ângulos do pai no instante): comande todos os que devem ver o mesmo.
+
+**Aparência e cenário.** `StageDefinition.appearance` diz como o estágio se vê: o corpo em troncos de cone (`BodySection`,
+com um arco de ladrilhos pretos), peças em dobradiças que giram com uma superfície (`HingedPart`: flaps, grid fins) e os
+pinos; a cena desenha também os sinos dos motores com o cardã, as plumas (estreitas no ar denso, um leque azulado no vácuo,
+pela pressão) e os jatos do RCS pelo ciclo de trabalho. `scenery` (`SceneryPart`) é o cenário do sítio, só desenhado:
+caixas, tanques (cilindros, ocos ou não) e treliças, em metros leste-norte-cima, com rumo e inclinação; cada peça pode girar
+com uma estrutura articulada (`structure`). A cena mostra o cenário e as estruturas (barras de aço) como o objeto `site`,
+preso ao chão: seu lugar vem da rotação da Terra a cada quadro (o objeto ancorado do núcleo), não de amostras.
 
 **Começar em voo.** `start` (`StartState`) cria o voo já no ar em vez do pad: sobre o corpo central (`local`: posição
 geodésica, velocidade em relação ao solo em NED, rumo, arfagem e rolagem, taxas do corpo) ou no referencial inercial do voo
@@ -437,7 +448,11 @@ núcleo.
   - grid fins como duas superfícies, com momento por deflexão e arrasto constante;
   - pinos de captura como `hard_points`.
 - **Torre:** os braços são `structures`, quatro barras de aço amortecidas em pares, formando trilhos. O pino fica no sulco
-  entre as barras.
+  entre as barras. Os braços têm dobradiça no carro da torre: abertos 30° para a subida e para a descida passando por eles,
+  fecham a 8°/s quando o veículo paira acima, e a descida até os pinos espera que fechem.
+- **Starbase:** o `scenery` desenha a torre em treliça de 146 m, o carro, os braços (que giram com as barras), o braço da
+  nave, a mesa de lançamento com as garras, o pátio de concreto, a fazenda de tanques e a linha de propelente (lugares e
+  medidas aproximados, de fotos). `--pad` mostra a pilha na mesa com a câmera dando a volta.
 
 **Voo**
 1. **Subida:** o programa genérico de subida dirige a pilha pelos cardãs, a 80% de empuxo a partir dos 40 s.

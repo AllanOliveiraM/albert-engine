@@ -400,6 +400,15 @@ int main(){try{
         const Vehicle hv{"hung",{hung},0};Flight caught(hv,tower,Flight::free(tower,hv,t0,{.5,-1.4,h+.3+.2},{},{0,pi/2,0}));for(int i=0;i<5000;++i)caught.advance(second/1000);
         const double rest=caught.sample().geodetic.height;std::printf("caught: centre of mass %.4f m over the bar's centre (radius 0.3, mg/k %.4f)\n",rest-h,1000*9.79/1e7);
         near(rest-h,.3-1000*9.79/1e7,2e-3,"Rests on the catch bar");near(caught.sample().nedVelocity.z,0,1e-3,"At rest");
+        // The same bar on a hinge 5 m north, laid 90° away: swung in, it carries the vehicle alike; at 1 rad/s it takes its time.
+        const V3 c=fixedPosition(earth,{.5,-1.4,h}),up=(fixedPosition(earth,{.5,-1.4,h+1})-c)/norm(fixedPosition(earth,{.5,-1.4,h+1})-c);
+        const V3 north=(fixedPosition(earth,{.5+1e-7,-1.4,h})-c)/norm(fixedPosition(earth,{.5+1e-7,-1.4,h})-c),pivot=c+north*5;
+        auto turn=[&](V3 x,double t){const V3 v=x-pivot;return pivot+v*std::cos(t)+cross(up,v)*std::sin(t)+up*(dot(up,v)*(1-std::cos(t)));};
+        Environment hinge=tower;auto& arm=hinge.structures[0];arm.a=turn(a,-pi/2);arm.b=turn(b,-pi/2);arm.hinged=true;arm.pivot=pivot;arm.axis=up;arm.high=pi/2;
+        Flight swung(hv,hinge,Flight::free(hinge,hv,t0,{.5,-1.4,h+.3+.2},{},{0,pi/2,0}));swung.swing(pi/2);for(int i=0;i<5000;++i)swung.advance(second/1000);
+        near(swung.sample().geodetic.height-h,.3-1000*9.79/1e7,2e-3,"Rests on the bar swung in");
+        hinge.structures[0].rate=1;Flight moving(hv,hinge,Flight::free(hinge,hv,t0,{.5,-1.4,h+50},{},{0,pi/2,0}));moving.swing(pi);for(int i=0;i<500;++i)moving.advance(second/1000);
+        near(moving.structures()[0].angle,.5,1e-9,"Swings at its rate");near(moving.structures()[0].target,pi/2,0,"Within its range");
     }
     // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
     // against 10 ms steps.

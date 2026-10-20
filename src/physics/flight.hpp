@@ -106,9 +106,11 @@ struct Environment {
     std::shared_ptr<const AirModel> air; // Replaces the standard atmosphere when set.
     double ground=-std::numeric_limits<double>::infinity(); // Ellipsoidal height of the surface (m).
     // water: that surface is water (sea water, 1025 kg/m³): the stack floats by its slices' buoyancy and drag; legs and wheels
-    // do not touch it. structures: segments fixed to the body (ECEF ends, m) with a radius, struck by the stages' hard points.
+    // do not touch it. structures: segments fixed to the body (ECEF ends, m) with a radius, struck by the stages' hard points;
+    // a hinged one turns about its axis through its pivot (body-fixed) by an angle from that pose (rad), commanded within
+    // [low, high] (Flight::swing) and reached at its rate (rad/s; 0: at once), from start.
     bool water=false;
-    struct Structure {std::string name;V3 a,b;double radius=.5,stiffness=1e7,damping=1e5,friction=.5;};
+    struct Structure {std::string name;V3 a,b;double radius=.5,stiffness=1e7,damping=1e5,friction=.5;bool hinged=false;V3 pivot,axis{0,0,1};double rate=0,low=0,high=0,start=0;};
     std::vector<Structure> structures;
 };
 // Earth (defaults), or the Moon / Mars with their rotation, climatology and a field of the given degree.
@@ -161,6 +163,7 @@ public:
     void thruster(double duty,int index=-1);      // A thruster's duty cycle (0-1) directly, until the next torque command.
     void brake(double fraction,int index=-1);     // Wheel brakes, 0-1.
     void steer(double angle,int index=-1);        // Wheel steering (rad), clamped to each wheel's limit.
+    void swing(double angle,int index=-1);        // A hinged structure's angle (rad), clamped to its range; reached at its rate.
     struct WheelState {double brake=0,steer=0;};
     const std::vector<WheelState>& wheels()const{return wheels_;}
     // Each engine of the stage: on, failed, throttle, gimbal as moved (rad) and as commanded.
@@ -168,6 +171,8 @@ public:
     const std::vector<EngineState>& engines()const{return engines_;}
     struct SurfaceState {double deflection=0,target=0;};
     const std::vector<SurfaceState>& surfaces()const{return surfaces_;}
+    struct StructureState {double angle=0,target=0;};
+    const std::vector<StructureState>& structures()const{return structures_;} // By Environment::structures (fixed ones at 0).
     const std::vector<double>& thrusters()const{return duty_;} // Duty cycles.
     const std::vector<double>& temperatures()const{return temperatures_;} // Thermal nodes (K), the stage's.
     std::vector<double> engineThrust()const; // Each engine's thrust now (N, after the ambient pressure).
@@ -194,9 +199,12 @@ private:
     Turbulence turbulence_;V3 gustNed_; // The gust over the step (NED, m/s).
     double flowOf(std::size_t i)const; // Engine i's propellant flow (kg/s).
     void allocate(); // Thruster duties for the torque command.
-    Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_;std::vector<WheelState> wheels_;Tt step_=0,coast_=0;Increments increments_;
+    Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_;std::vector<WheelState> wheels_;
+    std::vector<StructureState> structures_;struct Segment {V3 a,b,pivot,spin;};std::vector<Segment> segments_; // Where the structures are now (spin: rad/s, body-fixed).
+    Tt step_=0,coast_=0;Increments increments_;
     void heat(double seconds); // The thermal nodes over a step, from its start's flow.
     double structureGap(V3 fixed)const;
+    void place(const std::vector<double>& before={},double seconds=0); // The structures where their angles put them; spin: from `before` over `seconds`.
     V3 padPosition_;Q padAttitude_; // ECEF and body→ECEF while clamped/landed.
     mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable ThirdBody p0_[2]{},p1_[2]{};mutable int bodies_=0;
 };

@@ -42,5 +42,14 @@ int main(){try{
         const auto e=parts.evaluate("vehicle",101);require(e.state.parts&&std::abs((*e.state.parts)[0]-.5f)<1e-6f&&std::abs((*e.state.parts)[1]-2)<1e-6f,"Vehicle parts not interpolated");
         Object bad=object();bad.id="bad";bad.samples[0].parts=std::make_shared<std::vector<float>>(std::vector<float>{std::numeric_limits<float>::quiet_NaN()});rejects([&]{parts.create(bad);});
     }
-    std::cout<<"Scene OK: precision, validation, interpolation, vehicle parts, bounded history, cancellation and concurrent queue\n";return 0;
+    { // Fixed on the Earth: where its frame, turning, puts it; an anchor on no built-in body is refused.
+        Scene fixed;Object o=object();o.id="site";o.anchor=Anchor{"earth",{6378137,0,0},Quaternion{0,0,0,1}};fixed.create(o);fixed.builtinState("earth",{100,{0,0,0}});
+        require(std::abs(fixed.evaluate("site",101).state.positionMeters.x-1e11-10)<1e-6,"Anchored object without a frame not on its samples");
+        const double spin=7.2921158553e-5,quarter=3.14159265358979323846/2/spin;fixed.builtinFrame("earth",100,{1,0,0,0,1,0,0,0,1},spin);
+        const auto e=fixed.evaluate("site",100+quarter).state;const auto q=*e.attitude;
+        require(std::abs(e.positionMeters.x)<1e-6&&std::abs(e.positionMeters.y-6378137)<1e-6&&std::abs(e.velocityMetersPerSecond.x+spin*6378137)<1e-9&&
+            std::abs(q.z-std::sqrt(.5))<1e-12&&std::abs(q.w-std::sqrt(.5))<1e-12,"Anchored object not turned with its body");
+        Object bad=object();bad.id="loose";bad.anchor=Anchor{"test",{1,0,0},Quaternion{0,0,0,1}};rejects([&]{fixed.create(bad);});
+    }
+    std::cout<<"Scene OK: precision, validation, interpolation, vehicle parts, anchors, bounded history, cancellation and concurrent queue\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

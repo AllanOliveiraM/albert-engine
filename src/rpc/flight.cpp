@@ -201,7 +201,7 @@ Prepared prepare(const api::CreateFlightRequest& r,double utc){
 struct Slot {
     using Sound=FlightServices::Sound;
     struct Command {std::uint32_t kind;double a=0,b=0,c=0;};
-    core::Bridge& bridge;AirSources sources;std::string name,sceneId;std::atomic<std::shared_ptr<const Sound>>& heard;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
+    core::Bridge& bridge;AirSources sources;std::string name,sceneId,siteId;std::atomic<std::shared_ptr<const Sound>>& heard;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
     // Navigation sensors, each measuring at the end of the step that completes its period.
     std::optional<ph::Gnss> gnss;std::optional<ph::RadarAltimeter> radar;std::optional<ph::StarTracker> tracker;
     ph::Gnss::Reading gnssReading;ph::RadarAltimeter::Reading radarReading;ph::StarTracker::Reading trackerReading;double gnssLast=0,radarLast=0,trackerLast=0;
@@ -220,7 +220,7 @@ struct Slot {
     // The keeper republishes a flight that is not stepping (paused, before real time) when the scene's
     // state of its central body changes, e.g. once Horizons data replaces ERFA's (Mars: ~1000 km).
     // wallAt, wallUtc, clockRate: the last publication's wall time and instant, and the rate between them (the scene clock's).
-    ph::V3 publishedOrigin{};double publishedUtc=-1e300,wallAt=0,wallUtc=0,clockRate=0;std::thread keeper;std::mutex keeperLock;std::condition_variable keeperWake;bool keeperStop=false;
+    ph::V3 publishedOrigin{};double siteUtc=-1,publishedUtc=-1e300,wallAt=0,wallUtc=0,clockRate=0;std::thread keeper;std::mutex keeperLock;std::condition_variable keeperWake;bool keeperStop=false;
     void keep(){
         std::unique_lock l(keeperLock);
         while(!keeperWake.wait_for(l,std::chrono::milliseconds(500),[this]{return keeperStop;})){
@@ -235,7 +235,7 @@ struct Slot {
     bool atInstant()const{const auto snap=bridge.snapshot();return snap&&std::abs(snap->utcSeconds-ph::utcFromTt(flight->state().time))<1;}
     void stopKeeper(){{std::lock_guard l(keeperLock);keeperStop=true;}keeperWake.notify_all();if(keeper.joinable())keeper.join();}
     Slot(core::Bridge& b,AirSources s,std::string id,std::atomic<std::shared_ptr<const Sound>>& sound)
-        :bridge(b),sources(std::move(s)),name(std::move(id)),sceneId(name=="flight"?name:"flight."+name),heard(sound){
+        :bridge(b),sources(std::move(s)),name(std::move(id)),sceneId(name=="flight"?name:"flight."+name),siteId(name=="flight"?"site":"site."+name),heard(sound){
         data=std::make_unique<wire::Server>([this](const wire::Request& q,wire::Response& r){
             std::vector<Command> commands; // Fixed order: fail, cutoff, separate, release, ignite, throttle, gimbal, torque.
             const std::uint32_t engine=std::min<std::uint32_t>(q.engine,0xffff)<<16; // Out of range: refused by the flight.
@@ -344,6 +344,30 @@ struct Slot {
         core::Object o;o.id=sceneId;o.name=name=="flight"?v.name:v.name+" ("+name+")";o.source="Albert flight physics";o.appearance={core::Shape::Cylinder,{v.diameter,length,v.diameter},0xe8e8e8};
         o.radiusMeters=length/2;o.defaultDistanceMeters=6*length;o.minDistanceMeters=length;o.samples.push_back(scene());o.look=look();return o;
     }
+    // The site's scenery and structures, fixed to the ground (none without either, or off the Earth).
+    std::optional<core::Object> siteObject(const api::CreateFlightRequest& r)const{
+        if(center!=ph::Center::earth||r.scenery().empty())return{};
+        const auto& g=r.site();const double la=g.latitude_degrees()*deg,lo=g.longitude_degrees()*deg;
+        const ph::V3 p=ph::fixedPosition(flight->environment().planet,{la,lo,g.height_meters()});
+        const ph::M3 enu=ph::transpose(ph::nedFromFixed(la,lo))*ph::M3{{{0,1,0},{1,0,0},{0,0,-1}}}; // East, north, up into the body-fixed frame.
+        auto look=std::make_shared<core::Scenery>();double extent=1;
+        auto cv=[&](const api::Vector3& x){extent=std::max({extent,std::abs(x.x()),std::abs(x.y()),std::abs(x.z())});return core::Vector{x.x(),x.y(),x.z()};};
+        for(const auto& x:r.scenery()){core::SceneryPart q;q.shape=static_cast<core::SceneryPart::Shape>(x.shape());q.centre=cv(x.centre_enu_meters());
+            q.size={x.size_meters().x(),x.size_meters().y(),x.size_meters().z()};q.heading=x.heading_degrees()*deg;q.tilt=x.tilt_degrees()*deg;q.inner=x.inner_diameter_meters();
+            q.bar=x.bar_meters();q.color=x.color();q.structure=x.structure();look->parts.push_back(q);}
+        for(const auto& x:r.structures()){look->bars.push_back({cv(x.start_enu_meters()),cv(x.end_enu_meters()),x.radius_meters()});
+            if(x.has_hinge_enu_meters()){auto& b=look->bars.back();const auto& k=x.hinge_axis();b.hinged=true;b.pivot=cv(x.hinge_enu_meters());b.axis=x.has_hinge_axis()?core::Vector{k.x(),k.y(),k.z()}:core::Vector{0,0,1};}}
+        const ph::Tt t=flight->state().time;const ph::M3 back=ph::transpose(flight->environment().rotation.at(t).fixed);const ph::V3 at=back*p;const ph::Q q=ph::quaternion(back*enu),a=ph::quaternion(enu);
+        core::Object o;o.id=siteId;o.name=name=="flight"?"Local de lancamento":"Local de lancamento ("+name+")";o.source="Flight request scenery and structures";
+        o.appearance={core::Shape::Box,{2*extent,2*extent,2*extent},0xb0b0b0};o.samples.push_back({ph::utcFromTt(t),{at.x,at.y,at.z},{},core::Quaternion{q.x,q.y,q.z,q.w},false});
+        o.samples.back().parts=angles();
+        o.scenery=std::move(look);o.anchor=core::Anchor{"earth",{p.x,p.y,p.z},core::Quaternion{a.x,a.y,a.z,a.w}};return o;
+    }
+    // The structures' angles (the site's moving parts), when any is hinged.
+    std::shared_ptr<const std::vector<float>> angles()const{
+        if(std::none_of(flight->environment().structures.begin(),flight->environment().structures.end(),[](const auto& x){return x.hinged;}))return{};
+        auto p=std::make_shared<std::vector<float>>();for(const auto& x:flight->structures())p->push_back(static_cast<float>(x.angle));return p;
+    }
     void publish(bool force){
         const auto now=std::chrono::steady_clock::now();
         if(!force&&now-published<std::chrono::milliseconds(33))return;
@@ -357,6 +381,8 @@ struct Slot {
             shown=flight->state().stage;
         }else (void)bridge.submit(core::Append{sceneId,{s}});
         publishedUtc=s.utcSeconds;publishedOrigin=at;
+        if(siteUtc>=0&&s.utcSeconds>siteUtc)if(auto a=angles()){ // The site's arms as they swing (its place is the Earth's).
+            core::Sample x{s.utcSeconds,{},{},core::Quaternion{},false};x.parts=std::move(a);(void)bridge.submit(core::Append{siteId,{std::move(x)}});siteUtc=s.utcSeconds;}
         // The scene's instant and the app's flight panel from the flight the camera follows (any, when it follows none).
         const auto snap=bridge.snapshot();const std::string followed=snap?snap->camera.target:std::string();
         if(followed==sceneId||(followed!="flight"&&followed.rfind("flight.",0)!=0)){
@@ -411,7 +437,8 @@ struct Slot {
         ph::State x;x.time=s.time;x.position=s.position+r;x.velocity=s.velocity+ph::cross(b*s.rate,r);x.attitude=s.attitude;x.rate=s.rate;x.propellant=left;
         (void)ph::Flight(v,f.environment(),x); // Checks the vehicle against the core's rules now, not after the step.
         api::CreateFlightRequest q=log.request();q.set_flight_id(flightName(sp.flight_id()));q.set_vehicle(api::CUSTOM);*q.mutable_definition()=sp.definition();q.clear_payload_kilograms();
-        q.set_utc_unix_seconds(ph::utcFromTt(s.time));q.set_focus_camera(false);q.set_terrain_height(false);
+        q.set_utc_unix_seconds(ph::utcFromTt(s.time));q.set_focus_camera(false);q.set_terrain_height(false);q.clear_scenery(); // The site is its parent's; its structures as they are now.
+        for(int j=0;j<q.structures_size()&&j<static_cast<int>(f.structures().size());++j)if(q.structures(j).has_hinge_enu_meters())q.mutable_structures(j)->set_start_radians(f.structures()[static_cast<std::size_t>(j)].angle);
         q.mutable_imu()->set_seed(q.imu().seed()^(0x9e3779b97f4a7c15ull*(k+1)));q.mutable_sensors()->set_seed(q.sensors().seed()^(0xbf58476d1ce4e5b9ull*(k+1)));
         q.mutable_physics()->set_turbulence_seed(q.physics().turbulence_seed()^(0x94d049bb133111ebull*(k+1)));
         auto* w=q.mutable_start();w->Clear();w->set_stage(0);w->set_propellant_kilograms(left);auto* i=w->mutable_inertial();
@@ -427,12 +454,12 @@ struct Slot {
         std::vector<api::CreateFlightRequest> spawned;
         try{for(const auto& c:commands){const int e=static_cast<int>(c.kind>>16)-1; // The engine in the high bits: 0 every one.
             const std::uint32_t k=c.kind&0xffff;
-            if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface&&k!=wire::brake&&k!=wire::steer)throw std::invalid_argument("This command takes no index");
+            if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface&&k!=wire::brake&&k!=wire::steer&&k!=wire::swing)throw std::invalid_argument("This command takes no index");
             switch(c.kind&0xffff){
             case wire::ignite:next.ignite(e);break;case wire::cutoff:next.cutoff(e);break;case wire::separate:next.separate();break;case wire::release:next.release();break;
             case wire::throttle:next.throttle(c.a,e);break;case wire::gimbal:next.gimbal(c.a,c.b,e);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
             case wire::fail:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e);break;
-            case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;case wire::brake:next.brake(c.a,e);break;case wire::steer:next.steer(c.a,e);break;
+            case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;case wire::brake:next.brake(c.a,e);break;case wire::steer:next.steer(c.a,e);break;case wire::swing:next.swing(c.a,e);break;
             case wire::spawn:{if(e>=0||!(c.a>=0&&c.a<static_cast<double>(log.spawns_size())))throw std::invalid_argument("No such spawn");const auto k=static_cast<std::size_t>(c.a);
                 if(next.state().stage+1>=static_cast<int>(next.vehicle().stages.size()))throw std::logic_error("No stage to separate");
                 spawned.push_back(child(next,log.spawns(static_cast<int>(k)),k));next.separate();break;}
@@ -493,6 +520,7 @@ struct Slot {
          for(std::size_t i=0;i<fs.size();++i){auto* x=o->add_surfaces();x->set_name(fs[i].name);x->set_deflection_radians(flight->surfaces()[i].deflection);x->set_command_radians(flight->surfaces()[i].target);}
          for(double u:flight->thrusters())o->add_thruster_duty(u);
          const auto& ws=v.stages[static_cast<std::size_t>(s.stage)].wheels;for(std::size_t i=0;i<ws.size();++i){auto* w=o->add_wheels();w->set_name(ws[i].name);w->set_brake(flight->wheels()[i].brake);w->set_steer_radians(flight->wheels()[i].steer);}
+         for(const auto& x:flight->structures())o->add_structure_radians(x.angle);
          const auto& nodes=v.stages[static_cast<std::size_t>(s.stage)].thermal;for(std::size_t i=0;i<nodes.size();++i){auto* t=o->add_thermal_nodes();t->set_name(nodes[i].name);
             t->set_temperature_kelvin(flight->temperatures()[i]);t->set_heat_flux_watts_per_meter2(ph::nodeHeating(nodes[i],x.heatFlux,x.airBody));t->set_over_limit(nodes[i].limit>0&&flight->temperatures()[i]>nodes[i].limit);}put(x.rcsForce,o->mutable_thruster_force_newtons());put(x.rcsMoment,o->mutable_thruster_moment_newton_meters());}
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();
@@ -540,7 +568,7 @@ struct FlightServices::Impl {
         std::shared_ptr<Slot> x;try{x=make(r.flight_id());}catch(const std::length_error& e){return{grpc::StatusCode::RESOURCE_EXHAUSTED,e.what()};}
         auto st=x->create(r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),cancelled,out);
         if(!st.ok()){drop(r.flight_id(),x);return st;}
-        if(find(r.flight_id())!=x){x->stopPacing();{std::lock_guard g(x->mutex);x->flight.reset();}(void)bridge.submit(core::Remove{x->sceneId});
+        if(find(r.flight_id())!=x){x->stopPacing();{std::lock_guard g(x->mutex);x->flight.reset();}(void)bridge.submit(core::Remove{x->sceneId});(void)bridge.submit(core::Remove{x->siteId});
             return{grpc::StatusCode::ABORTED,"The flight was ended while being created"};}
         if(made)*made=x;return st;
     }
@@ -556,11 +584,19 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     env.wind=on(m.has_wind(),m.wind());env.solarPressure=on(m.has_solar_radiation_pressure(),m.solar_radiation_pressure());
     env.turbulence=m.turbulence_meters_per_second();env.turbulenceSeed=m.turbulence_seed();env.water=r.water();
     if(r.structures_size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 structures"};
+    if(r.scenery_size()>512)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 512 scenery parts"};
+    for(const auto& x:r.scenery()){const auto& c=x.centre_enu_meters();const auto& z=x.size_meters();
+        const bool ok=api::SceneryPart::Shape_IsValid(x.shape())&&std::isfinite(c.x())&&std::isfinite(c.y())&&std::isfinite(c.z())&&std::max({std::abs(c.x()),std::abs(c.y()),std::abs(c.z())})<=2e4&&
+            z.x()>0&&z.y()>0&&z.z()>0&&std::max({z.x(),z.y(),z.z()})<=5e3&&std::isfinite(x.heading_degrees())&&std::isfinite(x.tilt_degrees())&&x.color()<=0xffffff&&
+            x.inner_diameter_meters()>=0&&x.inner_diameter_meters()<std::min(z.x(),z.y())&&x.bar_meters()>=0&&x.bar_meters()<=std::min(z.x(),z.y())/2;
+        if(!ok)return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid scenery part"};}
     { // Structures from the site's east, north and up into the body-fixed frame.
         const double la=site.latitude_degrees()*deg,lo=site.longitude_degrees()*deg;const ph::V3 o=ph::fixedPosition(env.planet,{la,lo,site.height_meters()});const ph::M3 back=ph::transpose(ph::nedFromFixed(la,lo));
         auto at=[&](const api::Vector3& v){return o+back*ph::V3{v.y(),v.x(),-v.z()};};
-        for(const auto& x:r.structures())env.structures.push_back({x.name().substr(0,128),at(x.start_enu_meters()),at(x.end_enu_meters()),x.radius_meters(),
+        for(const auto& x:r.structures()){env.structures.push_back({x.name().substr(0,128),at(x.start_enu_meters()),at(x.end_enu_meters()),x.radius_meters(),
             x.has_stiffness_newtons_per_meter()?x.stiffness_newtons_per_meter():1e7,x.has_damping_newton_seconds_per_meter()?x.damping_newton_seconds_per_meter():1e5,x.has_friction()?x.friction():.5});
+            if(x.has_hinge_enu_meters()){auto& h=env.structures.back();const auto& k=x.hinge_axis();h.hinged=true;h.pivot=at(x.hinge_enu_meters());
+                h.axis=x.has_hinge_axis()?back*ph::V3{k.y(),k.x(),-k.z()}:back*ph::V3{0,0,-1};h.rate=x.swing_rate_radians_per_second();h.low=x.min_radians();h.high=x.max_radians();h.start=x.start_radians();}}
     }
     if(!(env.turbulence>=0&&env.turbulence<=50))return{grpc::StatusCode::INVALID_ARGUMENT,"Turbulence must be 0-50 m/s"};
     if(p.body==ph::Center::earth){env.air=air;env.planet.degree=static_cast<int>(p.degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(p.utc-946728000.));}
@@ -616,8 +652,9 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     for(auto& b:grib)log.add_gfs(std::move(b));
     log.set_gravity(std::move(gravity.table));
     for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}
-    shown=0;(void)wait(bridge.submit(core::Remove{sceneId}));
+    shown=0;(void)wait(bridge.submit(core::Remove{sceneId}));(void)wait(bridge.submit(core::Remove{siteId}));
     if(auto s=failed(wait(bridge.submit(core::Create{object()})));!s.ok())return s;
+    siteUtc=-1;if(auto o=siteObject(r)){const double u=o->samples.back().utcSeconds;if(auto s=failed(wait(bridge.submit(core::Create{std::move(*o)})));!s.ok())return s;siteUtc=u;}
     publishedOrigin=origin(flight->state().time).position;publishedUtc=ph::utcFromTt(flight->state().time); // The keeper's reference.
     if(auto s=failed(wait(bridge.submit(core::SetTime{ph::utcFromTt(t),0.,false})));!s.ok())return s;
     if(r.focus_camera())(void)wait(bridge.submit(core::Focus{sceneId,true}));
@@ -724,7 +761,7 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
     std::vector<Slot::Command> commands;
     for(int j=0;j<r->commands_size();++j){const auto& c=r->commands(j);
-        if(c.index()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine, wheel, surface or thruster"};
+        if(c.index()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine, wheel, surface, thruster or structure"};
         const std::uint32_t e=c.index()<<16; // In the kind's high bits (the replay log keeps the record format).
         switch(c.command_case()){
         case api::FlightCommand::kIgnite:if(c.ignite())commands.push_back({wire::ignite|e});break;
@@ -739,6 +776,7 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
         case api::FlightCommand::kSurfaceRadians:commands.push_back({wire::surface|e,c.surface_radians()});break;
         case api::FlightCommand::kBrake:commands.push_back({wire::brake|e,c.brake()});break;
         case api::FlightCommand::kSteerRadians:commands.push_back({wire::steer|e,c.steer_radians()});break;
+        case api::FlightCommand::kStructureRadians:commands.push_back({wire::swing|e,c.structure_radians()});break;
         case api::FlightCommand::kSpawn:commands.push_back({wire::spawn|e,-1,static_cast<double>(j)});break; // b: the request's command, for its payload.
         default:return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
         }
@@ -767,7 +805,7 @@ grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::FlightReq
     slot->stopPacing();core::Reply reply;
     {std::lock_guard lock(slot->mutex);
         if(slot->flight){slot->flight.reset();if(const auto h=impl_->sound.load();h&&h->owner==slot.get())impl_->sound.store(nullptr);
-            reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));out->set_revision(reply.revision);}
+            reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));(void)impl_->bridge.submit(core::Remove{slot->siteId});out->set_revision(reply.revision);}
         else reply={core::Code::NotFound,"",0};}
     impl_->drop(id,slot); // Its threads stop with the last reference.
     { // The app's flight panel: another flight's, or none.

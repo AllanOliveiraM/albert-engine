@@ -33,6 +33,17 @@ struct LookPart {std::string name;Vector hinge,axis{1,0,0},outward{0,1,0};double
 struct LookEngine {Vector position,direction{1,0,0};double exitRadius=.5;};
 struct LookThruster {Vector position,direction{1,0,0};};
 struct VehicleLook {double length=1,diameter=1;std::vector<LookSection> sections;std::vector<LookPart> parts;std::vector<LookEngine> engines;std::vector<LookThruster> thrusters;};
+// A site's scenery (a launch pad's tower, mount and tanks), in metres east, north and up of its place, drawn only: boxes,
+// round tanks (diameters size x by y, size z long, hollow inside `inner`) and trusses (a lattice box size z long, bars `bar`
+// thick), each turned by `heading` (rad: its y toward it, clockwise from north) and tilted (rad: its z leaning from up toward
+// its y), and turning with a hinged structure (1-based; 0: fixed); and the structures that carry the flight's physics as
+// steel bars, a hinged one about its axis through its pivot by its angle (Sample::parts: one per structure).
+struct SceneryPart {enum class Shape {Box,Cylinder,Truss} shape=Shape::Box;Vector centre,size{1,1,1};double heading=0,tilt=0,inner=0,bar=0;std::uint32_t color=0xb0b0b0;unsigned structure=0;};
+struct SceneryBar {Vector from,to;double radius=.5;bool hinged=false;Vector pivot,axis{0,0,1};};
+struct Scenery {std::vector<SceneryPart> parts;std::vector<SceneryBar> bars;};
+// Fixed on a built-in body (the Earth): its place in metres in the body-fixed frame (ITRS) and its local axes there; its
+// state then follows the body's frame (Scene::builtinFrame), its samples standing in until that is known.
+struct Anchor {ObjectId body;Vector position;Quaternion attitude;};
 enum class Shape {Builtin,Sphere,Box,Cylinder,Model};
 struct Appearance {Shape shape=Shape::Sphere;Vector sizeMeters{1000,1000,1000};std::uint32_t color=0x77cddd;std::string modelId;double metersPerUnit=1;};
 struct Object {
@@ -42,6 +53,8 @@ struct Object {
     bool builtin=false,visible=true,providerManaged=false;std::uint64_t instance=0;
     std::vector<Sample> samples;
     std::shared_ptr<const VehicleLook> look; // A vehicle's, drawn instead of the shape (with Sample::parts).
+    std::shared_ptr<const Scenery> scenery; // Drawn instead of the shape.
+    std::optional<Anchor> anchor;
 };
 struct Evaluated {Sample state;bool stale=false;};
 struct CameraState {ObjectId target="earth";Vector positionMeters;double distanceMeters=0;bool transitioning=false;};
@@ -81,6 +94,9 @@ public:
     void samples(const ObjectId& id,std::vector<Sample> values);
     void replace(const ObjectId& id,std::vector<Sample> values);
     void builtinState(const ObjectId& id,Sample value);
+    // A built-in body's orientation at an instant (celestial to body-fixed, row-major) and its spin about its fixed z (rad/s):
+    // where the objects anchored on it are, near that instant.
+    void builtinFrame(const ObjectId& id,double utcSeconds,const std::array<double,9>& celestialToFixed,double spin);
     const Object& get(const ObjectId& id) const;
     const std::map<ObjectId,Object>& objects() const{return objects_;}
     Evaluated evaluate(const ObjectId& id,double utcSeconds) const;
@@ -91,6 +107,7 @@ private:
     std::map<ObjectId,Object> objects_;
     std::map<std::string,std::shared_ptr<const Model>> models_;
     std::map<std::string,Layer> layers_;
+    struct Frame {double utc=0;std::array<double,9> m{};double spin=0;};std::map<ObjectId,Frame> frames_;
     std::uint64_t revision_=0;
 };
 bool validObjectId(std::string_view id);

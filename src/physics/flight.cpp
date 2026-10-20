@@ -74,8 +74,13 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
     if(vehicle_.stages.empty())throw std::invalid_argument("Vehicle without stages");
     auto finite=[](std::initializer_list<double> x){return std::all_of(x.begin(),x.end(),[](double v){return std::isfinite(v);});};
     if(!finite({vehicle_.torque,vehicle_.inertiaRate,vehicle_.diameter,vehicle_.sunArea,vehicle_.reflectivity}))throw std::invalid_argument("Non-finite vehicle value");
-    for(const auto& x:env_.structures)if(!finite({x.a.x,x.a.y,x.a.z,x.b.x,x.b.y,x.b.z,x.radius,x.stiffness,x.damping,x.friction})||!(x.radius>0)||!(x.stiffness>0)||!(x.damping>=0)||!(x.friction>=0))
-        throw std::invalid_argument("Invalid structure: "+x.name);
+    for(auto& x:env_.structures){
+        if(!finite({x.a.x,x.a.y,x.a.z,x.b.x,x.b.y,x.b.z,x.radius,x.stiffness,x.damping,x.friction})||!(x.radius>0)||!(x.stiffness>0)||!(x.damping>=0)||!(x.friction>=0)||
+           (x.hinged&&(!finite({x.pivot.x,x.pivot.y,x.pivot.z,x.axis.x,x.axis.y,x.axis.z,x.rate,x.low,x.high,x.start})||!(norm(x.axis)>0)||!(x.rate>=0)||!(x.low<=x.start&&x.start<=x.high))))
+            throw std::invalid_argument("Invalid structure: "+x.name);
+        if(x.hinged)x.axis=x.axis/norm(x.axis);
+        structures_.push_back({x.hinged?x.start:0.,x.hinged?x.start:0.});}
+    place();
     for(auto& st:vehicle_.stages){
         for(const V3& h:st.hardPoints)if(!finite({h.x,h.y,h.z}))throw std::invalid_argument("Invalid hard point: "+st.name);
         if(!finite({st.massFull,st.massEmpty,st.propellant,st.cgFull,st.cgEmpty,st.reference,st.length,st.noseRadius,st.legStiffness,st.legDamping,st.friction,st.aero.area,st.aero.length,st.aero.span,
@@ -267,10 +272,10 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         const V3 wi=b*s.rate;
         for(const V3& h:st.hardPoints){
             const V3 r{ms.cg-h.x,h.y,h.z},p=s.position+b*r,pf=o.fixed*p;
-            for(const auto& x:env_.structures){
-                const V3 ab=x.b-x.a;const double t=std::clamp(dot(pf-x.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);const V3 d=pf-(x.a+ab*t);const double dist=norm(d);
+            for(std::size_t i=0;i<segments_.size();++i){const auto& x=env_.structures[i];const auto& g=segments_[i];
+                const V3 ab=g.b-g.a;const double t=std::clamp(dot(pf-g.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);const V3 d=pf-(g.a+ab*t);const double dist=norm(d);
                 if(!(dist<x.radius)||!(dist>0))continue;
-                const V3 n=back*(d/dist),v=s.velocity+cross(wi,b*r)-cross(o.omega,p);const double vn=dot(v,n);const V3 vt=v-n*vn;
+                const V3 n=back*(d/dist),v=s.velocity+cross(wi,b*r)-cross(o.omega,p)-back*cross(g.spin,pf-g.pivot);const double vn=dot(v,n);const V3 vt=v-n*vn; // Relative to the structure.
                 const double fn=std::max(0.,x.stiffness*(x.radius-dist)-x.damping*vn);const V3 f=n*fn-vt*(x.friction*fn/std::max(norm(vt),.05));
                 const V3 fb=bt*f;fc+=fb;mc+=cross(r,fb);
             }
@@ -364,7 +369,8 @@ Tt Flight::advance(Tt dt){
         if(const Stage& st=vehicle_.stages[s_.stage];!st.hardPoints.empty()&&!env_.structures.empty()&&!s_.clamped){ // Near a structure: its stiff contact's step.
             const Orientation o=env_.rotation.at(s_.time);const V3 pf=o.fixed*s_.position;const Mass ms=mass(st,s_.propellant);double near=1e300,reach=0,rate=1;
             for(const V3& p:st.hardPoints)reach=std::max(reach,norm(V3{ms.cg-p.x,p.y,p.z}));
-            for(const auto& x:env_.structures){const V3 ab=x.b-x.a;const double t=std::clamp(dot(pf-x.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);near=std::min(near,norm(pf-(x.a+ab*t))-x.radius);
+            for(std::size_t i=0;i<segments_.size();++i){const auto& x=env_.structures[i];const auto& g=segments_[i];
+                const V3 ab=g.b-g.a;const double t=std::clamp(dot(pf-g.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);near=std::min(near,norm(pf-(g.a+ab*t))-x.radius);
                 rate=std::max({rate,std::sqrt(x.stiffness/ms.m),x.damping/ms.m,x.friction*env_.planet.gm/dot(s_.position,s_.position)/.05});}
             if(near<reach+norm(s_.velocity-cross(o.omega,s_.position))*static_cast<double>(h)*1e-9+10)h=std::min(h,std::max<Tt>(1000,static_cast<Tt>(.5/rate*1e9)));
         }
@@ -415,6 +421,12 @@ void Flight::slew(double seconds){
     for(std::size_t i=0;i<engines_.size();++i)if(es[i].breathing){auto& e=engines_[i];const double target=s_.burning&&e.on?e.throttle:0.; // Spool up or down.
         e.spool=es[i].spool>0?target+(e.spool-target)*std::exp(-seconds/es[i].spool):target;}
     for(std::size_t i=0;i<surfaces_.size();++i)if(st.surfaces[i].rate>0){const double step=st.surfaces[i].rate*seconds;auto& f=surfaces_[i];f.deflection+=std::clamp(f.target-f.deflection,-step,step);}
+    { // Hinged structures toward their commands at their rates.
+        bool moving=false;std::vector<double> before;
+        for(std::size_t i=0;i<structures_.size();++i){auto& x=structures_[i];before.push_back(x.angle);const double step=env_.structures[i].rate*seconds;
+            if(x.angle!=x.target){x.angle+=std::clamp(x.target-x.angle,-step,step);moving=true;}}
+        if(moving||std::any_of(segments_.begin(),segments_.end(),[](const Segment& g){return g.spin.x!=0||g.spin.y!=0||g.spin.z!=0;}))place(before,seconds);
+    }
     if(turbulence_.sigma()>0&&env_.atmosphere&&!s_.clamped&&!s_.landed){ // Gusts in the air-relative velocity's axes, held over the step.
         const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;const Geodetic geo=geodetic(env_.planet,rf);
         if(geo.height<airTop(env_.center)+1e5){
@@ -427,7 +439,9 @@ void Flight::slew(double seconds){
     }
 }
 double Flight::structureGap(V3 fixed)const{ // From the centre of mass to the nearest structure's surface (m).
-    double gap=1e300;for(const auto& x:env_.structures){const V3 ab=x.b-x.a;const double t=std::clamp(dot(fixed-x.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);gap=std::min(gap,norm(fixed-(x.a+ab*t))-x.radius);}
+    double gap=1e300;
+    for(std::size_t i=0;i<segments_.size();++i){const auto& g=segments_[i];const V3 ab=g.b-g.a;const double t=std::clamp(dot(fixed-g.a,ab)/std::max(dot(ab,ab),1e-12),0.,1.);
+        gap=std::min(gap,norm(fixed-(g.a+ab*t))-env_.structures[i].radius);}
     return gap;
 }
 void Flight::heat(double seconds){ // Explicit in the flow (the step's start), implicit in each node's temperature.
@@ -448,6 +462,21 @@ void Flight::brake(double f,int index){
 void Flight::steer(double a,int index){
     if(!std::isfinite(a))throw std::invalid_argument("Invalid steering");const auto& ws=vehicle_.stages[s_.stage].wheels;
     auto set=[&](std::size_t i){wheels_[i].steer=std::clamp(a,-ws[i].steer,ws[i].steer);};if(index>=0)set(pick(index,ws.size()));else for(std::size_t i=0;i<ws.size();++i)set(i);
+}
+void Flight::swing(double a,int index){
+    if(!std::isfinite(a))throw std::invalid_argument("Invalid structure angle");const auto& xs=env_.structures;
+    auto set=[&](std::size_t i){if(!xs[i].hinged)return;auto& x=structures_[i];x.target=std::clamp(a,xs[i].low,xs[i].high);if(!(xs[i].rate>0))x.angle=x.target;};
+    if(index>=0){if(!xs[pick(index,xs.size())].hinged)throw std::invalid_argument("The structure has no hinge");set(pick(index,xs.size()));}else for(std::size_t i=0;i<xs.size();++i)set(i);
+    place();
+}
+void Flight::place(const std::vector<double>& before,double seconds){
+    segments_.resize(env_.structures.size());
+    for(std::size_t i=0;i<segments_.size();++i){const auto& x=env_.structures[i];auto& g=segments_[i];
+        if(!x.hinged){g={x.a,x.b,x.a,{}};continue;}
+        const double a=structures_[i].angle,c=std::cos(a),n=std::sin(a);const V3 k=x.axis;
+        auto turn=[&](V3 p){const V3 v=p-x.pivot;return x.pivot+v*c+cross(k,v)*n+k*(dot(k,v)*(1-c));}; // Rodrigues about the hinge.
+        g={turn(x.a),turn(x.b),x.pivot,i<before.size()&&seconds>0?k*((a-before[i])/seconds):V3{}};
+    }
 }
 void Flight::thruster(double d,int index){
     if(!std::isfinite(d))throw std::invalid_argument("Invalid duty cycle");
@@ -525,6 +554,7 @@ std::uint64_t Flight::hash()const{
         s_.rate.x,s_.rate.y,s_.rate.z,s_.propellant,s_.heatLoad,s_.throttle,s_.gimbalPitch,s_.gimbalYaw,s_.torque.x,s_.torque.y,s_.torque.z,padPosition_.x,padPosition_.y,padPosition_.z};
     mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const double pad[]{padAttitude_.w,padAttitude_.x,padAttitude_.y,padAttitude_.z};mix(pad,sizeof pad);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
     for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed};mix(x,sizeof x);mix(b,sizeof b);}
+    for(const auto& x:structures_){const double a[]{x.angle,x.target};mix(a,sizeof a);}
     for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);}for(double u:duty_)mix(&u,8);
     {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z};mix(t,sizeof t);}for(double t:temperatures_)mix(&t,8);for(const auto& w:wheels_){mix(&w.brake,8);mix(&w.steer,8);}
     for(const auto& e:engines_)mix(&e.spool,8);

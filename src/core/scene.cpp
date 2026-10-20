@@ -17,6 +17,15 @@ Quaternion blend(Quaternion a,Quaternion b,double t){
     const double n=std::hypot(std::hypot(r.x,r.y),std::hypot(r.z,r.w));
     return {r.x/n,r.y/n,r.z/n,r.w/n};
 }
+Quaternion product(Quaternion a,Quaternion b){return {a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w,a.w*b.w-a.x*b.x-a.y*b.y-a.z*b.z};}
+Quaternion rotation(const Vector c[3]){ // From a rotation's columns (Shepperd).
+    const double m00=c[0].x,m11=c[1].y,m22=c[2].z,t=m00+m11+m22;Quaternion q;
+    if(t>m00&&t>m11&&t>m22){const double s=2*std::sqrt(1+t);q={(c[1].z-c[2].y)/s,(c[2].x-c[0].z)/s,(c[0].y-c[1].x)/s,s/4};}
+    else if(m00>m11&&m00>m22){const double s=2*std::sqrt(1+m00-m11-m22);q={s/4,(c[1].x+c[0].y)/s,(c[2].x+c[0].z)/s,(c[1].z-c[2].y)/s};}
+    else if(m11>m22){const double s=2*std::sqrt(1+m11-m00-m22);q={(c[1].x+c[0].y)/s,s/4,(c[2].y+c[1].z)/s,(c[2].x-c[0].z)/s};}
+    else{const double s=2*std::sqrt(1+m22-m00-m11);q={(c[2].x+c[0].z)/s,(c[2].y+c[1].z)/s,s/4,(c[0].y-c[1].x)/s};}
+    const double n=std::hypot(std::hypot(q.x,q.y),std::hypot(q.z,q.w));return {q.x/n,q.y/n,q.z/n,q.w/n};
+}
 }
 void validate(Sample& s){
     if(!std::isfinite(s.utcSeconds)||s.utcSeconds< -1e10||s.utcSeconds>1e11||!finite(s.positionMeters)||length(s.positionMeters)>1e15||
@@ -68,6 +77,8 @@ void Scene::create(Object o,bool replace){
     o.defaultDistanceMeters=o.radiusMeters*4;o.minDistanceMeters=o.radiusMeters*1.05;
     if(o.samples.empty()||o.samples.size()>maxSamples)throw std::invalid_argument("Initial samples required");
     for(auto& s:o.samples)validate(s);
+    if(o.anchor){const auto& a=*o.anchor;const auto b=objects_.find(a.body);const double n=std::hypot(std::hypot(a.attitude.x,a.attitude.y),std::hypot(a.attitude.z,a.attitude.w));
+        if(b==objects_.end()||!b->second.builtin||!finite(a.position)||length(a.position)>1e10||!std::isfinite(n)||std::abs(n-1)>1e-6)throw std::invalid_argument("Invalid anchor");}
     for(size_t i=1;i<o.samples.size();++i)if(o.samples[i].utcSeconds<=o.samples[i-1].utcSeconds)throw std::invalid_argument("Samples must have increasing timestamps");
     o.instance=revision_+1;const auto id=o.id;objects_.insert_or_assign(id,std::move(o));++revision_;
 }
@@ -111,10 +122,14 @@ void Scene::replace(const ObjectId& id,std::vector<Sample> values){
     for(auto& s:values)validate(s);for(size_t i=1;i<values.size();++i)if(values[i].utcSeconds<=values[i-1].utcSeconds)throw std::invalid_argument("Provider samples must be ordered");
     objects_.at(id).samples=std::move(values);++revision_;
 }
+void Scene::builtinFrame(const ObjectId& id,double utc,const std::array<double,9>& m,double spin){
+    if(!get(id).builtin||!std::isfinite(utc)||!std::isfinite(spin)||!std::all_of(m.begin(),m.end(),[](double x){return std::isfinite(x);}))throw std::invalid_argument("Invalid body frame");
+    frames_[id]={utc,m,spin};
+}
 void Scene::builtinState(const ObjectId& id,Sample s){validate(s);auto& o=objects_.at(id);if(!o.builtin)throw std::invalid_argument("Object is not built in");o.samples.assign(1,std::move(s));}
-Evaluated Scene::evaluate(const ObjectId& id,double now) const{
-    if(!std::isfinite(now))throw std::invalid_argument("Invalid evaluation time");
-    const auto& o=get(id);if(o.samples.empty())return {{},true};const auto& v=o.samples;
+namespace {
+Evaluated sampled(const Object& o,double now){ // Between its samples.
+    if(o.samples.empty())return {{},true};const auto& v=o.samples;
     if(now<=v.front().utcSeconds)return {v.front(),now<v.front().utcSeconds};
     if(now>=v.back().utcSeconds)return {v.back(),now-v.back().utcSeconds>1.};
     const auto b=std::upper_bound(v.begin(),v.end(),now,[](double t,const Sample& s){return t<s.utcSeconds;});const auto& a=*(b-1);
@@ -128,6 +143,20 @@ Evaluated Scene::evaluate(const ObjectId& id,double now) const{
     if(a.parts&&b->parts&&a.parts->size()==b->parts->size()){auto p=std::make_shared<std::vector<float>>(*a.parts);
         for(std::size_t i=0;i<p->size();++i)(*p)[i]+=static_cast<float>(t)*((*b->parts)[i]-(*p)[i]);r.parts=std::move(p);}
     return {r,false};
+}
+}
+Evaluated Scene::evaluate(const ObjectId& id,double now) const{
+    if(!std::isfinite(now))throw std::invalid_argument("Invalid evaluation time");
+    const auto& o=get(id);Evaluated e=sampled(o,now);
+    if(o.anchor)if(const auto f=frames_.find(o.anchor->body);f!=frames_.end()){ // Fixed on its body: the body's frame now (its samples: the moving parts).
+        const auto& a=*o.anchor;const auto& m=f->second.m;const double th=f->second.spin*(now-f->second.utc),c=std::cos(th),s=std::sin(th);
+        auto out=[&](Vector v){return Vector{m[0]*v.x+m[3]*v.y+m[6]*v.z,m[1]*v.x+m[4]*v.y+m[7]*v.z,m[2]*v.x+m[5]*v.y+m[8]*v.z};}; // Fixed then to celestial.
+        const Vector axes[3]{out({c,s,0}),out({-s,c,0}),out({0,0,1})}; // Fixed now to celestial: the frame then, turned on by θ about z.
+        const Vector r=axes[0]*a.position.x+axes[1]*a.position.y+axes[2]*a.position.z,w=axes[2]*f->second.spin;const Evaluated b=evaluate(a.body,now);
+        Sample x{now,b.state.positionMeters+r,b.state.velocityMetersPerSecond+Vector{w.y*r.z-w.z*r.y,w.z*r.x-w.x*r.z,w.x*r.y-w.y*r.x},product(rotation(axes),a.attitude),true};
+        x.parts=std::move(e.state.parts);return {x,b.stale};
+    }
+    return e;
 }
 Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera,{},{},{},{},false};result.clock.utcSeconds=now;result.simulation.utcSeconds=now;for(const auto& [id,l]:layers_)result.layers.push_back({id,l.name,l.source,l.anchor,l.kind,l.frame,l.data->positions.size(),l.color,l.widthPixels,l.clearanceMeters,l.visible});for(const auto& [id,m]:models_)result.models.push_back({id,m->source,m->sourceBytes,m->vertices,m->triangles,m->sizeUnits,m->radiusUnits});for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}
 }

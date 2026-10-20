@@ -295,9 +295,24 @@ message CreateFlightRequest {
   // Structures fixed to the ground (a tower's catch arms): segments with a radius, in metres east, north and up of the site,
   // struck by the stages' hard points.
   repeated StructureDefinition structures=21;
+  // The site's scenery (a pad's tower, mount, tanks), drawn only, fixed to the ground with the structures (drawn as steel
+  // bars; parts on a hinged one turn with it): up to 512 parts. The scene shows them as object "site" ("site.<id>" for the
+  // other flights; none without scenery or off the Earth).
+  repeated SceneryPart scenery=22;
 }
+// A piece of scenery in metres east, north and up of the site: its centre and size along its own axes, which are turned by
+// heading_degrees (its y toward it, clockwise from north) and tilted by tilt_degrees (its z leaning from up toward its y).
+// BOX; CYLINDER: diameters size x by y, size z long, hollow inside inner_diameter_meters; TRUSS: a lattice box of chords
+// and braces size z long, its bars bar_meters thick (unset: 8% of its width). structure: n turns it with the n-th structure
+// when that is hinged (0: fixed).
+message SceneryPart { enum Shape { BOX=0; CYLINDER=1; TRUSS=2; } string name=1; Shape shape=2; Vector3 centre_enu_meters=3; Vector3 size_meters=4;
+  double heading_degrees=5; double tilt_degrees=6; uint32 color=7; double inner_diameter_meters=8; double bar_meters=9; uint32 structure=10; }
 message StructureDefinition { string name=1; Vector3 start_enu_meters=2; Vector3 end_enu_meters=3; double radius_meters=4;
-  optional double stiffness_newtons_per_meter=5; optional double damping_newton_seconds_per_meter=6; optional double friction=7; } // Unset: 1e7, 1e5, 0.5.
+  optional double stiffness_newtons_per_meter=5; optional double damping_newton_seconds_per_meter=6; optional double friction=7; // Unset: 1e7, 1e5, 0.5.
+  // Hinged (with hinge_enu_meters): it turns about hinge_axis (east, north, up; unset: up) through that point by an angle from
+  // the pose above (right-handed), commanded by FlightCommand.structure_radians within [min_radians, max_radians] and reached
+  // at swing_rate_radians_per_second (0: at once); it starts at start_radians.
+  Vector3 hinge_enu_meters=8; Vector3 hinge_axis=9; double swing_rate_radians_per_second=10; double min_radians=11; double max_radians=12; double start_radians=13; }
 message FlightRequest { string flight_id=1; } // Empty: "flight".
 message FlightList { repeated string flight_ids=1; }
 message StartState {
@@ -354,9 +369,11 @@ message FlightCommand {
     Spawn spawn=12;                     // Separate the active stage as a flight of its own (gRPC only).
     double brake=13;                    // Wheel brakes, 0-1 (index: the wheel).
     double steer_radians=14;            // Wheel steering, clamped to its limit (index: the wheel).
+    double structure_radians=15;        // A hinged structure's angle, clamped to its range, reached at its rate (index: the structure).
   }
-  // ignite, cutoff, throttle, gimbal and fail: the engine; thruster_duty: the thruster; surface_radians: the surface; brake, steer: the wheel.
-  // 0 for every one of the stage, n for its n-th (the order of FlightSample.engines, thruster_duty and surfaces).
+  // ignite, cutoff, throttle, gimbal and fail: the engine; thruster_duty: the thruster; surface_radians: the surface; brake, steer: the wheel;
+  // structure_radians: the structure. 0 for every one of the stage (the hinged structures), n for its n-th (the order of
+  // FlightSample.engines, thruster_duty, surfaces and CreateFlightRequest.structures).
   uint32 index=9;
 }
 // Separates the active stage, which flies on as flight `flight_id` (another id): `definition` (its stage 0 the part that fell
@@ -408,6 +425,7 @@ message FlightSample {
   repeated ThermalSample thermal_nodes=56; // The stage's thermal nodes now.
   repeated WheelSample wheels=57;           // The stage's wheels.
   Vector3 contact_force_newtons=58;         // From the ground, water and structures, body axes.
+  repeated double structure_radians=59;     // Each structure's angle about its hinge (0 when fixed), in the request's order.
 }
 message WheelSample { string name=1; double brake=2; double steer_radians=3; }
 message ThermalSample { string name=1; double temperature_kelvin=2; double heat_flux_watts_per_meter2=3; bool over_limit=4; }

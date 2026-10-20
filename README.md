@@ -285,7 +285,9 @@ sobra. Tirado o booster dos braços, a nave espera em órbita a passagem que a t
 depois. Então queima para sair de órbita, reentra de barriga guiada pela inclinação lateral, com flaps e RCS segurando a
 atitude e o escudo térmico abaixo do limite. Ela se vira para os motores, queima para pousar e é capturada nos mesmos braços.
 Em tempo real, a órbita passa acelerada (`--warp=1000`, o padrão) e o resto em 1×. `--follow-booster` leva a câmera para o
-booster na separação.
+booster na separação. Os veículos aparecem como são definidos: corpo, flaps e grid fins mexendo, sinos com o cardã, plumas
+que se abrem no vácuo e jatos do RCS. Starbase está no chão: a torre, os braços (abertos na subida, fechando em volta do
+booster e da nave que pairam), a mesa de lançamento, os tanques. `--pad` mostra a pilha na mesa, com a câmera dando a volta.
 
 Com dois voos ou mais, um quadro no canto mostra o outro voo ("Segunda vista dos voos" em Ajustes); um clique nele passa a
 seguir aquele voo.

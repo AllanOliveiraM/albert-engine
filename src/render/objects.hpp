@@ -1,6 +1,7 @@
 #pragma once
 #include "core/scene.hpp"
 #include "lighting.hpp"
+#include "scenery.hpp"
 #include "vehicle.hpp"
 #include "threepp/threepp.hpp"
 #include "threepp/utils/BVH.hpp"
@@ -26,5 +27,6 @@ private:
     std::map<core::ObjectId,float> displayedFill_;
     std::map<core::Shape,std::shared_ptr<threepp::BufferGeometry>> geometries_;
     std::map<core::ObjectId,std::unique_ptr<Vehicle>> vehicles_; // Objects with a look.
+    std::map<core::ObjectId,std::unique_ptr<Site>> sites_;       // With scenery.
 };
 }
