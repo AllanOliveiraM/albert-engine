@@ -352,8 +352,9 @@ arrasto, força lateral e momentos, amortecimentos), rodas (`WheelDefinition`: p
 ar (`EngineDefinition.air_breathing` com tabelas de empuxo e consumo por Mach × altitude e o tempo do carretel),
 nós de proteção térmica (`ThermalNodeDefinition`: posição, normal, área, capacidade térmica, emissividade, condução à
 estrutura, fator de aquecimento e limite; a amostra traz temperatura e fluxo de cada um e o evento `OVERHEAT`),
-superfícies de controle (`SurfaceDefinition`: limite, taxa e
-incrementos em tabelas Mach × ângulo × deflexão), propulsores de RCS (`ThrusterDefinition`), pernas e o torque ideal de
+superfícies de controle (`SurfaceDefinition`: limite, taxa,
+incrementos em tabelas Mach × ângulo × deflexão e, opcional, `position_meters`: as forças da superfície agem ali, com o
+momento tirado de lá), propulsores de RCS (`ThrusterDefinition`), pernas e o torque ideal de
 atitude; posições em metros atrás do nariz.
 `GetVehicle` devolve cada preset como definição, para editar: voada como `CUSTOM` sem mudanças, dá o mesmo `state_hash` do
 preset (`rpc_test`). O mapeamento JSON do protobuf serve de formato de arquivo: `albert_flight_client --export-vehicle=launcher`

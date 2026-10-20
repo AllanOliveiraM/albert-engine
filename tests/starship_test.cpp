@@ -9,10 +9,11 @@
 #include <cstdio>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <thread>
 using namespace albert::core;
 static void require(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
-int main(){try{
+int main(int argc,char** argv){try{
     Scene registry;Bridge bridge;double monotonic=0;albert::time::Simulation simulation([]{return 1792238400.;},[&]{return monotonic;});
     std::jthread owner([&](std::stop_token stop){CameraState camera;
         while(!stop.stop_requested()){
@@ -31,10 +32,14 @@ int main(){try{
     auto channel=grpc::CreateChannel("127.0.0.1:"+std::to_string(server.port()),grpc::InsecureChannelCredentials());
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto flight=albert::v1::FlightService::NewStub(channel);
+    if(argc>1&&std::string(argv[1])=="--home"){albert::example::starship::homecoming(*flight,true);return 0;} // The ship's return alone (development).
     const auto m=albert::example::starship::mission(*flight,true);
     require(m.meco>135&&m.meco<165&&m.mecoHeight>60e3&&m.mecoHeight<90e3,"Staging off the public profile (~141-160 s, ~64-75 km)");
     require(m.perigee>170e3&&m.apoapsis<260e3,"The ship short of its 180 km orbit");
     require(m.caught>m.meco+200&&m.offAxis<1&&m.speed<.1&&m.propellant>5e3,"The booster not caught and at rest on the arms");
-    std::puts("Starship-class mission: orbit, booster caught and at rest");
+    require(m.ship.deorbit>6e4&&m.ship.deorbit<1.7e5,"The ship's deorbit burn not on the pass over the tower a day on");
+    require(m.ship.caught>m.ship.entry&&m.ship.offAxis<1.5&&m.ship.speed<.1&&m.ship.propellant>5e3,"The ship not caught and at rest on the arms");
+    require(m.ship.maxTile<1700&&m.ship.overheats==0,"The ship's heat shield past its limit");
+    std::puts("Starship-class mission: orbit, booster caught and at rest, the ship home a day later, caught and at rest");
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
