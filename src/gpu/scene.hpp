@@ -20,6 +20,7 @@ public:
     bool toneMapping=true; // ACES filmic (threepp's ACESFilmic); false: none, as threepp's default.
     bool shadows=false; // Sun shadow map for castShadow meshes on receiveShadow ones.
     unsigned samples=4; // Multisampling: 4 (resolved into the target) or 1.
+    bool measured=true; // GPU timing of the render (off for a second view).
     // The air this frame: aerial perspective, sunlight and sky light through `atmosphere` around
     // `body`, whose local frame times kmPerUnit is the atmosphere's planet frame; strength 0-1. Its
     // precomputation advances `airSteps` dispatches a frame and the air shows once it is complete.

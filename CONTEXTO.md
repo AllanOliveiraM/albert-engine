@@ -104,7 +104,8 @@ resolvidas no log), sensores (GNSS, radar, rastreador de estrelas), turbulência
 vários voos por `flight_id` (`Slot` por voo: física, sensores, plano de dados, pacer, keeper, log; ids de cena `flight.<id>`)
 e `spawn` (o estágio separado vira outro voo com log próprio), nós térmicos no voo (OVERHEAT), rodas e motores a ar, água
 e estruturas (pontos de captura). Voo completo de Starship em `examples/starship_flight.hpp` (teste `starship_mission`):
-- **Resultado:** separação aos 151 s a 77 km, nave em 181 × 204 km, booster capturado a 0,02 m do eixo com 40 t.
+- **Resultado:** separação aos 151 s a 77 km, nave em 181 × 204 km, booster capturado a 0,02 m do eixo com 40 t. A nave
+  volta na passagem de ~22 h depois e é capturada nos mesmos braços com ~43 t, ladrilhos a ~1530 K (limite 1700 K).
 - **Lições da guiagem:**
   - a subida precisa dos cardãs; o torque ideal de 2e5 N m não vira a pilha;
   - em q alto, inclinar o empuxo gera sustentação contrária, então a correção lateral fica com as grid fins e a
@@ -114,6 +115,14 @@ e estruturas (pontos de captura). Voo completo de Starship em `examples/starship
   - o sinal do rolamento estava trocado, e ±y ao norte bastam (pinos simétricos);
   - o pouso se planeja com a massa de pouso, e o leste-norte-cima é geodésico (o geocêntrico dava 0,17 m falsos);
   - braços de cilindro único derrubam o pino: são trilhos de duas barras de 1e8 N/m com ζ ~0,8.
+- **Lições da volta da nave:**
+  - o previsor da reentrada precisa das tabelas do Albert e da U.S. 1976; 5% de L/D é ~100 km de alcance;
+  - flaps só de arrasto não giram em volta do escoamento: a inclinação lateral fica com o RCS, limitada a 4°/s;
+  - flaps no ponto de referência não dão estabilidade de guinada: veio daí o `position_meters` das superfícies;
+  - no previsor, só a parte vertical da sustentação (cos σ);
+  - pesada, a nave paira em 1 motor; o empuxo fora do eixo precisa da linha pelo centro de massa, o motor no eixo z
+    (perpendicular aos pinos) e, pendurada, o empuxo pelos pinos para não balançar;
+  - `far`/`near` são macros no Windows (o MSVC quebrou).
 - **Falta:** validação contra telemetria pública.
 - **Visto em 19/10:** três instâncias do app na MX350 esgotam a memória da GPU, e o wgpu entra em pânico sem tratamento.
   Rodar no máximo duas.

@@ -1060,6 +1060,8 @@ int albert::runRenderer(int argc, char** argv) {
         camera->position.set(0, 0, 3.5f);
 
         OrbitControls controls{*camera, graphics.events()};
+        // The second view (picture-in-picture): the other flight beside the one followed, from the same side, at its framing.
+        auto insetCamera=PerspectiveCamera::create(60,16.f/9.f,.01f,100000.f);std::string insetId;unsigned long long insetTexture=0;
 
         controls.enableDamping = true;
         controls.dampingFactor = CAMERA_EASING;
@@ -1199,12 +1201,12 @@ int albert::runRenderer(int argc, char** argv) {
 
         // Ajustes, kept in settings.json across runs (the sound always starts muted). The volumetric clouds and the ocean's
         // waves are the costly effects: on by default, a weaker machine turns them off.
-        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
+        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false,inset=true;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
             bool thirdBodies=true,relativity=true,flightAir=true,wind=true,solarPressure=true;float turbulence=0;} preferences; // The last six: the Fisica page's defaults for new flights.
         const auto preferencesFile=albert::dataDirectory()/"settings.json";
         try{std::ifstream in(preferencesFile);if(in){const auto j=json::parse(in);auto& p=preferences;auto& v=visualSettings;
             p.volumetricClouds=j.value("volumetric_clouds",p.volumetricClouds);p.oceanWaves=j.value("ocean_waves",p.oceanWaves);p.antialias=j.value("antialias",p.antialias);
-            p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);
+            p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);p.inset=j.value("flight_inset",p.inset);
             p.fov=std::clamp(j.value("field_of_view",p.fov),35.f,90.f);p.uiScale=std::clamp(j.value("interface_scale",p.uiScale),.8f,1.6f);
             p.sensitivity=std::clamp(j.value("mouse_sensitivity",p.sensitivity),.25f,3.f);p.volume=std::clamp(j.value("volume",p.volume),0.f,1.f);
             p.thirdBodies=j.value("physics_third_bodies",p.thirdBodies);p.relativity=j.value("physics_relativity",p.relativity);p.flightAir=j.value("physics_atmosphere",p.flightAir);
@@ -1214,7 +1216,7 @@ int albert::runRenderer(int argc, char** argv) {
             showOrbits=j.value("orbits",showOrbits);showDebris=j.value("debris",showDebris);}}
         catch(const std::exception&){} // A damaged preference never prevents startup.
         auto savePreferences=[&]{try{const auto& p=preferences;const auto& v=visualSettings;std::filesystem::create_directories(preferencesFile.parent_path());std::ofstream out(preferencesFile);
-            out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},
+            out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},{"flight_inset",p.inset},
                 {"field_of_view",p.fov},{"interface_scale",p.uiScale},{"mouse_sensitivity",p.sensitivity},{"volume",p.volume},{"quality",v.quality},{"shadows",v.shadows},
                 {"atmosphere",v.atmosphere},{"terrain",v.terrain},{"live_clouds",v.clouds},{"city_lights",v.nightLights},{"borders",v.borders},{"orbits",showOrbits},{"debris",showDebris},
                 {"physics_third_bodies",p.thirdBodies},{"physics_relativity",p.relativity},{"physics_atmosphere",p.flightAir},{"physics_wind",p.wind},{"physics_solar_pressure",p.solarPressure},{"physics_turbulence",p.turbulence}}.dump(2)<<'\n';}
@@ -1619,6 +1621,7 @@ int albert::runRenderer(int argc, char** argv) {
                     check("Caminhos das orbitas",showOrbits);
                     check("Cinturoes e nuvem de Oort",showDebris);
                     check("Girar devagar ao chegar",preferences.autoRotate);
+                    check("Segunda vista dos voos",preferences.inset,"Com dois voos ou mais, um quadro no canto mostra o outro; clique nele para trocar.");
                     slider("##Escala da interface",preferences.uiScale,.8f,1.6f,"Interface: %.1fx");
                     ImGui::Spacing();ImGui::TextDisabled("CAMERA");
                     bool free=freeCamera;if(ImGui::Checkbox("Camera livre (F)",&free))toggleFreeCamera(free);
@@ -1670,6 +1673,16 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::PopStyleVar(4);
             }
 
+            if(insetTexture&&!insetId.empty()){ // The second view, bottom left; a click follows that flight instead.
+                const float width=display.x*.28f;
+                ImGui::SetNextWindowPos(ImVec2(margin,display.y-margin),ImGuiCond_Always,ImVec2(0,1));ImGui::SetNextWindowBgAlpha(.55f);
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(6,6));
+                ImGui::Begin("Segunda vista",nullptr,flags|ImGuiWindowFlags_NoScrollbar);protectPanel();
+                ImGui::TextUnformatted(registry.get(insetId).name.c_str());
+                if(ImGui::ImageButton("##segunda",ImTextureRef(static_cast<ImTextureID>(insetTexture)),ImVec2(width,width*9/16)))setFocus(insetId);
+                if(ImGui::IsItemHovered())ImGui::SetTooltip("Seguir este voo");
+                ImGui::End();ImGui::PopStyleVar();
+            }
             const bool loadingDetails=planets.detailActive() || solids.uploading() || cloudSync.detailActive() || regional.active();
             detailLoaderAge=loadingDetails ? detailLoaderAge+ImGui::GetIO().DeltaTime : 0.f;
             detailLoaderAlpha=albert::animateValue(detailLoaderAlpha,detailLoaderAge>.15f ? .65f : 0.f,ImGui::GetIO().DeltaTime);
@@ -2795,6 +2808,23 @@ int albert::runRenderer(int argc, char** argv) {
                 if(sound)sound->hear(levels,audible,pan,dt);
             }
 #endif
+            insetTexture=0;insetId.clear();
+            if(auto flightId=[](const std::string& id){return id=="flight"||id.rfind("flight.",0)==0;};preferences.inset&&flightId(focus)&&!transition.active&&!freeCamera){
+                for(const auto& [id,node]:objects.nodes())if(id!=focus&&flightId(id)&&node->visible){insetId=id;break;}
+                if(!insetId.empty()){
+                    const auto& io=ImGui::GetIO();const float scale=io.DisplayFramebufferScale.x>0?io.DisplayFramebufferScale.x:1.f;
+                    const unsigned w=static_cast<unsigned>(std::max(io.DisplaySize.x*.28f*scale,160.f)),h=w*9/16;
+                    // Side-on: the main camera's side, less along the vehicle's long axis (the cylinder's local y).
+                    const auto& node=*objects.nodes().at(insetId);const Vector3 target=node.position;Vector3 axis(0,1,0);axis.applyQuaternion(node.quaternion);
+                    Vector3 side=camera->position;side.sub(controls.target);Vector3 along=axis;side.sub(along.multiplyScalar(side.dot(axis)));
+                    if(side.length()<1e-6f*std::max(1.f,camera->position.length())){side.copy(camera->up);Vector3 a=axis;side.sub(a.multiplyScalar(side.dot(axis)));}
+                    const float distance=distanceFor(insetId);side.normalize().multiplyScalar(distance);
+                    insetCamera->position.copy(target).add(side);insetCamera->up.copy(camera->up);insetCamera->lookAt(target);
+                    insetCamera->fov=camera->fov;insetCamera->aspect=static_cast<float>(w)/static_cast<float>(h);insetCamera->nearPlane=std::clamp(distance*.02f,1e-9f,100.f);
+                    insetCamera->updateProjectionMatrix();insetCamera->updateMatrixWorld();
+                    insetTexture=graphics.renderInset(*scene,*insetCamera,w,h);
+                }
+            }
             graphics.render(*scene, *camera);
             graphics.ui();
 #ifdef ALBERT_HAS_RPC

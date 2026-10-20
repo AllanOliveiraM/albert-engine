@@ -150,7 +150,9 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
 }
 struct SceneRenderer::Impl {
     Context& gpu;WGPUDevice device;WGPUQueue queue;
-    WGPUTexture depth=nullptr,colour=nullptr;WGPUTextureView depthView=nullptr,colourView=nullptr;unsigned depthWidth=0,depthHeight=0,depthSamples=0; // colour: multisampled, resolved into the target.
+    // Depth and multisampled colour (resolved into the target) by size, two kept: a second, smaller view keeps its own.
+    struct Targets {WGPUTexture depth=nullptr,colour=nullptr;WGPUTextureView depthView=nullptr,colourView=nullptr;unsigned width=0,height=0,samples=0;std::uint64_t used=0;} slots[2];
+    WGPUTextureView depthView=nullptr,colourView=nullptr; // This render's.
     WGPUBuffer frameBuffer=nullptr,objectBuffer=nullptr;std::size_t objectCapacity=0;
     WGPUBindGroupLayout frameLayout=nullptr,objectLayout=nullptr;WGPUBindGroup frameGroup=nullptr,objectGroup=nullptr;
     WGPUBuffer zeros=nullptr;WGPUTexture whiteTexture=nullptr,blackTexture=nullptr;WGPUTextureView white=nullptr,black=nullptr;WGPUSampler linear=nullptr;
@@ -234,7 +236,7 @@ struct SceneRenderer::Impl {
         if(shadowPipeline)wgpuRenderPipelineRelease(shadowPipeline);if(shadowLayout)wgpuPipelineLayoutRelease(shadowLayout);if(shadowModule)wgpuShaderModuleRelease(shadowModule);
         wgpuBindGroupLayoutRelease(frameLayout);wgpuBindGroupLayoutRelease(objectLayout);
         wgpuSamplerRelease(linear);wgpuTextureViewRelease(white);wgpuTextureRelease(whiteTexture);wgpuTextureViewRelease(black);wgpuTextureRelease(blackTexture);
-        if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);if(colourView)wgpuTextureViewRelease(colourView);if(colour)wgpuTextureRelease(colour);
+        for(auto& t:slots){if(t.depthView)wgpuTextureViewRelease(t.depthView);if(t.depth)wgpuTextureRelease(t.depth);if(t.colourView)wgpuTextureViewRelease(t.colourView);if(t.colour)wgpuTextureRelease(t.colour);}
     }
     WGPUBindGroup frameWith(WGPUTextureView shadow,const Atmosphere* a,WGPUTextureView clouds,const Ocean* ocean){ // a: ready tables, or null for placeholders.
         WGPUBindGroupEntry e[14]{};e[0].binding=0;e[0].buffer=frameBuffer;e[0].size=512;e[1].binding=1;e[1].textureView=shadow;e[2].binding=2;e[2].sampler=shadowSampler;
@@ -483,11 +485,13 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         return pipelines.emplace(key,wgpuDeviceCreateRenderPipeline(device,&d)).first->second;
     }
     void ensureDepth(unsigned w,unsigned h,unsigned samples){
-        if(depth&&depthWidth==w&&depthHeight==h&&depthSamples==samples)return;
-        if(depthView)wgpuTextureViewRelease(depthView);if(depth)wgpuTextureRelease(depth);if(colourView)wgpuTextureViewRelease(colourView);if(colour)wgpuTextureRelease(colour);colour=nullptr;colourView=nullptr;
-        WGPUTextureDescriptor d{};d.size={w,h,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_RenderAttachment;d.mipLevelCount=1;d.sampleCount=samples;d.dimension=WGPUTextureDimension_2D;
-        depth=wgpuDeviceCreateTexture(device,&d);depthView=wgpuTextureCreateView(depth,nullptr);depthWidth=w;depthHeight=h;depthSamples=samples;
-        if(samples>1){d.format=gpu.format();colour=wgpuDeviceCreateTexture(device,&d);colourView=wgpuTextureCreateView(colour,nullptr);}
+        Targets* t=nullptr;for(auto& x:slots)if(x.depth&&x.width==w&&x.height==h&&x.samples==samples)t=&x;
+        if(!t){t=slots[0].used<=slots[1].used?&slots[0]:&slots[1]; // The least recently used one, remade.
+            if(t->depthView)wgpuTextureViewRelease(t->depthView);if(t->depth)wgpuTextureRelease(t->depth);if(t->colourView)wgpuTextureViewRelease(t->colourView);if(t->colour)wgpuTextureRelease(t->colour);*t=Targets{};
+            WGPUTextureDescriptor d{};d.size={w,h,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_RenderAttachment;d.mipLevelCount=1;d.sampleCount=samples;d.dimension=WGPUTextureDimension_2D;
+            t->depth=wgpuDeviceCreateTexture(device,&d);t->depthView=wgpuTextureCreateView(t->depth,nullptr);t->width=w;t->height=h;t->samples=samples;
+            if(samples>1){d.format=gpu.format();t->colour=wgpuDeviceCreateTexture(device,&d);t->colourView=wgpuTextureCreateView(t->colour,nullptr);}}
+        t->used=frame;depthView=t->depthView;colourView=t->colourView;
     }
     void evict(){
         for(auto it=geometries.begin();it!=geometries.end();)if(frame-it->second.used>evictAfter){release(it->second);it=geometries.erase(it);}else ++it;
@@ -587,7 +591,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         if(g.cloudNoise.wait_for(std::chrono::seconds(0))==std::future_status::ready)g.clouds=std::make_unique<Clouds>(g.gpu,g.frameLayout,g.cloudNoise.get());else clouded=false;
     }
     g.clouded=clouded;
-    const bool timing=g.timestamps&&!g.mapping; // GPU time from the march (when there is one) to the end of the scene pass.
+    const bool timing=measured&&g.timestamps&&!g.mapping; // GPU time from the march (when there is one) to the end of the scene pass.
     if(clouded){
         const double step=g.cloudSeconds<0?0:std::clamp(volume.seconds-g.cloudSeconds,0.,1.);g.cloudSeconds=volume.seconds;
         const double ux=f[92],uy=f[93],uz=f[94],ul=std::sqrt(ux*ux+uy*uy+uz*uz),el=std::hypot(uz,ux);

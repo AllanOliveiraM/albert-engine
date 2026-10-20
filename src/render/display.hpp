@@ -23,6 +23,10 @@ public:
     bool frame(const std::function<void()>& work); // Polls input, runs work, presents; false once closing.
     void clear();                                  // In work: background only (loading screen).
     void render(threepp::Scene& scene,threepp::Camera& camera); // In work.
+    // In work, before render(): a second view (picture-in-picture) of the scene from `camera` into an image width × height,
+    // recorded and submitted at once (render() then writes its own per-frame data after it), without the volumetric clouds,
+    // the waves or the GPU timing. Returns the image for ImGui::Image (an ImTextureID), or 0 outside work.
+    unsigned long long renderInset(threepp::Scene& scene,threepp::Camera& camera,unsigned width,unsigned height);
     void ui();                                     // In work, after the scene.
     void setExposure(float value);
     void setShadows(bool enabled); // Sun shadow map, every frame.

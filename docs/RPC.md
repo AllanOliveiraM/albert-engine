@@ -417,7 +417,7 @@ depois propaga uma volta inteira em nove chamadas (~0,1 s de cálculo).
 ./build/linux/src/rpc/albert_flight_client --body=moon   # Tranquilidade → 18 × 85 km (Apollo 11)
 ./build/linux/src/rpc/albert_flight_client --body=mars   # Jezero → ~200 × 250 km, em duas queimas
 ./build/linux/src/rpc/albert_flight_client --apollo11    # Saturn V AS-506 de 39A em 1969-07-16 → ~186 × 183 km
-./build/linux/src/rpc/albert_flight_client --starship    # Starship de Starbase → 181 × 204 km; booster capturado na torre
+./build/linux/src/rpc/albert_flight_client --starship    # Starship de Starbase → órbita; booster e, ~22 h depois, a nave capturados na torre
 ```
 
 O `SATURN_V` (Apollo 11, AS-506) tem cinco estágios: S-IC; S-II com o interestágio de trás e a torre de
@@ -448,8 +448,23 @@ núcleo.
    escoamento cruzado leve o ponto de pouso à torre.
 4. **Pouso:** a queima de pouso vai até um portão a 80 m/s em 13 motores. A partir daí, 3 motores param o booster 10 m
    acima dos braços, com o rolamento alinhando os pinos.
-5. **Captura:** o booster desce a 1 m/s. Os motores ficam no mínimo por 1 s enquanto os braços tomam a carga. O teste
-   `starship_mission` voa tudo e verifica a órbita, a captura e o repouso nos braços 30 s depois.
+5. **Captura:** o booster desce a 1 m/s. Os motores ficam no mínimo por 1 s enquanto os braços tomam a carga. Ele
+   descansa 30 s e é tirado dos braços (`EndFlight`).
+6. **A nave de volta** ([ship_return.hpp](../examples/ship_return.hpp)), com flaps posicionados (`position_meters`), RCS,
+   nós térmicos no escudo e pinos:
+   - **Saída de órbita:** sem torque em órbita (passos longos), procura a cada minuto onde pousaria uma queima agora. Na
+     passagem que leva à torre (~22 h depois), queima retrógrado e corta quando o pouso previsto chega à torre.
+   - **Reentrada:** de barriga, com α de 65° a 80°. Um previsor (tabelas do Albert, U.S. Standard Atmosphere 1976 e
+     correção pelo arrasto e pela sustentação medidos) dá a inclinação lateral para o alcance. O lado segue o desvio
+     lateral previsto, com reversões dentro de um corredor. Abaixo de 300 m/s, planeio direto para a torre.
+   - **Atitude:** os flaps viram o veículo em arfagem e no eixo transversal ao escoamento; o RCS faz o resto (a rolagem
+     em volta do escoamento).
+   - **Pouso e captura:** giro para os motores, queima em 3 Raptors e pairar em 2 ou 1 (com a linha do empuxo pelo
+     centro de massa). Desce a 1 m/s até os pinos, e pendurada nos braços com o motor ainda ligado, o empuxo passa pelos
+     pinos até parar de balançar.
+
+O teste `starship_mission` voa tudo e verifica a órbita, as duas capturas, o repouso nos braços e o escudo abaixo do
+limite. `--warp=N` acelera a órbita em tempo real e `--ship-return` voa só a volta da nave, começando em órbita.
 
 Na Lua o `GENERIC_LUNAR_ASCENT` sobe 50 m e segue pela taxa vertical até 18 km, cortando com
 perilúnio ≥ 15 km e apolúnio ≥ 85 km. Em Marte o `GENERIC_MARS_ASCENT` também é guiado desde a

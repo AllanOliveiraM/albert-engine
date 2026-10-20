@@ -269,7 +269,7 @@ variável) e mostra o veículo na cena:
 ./build/linux/src/rpc/albert_flight_client --body=moon   # Base da Tranquilidade → órbita lunar
 ./build/linux/src/rpc/albert_flight_client --body=mars   # cratera Jezero → órbita de Marte
 ./build/linux/src/rpc/albert_flight_client --apollo11    # Saturn V do Apollo 11 → órbita de estacionamento
-./build/linux/src/rpc/albert_flight_client --starship    # Starship de Starbase: nave em órbita, booster capturado na torre
+./build/linux/src/rpc/albert_flight_client --starship    # Starship de Starbase: booster e, um dia depois, nave capturados na torre
 ```
 
 O `--apollo11` voa o Saturn V AS-506, montado a partir do relatório de avaliação de voo da NASA, pelo
@@ -281,7 +281,14 @@ O `--starship` voa um Starship montado só com a física genérica, por definiç
 públicos aproximados em examples/starship.hpp). A pilha sobe com 33 Raptors e separa a quente aos 151 s, a 77 km. A nave
 segue até uma órbita de 181 × 204 km. O Super Heavy vira outro voo e volta à torre: boostback, descida guiada pelas grid
 fins, queima de pouso em 13 e depois 3 motores e captura nos braços. Ele fica a 0,02 m do eixo da torre, com 40 t de
-sobra. `--follow-booster` leva a câmera para o booster na separação.
+sobra. Tirado o booster dos braços, a nave espera em órbita a passagem que a traz de volta sobre Starbase, cerca de 22 h
+depois. Então queima para sair de órbita, reentra de barriga guiada pela inclinação lateral, com flaps e RCS segurando a
+atitude e o escudo térmico abaixo do limite. Ela se vira para os motores, queima para pousar e é capturada nos mesmos braços.
+Em tempo real, a órbita passa acelerada (`--warp=1000`, o padrão) e o resto em 1×. `--follow-booster` leva a câmera para o
+booster na separação.
+
+Com dois voos ou mais, um quadro no canto mostra o outro voo ("Segunda vista dos voos" em Ajustes); um clique nele passa a
+seguir aquele voo.
 
 Em Ajustes ficam as opções de gráficos, Terra, vista, câmera e som (guardadas entre execuções), e a câmera livre: F liga,
 arrastar olha, W/A/S/D/Espaço/Ctrl voam, com a velocidade pela altura, como no Kerbal Space Program; F ou Esc volta.

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <vector>
 #include <imgui_impl_wgpu.h>
@@ -22,6 +23,8 @@ struct albert::Display::Impl {
     std::function<void()> draw;
     std::unique_ptr<gpu::Window> window;std::unique_ptr<gpu::Context> context;std::unique_ptr<gpu::SceneRenderer> scene;std::unique_ptr<gpu::Atmosphere> earthAir,marsAir;std::unique_ptr<gpu::Ocean> ocean;
     WGPUCommandEncoder encoder=nullptr;WGPUTextureView target=nullptr;bool drawnTarget=false,styled=false;float dpi=1;
+    // The second view's image; ones it outgrew are kept to the end (ImGui's backend caches a bind group per view).
+    WGPUTexture inset=nullptr;WGPUTextureView insetView=nullptr;unsigned insetWidth=0,insetHeight=0;std::vector<std::pair<WGPUTexture,WGPUTextureView>> retired;
     void framebuffer(unsigned& w,unsigned& h)const{int x=0,y=0;glfwGetFramebufferSize(window->handle(),&x,&y);w=static_cast<unsigned>(std::max(x,1));h=static_cast<unsigned>(std::max(y,1));}
     void pass(WGPULoadOp load){ // A colour-only pass on the surface (clear, or ImGui over the scene).
         WGPURenderPassColorAttachment c{};c.view=target;c.depthSlice=WGPU_DEPTH_SLICE_UNDEFINED;c.loadOp=load;c.storeOp=WGPUStoreOp_Store;c.clearValue={0,0,0,1};
@@ -42,7 +45,8 @@ albert::Display::Display(const std::string& title,WindowSize size,const std::fil
     d.dpi=monitor::contentScale().first;
 }
 albert::Display::~Display(){
-    auto& d=*impl_;ImGui_ImplWGPU_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();d.scene.reset();d.earthAir.reset();d.marsAir.reset();d.ocean.reset();d.context.reset();d.window.reset();
+    auto& d=*impl_;ImGui_ImplWGPU_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();
+    if(d.inset)d.retired.emplace_back(d.inset,d.insetView);for(auto [t,v]:d.retired){wgpuTextureViewRelease(v);wgpuTextureRelease(t);}d.scene.reset();d.earthAir.reset();d.marsAir.reset();d.ocean.reset();d.context.reset();d.window.reset();
 }
 PeripheralsEventSource& albert::Display::events(){return *impl_->window;}
 bool albert::Display::isOpen()const{return impl_->window->isOpen();}
@@ -106,6 +110,18 @@ void albert::Display::render(Scene& scene,Camera& camera){
     unsigned w,h;d.framebuffer(w,h);const auto t0=std::chrono::steady_clock::now();d.scene->render(scene,camera,d.target,w,h,d.encoder);d.drawnTarget=true;
     static const bool debug=std::getenv("ALBERT_TERRAIN_DEBUG")!=nullptr;
     if(debug){static int n=0;static double sum=0;sum+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();if(++n%60==0){std::fprintf(stderr,"scene render cpu %.2f ms, %u draws\n",sum/60,d.scene->drawn());sum=0;}}
+}
+unsigned long long albert::Display::renderInset(Scene& scene,Camera& camera,unsigned width,unsigned height){
+    auto& d=*impl_;if(!d.encoder||!width||!height)return 0;
+    if(!d.inset||d.insetWidth!=width||d.insetHeight!=height){
+        if(d.inset)d.retired.emplace_back(d.inset,d.insetView);
+        WGPUTextureDescriptor t{};t.size={width,height,1};t.format=d.context->format();t.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_TextureBinding;t.mipLevelCount=1;t.sampleCount=1;t.dimension=WGPUTextureDimension_2D;
+        d.inset=wgpuDeviceCreateTexture(d.context->device(),&t);d.insetView=wgpuTextureCreateView(d.inset,nullptr);d.insetWidth=width;d.insetHeight=height;}
+    auto& r=*d.scene;const bool clouds=r.volume.enabled,sea=r.sea.enabled;r.volume.enabled=false;r.sea.enabled=false;r.measured=false;
+    WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(d.context->device(),nullptr);r.render(scene,camera,d.insetView,width,height,e);
+    r.volume.enabled=clouds;r.sea.enabled=sea;r.measured=true;
+    WGPUCommandBuffer commands=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(d.context->queue(),1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(e);
+    return static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(d.insetView));
 }
 void albert::Display::ui(){
     auto& d=*impl_;if(!d.encoder)return;
