@@ -170,8 +170,8 @@ private:
         calibrate(s);
         // The bank's side: away from where the landing falls beside the tower, kept until that passes a corridor narrowing with
         // the range; within 15 km, toward the tower.
-        const double far=range(s),corridor=3e3+.03*far;Arrival a=arrive(s.position,s.velocity,s.mass,0);
-        if(far<15e3)sign_=heading(s)>0?1:-1;else if(sign_*a.cross>corridor)sign_=-sign_;
+        const double distance=range(s),corridor=3e3+.03*distance;Arrival a=arrive(s.position,s.velocity,s.mass,0);
+        if(distance<15e3)sign_=heading(s)>0?1:-1;else if(sign_*a.cross>corridor)sign_=-sign_;
         if(a.along<=0)bank_=0;
         else{double lo=0,hi=120*deg;a=arrive(s.position,s.velocity,s.mass,sign_*hi);
             if(a.along>=0)bank_=sign_*hi;
