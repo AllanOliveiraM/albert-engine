@@ -33,6 +33,9 @@ int main(int argc,char** argv){try{
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto flight=albert::v1::FlightService::NewStub(channel);
     if(argc>1&&std::string(argv[1])=="--home"){albert::example::starship::homecoming(*flight,true);return 0;} // The ship's return alone (development).
+    if(argc>1&&std::string(argv[1]).rfind("--fail=",0)==0){ // A mission with engine failures (development).
+        const auto f=albert::example::starship::mission(*flight,true,1000,false,{},albert::example::starship::faults(std::string(argv[1]).substr(7)));
+        std::printf("booster %.2f m off the axis, ship %.2f m; clearance %.1f and %.1f m\n",f.offAxis,f.ship.offAxis,f.towerClearance,f.ship.towerClearance);return 0;}
     const auto m=albert::example::starship::mission(*flight,true);
     require(m.meco>135&&m.meco<165&&m.mecoHeight>60e3&&m.mecoHeight<90e3,"Staging off the public profile (~141-160 s, ~64-75 km)");
     require(m.perigee>170e3&&m.apoapsis<260e3,"The ship short of its 180 km orbit");
@@ -41,6 +44,11 @@ int main(int argc,char** argv){try{
     require(m.ship.caught>m.ship.entry&&m.ship.offAxis<1.5&&m.ship.speed<.1&&m.ship.propellant>5e3,"The ship not caught and at rest on the arms");
     require(m.ship.maxTile<1700&&m.ship.overheats==0,"The ship's heat shield past its limit");
     require(m.towerClearance>0&&m.ship.towerClearance>0,"A vehicle through the tower");
-    std::puts("Starship-class mission: orbit, booster caught and at rest, the ship home a day later, caught and at rest");
+    // Engines failing as the guidance must ride out: three of the 33 on the way up, a centre one as the booster lights for
+    // landing and another as it hovers, one of the ship's sea-level Raptors as it deorbits (it lands on the other two).
+    const auto f=albert::example::starship::mission(*flight,true,1000,false,{},albert::example::starship::faults("stack@60:20,stack@90:30,stack@100:5,booster@landing:1,booster@hover:2,ship@deorbit:2"));
+    require(f.perigee>170e3&&f.caught>f.meco+200&&f.offAxis<1&&f.speed<.1&&f.ship.caught>f.ship.entry&&f.ship.offAxis<1.5&&f.ship.speed<.1&&f.towerClearance>0&&f.ship.towerClearance>0,
+        "Engine failures not ridden out");
+    std::puts("Starship-class mission: orbit, booster caught and at rest, the ship home a day later, caught and at rest; and again with six engines failing");
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

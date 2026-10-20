@@ -4,9 +4,18 @@
 #include "albert/v1/engine.grpc.pb.h"
 #include "gravity_turn.hpp"
 #include <grpcpp/grpcpp.h>
+#include <chrono>
 #include <stdexcept>
+#include <thread>
 namespace albert::example {
 inline void check(const grpc::Status& s){if(!s.ok())throw std::runtime_error(s.error_message());}
+// An RPC until the server takes it: a busy server (UNAVAILABLE, RESOURCE_EXHAUSTED) refuses before applying anything, so it
+// is sent again after 50 ms to 0.8 s, for up to ~15 s; anything else throws.
+template<class Rpc> void call(Rpc&& rpc){
+    for(int i=0;;++i){grpc::ClientContext c;const grpc::Status s=rpc(c);if(s.ok())return;
+        const bool busy=s.error_code()==grpc::StatusCode::UNAVAILABLE||s.error_code()==grpc::StatusCode::RESOURCE_EXHAUSTED;
+        if(!busy||i>=24)throw std::runtime_error(s.error_message());std::this_thread::sleep_for(std::chrono::milliseconds(50<<std::min(i,4)));}
+}
 inline Vec vec(const ::albert::v1::Vector3& v){return{v.x(),v.y(),v.z()};}
 inline Reading reading(const ::albert::v1::FlightSample& s){
     Reading r;r.elapsed=s.elapsed_seconds();r.height=s.geodetic().height_meters();r.nedVelocity=vec(s.velocity_ned_meters_per_second());

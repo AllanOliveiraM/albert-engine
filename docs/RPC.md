@@ -482,8 +482,17 @@ núcleo.
      centro de massa). Desce a 1 m/s até os pinos, e pendurada nos braços com o motor ainda ligado, o empuxo passa pelos
      pinos até parar de balançar.
 
-O teste `starship_mission` voa tudo e verifica a órbita, as duas capturas, o repouso nos braços e o escudo abaixo do
-limite. `--warp=N` acelera a órbita em tempo real e `--ship-return` voa só a volta da nave, começando em órbita.
+**Falhas de motor.** Os guiamentos leem dos motores quais falharam (`EngineSample.failed`, o que os sensores de um motor
+real dizem) e escolhem os que usam: os primeiros que funcionam numa ordem de preferência (o centro, o anel do meio, os de
+fora), trocando na hora um que falhe aceso; com 3 ou menos, o conjunto cujo centro de empuxo fica sobre a linha perpendicular
+aos pinos, para que a inclinação que leva o empuxo pelo centro de massa deixe os dois pinos nivelados. A aceleração, a altura do
+giro e da queima de pouso contam os motores que funcionam; a captura só desliga os motores depois de 0,3 s nos braços e 1 s
+segurando, voltando à descida se escorregar. `--fail=voo@instante-ou-fase:motor,...` injeta falhas (`stack`, `booster` ou
+`ship`; o instante em segundos da missão ou a fase do guiamento, como `landing` ou `deorbit`).
+
+O teste `starship_mission` voa tudo e verifica a órbita, as duas capturas, o repouso nos braços, o escudo abaixo do
+limite e que nenhum veículo passa pela torre; e voa de novo com seis motores falhando (três dos 33 na subida, dois do booster no
+pouso, um da nave na saída de órbita, que pousa nos outros dois). `--warp=N` acelera a órbita em tempo real e `--ship-return` voa só a volta da nave, começando em órbita.
 
 Na Lua o `GENERIC_LUNAR_ASCENT` sobe 50 m e segue pela taxa vertical até 18 km, cortando com
 perilúnio ≥ 15 km e apolúnio ≥ 85 km. Em Marte o `GENERIC_MARS_ASCENT` também é guiado desde a

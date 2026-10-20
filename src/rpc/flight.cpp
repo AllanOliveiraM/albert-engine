@@ -816,7 +816,9 @@ grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::FlightReq
     slot->stopPacing();core::Reply reply;
     {std::lock_guard lock(slot->mutex);
         if(slot->flight){slot->flight.reset();impl_->sounds.put(slot->sceneId,nullptr);
-            reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));(void)impl_->bridge.submit(core::Remove{slot->siteId});out->set_revision(reply.revision);}
+            // Off the scene even while the frame loop is behind (the flight itself is gone already).
+            for(int i=0;i<200;++i){reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));if(reply.code!=core::Code::Exhausted)break;std::this_thread::sleep_for(std::chrono::milliseconds(25));}
+            (void)impl_->bridge.submit(core::Remove{slot->siteId});out->set_revision(reply.revision);}
         else reply={core::Code::NotFound,"",0};}
     impl_->drop(id,slot); // Its threads stop with the last reference.
     { // The app's flight panel: another flight's, or none.

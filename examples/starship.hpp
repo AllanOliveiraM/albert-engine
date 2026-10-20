@@ -13,6 +13,7 @@
 #include "albert/v1/engine.pb.h"
 #include "gravity_turn.hpp"
 #include <algorithm>
+#include <bit>
 #include <array>
 #include <cmath>
 #include <string>
@@ -180,10 +181,45 @@ inline Mat bodyToNed(double w,double x,double y,double z){ // Rows of the body-t
     return{{1-2*(y*y+z*z),2*(x*y-w*z),2*(x*z+w*y)},{2*(x*y+w*z),1-2*(x*x+z*z),2*(y*z-w*x)},{2*(x*z-w*y),2*(y*z+w*x),1-2*(x*x+y*y)}};
 }
 // toBody: ECEF to body (rows: the body axes); specific: the IMU's specific force (body, m/s²); q: dynamic pressure (Pa);
-// surfaces: their deflections (rad).
-struct State {Vec position,velocity,rate,contact,specific;Mat toBody;double mass=0,propellant=0,thrust=0,height=0,q=0;std::vector<double> surfaces;};
+// surfaces: their deflections (rad); failed: by engine (0-based), as the engines report it.
+struct State {Vec position,velocity,rate,contact,specific;Mat toBody;double mass=0,propellant=0,thrust=0,height=0,q=0;std::vector<double> surfaces;std::vector<bool> failed;};
 // surfaces: deflections (rad) by surface, in the stage's order; none sent when empty.
 struct Command {std::vector<int> ignite,cutoff;double throttle=-1,gimbalPitch=0,gimbalYaw=0;std::vector<double> surfaces;Vec torque;bool torqueOn=false;};
+// Where an engine's nozzle sits off the axis (body y, z; m), by its number (1-based), as raptors() lays them out.
+inline Vec boosterNozzle(int i){const double r=i<=3?.75:i<=13?2.2:3.9,a=(i<=3?(i-1)*120.:i<=13?(i-4)*36.:(i-14)*18+9.)*deg;return{0,r*std::cos(a),r*std::sin(a)};}
+inline Vec shipNozzle(int i){const double r=i<=3?1:3.2,a=(i<=3?90+(i-1)*120.:30+(i-4)*120.)*deg;return{0,r*std::cos(a),r*std::sin(a)};}
+// The engines a burn uses: the first n still working of an order of preference (1-based), lit and put out by commands; one
+// that fails while lit (the engines report it) is left out and the next working one lit in its place on the next use(). Up to
+// 3, out of the working ones among the first `balance`, the set whose thrust centre is nearest the body's z axis (the line
+// across the catch pins: leaning to bring the thrust through the centre of mass then keeps both pins level), then nearest the
+// axis, then the most preferred.
+class Engines {
+public:
+    Engines(std::vector<int> order,Vec(*nozzle)(int),std::size_t balance=0):order_(std::move(order)),nozzle_(nozzle),balance_(balance){}
+    void use(Command& c,const State& s,int n){
+        std::vector<int> want=choose(s,n);
+        for(int e:want)if(std::find(lit_.begin(),lit_.end(),e)==lit_.end())c.ignite.push_back(e);
+        for(int e:lit_)if(std::find(want.begin(),want.end(),e)==want.end())c.cutoff.push_back(e);
+        lit_=std::move(want);n_=n;
+    }
+    void keep(Command& c,const State& s){if(std::any_of(lit_.begin(),lit_.end(),[&](int e){return failed(s,e);}))use(c,s,n_);} // A failed one replaced.
+    int count()const{return static_cast<int>(lit_.size());}
+    int wanted()const{return n_;}
+    int working(const State& s,int n)const{int k=0;for(int e:order_)k+=k<n&&!failed(s,e);return k;} // Of the first n wanted, how many could be lit.
+    Vec centre()const{Vec c;for(int e:lit_)c=c+nozzle_(e);return lit_.empty()?c:c*(1./static_cast<double>(lit_.size()));} // Thrust centre (body y, z).
+private:
+    static bool failed(const State& s,int e){return e>=1&&static_cast<std::size_t>(e)<=s.failed.size()&&s.failed[static_cast<std::size_t>(e-1)];}
+    std::vector<int> choose(const State& s,int n)const{
+        std::vector<int> pool,best;for(std::size_t i=0;i<order_.size()&&i<balance_;++i)if(!failed(s,order_[i]))pool.push_back(order_[i]);
+        if(n<1||n>3||static_cast<int>(pool.size())<n){for(int e:order_)if(static_cast<int>(best.size())<n&&!failed(s,e))best.push_back(e);return best;}
+        double least=1e300;unsigned pick=0;
+        for(unsigned m=1;m<(1u<<pool.size());++m)if(std::popcount(m)==n){Vec c;double rank=0; // Every set of n: its thrust centre and rank.
+            for(std::size_t i=0;i<pool.size();++i)if(m>>i&1u){c=c+nozzle_(pool[i]);rank+=static_cast<double>(i);}
+            const double x=(10*std::abs(c.y)+std::abs(c.z))/n+1e-3*rank;if(x<least){least=x;pick=m;}}
+        for(std::size_t i=0;i<pool.size();++i)if(pick>>i&1u)best.push_back(pool[i]);return best;
+    }
+    std::vector<int> order_,lit_;Vec(*nozzle_)(int);std::size_t balance_;int n_=0;
+};
 // The U.S. Standard Atmosphere 1976 to 86 km (none above, as Albert's): its temperature (K) and density (kg/m³) at a height
 // over the sea (m), by layers of constant lapse in geopotential height.
 struct Air76 {double temperature,density;};
@@ -268,16 +304,16 @@ public:
     Phase phase()const{return phase_;}
     double predicted()const{return miss_;} // The latest predicted landing's distance from the tower (m).
     Command step(double t,const State& s){
-        Command c;c.surfaces={0.,0.,0.};const Vec g=gravity(s.position);const Vec rel=s.position+site_*-1;
+        Command c;c.surfaces={0.,0.,0.};const Vec g=gravity(s.position);set_.keep(c,s);const Vec rel=s.position+site_*-1; // keep: a lit engine that failed, the next working one in its place.
         const double over=dot(rel,up_);const Vec flat=rel+up_*-over;
         switch(phase_){
-        case Phase::wait:if(t-start_>2){c.ignite={1,2,3};c.throttle=.4;phase_=Phase::flip;}hold(c,s,unit(s.velocity));break; // Clear of the ship, then 3 engines.
+        case Phase::wait:if(t-start_>2){set_.use(c,s,3);c.throttle=.4;phase_=Phase::flip;}hold(c,s,unit(s.velocity));break; // Clear of the ship, then 3 engines.
         case Phase::flip:{ // Turn to point the thrust from the predicted landing back to the tower, boostbackPitch from the horizon.
-            if(age_--<=0){aimed_=landing(s);age_=5;}const Vec d=boostbackDirection(aimed_);aim(c,s,d);if(dot(bodyX(s),d)>std::cos(8*deg)){for(int i=4;i<=13;++i)c.ignite.push_back(i);c.throttle=1;phase_=Phase::boostback;back_=d;}break;}
+            if(age_--<=0){aimed_=landing(s);age_=5;}const Vec d=boostbackDirection(aimed_);aim(c,s,d,set_.centre());if(dot(bodyX(s),d)>std::cos(8*deg)){set_.use(c,s,13);c.throttle=1;phase_=Phase::boostback;back_=d;}break;}
         case Phase::boostback:{ // The prediction every 0.1 s, every step within 10 km of the tower.
-            if(age_--<=0||dot(aimed_,back_)>-1e4){aimed_=landing(s);age_=5;}const Vec e=aimed_;aim(c,s,boostbackDirection(e));miss_=norm(e);
-            if(engines_==13&&dot(e,back_)>-5e3){for(int i=4;i<=13;++i)c.cutoff.push_back(i);engines_=3;} // The last few km on 3, to cut finely.
-            if(dot(e,back_)>=0||s.propellant<120e3){for(int i=1;i<=3;++i)c.cutoff.push_back(i);if(engines_==13)for(int i=4;i<=13;++i)c.cutoff.push_back(i);engines_=13;phase_=Phase::coast;}break;}
+            if(age_--<=0||dot(aimed_,back_)>-1e4){aimed_=landing(s);age_=5;}const Vec e=aimed_;aim(c,s,boostbackDirection(e),set_.centre());miss_=norm(e);
+            if(engines_==13&&dot(e,back_)>-5e3){set_.use(c,s,3);engines_=3;} // The last few km on 3, to cut finely.
+            if(dot(e,back_)>=0||s.propellant<120e3){set_.use(c,s,0);engines_=13;phase_=Phase::coast;}break;}
         case Phase::coast:{ // Engines first through the descent: held by the RCS above the air, then the grid fins tilt the body so its
             // crossflow lift (away from the nose's tilt) carries the impact onto the tower; the landing burn when the stop needs it.
             if(age_--<=0){aimed_=landing(s,&seconds_);age_=25;}const Vec e=aimed_;const double seconds=seconds_;miss_=norm(e);const Vec vhat=unit(s.velocity);
@@ -285,27 +321,28 @@ public:
             else{Vec want=e*(-6/std::max(seconds*seconds,1.));want=want+vhat*-dot(want,vhat);
                 const double a=norm(want),side=1.2*boosterLength*2*radius/(pi*radius*radius),tilt=std::min(std::sqrt(a*s.mass/(s.q*pi*radius*radius*side)),std::sin(12*deg));
                 steer(c,s,a>0?unit(vhat*-std::sqrt(1-tilt*tilt)+unit(want)*-tilt):vhat*-1);}
-            if(over<40e3&&gateHeight(s,13*.9*raptorSea/s.mass)<=catchHeight(s)+hoverAbove+gate(s.mass)+50){for(int i=1;i<=13;++i)c.ignite.push_back(i);c.throttle=.9;phase_=Phase::landing;}break;}
+            if(over<40e3&&gateHeight(s,set_.working(s,13)*.9*raptorSea/s.mass)<=catchHeight(s)+hoverAbove+gate(s.mass,set_.working(s,3))+50){set_.use(c,s,13);c.throttle=.9;phase_=Phase::landing;}break;}
         case Phase::landing:{ // 13 engines to the gate (gateSpeed at the height 3 engines stop from), then 3 to rest at the hover
             // point: the constant deceleration that does it net of the drag; across, E-guidance onto the tower's axis over the
             // same time on 13 engines, the braking law on 3.
-            const double above=over-catchHeight(s)-hoverAbove,vz=dot(s.velocity,up_),floor=engines_==13?gate(s.mass):0,v2=engines_==13?gateSpeed*gateSpeed:0;
-            if(engines_==13&&(-vz<=gateSpeed||above<=floor)){for(int i=4;i<=13;++i)c.cutoff.push_back(i);engines_=3;}
+            const double above=over-catchHeight(s)-hoverAbove,vz=dot(s.velocity,up_),floor=engines_==13?gate(s.mass,set_.working(s,3)):0,v2=engines_==13?gateSpeed*gateSpeed:0;
+            if(engines_==13&&(-vz<=gateSpeed||above<=floor)){set_.use(c,s,3);engines_=3;}
             const Vec across=s.velocity+up_*-vz;const double to=above-floor;
-            const double brake=to>1&&vz<0?std::max(vz*vz-v2,0.)/(2*to):0,tgo=std::max(vz<0&&above>1?(engines_==13?2*to/(gateSpeed-vz)+2*gate(s.mass)/gateSpeed:2*above/-vz):1.,2.);
+            const double brake=to>1&&vz<0?std::max(vz*vz-v2,0.)/(2*to):0,tgo=std::max(vz<0&&above>1?(engines_==13?2*to/(gateSpeed-vz)+2*gate(s.mass,set_.working(s,3))/gateSpeed:2*above/-vz):1.,2.);
             const double up=std::max(brake+norm(g)-drag(s)*(norm(s.velocity)>0?-vz/norm(s.velocity):0),0.);
             // At most the tilt whose thrust across beats the crossflow lift it raises (T sin θ - q S C sin²θ peaks at sin θ = T/2qSC).
             const double side0=1.2*boosterLength*2*radius/(pi*radius*radius),best=std::asin(std::min(1.,std::max(s.thrust,1.)/(2*std::max(s.q,1.)*pi*radius*radius*side0)));
             const double tilt=std::tan(std::min(20*deg,best))*std::max(up,norm(g));Vec side=engines_==13?flat*(-6/(tgo*tgo))+across*(-4/tgo):toAxis(s,flat);
             if(norm(side)>tilt)side=side*(tilt/norm(side));
-            const Vec a=up_*up+side;c.throttle=std::clamp(s.mass*norm(a)/(engines_*raptorSea),.4,1.);aim(c,s,unit(a));if(engines_==3)roll(c,s);
+            const Vec a=up_*up+side;c.throttle=std::clamp(s.mass*norm(a)/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(a),set_.centre());if(engines_==3)roll(c,s);
             if(engines_==3&&(above<2||vz>-1))phase_=Phase::hover;break;}
         case Phase::hover:case Phase::descend: // Over the tower, then down at 1 m/s until the pins rest on the arms.
             if(phase_==Phase::hover&&armsClosed&&settled(s,flat))phase_=Phase::descend;
-            overArms(c,s,flat,over,phase_==Phase::descend,3);
-            if(norm(s.contact)>0){c.throttle=.4;phase_=Phase::caught;caught_=t;}break;
-        case Phase::caught: // The engines at their least for a second while the arms take the load, then off.
-            if(t-caught_>1&&!off_){for(int i=1;i<=3;++i)c.cutoff.push_back(i);off_=true;}c.torqueOn=true;c.torque={};break;
+            overArms(c,s,flat,over,phase_==Phase::descend,std::max(set_.count(),1),set_.centre());
+            if(norm(s.contact)>0){if(touch_<0)touch_=t;if(t-touch_>=.3){c.throttle=.4;phase_=Phase::caught;caught_=t;}}else touch_=-1;break; // On the arms for 0.3 s.
+        case Phase::caught: // The engines at their least, held upright, while the arms take the load, then off; slipping off in that second: back down.
+            if(!off_){if(norm(s.contact)==0){phase_=Phase::descend;touch_=-1;break;}aim(c,s,up_,set_.centre());c.throttle=.4;if(t-caught_>1){set_.use(c,s,0);off_=true;}}
+            else{c.torqueOn=true;c.torque={};}break;
         }
         return c;
     }
@@ -335,13 +372,13 @@ private:
         Vec r=s.position,v=s.velocity;fly(r,v,s.mass,accel,.1,[&]{return -dot(v,up_)<=gateSpeed||dot(r+site_*-1,up_)<0;});return dot(r+site_*-1,up_);
     }
     // The 3 engines' stop from gateSpeed at mass m (their net deceleration floored at 1 m/s²: too heavy to stop on 3).
-    static double gate(double m){return gateSpeed*gateSpeed/(2*std::max(.8*3*raptorSea/m-g0,1.));}
+    static double gate(double m,int engines=3){return gateSpeed*gateSpeed/(2*std::max(.8*engines*raptorSea/m-g0,1.));}
     // The mass to plan the landing with: the booster's now, at most its own with the propellant a boostback leaves.
     static double landingMass(double m){return std::min(m,boosterEmpty+170e3);}
     // Where the fall reaches the gate: ballistic until a burn of 13 engines at 90% lit there would reach it at its height (checked
     // every 2 s), then that burn: horizontal from the point offshore (m); seconds: the time to it.
     Vec landing(const State& s,double* seconds=nullptr)const{
-        const double mass=landingMass(s.mass),accel=13*.9*raptorSea/mass,low=catchHeight(s)+hoverAbove+gate(mass)+50;Vec r=s.position,v=s.velocity;int n=0,m=0;
+        const double mass=landingMass(s.mass),accel=set_.working(s,13)*.9*raptorSea/mass,low=catchHeight(s)+hoverAbove+gate(mass,set_.working(s,3))+50;Vec r=s.position,v=s.velocity;int n=0,m=0;
         auto height=[&](Vec p){return dot(p+site_*-1,up_);};auto gated=[&](Vec& p,Vec& u){fly(p,u,mass,accel,.25,[&]{++m;return -dot(u,up_)<=gateSpeed||height(p)<0;});};
         fly(r,v,mass,0,.5,[&]{if(++n%4==0&&dot(v,up_)<0&&height(r)<40e3){Vec p=r,u=v;const int k=m;gated(p,u);m=k;if(height(p)<=low)return true;}return height(r)<0&&dot(v,up_)<0;});
         gated(r,v);if(seconds)*seconds=.5*(n-1)+.25*m;const Vec rel=r+site_*-1;return rel+up_*-dot(rel,up_)+offshore_*-1.;
@@ -359,6 +396,8 @@ private:
             const Vec a1=acc(r,v),v1=v+a1*(h/2),r1=r+v*(h/2),a2=acc(r1,v1),v2=v+a2*(h/2),r2=r+v1*(h/2),a3=acc(r2,v2),v3=v+a3*h,r3=r+v2*h,a4=acc(r3,v3);
             r=r+(v+v1*2+v2*2+v3)*(h/6);v=v+(a1+a2*2+a3*2+a4)*(h/6);}
     }
-    Phase phase_=Phase::wait;Vec back_,aimed_,offshore_=cross(north_,up_)*offshore;double start_=0,miss_=0,seconds_=0,caught_=0;int engines_=13,age_=0;bool off_=false;
+    Phase phase_=Phase::wait;Vec back_,aimed_,offshore_=cross(north_,up_)*offshore;double start_=0,miss_=0,seconds_=0,caught_=0,touch_=-1;int engines_=13,age_=0;bool off_=false;
+    // The 13 gimballed engines first (the centre 3, then the middle ring), then the outer ones: the burns' engines, failed ones replaced.
+    Engines set_{[]{std::vector<int> v;for(int i=1;i<=33;++i)v.push_back(i);return v;}(),boosterNozzle,13};
 };
 }

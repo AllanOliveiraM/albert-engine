@@ -73,7 +73,7 @@ if(ALBERT_RPC)
     target_include_directories(starship_test PRIVATE ${PROJECT_SOURCE_DIR}/examples)
     target_link_libraries(starship_test PRIVATE albert_rpc)
     add_test(NAME starship_mission COMMAND starship_test)
-    set_tests_properties(starship_mission PROPERTIES TIMEOUT 300)
+    set_tests_properties(starship_mission PROPERTIES TIMEOUT 600)
 endif()
 
 add_executable(time_test time_test.cpp)

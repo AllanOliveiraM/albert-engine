@@ -3,7 +3,7 @@
 // Kennedy LC-39A; Moon: the lunar ascent stage from Tranquility Base; Mars: the Mars ascent
 // vehicle from Jezero crater (two burns, circularizing at a 250 km apoapsis).
 // Usage: albert_flight_client [address] [--fast] [--wire] [--utc=UNIX_SECONDS] [--body=moon|mars] [--apollo11]
-//        [--export-vehicle=launcher|saturn-v|lander|lunar-ascent|mars-ascent] [--definition=FILE.json] [--starship [--follow-booster]] [--ship-return] [--pad] [--warp=N]
+//        [--export-vehicle=launcher|saturn-v|lander|lunar-ascent|mars-ascent] [--definition=FILE.json] [--starship [--follow-booster]] [--ship-return] [--pad] [--warp=N] [--fail=F,...]
 // Defaults: 127.0.0.1:50051, real time, the instant shown by Albert, the Earth. --wire (Earth)
 // flies over the binary data plane at 1 kHz (one exchange per tick) and then coasts to 10 minutes.
 // --apollo11: the Saturn V of Apollo 11 (AS-506) from LC-39A on 1969-07-16 by its flight program (saturn_v.hpp).
@@ -12,7 +12,8 @@
 // --starship: a Starship-class flight from Starbase, the ship to orbit and the booster back to a catch on the tower's arms
 // (starship_flight.hpp), and a day later the ship home to the same arms; --follow-booster keeps the camera on the booster from
 // staging; --pad: the stack on the mount at Starbase, the camera going around it; --warp=N: the orbit's time compression in
-// real time (default 1000); --ship-return: the ship's way home alone, from orbit.
+// real time (default 1000); --ship-return: the ship's way home alone, from orbit; --fail: engine failures to inject
+// (flight@time-or-phase:engine, starship_flight.hpp).
 #include "albert/v1/engine.grpc.pb.h"
 #include "gravity_turn.hpp"
 #include "saturn_v.hpp"
@@ -62,8 +63,8 @@ int apollo11(api::FlightService::Stub& flight,bool fast){
     return 0;
 }
 int main(int argc,char** argv){try{
-    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth",exported,definition;bool fast=false,binary=false,apollo=false,starship=false,follow=false,homeOnly=false,pad=false;double utc=0,warp=1000;bool chosen=false;
-    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a=="--apollo11")apollo=true;else if(a=="--starship")starship=true;else if(a=="--follow-booster")follow=true;else if(a=="--ship-return")homeOnly=true;else if(a=="--pad")pad=true;else if(a.rfind("--warp=",0)==0)warp=std::stod(a.substr(7));else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
+    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth",exported,definition,failures;bool fast=false,binary=false,apollo=false,starship=false,follow=false,homeOnly=false,pad=false;double utc=0,warp=1000;bool chosen=false;
+    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a=="--apollo11")apollo=true;else if(a=="--starship")starship=true;else if(a=="--follow-booster")follow=true;else if(a=="--ship-return")homeOnly=true;else if(a=="--pad")pad=true;else if(a.rfind("--fail=",0)==0)failures=a.substr(7);else if(a.rfind("--warp=",0)==0)warp=std::stod(a.substr(7));else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
         else if(a.rfind("--body=",0)==0)world=a.substr(7);else if(a.rfind("--export-vehicle=",0)==0)exported=a.substr(17);else if(a.rfind("--definition=",0)==0)definition=a.substr(13);else address=a;}
     if(world!="earth"&&world!="moon"&&world!="mars")throw std::invalid_argument("--body: earth, moon or mars");
     if(binary&&world!="earth")throw std::invalid_argument("--wire flies the Earth case");
@@ -71,10 +72,10 @@ int main(int argc,char** argv){try{
     if(!channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(30)))throw std::runtime_error("Abra AlbertEngine --rpc antes de executar o exemplo");
     auto flight=api::FlightService::NewStub(channel);
     if(apollo)return apollo11(*flight,fast);
-    if(homeOnly){ex::starship::homecoming(*flight,fast,warp);return 0;}
+    if(homeOnly){ex::starship::homecoming(*flight,fast,warp,560,ex::starship::faults(failures));return 0;}
     if(pad){auto camera=api::CameraService::NewStub(channel);ex::starship::onPad(*flight,*camera);return 0;}
     if(starship){auto camera=api::CameraService::NewStub(channel); // --follow-booster: the camera on the booster from staging.
-        ex::starship::mission(*flight,fast,warp,false,follow?std::function<void()>([&]{grpc::ClientContext c;api::FocusRequest f;f.set_id("flight.booster");api::Applied a;check(camera->Focus(&c,f,&a));}):std::function<void()>());return 0;}
+        ex::starship::mission(*flight,fast,warp,false,follow?std::function<void()>([&]{api::FocusRequest f;f.set_id("flight.booster");api::Applied a;ex::call([&](grpc::ClientContext& c){return camera->Focus(&c,f,&a);});}):std::function<void()>(),ex::starship::faults(failures));return 0;}
     if(!exported.empty()){ // A preset as JSON, to edit and fly with --definition.
         const std::map<std::string,api::Vehicle> presets{{"launcher",api::GENERIC_LAUNCHER},{"saturn-v",api::SATURN_V},{"lander",api::GENERIC_LANDER},{"lunar-ascent",api::GENERIC_LUNAR_ASCENT},{"mars-ascent",api::GENERIC_MARS_ASCENT}};
         const auto kind=presets.find(exported);if(kind==presets.end())throw std::invalid_argument("--export-vehicle: launcher, saturn-v, lander, lunar-ascent or mars-ascent");

@@ -32,12 +32,12 @@ public:
         case Phase::orient: // Retrograde on the RCS; the burn once the landing it gives reaches the tower, pointed within 3°.
             hold(c,s,unit(inertial(s)*-1));
             if(t>=check_){const Arrival a=plan(s);along_=a.along;cross_=a.cross;check_=t+1;
-                if(a.along>=0&&dot(bodyX(s),unit(inertial(s)*-1))>std::cos(3*deg)){c.ignite={1,2,3};c.throttle=.4;phase_=Phase::deorbit;v0_=norm(inertial(s));}}
+                if(a.along>=0&&dot(bodyX(s),unit(inertial(s)*-1))>std::cos(3*deg)){burn_.use(c,s,3);c.throttle=.4;phase_=Phase::deorbit;v0_=norm(inertial(s));}}
             break;
         case Phase::deorbit: // Cut once the landing without more of it, at the planned bank, is back at the tower (within the pass's
             // 2000 km: a burn barely begun can come down a lap or more later, as far short).
             aim(c,s,unit(inertial(s)*-1));{const Arrival a=arrive(s.position,s.velocity,s.mass,50*deg);along_=a.along;cross_=a.cross;
-                if((a.down&&a.along<=0&&a.along>-2e6)||v0_-norm(inertial(s))>=2*deorbit){c.cutoff={1,2,3};phase_=Phase::glide;}}break;
+                burn_.keep(c,s);if((a.down&&a.along<=0&&a.along>-2e6)||v0_-norm(inertial(s))>=2*deorbit){burn_.use(c,s,0);phase_=Phase::glide;}}break;
         case Phase::glide: // Torque-free down to 140 km, then belly-first at the entry attitude on the RCS.
             if(height>140e3){c.torqueOn=true;c.torque={};next_=std::min(10.,(height-140e3)/std::max(-dot(s.velocity,unit(s.position)),1.));}
             else attitude(c,s,alpha(norm(s.velocity),height),0);
@@ -47,29 +47,29 @@ public:
             const double speed=norm(s.velocity);double al=alpha(speed,height);
             if(speed>300){if(t>=check_){check_=t+1;guide(s);}}else al=glide(s,height);
             held_+=std::clamp(bank_-held_,-4*deg*.02,4*deg*.02);attitude(c,s,al,held_); // The bank at most 4°/s.
-            if(speed<150&&range(s)<5e3&&height<flipHeight(s)){phase_=Phase::flip;c.ignite={1,2,3};c.throttle=.5;}
+            if(speed<150&&range(s)<5e3&&height<flipHeight(s)){phase_=Phase::flip;set_.use(c,s,3);c.throttle=.5;}
             break;}
         case Phase::flip: // Nose up onto the engines: the forward flaps open, the aft ones folded, the gimbals.
-            aim(c,s,up_);c.surfaces={45*deg,45*deg,-45*deg,-45*deg};c.throttle=.5;
+            set_.keep(c,s);aim(c,s,up_,set_.centre());c.surfaces={45*deg,45*deg,-45*deg,-45*deg};c.throttle=.5;
             if(dot(bodyX(s),up_)>std::cos(25*deg))phase_=Phase::landing;
             break;
         case Phase::landing:{ // To rest at the hover point on 3 engines (2 once they can carry it), across onto the axis.
             const double above=over-catchHeight(s)-hoverAbove,vz=dot(s.velocity,up_),brake=above>1&&vz<0?vz*vz/(2*above):0,up=brake+norm(gravity(s.position));
             Vec side=toAxis(s,flat);const double limit=std::tan(20*deg)*up;if(norm(side)>limit)side=side*(limit/norm(side));
-            const Vec a=up_*up+side;if(engines_==3&&s.mass*norm(a)<.9*2*raptorSea){c.cutoff={3};engines_=2;}
-            c.throttle=std::clamp(s.mass*norm(a)/(engines_*raptorSea),.4,1.);aim(c,s,unit(a),centre());roll(c,s);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
-            if(engines_==2&&(above<2||vz>-1))phase_=Phase::hover;
+            set_.keep(c,s);const Vec a=up_*up+side;if(set_.count()==3&&s.mass*norm(a)<.9*2*raptorSea)set_.use(c,s,2);
+            c.throttle=std::clamp(s.mass*norm(a)/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(a),set_.centre());roll(c,s);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
+            if(set_.count()<=2&&(above<2||vz>-1))phase_=Phase::hover;
             break;}
         case Phase::hover:case Phase::descend: // Over the tower, then down at 1 m/s until the pins rest on the arms.
             if(phase_==Phase::hover&&armsClosed&&settled(s,flat))phase_=Phase::descend;
-            {const double demand=overArms(c,s,flat,over,phase_==Phase::descend,engines_,centre());c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
-                // As light as it gets, 2 Raptors at their least lift more than its weight: down to 1 (and up again when short).
-                if(engines_>1&&demand<.45*engines_*raptorSea){c.cutoff={engines_};--engines_;}else if(engines_<3&&demand>.9*engines_*raptorSea){++engines_;c.ignite={engines_};}}
+            {set_.keep(c,s);const int n=std::max(set_.count(),1);const double demand=overArms(c,s,flat,over,phase_==Phase::descend,n,set_.centre());c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
+                // As light as it gets, 2 Raptors at their least lift more than its weight: down to 1 (and up again when short, while one works).
+                if(n>1&&demand<.45*n*raptorSea)set_.use(c,s,n-1);else if(n<set_.working(s,3)&&demand>.9*n*raptorSea)set_.use(c,s,n+1);}
             if(norm(s.contact)>0){c.throttle=.4;phase_=Phase::caught;caught_=t;}
             break;
         case Phase::caught: // On the arms, the engine at its least while they take the load, then off once it hangs still.
             if(!off_){hang(c,s);c.throttle=.4;}else{c.torqueOn=true;c.torque={};}
-            if(!off_&&t-caught_>2&&(std::hypot(s.rate.y,s.rate.z)<.002||t-caught_>15)){c.cutoff={1,2,3};off_=true;}break;
+            if(!off_&&t-caught_>2&&(std::hypot(s.rate.y,s.rate.z)<.002||t-caught_>15)){set_.use(c,s,0);off_=true;}break;
         }
         return c;
     }
@@ -78,12 +78,10 @@ private:
     // The flaps' drag at their openings now (times |sin α|; their entry trim before any), on the reference area.
     double flapDrag(const State& s)const{
         double d=0;for(std::size_t i=0;i<4;++i)d+=flapCn*flaps[i].area/(pi*radius*radius)*std::sin(45*deg+(s.surfaces.size()==4?s.surfaces[i]:i<2?-30*deg:13*deg));return d;}
-    // The lit sea-level Raptors' thrust centre (body y, z): engines 1 to engines_, 1 m off the axis at 90°, 210° and 330°.
-    Vec centre()const{Vec c;for(int i=0;i<engines_;++i)c=c+Vec{0,std::cos((90+i*120)*deg),std::sin((90+i*120)*deg)};return c*(1./engines_);}
     // Hanging on the pins with the engine on: the body upright and the thrust's line through the pins (the pivot), so nothing is
     // left to swing when it cuts.
     void hang(Command& c,const State& s)const{
-        const Vec e=mul(s.toBody,cross(bodyX(s),up_)),w=s.rate,o=centre();const double lever=shipLength-shipPinAt,gain=pitchInertia(s.propellant)/std::max(s.thrust*lever,1.);
+        const Vec e=mul(s.toBody,cross(bodyX(s),up_)),w=s.rate,o=set_.centre();const double lever=shipLength-shipPinAt,gain=pitchInertia(s.propellant)/std::max(s.thrust*lever,1.);
         c.gimbalPitch=std::clamp(gain*(1.44*e.y-2*w.y)-o.z/lever,-15*deg,15*deg);c.gimbalYaw=std::clamp(gain*(1.44*e.z-2*w.z)+o.y/lever,-15*deg,15*deg);c.torque={};roll(c,s);
     }
     static Vec inertial(const State& s){return s.velocity+cross(Vec{0,0,7.292115e-5},s.position);}
@@ -105,7 +103,7 @@ private:
     }
     double range(const State& s)const{return 6371e3*std::acos(std::clamp(dot(unit(s.position),unit(site_)),-1.,1.));}
     double flipHeight(const State& s)const{
-        const double v=norm(s.velocity),a=std::max(3*.8*raptorSea/s.mass-g0,2.);return catchHeight(s)+hoverAbove+v*v/(2*a)+4*v+50;
+        const double v=norm(s.velocity),a=std::max(set_.working(s,3)*.8*raptorSea/s.mass-g0,2.);return catchHeight(s)+hoverAbove+v*v/(2*a)+4*v+50; // On the engines that work.
     }
     // Body axes (rows, in ECEF) for the angle of attack a along the velocity v at r, banked b (right positive).
     static Mat axes(Vec r,Vec v,double a,double b){
@@ -191,6 +189,8 @@ private:
             else{for(int i=0;i<8;++i){const double mid=(lo+hi)/2;a=arrive(s.position,s.velocity,s.mass,sign_*mid);(a.along>0?lo:hi)=mid;}bank_=sign_*(lo+hi)/2;}}
         along_=a.along;cross_=a.cross;
     }
-    Phase phase_=Phase::orbit;double held_=0,drag_=1,lift_=1,flaps_=1.8,next_=.02,check_=0,pulse_=0,along_=0,cross_=0,bank_=0,v0_=0,caught_=0;int sign_=1,engines_=3;bool off_=false;
+    Phase phase_=Phase::orbit;double held_=0,drag_=1,lift_=1,flaps_=1.8,next_=.02,check_=0,pulse_=0,along_=0,cross_=0,bank_=0,v0_=0,caught_=0;int sign_=1;bool off_=false;
+    // The landing's engines: the sea-level Raptors; the deorbit burn's: those, then the vacuum ones (in vacuum either will do).
+    Engines set_{{1,2,3},shipNozzle,3},burn_{{1,2,3,4,5,6},shipNozzle};
 };
 }
