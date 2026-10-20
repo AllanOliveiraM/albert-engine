@@ -312,6 +312,12 @@ int main(){try{
         for(int i=0;i<250;++i)g.advance(second/1000);near(g.surfaces()[0].deflection*180/3.14159265358979,2.5,1e-9,"Surface at its rate (10°/s)");
         g.advance(second/4);x=g.sample();near(g.surfaces()[0].deflection*180/3.14159265358979,5,1e-9,"Surface at its command");
         near(x.aeroMoment.y,x.dynamicPressure*2*3*.05,1e-9*x.dynamicPressure,"Surface pitching moment q S L ΔCm");
+        // A placed surface's drag acts where it is: 1.5 m right of the axis, it yaws the vehicle by 1.5 m × q S ΔCD (none at
+        // the reference, nose-on), the force the same.
+        Surface brake;brake.name="brake";brake.drag={{0},{0},{0},{.5}};Stage at=w,placed=w;at.surfaces={brake};brake.position={2,1.5,0};brake.placed=true;placed.surfaces={brake};
+        const Vehicle av{"braked",{at},0},pv{"braked aside",{placed},0};
+        const Sample y0=Flight(av,air,Flight::free(air,av,0,{0,0,1e4},{300,0,0},{})).sample(),y1=Flight(pv,air,Flight::free(air,pv,0,{0,0,1e4},{300,0,0},{})).sample();
+        near(y1.aeroMoment.z-y0.aeroMoment.z,1.5*y1.dynamicPressure*2*.5,1e-9*y1.dynamicPressure,"Placed surface's drag yaws from where it is");near(norm(y1.aeroForce-y0.aeroForce),0,1e-9*y1.dynamicPressure,"with the same force");
     }
     // Navigation sensors against their settings: the GNSS's noise per axis and its limits; the radar altimeter's slant range
     // and beam edge; the star tracker's noise across and about its boresight, and its exclusions.

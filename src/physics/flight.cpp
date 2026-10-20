@@ -196,15 +196,17 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     if(q>0){
         const Aerodynamics& ae=st.aero;const double ad=alpha*degrees,bd=beta*degrees,k=q*ae.area;
         double cl=ae.lift(mach,ad),cd=ae.drag(mach,std::hypot(ad,bd)),cy=ae.side(mach,bd),cr=ae.roll(mach,ad),cm=ae.pitch(mach,ad),cn=ae.yaw(mach,bd);
-        const auto& fs=st.surfaces; // Control surfaces' increments at their deflections.
-        for(std::size_t i=0;i<fs.size();++i){const double d=surfaces_[i].deflection*degrees;
-            cl+=fs[i].lift(mach,ad,d);cd+=fs[i].drag(mach,ad,d);cy+=fs[i].side(mach,bd,d);cr+=fs[i].roll(mach,ad,d);cm+=fs[i].pitch(mach,ad,d);cn+=fs[i].yaw(mach,bd,d);}
         const double ca=std::cos(alpha),sa=std::sin(alpha);
-        fa=k*(cl*V3{sa,0,-ca}+V3{0,cy,0})-k*cd/speed*air; // Drag along the air velocity.
+        auto force=[&](double l,double d,double y){return k*(l*V3{sa,0,-ca}+V3{0,y,0})-k*d/speed*air;}; // Drag along the air velocity.
+        const auto& fs=st.surfaces;V3 fp,mp; // Control surfaces' increments at their deflections; placed ones' forces act where they are.
+        for(std::size_t i=0;i<fs.size();++i){const double d=surfaces_[i].deflection*degrees,l=fs[i].lift(mach,ad,d),dr=fs[i].drag(mach,ad,d),y=fs[i].side(mach,bd,d);
+            cr+=fs[i].roll(mach,ad,d);cm+=fs[i].pitch(mach,ad,d);cn+=fs[i].yaw(mach,bd,d);
+            if(fs[i].placed){const V3 f=force(l,dr,y);fp+=f;mp+=cross(V3{ms.cg-fs[i].position.x,fs[i].position.y,fs[i].position.z},f);}else{cl+=l;cd+=dr;cy+=y;}}
+        fa=force(cl,cd,cy);
 
         const V3 w=s.rate-bt*o.omega;const double hl=ae.length/(2*speed),hs=ae.span/(2*speed);
         ma={k*ae.span*(cr+ae.rollDamping*w.x*hs),k*ae.length*(cm+ae.pitchDamping*w.y*hl),k*ae.span*(cn+ae.yawDamping*w.z*hs)};
-        ma+=cross(V3{ms.cg-st.reference,0,0},fa);
+        ma+=cross(V3{ms.cg-st.reference,0,0},fa)+mp;fa+=fp;
     }
     V3 ft,mt;double thrust=0,flow=0,jet=0; // jet: Σ ṁ l², the exhaust's transverse momentum lever.
     if(s.burning)for(std::size_t i=0;i<engines_.size();++i){ // Steps end at depletion, so the engines hold through all RK4 stages.
