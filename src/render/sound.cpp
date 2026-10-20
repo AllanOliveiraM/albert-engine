@@ -31,6 +31,9 @@ struct albert::Sound::Impl {
     std::array<int,size/2> band{};std::array<int,count> bins{};std::array<double,size> window{};
     std::vector<std::complex<double>> spectrum=std::vector<std::complex<double>>(size);std::vector<double> overlap=std::vector<double>(hop),ready=std::vector<double>(hop);
     std::size_t position=hop;float pan=0;Random random;double adaptation=0;ma_device device{};bool open=false;std::atomic<float> volume{1};
+    std::atomic<float> square{0}; // The crackle's mean squared shock amplitude (digital units²; 0: none).
+    struct Shock {float amplitude=0,length=1,age=0;};std::array<Shock,64> shocks{};double still=0,passed=0; // still, passed: the DC blocker's state.
+    struct Boom {float amplitude=0,length=0,pan=0;std::size_t age=0;};std::array<Boom,8> pending{},booms{};std::atomic<unsigned> written{0},read{0}; // A ring from the main thread.
     Impl(){
         for(auto& p:powers)p=0;
         // Each bin to the band holding its frequency; a band narrower than a bin takes the nearest one.
@@ -62,21 +65,42 @@ albert::Sound::~Sound(){if(impl_->open)ma_device_uninit(&impl_->device);}
 bool albert::Sound::playing()const{return impl_->open;}
 void albert::Sound::setVolume(float v){impl_->volume.store(std::clamp(v,0.f,1.f),std::memory_order_relaxed);}
 double albert::Sound::adaptation()const{return impl_->adaptation;}
-void albert::Sound::hear(const ac::Spectrum& levels,bool audible,float pan,double seconds){
+void albert::Sound::boom(double overpressure,double duration,float pan){
+    auto& d=*impl_;const unsigned n=d.written.load(std::memory_order_relaxed);if(n-d.read.load(std::memory_order_acquire)>=d.pending.size())return; // The ring full: dropped.
+    d.pending[n%d.pending.size()]={static_cast<float>(overpressure*.1774*std::pow(10.,-d.adaptation/20)),static_cast<float>(std::clamp(duration,.01,2.)*rate),std::clamp(pan,-1.f,1.f),0};
+    d.written.store(n+1,std::memory_order_release); // 95 dB SPL (1.12 Pa rms) at -14 dBFS: 0.1774 a pascal.
+}
+void albert::Sound::hear(const ac::Spectrum& levels,bool audible,float pan,double seconds,float crackle){
     auto& d=*impl_;double sum=0;
     if(audible)for(int b=first;b<ac::bands;++b)sum+=std::pow(10.,levels[static_cast<std::size_t>(b)]/10);
     const double overall=sum>0?10*std::log10(sum):0,want=std::max(overall-95,0.);
     d.adaptation+=(want-d.adaptation)*(want>d.adaptation?-std::expm1(-seconds/1.5):-std::expm1(-seconds/4)); // Down fast, back slowly.
-    for(int b=0;b<count;++b){const double l=levels[static_cast<std::size_t>(first+b)]; // 95 dB SPL (after adaptation) at -14 dBFS.
-        d.powers[static_cast<std::size_t>(b)].store(audible&&l>-200?static_cast<float>(std::pow(10.,(l-d.adaptation-109)/10)):0.f,std::memory_order_relaxed);}
+    const float share=std::clamp(crackle,0.f,1.f);double treble=0;
+    for(int b=0;b<count;++b){const double l=levels[static_cast<std::size_t>(first+b)],p=audible&&l>-200?std::pow(10.,(l-d.adaptation-109)/10):0.; // 95 dB SPL (after adaptation) at -14 dBFS.
+        const bool high=ac::bandCentre(first+b)>=500;if(high)treble+=p;d.powers[static_cast<std::size_t>(b)].store(static_cast<float>(high?p*(1-share):p),std::memory_order_relaxed);}
+    // That share of the treble as shocks: rate λ 800/s, a ramp's energy A² T/3 with T 0.9 ms on average.
+    d.square.store(static_cast<float>(3*share*treble/(800*.9e-3)),std::memory_order_relaxed);
     d.panTarget.store(std::clamp(pan,-1.f,1.f),std::memory_order_relaxed);
 }
 void albert::Sound::render(float* out,unsigned frames,unsigned channels){
     auto& d=*impl_;constexpr float smooth=1.f/(.03f*rate);const float panTo=d.panTarget.load(std::memory_order_relaxed),volume=d.volume.load(std::memory_order_relaxed);
+    const float square=d.square.load(std::memory_order_relaxed),scale=std::sqrt(square/3); // Pareto (α 3) amplitudes from scale: E[A²] = 3 scale².
+    for(unsigned k=d.read.load(std::memory_order_relaxed);k!=d.written.load(std::memory_order_acquire);d.read.store(++k,std::memory_order_release)) // New booms into a free place.
+        for(auto& b:d.booms)if(b.length<=0){b=d.pending[k%d.pending.size()];break;}
+    auto gains=[](float pan,float& l,float& r){const float a=(pan+1)*static_cast<float>(pi/4);l=std::cos(a)*1.4142135f;r=std::sin(a)*1.4142135f;}; // Equal power, unity in the centre.
     for(unsigned i=0;i<frames;++i){
         if(d.position>=hop)d.frame();
-        const float y=std::tanh(static_cast<float>(d.ready[d.position++])*volume); // Soft limit.
-        d.pan+=(panTo-d.pan)*smooth;const float a=(d.pan+1)*static_cast<float>(pi/4),left=std::cos(a)*1.4142135f,right=std::sin(a)*1.4142135f; // Equal power, unity in the centre.
-        for(unsigned c=0;c<channels;++c)out[i*channels+c]=channels==1?y:c==0?y*left:c==1?y*right:0.f;
+        float x=static_cast<float>(d.ready[d.position++]);
+        if(square>0&&d.random.next()<800./rate)for(auto& k:d.shocks)if(k.age>=k.length){ // A shock: its length 0.3-1.5 ms.
+            k={scale*static_cast<float>(std::pow(std::max(d.random.next(),1e-3),-1./3)),static_cast<float>((.3e-3+1.2e-3*d.random.next())*rate),0};break;}
+        double shocks=0;for(auto& k:d.shocks)if(k.age<k.length){shocks+=k.amplitude*(1-k.age/k.length);k.age+=1;}
+        const double blocked=shocks-d.passed+.9974*d.still;d.passed=shocks;d.still=blocked;x+=static_cast<float>(blocked); // Their mean taken out (~20 Hz high-pass).
+        float boomLeft=0,boomRight=0;
+        for(auto& b:d.booms)if(b.length>0){ // The N: up in 2 ms, down through zero to its negative peak, back up in 2 ms.
+            const float t=static_cast<float>(b.age++),rise=.002f*rate,v=t<rise?b.amplitude*(t/rise)*(1-2*t/b.length):t<=b.length?b.amplitude*(1-2*t/b.length):b.amplitude*-(1-(t-b.length)/rise);
+            float l,r;gains(b.pan,l,r);boomLeft+=v*l;boomRight+=v*r;if(t>=b.length+rise)b.length=0;}
+        d.pan+=(panTo-d.pan)*smooth;float left,right;gains(d.pan,left,right);
+        const float l=std::tanh((x*left+boomLeft)*volume),r=std::tanh((x*right+boomRight)*volume),m=std::tanh((x+.5f*(boomLeft+boomRight))*volume); // Soft limit.
+        for(unsigned c=0;c<channels;++c)out[i*channels+c]=channels==1?m:c==0?l:c==1?r:0.f;
     }
 }

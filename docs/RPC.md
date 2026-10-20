@@ -469,8 +469,10 @@ núcleo.
    descansa 30 s e é tirado dos braços (`EndFlight`).
 6. **A nave de volta** ([ship_return.hpp](../examples/ship_return.hpp)), com flaps posicionados (`position_meters`), RCS,
    nós térmicos no escudo e pinos:
-   - **Saída de órbita:** sem torque em órbita (passos longos), procura a cada minuto onde pousaria uma queima agora. Na
-     passagem que leva à torre (~22 h depois), queima retrógrado e corta quando o pouso previsto chega à torre.
+   - **Saída de órbita:** em órbita, nariz para a frente e barriga para a Terra, mantidos por um pulso de RCS de 0,5 s a cada
+     30 s (sem torque entre eles, em passos longos); procura a cada minuto onde pousaria uma queima agora. Na passagem que
+     leva à torre (~22 h depois), vira para trás pela arfagem, queima retrógrado quando apontada a 3° e corta quando o pouso
+     previsto chega à torre (dentro dos 2000 km da passagem).
    - **Reentrada:** de barriga, com α de 65° a 80°. Um previsor (tabelas do Albert, U.S. Standard Atmosphere 1976 e
      correção pelo arrasto e pela sustentação medidos) dá a inclinação lateral para o alcance. O lado segue o desvio
      lateral previsto, com reversões dentro de um corredor. Abaixo de 300 m/s, planeio direto para a torre.

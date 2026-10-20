@@ -1090,7 +1090,8 @@ int albert::runRenderer(int argc, char** argv) {
         std::unique_ptr<albert::rpc::Server> rpc;
         // The flight's sound at the camera: muted until "Som do voo" is ticked (the device opens then); its emissions over
         // the last ten minutes and the listener's last place.
-        bool soundOn=false;std::unique_ptr<albert::Sound> sound;std::vector<albert::physics::acoustics::Emission> emissions;
+        bool soundOn=false;std::unique_ptr<albert::Sound> sound;
+        struct Heard {std::vector<albert::physics::acoustics::Emission> emissions;std::size_t booms=0;};std::map<std::string,Heard> heardFlights; // By scene id.
         std::optional<std::pair<double,albert::physics::V3>> lastListener;albert::physics::V3 listenerVelocity;
         const bool soundStats=std::getenv("ALBERT_SOUND_STATS")!=nullptr;auto soundReport=std::chrono::steady_clock::now();
 #endif
@@ -2790,16 +2791,14 @@ int albert::runRenderer(int argc, char** argv) {
             }
             graphics.setSamples(preferences.antialias?4:1);graphics.setVsync(preferences.vsync);ImGui::GetIO().FontGlobalScale=preferences.uiScale;
 #ifdef ALBERT_HAS_RPC
-            { // The flight's sound at the camera, at the shown instant (an Earth flight; physics/acoustics.hpp).
+            { // The flights' sound at the camera, at the shown instant (Earth flights; physics/acoustics.hpp): each heard its own way and
+              // summed by band, the crackle by the loudest engines, a boom as each Mach cone sweeps over the camera.
                 namespace ph=albert::physics;namespace ac=ph::acoustics;
-                const auto source=rpc?rpc->flightSound():std::nullopt;bool audible=false;ac::Spectrum levels{};float pan=0;
+                const auto sources=rpc?rpc->flightSounds():std::vector<albert::rpc::FlightServices::Sound>{};bool audible=false;ac::Spectrum levels;levels.fill(-1e9);float pan=0;double engines=-1e9;
                 if(soundOn&&!sound&&!smokeTest)sound=std::make_unique<albert::Sound>(true);else if(!soundOn&&sound)sound.reset();
                 if(sound)sound->setVolume(preferences.volume);
-                if(source){
-                    if(!emissions.empty()&&source->utc<emissions.back().time)emissions.clear(); // A new flight, or a replay.
-                    if(emissions.empty()||source->utc>=emissions.back().time+.05)emissions.push_back(source->emission);
-                    if(emissions.size()>2&&emissions.front().time<source->utc-660)
-                        emissions.erase(emissions.begin(),std::lower_bound(emissions.begin(),emissions.end(),source->utc-600,[](const ac::Emission& e,double t){return e.time<t;}));
+                for(auto it=heardFlights.begin();it!=heardFlights.end();)if(std::none_of(sources.begin(),sources.end(),[&](const auto& x){return x.id==it->first;}))it=heardFlights.erase(it);else ++it;
+                if(!sources.empty()){
                     // The camera in the Earth's rotating frame (renderPosition inverted); its velocity there between shown instants.
                     const double r=albert::core::earthRadiusMeters;const auto& c=camera->position;
                     const ph::V3 gcrf{c.x*r+sceneOrigin.x,-c.z*r+sceneOrigin.y,c.y*r+sceneOrigin.z};const ph::Tt tt=ph::ttFromUtc(simulatedUtc);
@@ -2807,18 +2806,35 @@ int albert::runRenderer(int argc, char** argv) {
                     if(lastListener&&simulatedUtc>lastListener->first)listenerVelocity=(here-lastListener->second)*(1/(simulatedUtc-lastListener->first));
                     else if(!lastListener||simulatedUtc<lastListener->first)listenerVelocity={};
                     lastListener={simulatedUtc,here};
-                    const auto air=source->air;
-                    const auto heard=ac::hear(emissions,simulatedUtc,here,listenerVelocity,source->planet,
-                        [&](const ph::Geodetic& g){return air?air->at(tt,g.latitude,g.longitude,g.height):ph::standardAtmosphere(g.height);});
-                    audible=heard.audible;levels=heard.levels;
-                    if(soundStats&&steadyNow>=soundReport){soundReport=steadyNow+std::chrono::seconds(1); // ALBERT_SOUND_STATS: once a second.
-                        std::printf("sound: %s, %s, %.1f dB SPL (%.1f dB above 20 Hz) from %.0f m, %.2f s late, Doppler %.3f, adaptation %.1f dB\n",sound&&sound->playing()?"device":"muted",
-                            audible?"audible":"silent",ac::overall(levels),[&]{ac::Spectrum a=levels;for(int b=0;b<12;++b)a[static_cast<std::size_t>(b)]=-1e9;return ac::overall(a);}(),heard.distance,heard.delay,heard.doppler,sound?sound->adaptation():0.);std::fflush(stdout);}
-                    if(const auto node=objects.nodes().find("flight");node!=objects.nodes().end()){
-                        Vector3 to=node->second->position;to.sub(camera->position);Vector3 right;right.setFromMatrixColumn(*camera->matrixWorld,0);
-                        if(to.length()>0)pan=to.normalize().dot(right.normalize());}
-                }else{emissions.clear();lastListener.reset();}
-                if(sound)sound->hear(levels,audible,pan,dt);
+                    double total=0,weighted=0;
+                    for(const auto& source:sources){auto& h=heardFlights[source.id];auto& emissions=h.emissions;
+                        if(!emissions.empty()&&source.utc<emissions.back().time)h={}; // A new flight, or a replay.
+                        if(emissions.empty()||source.utc>=emissions.back().time+.05)emissions.push_back(source.emission);
+                        if(emissions.size()>2&&emissions.front().time<source.utc-660)
+                            emissions.erase(emissions.begin(),std::lower_bound(emissions.begin(),emissions.end(),source.utc-600,[](const ac::Emission& e,double t){return e.time<t;}));
+                        const auto air=source.air;const auto at=[&](const ph::Geodetic& g){return air?air->at(tt,g.latitude,g.longitude,g.height):ph::standardAtmosphere(g.height);};
+                        float side=0; // Where it is on the screen: -1 left to 1 right.
+                        if(const auto node=objects.nodes().find(source.id);node!=objects.nodes().end()){
+                            Vector3 to=node->second->position;to.sub(camera->position);Vector3 right;right.setFromMatrixColumn(*camera->matrixWorld,0);
+                            if(to.length()>0)side=to.normalize().dot(right.normalize());}
+                        const auto heard=ac::hear(emissions,simulatedUtc,here,listenerVelocity,source.planet,at);
+                        if(heard.audible){audible=true;const double power=std::pow(10.,ac::overall(heard.levels)/10);total+=power;weighted+=power*side;engines=std::max(engines,heard.rocket);
+                            for(int b=0;b<ac::bands;++b){auto& l=levels[static_cast<std::size_t>(b)];l=10*std::log10(std::pow(10.,l/10)+std::pow(10.,heard.levels[static_cast<std::size_t>(b)]/10)+1e-300);}}
+                        const auto booms=ac::booms(emissions,simulatedUtc,here,source.planet,at); // One more cone over the camera, just now: its boom.
+                        if(booms.size()>h.booms&&booms.back().time>simulatedUtc-1&&sound)sound->boom(booms.back().overpressure,booms.back().duration,side);
+                        h.booms=booms.size();
+                        if(soundStats&&steadyNow>=soundReport) // ALBERT_SOUND_STATS: once a second.
+                            std::printf("sound %s: %s, %.1f dB SPL (%.1f dB above 20 Hz, engines %.1f dB) from %.0f m, %.2f s late, Doppler %.3f, %zu booms\n",source.id.c_str(),
+                                heard.audible?"audible":"silent",heard.audible?ac::overall(heard.levels):-1e9,[&]{ac::Spectrum a=heard.levels;if(!heard.audible)a.fill(-1e9);for(int b=0;b<12;++b)a[static_cast<std::size_t>(b)]=-1e9;return ac::overall(a);}(),
+                                heard.rocket,heard.distance,heard.delay,heard.doppler,booms.size());
+                    }
+                    if(soundStats&&steadyNow>=soundReport){soundReport=steadyNow+std::chrono::seconds(1);
+                        std::printf("sound: %s, %.1f dB SPL, adaptation %.1f dB\n",sound&&sound->playing()?"device":"muted",ac::overall(levels),sound?sound->adaptation():0.);std::fflush(stdout);}
+                    if(total>0)pan=static_cast<float>(weighted/total);
+                }else lastListener.reset();
+                // Crackle (the shocks in a big rocket's jet noise, steepening on the way) from ~105 dB of engines heard, at most 60% of
+                // the treble's power at ~125 dB; air absorption leaves little treble far away, so then mostly the rumble.
+                if(sound)sound->hear(levels,audible,pan,dt,static_cast<float>(.6*std::clamp((engines-105)/20,0.,1.)));
             }
 #endif
             const bool insetFrame=(++insetFrames&1)==0;if(insetFrame)insetTexture=0; // The second view every other frame: half its cost.

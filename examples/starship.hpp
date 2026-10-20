@@ -227,8 +227,9 @@ protected:
         c.gimbalPitch=std::clamp(gain*(1.44*e.y-2*w.y)-offset.z/lever,-15*deg,15*deg);c.gimbalYaw=std::clamp(gain*(1.44*e.z-2*w.z)+offset.y/lever,-15*deg,15*deg);
         c.torqueOn=true;c.torque={-2e6*w.x,0,0}; // The RCS keeps the roll still while the engines steer.
     }
-    void hold(Command& c,const State& s,Vec d)const{ // By the RCS alone (engines off): body x along d, no roll.
-        const Vec e=mul(s.toBody,cross(bodyX(s),d)),w=s.rate;const double i=pitchInertia(s.propellant);
+    void hold(Command& c,const State& s,Vec d)const{ // By the RCS alone (engines off): body x along d, no roll; from nearly
+        // opposite it, over in pitch (the turn's axis is lost there).
+        Vec e=mul(s.toBody,cross(bodyX(s),d));const Vec w=s.rate;const double i=pitchInertia(s.propellant);if(dot(bodyX(s),d)<0&&norm(e)<.5)e={0,1,0};
         c.torqueOn=true;c.torque={-2e6*w.x,i*(.04*e.y-.4*w.y),i*(.04*e.z-.4*w.z)};
     }
     // Minus the roll that takes body y or -y to north (the pins are symmetric, so the shorter way), in (-90°, 90°].

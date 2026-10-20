@@ -5,7 +5,9 @@ namespace albert {
 // What the camera hears: white noise through the acoustics' one-third-octave bands from 20 Hz up, each at the heard level,
 // on miniaudio's default playback device (none, or ALBERT_AUDIO=0: silent but still rendered on demand). Levels above
 // 95 dB SPL come down over ~1.5 s, as hearing protects itself, and 95 dB plays at -14 dBFS: a launch at the pad and one
-// 30 km away both sit in range, the nearer louder.
+// 30 km away both sit in range, the nearer louder. Crackle: a share of the power above 500 Hz as random shocks (a sudden
+// compression decaying over 0.3-1.5 ms, ~800 a second, Pareto amplitudes: a few loud), the rest staying noise. Booms:
+// N-waves (2 ms shocks) at their overpressure, through the same gain.
 class Sound {
 public:
     static constexpr unsigned rate=48000;
@@ -14,7 +16,8 @@ public:
     Sound(const Sound&)=delete;Sound& operator=(const Sound&)=delete;
     // From the main thread, every frame: the heard levels (dB re 20 µPa; audible false: silence), the source's side
     // (-1 left to 1 right) and the seconds since the last call.
-    void hear(const physics::acoustics::Spectrum& levels,bool audible,float pan,double seconds);
+    void hear(const physics::acoustics::Spectrum& levels,bool audible,float pan,double seconds,float crackle=0);
+    void boom(double overpressure,double duration,float pan); // Pa, s; from the main thread.
     // Interleaved float frames at `rate`: the device's callback, and offline for tests.
     void render(float* out,unsigned frames,unsigned channels);
     bool playing()const; // A device is open.

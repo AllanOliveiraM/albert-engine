@@ -50,6 +50,15 @@ Spectrum freeField(const RocketNoise& r,double distance,double theta,double shif
     for(auto& x:l)x+=d-spread;
     return l;
 }
+double flowPower(double drag,double mach){return 4e-5*std::pow(std::clamp(mach,0.,.5)/.24,3)*std::max(drag,0.);}
+Spectrum flowLevels(double w,double speed,double diameter,double shift){
+    Spectrum l;const double peak=.2*std::max(speed,1e-3)/std::max(diameter,.01);
+    for(int b=0;b<bands;++b){ // ∫ over the band of W 3x²/(1+x²)^2.5 dx, x = f/f_p, eight steps in log f.
+        const double lo=bandCentre(b)*std::pow(2.,-1./6)/shift/peak,hi=bandCentre(b)*std::pow(2.,1./6)/shift/peak;double p=0;
+        for(int k=0;k<8;++k){const double x=lo*std::pow(hi/lo,(k+.5)/8),dx=x*std::log(hi/lo)/8;p+=w*3*x*x/std::pow(1+x*x,2.5)*dx;}
+        l[static_cast<std::size_t>(b)]=p>0?10*std::log10(p)+120:-1e9;}
+    return l;
+}
 double overall(const Spectrum& l){double s=0;for(double x:l)s+=std::pow(10.,x/10);return s>0?10*std::log10(s):-1e9;}
 Spectrum ground(double height,double grazing,double c){
     Spectrum g{};const double fade=std::clamp((100-height)/50,0.,1.);if(fade<=0||height<0)return g;
@@ -73,15 +82,18 @@ Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listen
             const Air a=air(g);const double c=a.sound>0?a.sound:331;p.slowness+=length/8/c;const double m=humidity(a);
             for(int b=0;b<bands;++b)p.absorbed[static_cast<std::size_t>(b)]+=a.pressure>1e-3?absorption(bandCentre(b),std::max(a.temperature,150.),a.pressure,m)*length/8:1e9;}
         return p;};
-    // Emission time by bisection on now - t - |listener - source(t)| c̄⁻¹, then once more with the path at that time.
+    // Emission time: the latest root of now - t - |listener - source(t)| c̄⁻¹ (a supersonic source has several; the newest
+    // sound is the nearest), back from now to the first sample that has arrived, then bisection after it; once more with the
+    // path at that time.
     double te=now;Path p=path(at(now).position);
     for(int pass=0;pass<2;++pass){
         const double mean=p.slowness/std::max(norm(listener-at(te).position),1e-9);
         auto f=[&](double t){return now-t-norm(listener-at(t).position)*mean;};
-        double lo=history.front().time,hi=now;if(f(lo)<0)return h; // Nothing emitted yet has arrived.
+        std::size_t k=history.size();while(k>0&&!(f(history[k-1].time)>=0))--k;if(k==0)return h; // Nothing emitted yet has arrived.
+        double lo=history[k-1].time,hi=k<history.size()?std::min(history[k].time,now):now;
         for(int i=0;i<60;++i){const double mid=(lo+hi)/2;(f(mid)>0?lo:hi)=mid;}
         te=(lo+hi)/2;p=path(at(te).position);}
-    const Emission e=at(te);if(!e.on||p.blocked)return h;
+    const Emission e=at(te);if(!(e.on||e.dragPower>0)||p.blocked)return h;
     const V3 d=listener-e.position;const double r=norm(d);const V3 n=d*(1/std::max(r,1e-9));
     auto windAt=[&](const Geodetic& g){const Air a=air(g);const double sl=std::sin(g.latitude),cl=std::cos(g.latitude),so=std::sin(g.longitude),co=std::cos(g.longitude);
         const V3 north{-sl*co,-sl*so,cl},east{-so,co,0};return north*a.wind.x+east*a.wind.y;};
@@ -91,8 +103,32 @@ Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listen
     const double plume=std::acos(std::clamp(dot(e.plume,n),-1.,1.))*180/pi;
     const double sl=std::sin(here.latitude),cl=std::cos(here.latitude),so=std::sin(here.longitude),co=std::cos(here.longitude);
     const V3 up{cl*co,cl*so,sl};const Spectrum g=ground(here.height,std::asin(std::clamp(-dot(n,up),-1.,1.)),c);
-    h.levels=freeField(e.noise,r,plume,h.doppler);
-    for(int b=0;b<bands;++b)h.levels[static_cast<std::size_t>(b)]+=g[static_cast<std::size_t>(b)]-p.absorbed[static_cast<std::size_t>(b)];
-    h.delay=now-te;h.distance=r;h.emitted=te;h.audible=true;return h;
+    // The engines' noise and the flow's, each spread, then the ground, the path's absorption and the listener's impedance.
+    const double impedance=local.density>0?10*std::log10(local.density*c/416.9):0.,spread=10*std::log10(4*pi*std::max(r,1.)*std::max(r,1.));
+    const Spectrum rocket=e.on?freeField(e.noise,r,plume,h.doppler):Spectrum{};
+    const Spectrum flow=e.dragPower>0?flowLevels(flowPower(e.dragPower,e.mach),e.mach>0?e.mach*e.sound:norm(e.velocity),e.diameter,h.doppler):Spectrum{};
+    Spectrum engines{};
+    for(int b=0;b<bands;++b){const auto k=static_cast<std::size_t>(b);const double loss=g[k]-p.absorbed[k]+impedance;
+        engines[k]=e.on?rocket[k]+loss:-1e9;const double f=e.dragPower>0?flow[k]-spread+loss:-1e9;
+        const double sum=std::pow(10.,engines[k]/10)+std::pow(10.,f/10);h.levels[k]=sum>0?10*std::log10(sum):-1e9;}
+    h.rocket=e.on?overall(engines):-1e9;h.delay=now-te;h.distance=r;h.emitted=te;h.audible=true;return h;
+}
+Boom carlson(double mach,double pv,double av,double pg,double height,double length,bool ground){
+    constexpr double ks=.1;const double m2=std::max(mach*mach-1,1e-6),he=std::max(height,length);
+    return{0,(ground?2:1)*std::sqrt(std::max(pv,0.)*std::max(pg,0.))*std::pow(m2,.125)*std::pow(he,-.75)*std::pow(length,.75)*ks,
+        3.42/std::max(av,1.)*mach*std::pow(m2,-.375)*std::pow(he,.25)*std::pow(length,.75)*ks};
+}
+std::vector<Boom> booms(const std::vector<Emission>& history,double now,V3 listener,const Planet& planet,const std::function<Air(const Geodetic&)>& air){
+    std::vector<Boom> out;const Geodetic here=geodetic(planet,listener);const Air local=air(here);if(!(local.pressure>10)||history.size()<3)return out;
+    const double cl=local.sound>0?local.sound:331;
+    auto arrival=[&](const Emission& e){return e.time+norm(listener-e.position)/(.5*(e.sound>0?e.sound:cl)+.5*cl);};
+    double t0=arrival(history[0]),t1=arrival(history[1]);
+    for(std::size_t k=1;k+1<history.size();++k){const double t2=arrival(history[k+1]);const Emission& e=history[k];
+        if(e.mach>1&&t1<t0&&t1<=t2){ // A local minimum: refined by the parabola through the three.
+            const double d=t0-2*t1+t2,u=d>0?std::clamp(.5*(t0-t2)/d,-1.,1.):0.,at=t1-.25*(t0-t2)*u;
+            if(at<=now){const Geodetic g=geodetic(planet,e.position);
+                Boom b=carlson(e.mach,e.pressure,e.sound,local.pressure,g.height-here.height,std::max(e.length,1.),here.height<100);b.time=at;out.push_back(b);}}
+        t0=t1;t1=t2;}
+    std::sort(out.begin(),out.end(),[](const Boom& a,const Boom& b){return a.time<b.time;});return out;
 }
 }

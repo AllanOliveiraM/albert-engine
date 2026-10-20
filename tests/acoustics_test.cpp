@@ -1,5 +1,6 @@
 // Acoustics against published data: ISO 9613-1 absorption (ISO 9613-2 Table 2; ISO 9613-1 Table 1), NASA SP-8072 rocket noise
-// against the maximum levels measured by BYU at Starship and SLS launches, and the propagation (retarded time, Doppler).
+// against the maximum levels measured by BYU at Starship and SLS launches, the propagation (retarded time, Doppler), the flow
+// noise and sonic booms (Carlson against Concorde; the Mach cone's arrival).
 #include "physics/acoustics.hpp"
 #include <cmath>
 #include <cstdio>
@@ -65,6 +66,29 @@ int main(){try{
         const auto far=ac::hear(high,1000,listener,{},flat,air);near(far.audible?ac::overall(far.levels):-1e9,-1e9,1e8,"200 km up: absorbed on the way (dB)");
         auto below=history;for(auto& e:below)e.position=listener+east*(-2e6)+up*(-1e6); // Behind the planet.
         near(ac::hear(below,2000,listener,{},flat,air).audible?1:0,0,0,"silent through the ground");
+    }
+    std::printf("Flow noise and sonic booms:\n");
+    {const double w=ac::flowPower(4e7,.24);near(w,1600,1,"an airliner's 40 MW of drag power at Mach 0.24 (W)");
+     double sum=0;int peak=0;const auto l=ac::flowLevels(w,80,6);for(int b=0;b<ac::bands;++b){sum+=std::pow(10.,(l[static_cast<std::size_t>(b)]-120)/10);if(l[static_cast<std::size_t>(b)]>l[static_cast<std::size_t>(peak)])peak=b;}
+     near(10*std::log10(sum),10*std::log10(w),.3,"bands over the flow's power (dB)");near(std::log10(ac::bandCentre(peak)/(.2*80/6)),0,.2,"peak band at St 0.2 (log10 of f/f_p)");
+     near(ac::flowPower(1e9,2)/ac::flowPower(1e9,.5),1,1e-12,"flat above Mach 0.5");}
+    {const Air at=standardAtmosphere(16500);const ac::Boom b=ac::carlson(2,at.pressure,at.sound,101325,16500,62,true);
+     near(b.overpressure,93,25,"Concorde's boom, Mach 2 at 16.5 km (Pa; ~93 measured)");near(b.duration,.3,.12,"and its duration (s)");}
+    {   // Mach 2 at 10 km, level, eastward over a listener 1.5 m up: the cone arrives h √(M̄²-1) / V after it passes overhead.
+        const Planet flat=earth;auto air=[](const Geodetic& g){return standardAtmosphere(g.height);};
+        const V3 listener=fixedPosition(flat,{0,0,1.5}),up=listener*(1/norm(listener)),east{0,1,0};const Air high=standardAtmosphere(1e4);const double v=2*high.sound;
+        std::vector<ac::Emission> history;
+        for(int i=0;i<=1200;++i){ac::Emission e;e.time=i*.05;e.position=listener+up*1e4+east*(v*(e.time-30));e.velocity=east*v;e.length=30;e.mach=2;e.sound=high.sound;e.pressure=high.pressure;history.push_back(e);}
+        const double mean=.5*(high.sound+standardAtmosphere(1.5).sound),m=v/mean,expected=30+1e4*std::sqrt(m*m-1)/v;
+        const auto before=ac::booms(history,expected-.5,listener,flat,air),after=ac::booms(history,expected+.5,listener,flat,air);
+        near(static_cast<double>(before.size()),0,0,"no boom before the cone arrives");near(after.empty()?0:after.back().time,expected,.05,"the cone's arrival (s)");
+        // Inside the cone two emissions arrive at once (before and after the Mach angle): the newer, nearer one is heard.
+        for(auto& e:history){e.on=true;e.noise={1e6,2500,1};}
+        const double later=expected+5;const auto heard=ac::hear(history,later,listener,{},flat,air);double latest=0;
+        for(double t=0;t<later;t+=1e-3){const V3 at=listener+up*1e4+east*(v*(t-30)); // The roots at the mid-height's sound speed.
+            if(std::abs(later-t-norm(listener-at)/standardAtmosphere(5000).sound)<2e-3)latest=t;}
+        near(heard.emitted,latest,.2,"the newer of the two emissions heard (s)");
+        near(after.empty()?0:after.back().overpressure,ac::carlson(2,high.pressure,high.sound,standardAtmosphere(1.5).pressure,1e4-1.5,30,true).overpressure,1,"its overpressure by Carlson (Pa; the source a little higher there)");
     }
     if(failures)throw std::runtime_error(std::to_string(failures)+" values outside");
     std::printf("acoustics_test: ok\n");return 0;

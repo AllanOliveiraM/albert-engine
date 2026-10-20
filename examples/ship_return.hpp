@@ -1,6 +1,7 @@
 #pragma once
 // The ship's way home after orbital insertion (starship.hpp: its flaps, RCS, heat shield and pins):
-// - torque-free in orbit until the pass that brings it back over the tower (about a day after a launch from Starbase);
+// - in orbit, nose forward and belly down by RCS pulses, until the pass that brings it back over the tower (about a day after
+//   a launch from Starbase);
 // - a deorbit burn on its 3 sea-level Raptors once an entry flown from there would end at the tower;
 // - the entry belly-first (angle of attack 65° hypersonic to 80° subsonic), steered by bank angle onto the tower, the flaps
 //   and the RCS holding the attitude;
@@ -23,13 +24,15 @@ public:
     Command step(double t,const State& s){
         Command c;next_=.02;const Vec rel=s.position+site_*-1;const double over=dot(rel,up_),height=norm(s.position)-norm(site_);const Vec flat=rel+up_*-over;
         switch(phase_){
-        case Phase::orbit: // Torque-free: where a deorbit burn now would land, each minute (each second within 2000 km of it).
+        case Phase::orbit: // Where a deorbit burn now would land, each minute (each second within 2000 km of it); nose forward and
+            // belly to the Earth, by a half-second pulse of the RCS every 30 s, torque-free between them (long steps).
             if(t>=check_){const Arrival a=plan(s);along_=a.along;cross_=a.cross;const bool pass=a.down&&std::abs(a.cross)<crossLimit&&a.along<0&&a.along>-2e6;
                 check_=t+(pass?1.:60.);if(pass&&a.along>-1.2e6)phase_=Phase::orient;}
-            next_=std::max(check_-t,.001);break;
-        case Phase::orient: // Retrograde on the RCS; the burn once the landing it gives reaches the tower.
+            c.torqueOn=true;if(t>=pulse_){c.torque=level(s);pulse_=t+30;next_=.5;}else next_=std::max(std::min(check_,pulse_)-t,.001);break;
+        case Phase::orient: // Retrograde on the RCS; the burn once the landing it gives reaches the tower, pointed within 3°.
             hold(c,s,unit(inertial(s)*-1));
-            if(t>=check_){const Arrival a=plan(s);along_=a.along;cross_=a.cross;check_=t+1;if(a.along>=0){c.ignite={1,2,3};c.throttle=.4;phase_=Phase::deorbit;v0_=norm(inertial(s));}}
+            if(t>=check_){const Arrival a=plan(s);along_=a.along;cross_=a.cross;check_=t+1;
+                if(a.along>=0&&dot(bodyX(s),unit(inertial(s)*-1))>std::cos(3*deg)){c.ignite={1,2,3};c.throttle=.4;phase_=Phase::deorbit;v0_=norm(inertial(s));}}
             break;
         case Phase::deorbit: // Cut once the landing without more of it, at the planned bank, is back at the tower (within the pass's
             // 2000 km: a burn barely begun can come down a lap or more later, as far short).
@@ -84,6 +87,15 @@ private:
         c.gimbalPitch=std::clamp(gain*(1.44*e.y-2*w.y)-o.z/lever,-15*deg,15*deg);c.gimbalYaw=std::clamp(gain*(1.44*e.z-2*w.z)+o.y/lever,-15*deg,15*deg);c.torque={};roll(c,s);
     }
     static Vec inertial(const State& s){return s.velocity+cross(Vec{0,0,7.292115e-5},s.position);}
+    // The torque that over a half-second pulse brings the body's rates to the local horizontal frame's (nose along the
+    // inertial velocity's horizontal, belly down: turning once an orbit) plus a turn toward it at 0.005/s (faster than the
+    // gravity gradient's pull off it, √3 n).
+    Vec level(const State& s)const{
+        const Vec vi=inertial(s),down=unit(s.position)*-1.,x=unit(vi+down*-dot(vi,down)),y=cross(down,x);
+        const Vec e=(cross(s.toBody.r0,x)+cross(s.toBody.r1,y)+cross(s.toBody.r2,down))*.5,turn=cross(s.position,vi)*(1/dot(s.position,s.position));
+        const Vec dw=mul(s.toBody,turn+e*.005)+s.rate*-1.;const double ix=rollInertia(s.propellant),iy=pitchInertia(s.propellant);
+        return {ix*dw.x/.5,iy*dw.y/.5,iy*dw.z/.5};
+    }
     // The angle of attack by Mach: 65° hypersonic, 75° at Mach 1, 80° below.
     static double alpha(double speed,double height){const double m=speed/sound(height);return (m>5?65:m>1?65+(5-m)*2.5:80)*deg;}
     // The heading error to the tower (rad, right positive) and the distance to it over the ground (m).
@@ -179,6 +191,6 @@ private:
             else{for(int i=0;i<8;++i){const double mid=(lo+hi)/2;a=arrive(s.position,s.velocity,s.mass,sign_*mid);(a.along>0?lo:hi)=mid;}bank_=sign_*(lo+hi)/2;}}
         along_=a.along;cross_=a.cross;
     }
-    Phase phase_=Phase::orbit;double held_=0,drag_=1,lift_=1,flaps_=1.8,next_=.02,check_=0,along_=0,cross_=0,bank_=0,v0_=0,caught_=0;int sign_=1,engines_=3;bool off_=false;
+    Phase phase_=Phase::orbit;double held_=0,drag_=1,lift_=1,flaps_=1.8,next_=.02,check_=0,pulse_=0,along_=0,cross_=0,bank_=0,v0_=0,caught_=0;int sign_=1,engines_=3;bool off_=false;
 };
 }

@@ -599,7 +599,7 @@ void regionalTone(){
     Image dark(std::vector<unsigned char>{10,10,10,255},1,1);albert::matchTone(dark,reference);require(dark.data()[0]==30,"Tone gains stay within 0.5-3");
 }
 // The sound's synthesis, offline: one band at 95 dB SPL plays at -14 dBFS around its centre, 135 dB comes down to the same
-// over ~10 s (loudness adaptation), silence when not audible, and the pan sends it to one side.
+// over ~10 s (loudness adaptation), silence when not audible, the pan sends it to one side; crackle and booms.
 void soundLevels(){
     namespace ac=albert::physics::acoustics;albert::Sound s(false);ac::Spectrum levels;levels.fill(-1e9);levels[29]=95; // 1 kHz.
     auto play=[&](double seconds,bool audible,float pan){s.hear(levels,audible,pan,seconds);std::vector<float> out(static_cast<std::size_t>(seconds*albert::Sound::rate)*2);
@@ -614,6 +614,19 @@ void soundLevels(){
     const auto side=play(1,true,1);std::cout<<"sound: panned right, left "<<rms(side,0,24000)<<" dBFS, right "<<rms(side,1,24000)<<" dBFS\n";
     require(rms(side,0,24000)<-40&&std::abs(rms(side,1,24000)+11)<1.5,"Sound: pan");
     play(.3,false,0);const auto quiet=play(.5,false,0);std::cout<<"sound: silent at "<<rms(quiet,0,0)<<" dBFS\n";require(rms(quiet,0,0)<-80,"Sound: silence");
+    // Crackle: the 2 kHz band's power partly as shocks, the level kept, the slope's skewness (crackle's measure) well above 0;
+    // a boom of 1 Pa peaks at 0.1774 (95 dB SPL at -14 dBFS) and is negative after half its length.
+    auto skew=[](const std::vector<float>& v){double m2=0,m3=0;std::size_t n=0;for(std::size_t i=2;i<v.size();i+=2){const double d=v[i]-v[i-2];m2+=d*d;m3+=d*d*d;++n;}
+        m2/=static_cast<double>(n);m3/=static_cast<double>(n);return m3/std::pow(m2,1.5);};
+    albert::Sound c(false);levels.fill(-1e9);levels[32]=95;
+    auto with=[&](float share){c.hear(levels,true,0,.3,share);std::vector<float> out(48000*2);c.render(out.data(),48000,2);c.hear(levels,true,0,1,share);c.render(out.data(),48000,2);return out;};
+    const auto smooth=with(0),cracking=with(.6);
+    std::cout<<"sound: crackle at 60% of the treble: "<<rms(cracking,0,0)<<" dBFS against "<<rms(smooth,0,0)<<", the slope's skewness "<<skew(cracking)<<" against "<<skew(smooth)<<"\n";
+    require(std::abs(rms(cracking,0,0)-rms(smooth,0,0))<1.5&&skew(cracking)>2&&std::abs(skew(smooth))<.5,"Sound: crackle");
+    albert::Sound b(false);b.hear(levels,false,0,.1);b.boom(1,.1,0);std::vector<float> n(14400*2);b.render(n.data(),14400,2);
+    float peak=0;std::size_t at=0;for(std::size_t i=0;i<n.size();i+=2)if(n[i]>peak){peak=n[i];at=i/2;}
+    std::cout<<"sound: a 1 Pa boom peaks at "<<peak<<" after "<<at<<" samples, "<<n[2*3600]<<" at 75 ms\n";
+    require(std::abs(peak-std::tanh(.1774f))<.01&&at<=120&&n[2*3600]<-.05f,"Sound: boom");
 }
 // Dark adaptation at the Moon: none down to quarter phase; the night side seen from the Earth's direction (sun-Moon-camera
 // 180°, full Earth 60.27 radii away) is lit by earthshine alone, ~760 times fainter than the quarter (Allen's law at 90°).

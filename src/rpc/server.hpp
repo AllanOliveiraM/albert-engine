@@ -11,7 +11,7 @@ public:
     Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog=nullptr,AirSources air={}); // Flight air; defaults: GFS, NRLMSISE-00.
     ~Server();
     unsigned port() const;
-    std::optional<FlightServices::Sound> flightSound()const; // See FlightServices::sound.
+    std::vector<FlightServices::Sound> flightSounds()const; // See FlightServices::sounds.
     void physicsDefaults(const ::albert::v1::PhysicsSettings& defaults); // See FlightServices::physicsDefaults.
 private:
     struct Impl;std::unique_ptr<Impl> impl_;

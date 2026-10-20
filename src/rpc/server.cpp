@@ -194,7 +194,7 @@ Server::Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog,AirS
     impl_->server=builder.BuildAndStart();if(!impl_->server||!impl_->port)throw std::runtime_error("Cannot bind local gRPC server");
 }
 unsigned Server::port() const{return static_cast<unsigned>(impl_->port);}
-std::optional<FlightServices::Sound> Server::flightSound()const{return impl_->flights.sound();}
+std::vector<FlightServices::Sound> Server::flightSounds()const{return impl_->flights.sounds();}
 void Server::physicsDefaults(const ::albert::v1::PhysicsSettings& d){impl_->flights.physicsDefaults(d);}
 Server::~Server(){impl_->bridge.close();impl_->server->Shutdown(std::chrono::system_clock::now()+std::chrono::seconds(1));}
 }

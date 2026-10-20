@@ -295,9 +295,11 @@ seguir aquele voo.
 Em Ajustes ficam as opções de gráficos, Terra, vista, câmera e som (guardadas entre execuções), e a câmera livre: F liga,
 arrastar olha, W/A/S/D/Espaço/Ctrl voam, com a velocidade pela altura, como no Kerbal Space Program; F ou Esc volta.
 
-Com "Som do voo" ligado no menu (o Albert começa mudo), a câmera ouve o foguete: ruído pelo modelo da NASA (SP-8072),
+Com "Som do voo" ligado no menu (o Albert começa mudo), a câmera ouve os foguetes: ruído pelo modelo da NASA (SP-8072),
 com o atraso da distância, a absorção do ar do caminho e o Doppler; a 1, 5 e 10 km de um Starship o nível fica a menos de
-1 dB do medido.
+1 dB do medido. Perto e alto, os motores crepitam; longe, sobra o ronco grave. Booster e nave se ouvem juntos, cada um do
+seu lado. O ar que passa pelo veículo ruge na descida, e quando o cone de Mach de um veículo supersônico passa pela câmera,
+vem o estrondo (método de Carlson, da NASA). No vácuo, silêncio.
 
 `albert_landing_client` faz o mesmo na Lua: o módulo de pouso genérico sai das pernas na Base da
 Tranquilidade (altura do LOLA), sobe a 150 m, paira e pousa a menos de 1 m/s:

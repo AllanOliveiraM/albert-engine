@@ -199,10 +199,15 @@ Prepared prepare(const api::CreateFlightRequest& r,double utc){
 }
 }
 // One flight (FlightServices keeps one per id): its physics, sensors, scene object, data plane, real-time pacer and log.
+// The flights' sounds by scene id: written as they publish, read by the frame loop; its lock is held for nothing else.
+struct Sounds {
+    std::mutex lock;std::map<std::string,std::shared_ptr<const FlightServices::Sound>> by;
+    void put(const std::string& id,std::shared_ptr<const FlightServices::Sound> s){std::lock_guard l(lock);if(s)by[id]=std::move(s);else by.erase(id);}
+};
 struct Slot {
     using Sound=FlightServices::Sound;
     struct Command {std::uint32_t kind;double a=0,b=0,c=0;};
-    core::Bridge& bridge;AirSources sources;std::string name,sceneId,siteId;std::atomic<std::shared_ptr<const Sound>>& heard;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
+    core::Bridge& bridge;AirSources sources;std::string name,sceneId,siteId;Sounds& heard;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
     // Navigation sensors, each measuring at the end of the step that completes its period.
     std::optional<ph::Gnss> gnss;std::optional<ph::RadarAltimeter> radar;std::optional<ph::StarTracker> tracker;
     ph::Gnss::Reading gnssReading;ph::RadarAltimeter::Reading radarReading;ph::StarTracker::Reading trackerReading;double gnssLast=0,radarLast=0,trackerLast=0;
@@ -235,8 +240,8 @@ struct Slot {
     // the camera and holds the clock at the flight's instant.
     bool atInstant()const{const auto snap=bridge.snapshot();return snap&&std::abs(snap->utcSeconds-ph::utcFromTt(flight->state().time))<1;}
     void stopKeeper(){{std::lock_guard l(keeperLock);keeperStop=true;}keeperWake.notify_all();if(keeper.joinable())keeper.join();}
-    Slot(core::Bridge& b,AirSources s,std::string id,std::atomic<std::shared_ptr<const Sound>>& sound)
-        :bridge(b),sources(std::move(s)),name(std::move(id)),sceneId(name=="flight"?name:"flight."+name),siteId(name=="flight"?"site":"site."+name),heard(sound){
+    Slot(core::Bridge& b,AirSources s,std::string id,Sounds& sounds)
+        :bridge(b),sources(std::move(s)),name(std::move(id)),sceneId(name=="flight"?name:"flight."+name),siteId(name=="flight"?"site":"site."+name),heard(sounds){
         data=std::make_unique<wire::Server>([this](const wire::Request& q,wire::Response& r){
             std::vector<Command> commands; // Fixed order: fail, cutoff, separate, release, ignite, throttle, gimbal, torque.
             const std::uint32_t engine=std::min<std::uint32_t>(q.engine,0xffff)<<16; // Out of range: refused by the flight.
@@ -373,8 +378,7 @@ struct Slot {
         const auto now=std::chrono::steady_clock::now();
         if(!force&&now-published<std::chrono::milliseconds(33))return;
         published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
-        if(center==ph::Center::earth){auto h=std::make_shared<Sound>(heardSound());h->owner=this;heard.store(std::move(h));} // Read by the frame loop without the lock.
-        else if(const auto h=heard.load();h&&h->owner==this)heard.store(nullptr); // Only its own sound: another flight may be heard.
+        heard.put(sceneId,center==ph::Center::earth?std::make_shared<const Sound>(heardSound()):nullptr); // Read by the frame loop without the flight's lock.
         // The stack got shorter, or the same instant again (the keeper; appending would be refused as
         // out of order): replace the cylinder in place (the camera stays on it).
         if(flight->state().stage!=shown||s.utcSeconds<=publishedUtc){
@@ -394,16 +398,18 @@ struct Slot {
             (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),clockRate,false,true});
             (void)bridge.submit(telemetry());}
     }
-    // The flight as a sound source (see FlightServices::sound); published with the scene, read without the mutex (the
+    // The flight as a sound source (see FlightServices::sounds); published with the scene, read without the mutex (the
     // frame loop must not wait on a step that waits on the frame loop).
     Sound heardSound()const{
         const ph::Sample x=flight->sample();const auto& st=flight->vehicle().stages[flight->state().stage];
-        Sound s;s.utc=ph::utcFromTt(flight->state().time);s.planet=flight->environment().planet;s.air=flight->environment().air;auto& e=s.emission;
+        Sound s;s.id=sceneId;s.utc=ph::utcFromTt(flight->state().time);s.planet=flight->environment().planet;s.air=flight->environment().air;auto& e=s.emission;
         e.time=s.utc;e.position=x.fixedPosition;e.velocity=x.fixedVelocity;
         const ph::V3 nose=flight->environment().rotation.at(flight->state().time).fixed*(ph::matrix(flight->state().attitude)*ph::V3{1,0,0});e.plume=nose*-1.;
         double exhaust=0,area=0,flow=0; // The rockets on as one plume: their exit area, flow-weighted exhaust velocity (jets have no noise model).
         for(std::size_t i=0;i<st.engines.size();++i)if(flight->engines()[i].on&&!st.engines[i].breathing){const auto& n=st.engines[i];const double f=flight->engines()[i].throttle*n.thrust/n.exhaust;exhaust+=f*n.exhaust;flow+=f;area+=n.exitArea;}
         e.noise={x.thrust,flow>0?exhaust/flow:0.,std::sqrt(4*area/3.14159265358979323846),.0035};e.on=flight->state().burning&&x.thrust>0;
+        // The flow's noise (drag power: the aerodynamic force times the airspeed) and what the booms need.
+        e.length=st.length;e.diameter=flight->vehicle().diameter;e.mach=x.mach;e.sound=x.air.sound;e.pressure=x.air.pressure;e.dragPower=ph::norm(x.aeroForce)*x.mach*x.air.sound;
         return s;
     }
     core::FlightTelemetry telemetry()const{
@@ -536,7 +542,7 @@ struct Slot {
 };
 struct FlightServices::Impl {
     core::Bridge& bridge;AirSources sources;
-    std::atomic<std::shared_ptr<const Sound>> sound;       // The flight last published on the Earth (the app plays one); before the slots, which use it.
+    Sounds sounds; // Before the slots, which use it.
     std::mutex lock;std::map<std::string,std::shared_ptr<Slot>> slots;
     std::mutex defaultsLock;api::PhysicsSettings defaults; // Albert's (the Fisica page), for unset switches.
     static constexpr std::size_t maxFlights=64;            // Each holds threads and a socket.
@@ -558,7 +564,7 @@ struct FlightServices::Impl {
     std::shared_ptr<Slot> make(const std::string& id){ // Built before it enters the map: a throwing constructor leaves no entry.
         std::lock_guard l(lock);if(const auto it=slots.find(id);it!=slots.end())return it->second;
         if(slots.size()>=maxFlights)throw std::length_error("At most 64 flights at once");
-        auto x=std::make_shared<Slot>(bridge,sources,id,sound);slots.emplace(id,x);return x;}
+        auto x=std::make_shared<Slot>(bridge,sources,id,sounds);slots.emplace(id,x);return x;}
     // A slot without a flight (a failed creation, an ended flight) leaves the map, if it is still the one there.
     void drop(const std::string& id,const std::shared_ptr<Slot>& x){
         std::lock_guard l(lock);const auto it=slots.find(id);if(it==slots.end()||it->second!=x)return;
@@ -569,7 +575,7 @@ struct FlightServices::Impl {
         std::shared_ptr<Slot> x;try{x=make(r.flight_id());}catch(const std::length_error& e){return{grpc::StatusCode::RESOURCE_EXHAUSTED,e.what()};}
         auto st=x->create(r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),cancelled,out);
         if(!st.ok()){drop(r.flight_id(),x);return st;}
-        if(find(r.flight_id())!=x){x->stopPacing();{std::lock_guard g(x->mutex);x->flight.reset();}(void)bridge.submit(core::Remove{x->sceneId});(void)bridge.submit(core::Remove{x->siteId});
+        if(find(r.flight_id())!=x){x->stopPacing();{std::lock_guard g(x->mutex);x->flight.reset();}sounds.put(x->sceneId,nullptr);(void)bridge.submit(core::Remove{x->sceneId});(void)bridge.submit(core::Remove{x->siteId});
             return{grpc::StatusCode::ABORTED,"The flight was ended while being created"};}
         if(made)*made=x;return st;
     }
@@ -710,7 +716,9 @@ grpc::Status FlightServices::GetVehicle(grpc::ServerContext*,const api::VehicleR
     catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
 }
 void FlightServices::physicsDefaults(const api::PhysicsSettings& d){std::lock_guard l(impl_->defaultsLock);impl_->defaults=d;}
-std::optional<FlightServices::Sound> FlightServices::sound()const{const auto s=impl_->sound.load();return s?std::optional<Sound>(*s):std::nullopt;}
+std::vector<FlightServices::Sound> FlightServices::sounds()const{
+    std::vector<Sound> out;std::lock_guard l(impl_->sounds.lock);for(const auto& [id,s]:impl_->sounds.by)out.push_back(*s);return out;
+}
 grpc::Status FlightServices::ExportFlight(grpc::ServerContext*,const api::FlightRequest* q,grpc::ServerWriter<api::FlightLogChunk>* writer){
     std::string bytes;std::shared_ptr<Slot> slot;
     try{slot=impl_->find(flightName(q->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
@@ -805,7 +813,7 @@ grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::FlightReq
     if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     slot->stopPacing();core::Reply reply;
     {std::lock_guard lock(slot->mutex);
-        if(slot->flight){slot->flight.reset();if(const auto h=impl_->sound.load();h&&h->owner==slot.get())impl_->sound.store(nullptr);
+        if(slot->flight){slot->flight.reset();impl_->sounds.put(slot->sceneId,nullptr);
             reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));(void)impl_->bridge.submit(core::Remove{slot->siteId});out->set_revision(reply.revision);}
         else reply={core::Code::NotFound,"",0};}
     impl_->drop(id,slot); // Its threads stop with the last reference.
