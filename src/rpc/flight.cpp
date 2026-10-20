@@ -94,6 +94,7 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
         for(const auto& f:sd.surfaces()){ph::Surface x;x.name=f.name().substr(0,128);x.limit=f.limit_radians();x.rate=f.rate_radians_per_second();
             x.lift=table(f.lift(),"surface lift");x.drag=table(f.drag(),"surface drag");x.side=table(f.side(),"surface side force");x.roll=table(f.roll(),"surface roll");x.pitch=table(f.pitch(),"surface pitch");x.yaw=table(f.yaw(),"surface yaw");
             if(f.has_position_meters()){x.position=get(f.position_meters());x.placed=true;if(!finite(x.position.x)||!finite(x.position.y)||!finite(x.position.z))throw std::invalid_argument("Invalid surface position");}
+            if(f.has_normal()){const ph::V3 n=get(f.normal());if(!finite(n.x)||!finite(n.y)||!finite(n.z)||!(ph::norm(n)>0))throw std::invalid_argument("Invalid surface normal");x.normal=n/ph::norm(n);x.normalSet=true;}
             st.surfaces.push_back(std::move(x));}
         for(const auto& n:sd.thermal_nodes()){ph::ThermalNode x;x.name=n.name().substr(0,128);x.position=get(n.position_meters());x.normal=get(n.normal());x.area=n.area_meters2();x.capacity=n.heat_capacity_joules_per_kelvin();
             if(n.has_emissivity())x.emissivity=n.emissivity();if(n.has_absorptivity())x.absorptivity=n.absorptivity();x.conductance=n.conductance_watts_per_kelvin();if(n.has_structure_kelvin())x.structure=n.structure_kelvin();
@@ -132,7 +133,7 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
         a->set_roll_damping(ae.rollDamping);a->set_pitch_damping(ae.pitchDamping);a->set_yaw_damping(ae.yawDamping);
         for(const auto& f:st.surfaces){auto* x=d->add_surfaces();x->set_name(f.name);x->set_limit_radians(f.limit);x->set_rate_radians_per_second(f.rate);
             put(f.lift,x->mutable_lift());put(f.drag,x->mutable_drag());put(f.side,x->mutable_side());put(f.roll,x->mutable_roll());put(f.pitch,x->mutable_pitch());put(f.yaw,x->mutable_yaw());
-            if(f.placed)put(f.position,x->mutable_position_meters());}
+            if(f.placed)put(f.position,x->mutable_position_meters());if(f.normalSet)put(f.normal,x->mutable_normal());}
         for(const auto& n:st.thermal){auto* x=d->add_thermal_nodes();x->set_name(n.name);put(n.position,x->mutable_position_meters());put(n.normal,x->mutable_normal());x->set_area_meters2(n.area);
             x->set_heat_capacity_joules_per_kelvin(n.capacity);x->set_emissivity(n.emissivity);x->set_absorptivity(n.absorptivity);x->set_conductance_watts_per_kelvin(n.conductance);
             x->set_structure_kelvin(n.structure);x->set_heating_factor(n.factor);x->set_start_kelvin(n.start);x->set_limit_kelvin(n.limit);}

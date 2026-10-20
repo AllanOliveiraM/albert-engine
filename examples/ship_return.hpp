@@ -31,9 +31,10 @@ public:
             hold(c,s,unit(inertial(s)*-1));
             if(t>=check_){const Arrival a=plan(s);along_=a.along;cross_=a.cross;check_=t+1;if(a.along>=0){c.ignite={1,2,3};c.throttle=.4;phase_=Phase::deorbit;v0_=norm(inertial(s));}}
             break;
-        case Phase::deorbit: // Cut once the landing without more of it, at the planned bank, is back at the tower.
+        case Phase::deorbit: // Cut once the landing without more of it, at the planned bank, is back at the tower (within the pass's
+            // 2000 km: a burn barely begun can come down a lap or more later, as far short).
             aim(c,s,unit(inertial(s)*-1));{const Arrival a=arrive(s.position,s.velocity,s.mass,50*deg);along_=a.along;cross_=a.cross;
-                if((a.down&&a.along<=0)||v0_-norm(inertial(s))>=2*deorbit){c.cutoff={1,2,3};phase_=Phase::glide;}}break;
+                if((a.down&&a.along<=0&&a.along>-2e6)||v0_-norm(inertial(s))>=2*deorbit){c.cutoff={1,2,3};phase_=Phase::glide;}}break;
         case Phase::glide: // Torque-free down to 140 km, then belly-first at the entry attitude on the RCS.
             if(height>140e3){c.torqueOn=true;c.torque={};next_=std::min(10.,(height-140e3)/std::max(-dot(s.velocity,unit(s.position)),1.));}
             else attitude(c,s,alpha(norm(s.velocity),height),0);
@@ -169,10 +170,10 @@ private:
     void guide(const State& s){
         calibrate(s);
         // The bank's side: away from where the landing falls beside the tower, kept until that passes a corridor narrowing with
-        // the range; within 15 km, toward the tower.
+        // the range; within 15 km, toward the tower; short of it even unbanked, gently toward it.
         const double distance=range(s),corridor=3e3+.03*distance;Arrival a=arrive(s.position,s.velocity,s.mass,0);
         if(distance<15e3)sign_=heading(s)>0?1:-1;else if(sign_*a.cross>corridor)sign_=-sign_;
-        if(a.along<=0)bank_=0;
+        if(a.along<=0)bank_=std::clamp(2*heading(s),-30*deg,30*deg); // Short even with all the lift up: turned toward the tower (the shortest way left).
         else{double lo=0,hi=120*deg;a=arrive(s.position,s.velocity,s.mass,sign_*hi);
             if(a.along>=0)bank_=sign_*hi;
             else{for(int i=0;i<8;++i){const double mid=(lo+hi)/2;a=arrive(s.position,s.velocity,s.mass,sign_*mid);(a.along>0?lo:hi)=mid;}bank_=sign_*(lo+hi)/2;}}

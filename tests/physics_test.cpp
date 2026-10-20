@@ -318,6 +318,11 @@ int main(){try{
         const Vehicle av{"braked",{at},0},pv{"braked aside",{placed},0};
         const Sample y0=Flight(av,air,Flight::free(air,av,0,{0,0,1e4},{300,0,0},{})).sample(),y1=Flight(pv,air,Flight::free(air,pv,0,{0,0,1e4},{300,0,0},{})).sample();
         near(y1.aeroMoment.z-y0.aeroMoment.z,1.5*y1.dynamicPressure*2*.5,1e-9*y1.dynamicPressure,"Placed surface's drag yaws from where it is");near(norm(y1.aeroForce-y0.aeroForce),0,1e-9*y1.dynamicPressure,"with the same force");
+        // A fin 1.5 m below the axis whose normal force (q S 0.4) pushes along body y: that force, and a roll of -1.5 m times it.
+        Surface fin;fin.name="fin";fin.lift={{0},{0},{0},{.4}};fin.position={2,0,1.5};fin.placed=true;fin.normal={0,1,0};fin.normalSet=true;
+        Stage finned=w;finned.surfaces={fin};const Vehicle fv{"finned",{finned},0};
+        const Sample y2=Flight(fv,air,Flight::free(air,fv,0,{0,0,1e4},{300,0,0},{})).sample();const double force=y2.dynamicPressure*2*.4;
+        near(y2.aeroForce.y-y0.aeroForce.y,force,1e-9*force,"A fin's normal force along its normal");near(y2.aeroMoment.x-y0.aeroMoment.x,-1.5*force,1e-9*force,"rolling from where it is");
     }
     // Navigation sensors against their settings: the GNSS's noise per axis and its limits; the radar altimeter's slant range
     // and beam edge; the star tracker's noise across and about its boresight, and its exclusions.

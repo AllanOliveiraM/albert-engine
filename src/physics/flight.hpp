@@ -31,7 +31,9 @@ struct Table3 {
 // coefficient increments it adds to the stage's (same references) against Mach, the angle of attack (sideslip for side
 // force and yaw) and the deflection. placed: its lift, drag and side force act at position (x m aft of the nose, y, z), their
 // moment taken from there (a flap's drag then yaws and rolls the vehicle by where it is); otherwise at the stage's reference.
-struct Surface {std::string name;double limit=0,rate=0;Table3 lift,drag,side,roll,pitch,yaw;V3 position;bool placed=false;};
+// normal (unit, body axes; with normalSet): its lift acts along it instead of square to the air in the pitch plane (a fin's
+// normal force).
+struct Surface {std::string name;double limit=0,rate=0;Table3 lift,drag,side,roll,pitch,yaw;V3 position;bool placed=false;V3 normal;bool normalSet=false;};
 // A reaction-control thruster on the stage's propellant: where (as engines), the direction it pushes the vehicle, thrust
 // (N) and exhaust velocity (m/s).
 struct Thruster {std::string name;V3 position,direction{1,0,0};double thrust=0,exhaust=0;};

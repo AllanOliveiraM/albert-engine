@@ -100,11 +100,17 @@ inline void shipSystems(api::StageDefinition* s){
     n->set_area_meters2(1);n->set_heat_capacity_joules_per_kelvin(1.58e4);n->set_emissivity(.3);n->set_absorptivity(.4);n->set_limit_kelvin(1100);
     for(const double y:{-(radius+1),radius+1})put(s->add_hard_points_meters(),shipPinAt,y,0);
 }
-constexpr double pinAt=6,pinOut=radius+1,finLimit=30*deg,finMoment=.77; // Hard points by the grid fins: 6 m below the nose, 5.5 m off the axis (body ±y).
+// The booster's grid fins as on V3 (2026): three, ~50% larger than the four before (27 m² each, C_Nδ 2.5) and lower, their
+// spindles 7.5 m below the top, two over the catch fittings (body ±y) and one on -z. Three and asymmetric is what SpaceX
+// shows; this layout is an assumption. Their normal force per radian on the stage's reference area, and the hard points
+// (catch fittings) 9 m below the top, 5.5 m off the axis, under the ±y fins.
+struct Fin {double y,z;}; // The spindle's direction (body y, z).
+constexpr Fin fins[]{{1,0},{-1,0},{0,-1}};
+constexpr double pinAt=9,pinOut=radius+1,finAt=7.5,finSpan=3.7,finWidth=6.1,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.15;
 // How they look (the scene only), from each one's nose `at` m along its stage: stainless steel; the ship's nose a tangent ogive
 // (11 m) in sections, black tiles on its windward half (+z), four flaps (hinged on its sides along x: +45° square to the
 // flow, -45° folded to the lee) turning with surfaces 1-4 when `moving`, else folded; the booster's vented hot-staging ring
-// and four grid fins (on their radial spindles: ±y with surface 1, ±z with surface 2 when `moving`); both vehicles' catch pins.
+// and its three grid fins (on their radial spindles, with surfaces 1-3 when `moving`); both vehicles' catch pins.
 inline void put(api::Vector3* o,const Vec& v){put(o,v.x,v.y,v.z);}
 inline void section(api::StageAppearance* a,double from,double to,double r0,double r1,std::uint32_t colour,double tiles){
     auto* x=a->add_sections();x->set_from_meters(from);x->set_to_meters(to);x->set_radius_from_meters(r0);x->set_radius_to_meters(r1);x->set_color(colour);x->set_tiles_radians(tiles);}
@@ -124,10 +130,9 @@ inline void shipLook(api::StageAppearance* a,double at,bool moving){
 }
 inline void boosterLook(api::StageAppearance* a,double at,bool moving){
     section(a,at,at+2,radius,radius,vents,0);section(a,at+2,at+boosterLength,radius,radius,steel,0);
-    for(const double side:{-1.,1.}){
-        hinged(a,"grid fin",{at+4.5,side*(radius+1.6),0},{0,side,0},{0,0,1},3,5,.5,moving?1:0,side,0,0x2e2e2e,true);
-        hinged(a,"grid fin",{at+4.5,0,side*(radius+1.6)},{0,0,side},{0,1,0},3,5,.5,moving?2:0,side,0,0x2e2e2e,true);
-        hinged(a,"pin",{at+pinAt,side*radius,0},{0,side,0},{1,0,0},1.2,1,1,0,0,0,vents);}
+    for(unsigned i=0;i<3;++i){const Fin f=fins[i];const double r=radius+finSpan/2; // +δ turns it about its spindle, pushing along body x × spindle.
+        hinged(a,"grid fin",{at+finAt,f.y*r,f.z*r},{0,f.y,f.z},{0,-f.z,f.y},finSpan,finWidth,.6,moving?i+1:0,1,0,0x2e2e2e,true);}
+    for(const double side:{-1.,1.})hinged(a,"pin",{at+pinAt,side*radius,0},{0,side,0},{1,0,0},1.2,1,1,0,0,0,vents);
 }
 // The stack (stage 0: booster burning with the full ship on top; stage 1: the ship), the ship alone and the booster alone.
 inline api::VehicleDefinition stack(){
@@ -149,12 +154,12 @@ inline api::VehicleDefinition superHeavy(){
     auto* s=v.add_stages();s->set_name("Booster");mass(s,combine(booster(true)),combine(booster(false)),boosterPropellant,boosterLength);raptors(s,boosterLength,true);aerodynamics(s,boosterLength);
     boosterLook(s->mutable_appearance(),0,true);
     for(const double y:{-pinOut,pinOut})put(s->add_hard_points_meters(),pinAt,y,0);
-    // Four grid fins by the nose as two pairs, always out: pitch and yaw moments by deflection in engines-first flight (0.77 a
-    // radian on the stage's references: a pair's ~36 m², 18 m² a fin, at C_Nδ 2.5, 39 m from the centre of mass) and a constant
-    // 0.2 of drag a pair.
-    for(const bool pitch:{true,false}){auto* f=s->add_surfaces();f->set_name(pitch?"grid fins pitch":"grid fins yaw");f->set_limit_radians(finLimit);f->set_rate_radians_per_second(60*deg);
-        auto* m=pitch?f->mutable_pitch():f->mutable_yaw();m->add_mach(0);m->add_angle_degrees(0);m->add_deflection_degrees(-30);m->add_deflection_degrees(30);m->add_values(-finMoment*finLimit);m->add_values(finMoment*finLimit);
-        auto* d=f->mutable_drag();d->add_mach(0);d->add_angle_degrees(0);d->add_deflection_degrees(0);d->add_values(.2);}
+    // The three grid fins, always out, each where it is: its normal force along body x × its spindle (finSlope a radian of
+    // deflection, engines-first flight) and 0.15 of drag, both on the stage's reference area.
+    for(const Fin f:fins){auto* x=s->add_surfaces();x->set_name("grid fin");x->set_limit_radians(finLimit);x->set_rate_radians_per_second(60*deg);
+        put(x->mutable_position_meters(),finAt,f.y*(radius+finSpan/2),f.z*(radius+finSpan/2));put(x->mutable_normal(),0,-f.z,f.y);
+        auto* l=x->mutable_lift();l->add_mach(0);l->add_angle_degrees(0);l->add_deflection_degrees(-30);l->add_deflection_degrees(30);l->add_values(-finSlope*finLimit);l->add_values(finSlope*finLimit);
+        auto* d=x->mutable_drag();d->add_mach(0);d->add_angle_degrees(0);d->add_deflection_degrees(0);d->add_values(finDrag);}
     // Cold-gas RCS 3 m below the nose: on the ±y sides pushing ±z and on the ±z sides pushing ±y (pitch, yaw and, in opposed
     // pairs, roll), 30 kN each.
     for(const double side:{-1.,1.})for(const double push:{-1.,1.}){
@@ -262,7 +267,7 @@ public:
     Phase phase()const{return phase_;}
     double predicted()const{return miss_;} // The latest predicted landing's distance from the tower (m).
     Command step(double t,const State& s){
-        Command c;c.surfaces={0.,0.};const Vec g=gravity(s.position);const Vec rel=s.position+site_*-1;
+        Command c;c.surfaces={0.,0.,0.};const Vec g=gravity(s.position);const Vec rel=s.position+site_*-1;
         const double over=dot(rel,up_);const Vec flat=rel+up_*-over;
         switch(phase_){
         case Phase::wait:if(t-start_>2){c.ignite={1,2,3};c.throttle=.4;phase_=Phase::flip;}hold(c,s,unit(s.velocity));break; // Clear of the ship, then 3 engines.
@@ -309,8 +314,17 @@ public:
 private:
     Vec boostbackDirection(Vec miss)const{const Vec h=unit(miss*-1);return h*std::cos(boostbackPitch)+up_*std::sin(boostbackPitch);} // miss: horizontal.
     void steer(Command& c,const State& s,Vec d)const{ // Body x along d by the grid fins (engines off, in the air), the roll by the RCS.
-        const Vec e=mul(s.toBody,cross(bodyX(s),d)),w=s.rate;const double i=pitchInertia(s.propellant),k=std::max(s.q*pi*radius*radius*boosterLength*finMoment,1.);
-        c.surfaces={std::clamp(i*(.3*e.y-.8*w.y)/k,-finLimit,finLimit),std::clamp(i*(.3*e.z-.8*w.z)/k,-finLimit,finLimit)};c.torqueOn=true;c.torque={-2e6*w.x,0,0};
+        const Vec e=mul(s.toBody,cross(bodyX(s),d)),w=s.rate;const double i=pitchInertia(s.propellant);
+        c.surfaces=finDeflections({0,i*(.3*e.y-.8*w.y),i*(.3*e.z-.8*w.z)},s.q,cg(s.propellant));c.torqueOn=true;c.torque={-2e6*w.x,0,0};
+    }
+    // The fins' deflections that give moment m (body, N m; x: the roll, none here) at dynamic pressure q: fin i gives, a radian,
+    // q S finSlope (r, -L u_y, -L u_z) (its force along x × u at r off the axis, L ahead of the centre of mass), the 3 x 3 system
+    // solved by Cramer's rule; each clamped to its limit.
+    static std::vector<double> finDeflections(Vec m,double q,double cg){
+        const double k=std::max(q,1.)*pi*radius*radius*finSlope,r=radius+finSpan/2,l=cg-finAt;Vec col[3];
+        for(int i=0;i<3;++i)col[i]=Vec{r,-l*fins[i].y,-l*fins[i].z}*k;
+        auto det=[](Vec a,Vec b,Vec c){return dot(a,cross(b,c));};const double d=det(col[0],col[1],col[2]);
+        return{std::clamp(det(m,col[1],col[2])/d,-finLimit,finLimit),std::clamp(det(col[0],m,col[2])/d,-finLimit,finLimit),std::clamp(det(col[0],col[1],m)/d,-finLimit,finLimit)};
     }
     // Where a burn lit now (thrust `accel` m/s² against the velocity) slows the fall to gateSpeed: the height over the tower's base.
     double gateHeight(const State& s,double accel)const{
@@ -330,7 +344,7 @@ private:
     }
     // The drag coefficient engines first (the stage's base table and the fins').
     static double baseDrag(double v,double h){const double m=v/sound(h),x[]{0,.8,1.2,2,5},y[]{1,1.1,1.4,1.2,1};
-        for(int i=0;i<4;++i)if(m<=x[i+1])return .4+y[i]+(y[i+1]-y[i])*(m-x[i])/(x[i+1]-x[i]);return 1.4;}
+        for(int i=0;i<4;++i)if(m<=x[i+1])return 3*finDrag+y[i]+(y[i+1]-y[i])*(m-x[i])/(x[i+1]-x[i]);return 1+3*finDrag;}
     double drag(const State& s)const{const double h=norm(s.position)-norm(site_),v=norm(s.velocity);return .5*density(h)*baseDrag(v,h)*pi*radius*radius*v*v/s.mass;}
     // RK4 in ECEF (gravity, the Earth's turning, drag engines first, thrust against the air) until done.
     template<class Done> void fly(Vec& r,Vec& v,double m,double accel,double h,Done done)const{

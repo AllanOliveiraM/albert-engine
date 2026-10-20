@@ -203,11 +203,11 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         double cl=ae.lift(mach,ad),cd=ae.drag(mach,std::hypot(ad,bd)),cy=ae.side(mach,bd),cr=ae.roll(mach,ad),cm=ae.pitch(mach,ad),cn=ae.yaw(mach,bd);
         const double ca=std::cos(alpha),sa=std::sin(alpha);
         auto force=[&](double l,double d,double y){return k*(l*V3{sa,0,-ca}+V3{0,y,0})-k*d/speed*air;}; // Drag along the air velocity.
-        const auto& fs=st.surfaces;V3 fp,mp; // Control surfaces' increments at their deflections; placed ones' forces act where they are.
+        const auto& fs=st.surfaces;V3 fp,mp,fn; // Control surfaces' increments at their deflections; placed ones' forces act where they are.
         for(std::size_t i=0;i<fs.size();++i){const double d=surfaces_[i].deflection*degrees,l=fs[i].lift(mach,ad,d),dr=fs[i].drag(mach,ad,d),y=fs[i].side(mach,bd,d);
-            cr+=fs[i].roll(mach,ad,d);cm+=fs[i].pitch(mach,ad,d);cn+=fs[i].yaw(mach,bd,d);
-            if(fs[i].placed){const V3 f=force(l,dr,y);fp+=f;mp+=cross(V3{ms.cg-fs[i].position.x,fs[i].position.y,fs[i].position.z},f);}else{cl+=l;cd+=dr;cy+=y;}}
-        fa=force(cl,cd,cy);
+            cr+=fs[i].roll(mach,ad,d);cm+=fs[i].pitch(mach,ad,d);cn+=fs[i].yaw(mach,bd,d);const V3 f=fs[i].normalSet?force(0,dr,y)+fs[i].normal*(k*l):force(l,dr,y);
+            if(fs[i].placed){fp+=f;mp+=cross(V3{ms.cg-fs[i].position.x,fs[i].position.y,fs[i].position.z},f);}else if(fs[i].normalSet)fn+=f;else{cl+=l;cd+=dr;cy+=y;}}
+        fa=force(cl,cd,cy)+fn;
 
         const V3 w=s.rate-bt*o.omega;const double hl=ae.length/(2*speed),hs=ae.span/(2*speed);
         ma={k*ae.span*(cr+ae.rollDamping*w.x*hs),k*ae.length*(cm+ae.pitchDamping*w.y*hl),k*ae.span*(cn+ae.yawDamping*w.z*hs)};

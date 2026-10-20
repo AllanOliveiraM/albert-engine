@@ -364,8 +364,8 @@ ar (`EngineDefinition.air_breathing` com tabelas de empuxo e consumo por Mach ×
 nós de proteção térmica (`ThermalNodeDefinition`: posição, normal, área, capacidade térmica, emissividade, condução à
 estrutura, fator de aquecimento e limite; a amostra traz temperatura e fluxo de cada um e o evento `OVERHEAT`),
 superfícies de controle (`SurfaceDefinition`: limite, taxa,
-incrementos em tabelas Mach × ângulo × deflexão e, opcional, `position_meters`: as forças da superfície agem ali, com o
-momento tirado de lá), propulsores de RCS (`ThrusterDefinition`), pernas e o torque ideal de
+incrementos em tabelas Mach × ângulo × deflexão e, opcionais, `position_meters`: as forças da superfície agem ali, com o
+momento tirado de lá; `normal`: a sustentação age nessa direção do corpo, a força normal de uma grid fin), propulsores de RCS (`ThrusterDefinition`), pernas e o torque ideal de
 atitude; posições em metros atrás do nariz.
 `GetVehicle` devolve cada preset como definição, para editar: voada como `CUSTOM` sem mudanças, dá o mesmo `state_hash` do
 preset (`rpc_test`). O mapeamento JSON do protobuf serve de formato de arquivo: `albert_flight_client --export-vehicle=launcher`
@@ -445,8 +445,9 @@ núcleo.
 - **Veículos:** a pilha e o Super Heavy são `CUSTOM` com `VehicleDefinition` (de [starship.hpp](../examples/starship.hpp)):
   - 33 motores, dos quais 13 com cardã de 15° a 20°/s;
   - RCS de 8 propulsores;
-  - grid fins como duas superfícies, com momento por deflexão e arrasto constante;
-  - pinos de captura como `hard_points`.
+  - três grid fins como na V3 (27 m² cada, 50% maiores, mais baixas; duas sobre os pinos de captura em ±y e uma em -z, uma
+    disposição suposta): superfícies posicionadas com `normal`, a força normal de cada uma onde está;
+  - pinos de captura como `hard_points`, sob as grid fins.
 - **Torre:** os braços são `structures`, quatro barras de aço amortecidas em pares, formando trilhos. O pino fica no sulco
   entre as barras. Os braços têm dobradiça no carro da torre: abertos 30° para a subida e para a descida passando por eles,
   fecham a 8°/s quando o veículo paira acima, e a descida até os pinos espera que fechem.
@@ -460,7 +461,8 @@ núcleo.
    seus comandos por `index`.
 3. **Boostback e descida:** o `BoosterReturn` fecha o boostback em 3 motores quando o pouso previsto passa na torre. O
    previsor balístico inclui a queima de pouso. Na descida, as grid fins inclinam o corpo para que a sustentação de
-   escoamento cruzado leve o ponto de pouso à torre.
+   escoamento cruzado leve o ponto de pouso à torre; o momento pedido é repartido entre as três resolvendo o sistema 3 × 3 da
+   geometria delas.
 4. **Pouso:** a queima de pouso vai até um portão a 80 m/s em 13 motores. A partir daí, 3 motores param o booster 10 m
    acima dos braços, com o rolamento alinhando os pinos.
 5. **Captura:** o booster desce a 1 m/s. Os motores ficam no mínimo por 1 s enquanto os braços tomam a carga. Ele

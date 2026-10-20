@@ -190,7 +190,8 @@ message SurfaceTable { repeated double mach=1; repeated double angle_degrees=2; 
 // y right, z down), when set: its lift, drag and side force act there, their moment taken from there (else at the stage's
 // aerodynamic reference); its moment tables add as they are.
 message SurfaceDefinition { string name=1; double limit_radians=2; double rate_radians_per_second=3;
-  SurfaceTable lift=4; SurfaceTable drag=5; SurfaceTable side=6; SurfaceTable roll=7; SurfaceTable pitch=8; SurfaceTable yaw=9; Vector3 position_meters=10; }
+  SurfaceTable lift=4; SurfaceTable drag=5; SurfaceTable side=6; SurfaceTable roll=7; SurfaceTable pitch=8; SurfaceTable yaw=9; Vector3 position_meters=10;
+  Vector3 normal=11; } // Set: lift acts along this body direction (a fin's normal force) instead of square to the air in the pitch plane.
 // A thermal-protection node (a tile, a panel): heated by the stagnation flux times heating_factor and cos θ to the flow
 // (modified Newtonian), radiating to the sky and conducting to its structure; it reports OVERHEAT above limit_kelvin
 // (0: never). Unset: emissivity and absorptivity 0.85, structure and start 300 K, factor 1.
