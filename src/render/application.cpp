@@ -1061,7 +1061,7 @@ int albert::runRenderer(int argc, char** argv) {
 
         OrbitControls controls{*camera, graphics.events()};
         // The second view (picture-in-picture): the other flight beside the one followed, from the same side, at its framing.
-        auto insetCamera=PerspectiveCamera::create(60,16.f/9.f,.01f,100000.f);std::string insetId;unsigned long long insetTexture=0;
+        auto insetCamera=PerspectiveCamera::create(60,16.f/9.f,.01f,100000.f);std::string insetId;unsigned long long insetTexture=0;unsigned insetFrames=0;
 
         controls.enableDamping = true;
         controls.dampingFactor = CAMERA_EASING;
@@ -1201,12 +1201,12 @@ int albert::runRenderer(int argc, char** argv) {
 
         // Ajustes, kept in settings.json across runs (the sound always starts muted). The volumetric clouds and the ocean's
         // waves are the costly effects: on by default, a weaker machine turns them off.
-        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false,inset=true;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
+        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false,inset=true;int frameCap=60;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
             bool thirdBodies=true,relativity=true,flightAir=true,wind=true,solarPressure=true;float turbulence=0;} preferences; // The last six: the Fisica page's defaults for new flights.
         const auto preferencesFile=albert::dataDirectory()/"settings.json";
         try{std::ifstream in(preferencesFile);if(in){const auto j=json::parse(in);auto& p=preferences;auto& v=visualSettings;
             p.volumetricClouds=j.value("volumetric_clouds",p.volumetricClouds);p.oceanWaves=j.value("ocean_waves",p.oceanWaves);p.antialias=j.value("antialias",p.antialias);
-            p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);p.inset=j.value("flight_inset",p.inset);
+            p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);p.inset=j.value("flight_inset",p.inset);p.frameCap=std::clamp(j.value("frame_cap",p.frameCap),0,240);
             p.fov=std::clamp(j.value("field_of_view",p.fov),35.f,90.f);p.uiScale=std::clamp(j.value("interface_scale",p.uiScale),.8f,1.6f);
             p.sensitivity=std::clamp(j.value("mouse_sensitivity",p.sensitivity),.25f,3.f);p.volume=std::clamp(j.value("volume",p.volume),0.f,1.f);
             p.thirdBodies=j.value("physics_third_bodies",p.thirdBodies);p.relativity=j.value("physics_relativity",p.relativity);p.flightAir=j.value("physics_atmosphere",p.flightAir);
@@ -1216,7 +1216,7 @@ int albert::runRenderer(int argc, char** argv) {
             showOrbits=j.value("orbits",showOrbits);showDebris=j.value("debris",showDebris);}}
         catch(const std::exception&){} // A damaged preference never prevents startup.
         auto savePreferences=[&]{try{const auto& p=preferences;const auto& v=visualSettings;std::filesystem::create_directories(preferencesFile.parent_path());std::ofstream out(preferencesFile);
-            out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},{"flight_inset",p.inset},
+            out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},{"flight_inset",p.inset},{"frame_cap",p.frameCap},
                 {"field_of_view",p.fov},{"interface_scale",p.uiScale},{"mouse_sensitivity",p.sensitivity},{"volume",p.volume},{"quality",v.quality},{"shadows",v.shadows},
                 {"atmosphere",v.atmosphere},{"terrain",v.terrain},{"live_clouds",v.clouds},{"city_lights",v.nightLights},{"borders",v.borders},{"orbits",showOrbits},{"debris",showDebris},
                 {"physics_third_bodies",p.thirdBodies},{"physics_relativity",p.relativity},{"physics_atmosphere",p.flightAir},{"physics_wind",p.wind},{"physics_solar_pressure",p.solarPressure},{"physics_turbulence",p.turbulence}}.dump(2)<<'\n';}
@@ -1607,6 +1607,9 @@ int albert::runRenderer(int argc, char** argv) {
                     hint("Mais detalhes: ate 2x a resolucao da tela e sombras de 2048 px; carregados ao aproximar.");
                     check("Antisserrilhado (4x)",preferences.antialias);
                     check("Sincronia vertical",preferences.vsync,"Desligada, o quadro sai assim que fica pronto (pode rasgar a imagem).");
+                    {int cap=preferences.frameCap==30?0:preferences.frameCap==60?1:2;ImGui::SetNextItemWidth(-1);
+                        if(ImGui::Combo("##Limite de quadros",&cap,"Limite: 30 quadros/s\0Limite: 60 quadros/s\0Sem limite\0")){preferences.frameCap=cap==0?30:cap==1?60:0;savePreferences();}
+                        hint("30 por segundo aquece e gasta bem menos a placa e o processador.");}
                     check("Sombras",visualSettings.shadows);
                     check("Atmosfera",visualSettings.atmosphere);
                     check("Relevo detalhado",visualSettings.terrain,"Copernicus 30 m na Terra, LOLA na Lua, MOLA em Marte.");
@@ -2002,6 +2005,8 @@ int albert::runRenderer(int argc, char** argv) {
         });
 
         using SteadyClock = std::chrono::steady_clock;
+        std::optional<std::pair<double,SteadyClock::time_point>> followed; // A running flight's last instant and when it drove the clock.
+        SteadyClock::time_point nextFrame=SteadyClock::now(); // The frame limit's next slot.
 
         auto nextRefresh = SteadyClock::now() + std::chrono::seconds(ephemerides.cached ? 0 : REFRESH_SECONDS);
         auto nextOrbitRefresh = SteadyClock::now() + std::chrono::hours(orbits.cached ? 0 : 24);
@@ -2051,6 +2056,8 @@ int albert::runRenderer(int argc, char** argv) {
         auto covered=[](const std::vector<State>& table,double tdb){return table.size()>=2&&tdb>=table.front().jd&&tdb<=table.back().jd;};
         while (graphics.frame([&] {
             const auto frameTime=timeService.status();
+            // A flight that drove the clock and stopped: held at its last instant (the clock would run on past it).
+            if(followed&&SteadyClock::now()-followed->second>std::chrono::milliseconds(500)){simulation.stall(followed->first);simulation.setRate(0);followed.reset();}
             auto moment=simulation.read();
             const float elapsed = clock.getDelta();
             const float dt = std::min(elapsed, 0.1f);
@@ -2211,7 +2218,9 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::RemoveLayer>)registry.removeLayer(value.id);
                     else if constexpr(std::is_same_v<T,albert::core::LayerVisibility>)registry.layerVisible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Focus>) setFocus(value.id,value.reset);
-                    else if constexpr(std::is_same_v<T,albert::core::SetTime>) {if(value.live)simulation.live();else if(value.hold&&value.utcSeconds)simulation.stall(*value.utcSeconds);else simulation.choose(value.utcSeconds,value.rate);}
+                    else if constexpr(std::is_same_v<T,albert::core::SetTime>) {if(value.live)simulation.live();
+                        else if(value.hold&&value.utcSeconds&&value.rate){simulation.follow(*value.utcSeconds,*value.rate);followed={*value.utcSeconds,SteadyClock::now()};} // A running flight.
+                        else if(value.hold&&value.utcSeconds)simulation.stall(*value.utcSeconds);else simulation.choose(value.utcSeconds,value.rate);}
                     else if constexpr(std::is_same_v<T,albert::core::FlightTelemetry>) {if(value.active){flightTelemetry=std::move(value);flightTelemetryAt=steadyNow;}else flightTelemetry.reset();}
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
@@ -2808,7 +2817,8 @@ int albert::runRenderer(int argc, char** argv) {
                 if(sound)sound->hear(levels,audible,pan,dt);
             }
 #endif
-            insetTexture=0;insetId.clear();
+            const bool insetFrame=(++insetFrames&1)==0;if(insetFrame)insetTexture=0; // The second view every other frame: half its cost.
+            insetId.clear();
             if(auto flightId=[](const std::string& id){return id=="flight"||id.rfind("flight.",0)==0;};preferences.inset&&flightId(focus)&&!transition.active&&!freeCamera){
                 for(const auto& [id,node]:objects.nodes())if(id!=focus&&flightId(id)&&node->visible){insetId=id;break;}
                 if(!insetId.empty()){
@@ -2818,11 +2828,11 @@ int albert::runRenderer(int argc, char** argv) {
                     const auto& node=*objects.nodes().at(insetId);const Vector3 target=node.position;Vector3 axis(0,1,0);axis.applyQuaternion(node.quaternion);
                     Vector3 side=camera->position;side.sub(controls.target);Vector3 along=axis;side.sub(along.multiplyScalar(side.dot(axis)));
                     if(side.length()<1e-6f*std::max(1.f,camera->position.length())){side.copy(camera->up);Vector3 a=axis;side.sub(a.multiplyScalar(side.dot(axis)));}
-                    const float distance=distanceFor(insetId);side.normalize().multiplyScalar(distance);
+                    const float distance=distanceFor(insetId)*.5f;side.normalize().multiplyScalar(distance);
                     insetCamera->position.copy(target).add(side);insetCamera->up.copy(camera->up);insetCamera->lookAt(target);
                     insetCamera->fov=camera->fov;insetCamera->aspect=static_cast<float>(w)/static_cast<float>(h);insetCamera->nearPlane=std::clamp(distance*.02f,1e-9f,100.f);
                     insetCamera->updateProjectionMatrix();insetCamera->updateMatrixWorld();
-                    insetTexture=graphics.renderInset(*scene,*insetCamera,w,h);
+                    if(insetFrame)insetTexture=graphics.renderInset(*scene,*insetCamera,w,h);
                 }
             }
             graphics.render(*scene, *camera);
@@ -2839,7 +2849,9 @@ int albert::runRenderer(int argc, char** argv) {
                           << std::endl;
                 graphics.close();
             }
-        })) {}
+        })) {if(preferences.frameCap>0){ // The frame limit: work and heat at most this often.
+            nextFrame=std::max(nextFrame+std::chrono::duration_cast<SteadyClock::duration>(std::chrono::duration<double>(1./preferences.frameCap)),SteadyClock::now()-std::chrono::milliseconds(100));
+            std::this_thread::sleep_until(nextFrame);}}
 
         catalog.close();
         commands.close();

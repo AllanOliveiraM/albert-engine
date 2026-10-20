@@ -48,6 +48,13 @@ void Simulation::stall(double utc){
     if(live_)return; // Real time never waits for data.
     anchorUtc_=utc;anchorMonotonic_=monotonic_();
 }
+void Simulation::follow(double utc,double rate){
+    validInstant(utc);validRate(rate);std::lock_guard lock(mutex_);
+    if(live_)return;
+    const double now=monotonic_(),current=at(now).utcSeconds,error=utc-current;anchorMonotonic_=now;
+    if(std::abs(error)>std::max(1.,.5*std::abs(rate))){anchorUtc_=utc;rate_=rate;return;}
+    anchorUtc_=current;rate_=std::clamp(rate+error/.25,0.,maximumRate);
+}
 void Simulation::live(){std::lock_guard lock(mutex_);if(live_)return;live_=true;rate_=1.;++generation_;}
 Simulation& simulation(){static Simulation value;return value;}
 

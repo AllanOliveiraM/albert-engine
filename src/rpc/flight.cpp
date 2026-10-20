@@ -211,7 +211,8 @@ struct Slot {
     std::chrono::steady_clock::time_point published{};
     // The keeper republishes a flight that is not stepping (paused, before real time) when the scene's
     // state of its central body changes, e.g. once Horizons data replaces ERFA's (Mars: ~1000 km).
-    ph::V3 publishedOrigin{};double publishedUtc=-1e300;std::thread keeper;std::mutex keeperLock;std::condition_variable keeperWake;bool keeperStop=false;
+    // wallAt, wallUtc, clockRate: the last publication's wall time and instant, and the rate between them (the scene clock's).
+    ph::V3 publishedOrigin{};double publishedUtc=-1e300,wallAt=0,wallUtc=0,clockRate=0;std::thread keeper;std::mutex keeperLock;std::condition_variable keeperWake;bool keeperStop=false;
     void keep(){
         std::unique_lock l(keeperLock);
         while(!keeperWake.wait_for(l,std::chrono::milliseconds(500),[this]{return keeperStop;})){
@@ -328,7 +329,11 @@ struct Slot {
         // The scene's instant and the app's flight panel from the flight the camera follows (any, when it follows none).
         const auto snap=bridge.snapshot();const std::string followed=snap?snap->camera.target:std::string();
         if(followed==sceneId||(followed!="flight"&&followed.rfind("flight.",0)!=0)){
-            (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),{},false,true});
+            // With the rate this flight runs at (simulated seconds a wall second, smoothed), so the scene runs smoothly between them.
+            const double wall=std::chrono::duration<double>(now.time_since_epoch()).count();
+            if(wallUtc>0&&wall>wallAt&&s.utcSeconds>=wallUtc){const double r=std::min((s.utcSeconds-wallUtc)/(wall-wallAt),time::Simulation::maximumRate);clockRate=clockRate>0?clockRate+.3*(r-clockRate):r;}
+            wallAt=wall;wallUtc=s.utcSeconds;
+            (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),clockRate,false,true});
             (void)bridge.submit(telemetry());}
     }
     // The flight as a sound source (see FlightServices::sound); published with the scene, read without the mutex (the

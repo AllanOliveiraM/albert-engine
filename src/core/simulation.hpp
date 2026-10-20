@@ -33,6 +33,10 @@ public:
     // Both validated before either applies; unset values are kept.
     void choose(std::optional<double> utcSeconds,std::optional<double> rate);
     void stall(double utcSeconds);                  // Holds while data loads; same generation.
+    // A source driving the clock while it runs (a flight): its instant and the rate it advances at. The clock eases onto it
+    // over a quarter second, without steps, and runs at that rate between calls; over a second (or half a second of its
+    // motion) off, it jumps. Same generation; ignored when live.
+    void follow(double utcSeconds,double rate);
     void live();
 private:
     Simulated at(double monotonic) const;
