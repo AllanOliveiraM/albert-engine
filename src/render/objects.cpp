@@ -3,6 +3,7 @@
 #include "core/bodies.hpp"
 #include "animation.hpp"
 #include "rocks.hpp"
+#include "vehicle.hpp"
 #include <numbers>
 using namespace threepp;
 threepp::Vector3 albert::renderPosition(core::Vector p,core::Vector origin){
@@ -34,7 +35,7 @@ std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Sce
             Vector3 hit;localRay.intersectSphere(bounds,hit);
             if(!hit.isNan())distance=hit.applyMatrix4(*node->matrixWorld).distanceTo(ray.ray.origin);
         }else{
-            const auto hits=ray.intersectObject(*node,object.appearance.shape==core::Shape::Model);
+            const auto hits=ray.intersectObject(*node,object.appearance.shape==core::Shape::Model||object.look);
             if(!hits.empty())distance=hits.front().distance;
         }
         if(distance>=ray.nearPlane&&distance<nearest){nearest=distance;picked=id;}
@@ -44,7 +45,7 @@ std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Sce
 void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vector origin){
     for(auto it=nodes_.begin();it!=nodes_.end();) {
         if(!registry.objects().contains(it->first)||(!registry.get(it->first).builtin&&instances_[it->first]!=registry.get(it->first).instance)){
-            auto mesh=it->second;scene_.remove(*mesh);mesh->traverseType<Mesh>([](Mesh& part){part.material()->dispose();});displayedFill_.erase(it->first);instances_.erase(it->first);pickers_.erase(it->first);it=nodes_.erase(it);
+            auto mesh=it->second;scene_.remove(*mesh);mesh->traverseType<Mesh>([](Mesh& part){part.material()->dispose();});displayedFill_.erase(it->first);instances_.erase(it->first);pickers_.erase(it->first);vehicles_.erase(it->first);it=nodes_.erase(it);
         }else ++it;
     }
     for(auto i=models_.begin();i!=models_.end();)if(!registry.models().contains(i->first)||registry.models().at(i->first)!=i->second.source){for(auto& g:i->second.geometry)g->dispose();for(auto& m:i->second.materials)m->dispose();i=models_.erase(i);}else ++i;
@@ -54,7 +55,9 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             // falls back to its artistic rock instead of disappearing.
             if(o.appearance.shape==core::Shape::Builtin&&!(core::localOrbit(id)&&artisticRock(id)))continue;
             instances_[id]=o.instance;
-            if(artisticRock(id)){
+            if(o.look){ // A vehicle: its body, parts, bells, plumes and jets, in metres.
+                auto v=std::make_unique<Vehicle>(*o.look);auto mesh=v->node();mesh->scale.setScalar(static_cast<float>(1/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);vehicles_[id]=std::move(v);
+            }else if(artisticRock(id)){
                 auto mesh=makeArtisticRock(*core::localOrbit(id));
                 mesh->scale.setScalar(float(o.radiusMeters*2/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);
             }else if(o.appearance.shape==core::Shape::Model){
@@ -88,6 +91,7 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             Quaternion basis;basis.setFromAxisAngle(Vector3(1,0,0),-std::numbers::pi_v<float>/2.f);
             basis.multiply(Quaternion(static_cast<float>(q.x),static_cast<float>(q.y),static_cast<float>(q.z),static_cast<float>(q.w)));
             mesh->quaternion.copy(basis);mesh->visible=o.visible;
+            if(const auto v=vehicles_.find(id);v!=vehicles_.end())v->second->animate(state.parts.get());
         }
     }
 }

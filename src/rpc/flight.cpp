@@ -68,6 +68,14 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
     v.sunArea=d.solar_area_meters2();v.reflectivity=d.has_reflectivity()?d.reflectivity():1.3;v.jetDamping=!d.has_jet_damping()||d.jet_damping();v.inertiaRate=d.has_inertia_rate()?d.inertia_rate():1.;
     if(!(v.torque>=0)||!(v.diameter>0)||!(v.sunArea>=0)||!(v.reflectivity>=0)||!finite(v.inertiaRate)||!std::isfinite(v.torque))throw std::invalid_argument("Invalid vehicle torque, diameter, solar area, reflectivity or inertia rate");
     for(const auto& sd:d.stages()){
+        { // The look (the scene only): bounded and finite.
+            const auto& a=sd.appearance();if(a.sections_size()>64||a.parts_size()>64)throw std::invalid_argument("At most 64 body sections and 64 hinged parts a stage");
+            for(const auto& x:a.sections())if(!finite(x.from_meters())||!finite(x.to_meters())||!(x.to_meters()>x.from_meters())||!(x.radius_from_meters()>=0)||!(x.radius_to_meters()>=0)||!finite(x.radius_from_meters())||!finite(x.radius_to_meters())||!finite(x.tiles_radians()))
+                throw std::invalid_argument("Invalid body section");
+            for(const auto& x:a.parts()){const auto ok=[](const api::Vector3& v){return finite(v.x())&&finite(v.y())&&finite(v.z());};
+                if(!ok(x.hinge_meters())||!ok(x.axis())||!ok(x.outward())||!(x.span_meters()>0)||!(x.width_meters()>0)||!(x.thickness_meters()>0)||!finite(x.span_meters())||!finite(x.width_meters())||!finite(x.thickness_meters())
+                   ||!finite(x.gain())||!finite(x.offset_radians())||x.surface()>static_cast<unsigned>(sd.surfaces_size()))throw std::invalid_argument("Invalid hinged part");}
+        }
         if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256||sd.wheels_size()>32||sd.hard_points_meters_size()>32)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters, 256 thermal nodes, 32 wheels and 32 hard points a stage");
         ph::Stage st;st.name=sd.name().substr(0,128);st.propellant=sd.propellant_kilograms();st.massFull=sd.mass_full_kilograms();st.massEmpty=sd.mass_empty_kilograms();
         st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
@@ -306,12 +314,35 @@ struct Slot {
         const double f=st.propellant>0?s.propellant/st.propellant:0,cg=st.cgEmpty+(st.cgFull-st.cgEmpty)*f;
         const ph::Q q=s.attitude*ph::Q{std::sqrt(.5),0,0,-std::sqrt(.5)};const ph::PositionVelocity o=origin(s.time);
         const ph::V3 p=o.position+s.position+ph::matrix(s.attitude)*ph::V3{cg-st.length/2,0,0},v=o.velocity+s.velocity;
-        return core::Sample{ph::utcFromTt(s.time),{p.x,p.y,p.z},{v.x,v.y,v.z},core::Quaternion{q.x,q.y,q.z,q.w},true};
+        core::Sample x{ph::utcFromTt(s.time),{p.x,p.y,p.z},{v.x,v.y,v.z},core::Quaternion{q.x,q.y,q.z,q.w},true};x.parts=parts();return x;
+    }
+    // The stage flying now as it looks: its definition's appearance (else a plain cylinder), its engines' bells and its thrusters.
+    std::shared_ptr<const core::VehicleLook> look()const{
+        const auto& v=flight->vehicle();const int stage=flight->state().stage;const auto& st=v.stages[static_cast<std::size_t>(stage)];
+        auto l=std::make_shared<core::VehicleLook>();l->length=st.length;l->diameter=v.diameter;const auto& r=log.request();
+        auto cv=[](const api::Vector3& x){return core::Vector{x.x(),x.y(),x.z()};};auto pv=[](ph::V3 x){return core::Vector{x.x,x.y,x.z};};
+        if(r.has_definition()&&stage<r.definition().stages_size()){const auto& a=r.definition().stages(stage).appearance();
+            for(const auto& x:a.sections())l->sections.push_back({x.from_meters(),x.to_meters(),x.radius_from_meters(),x.radius_to_meters(),x.color(),x.tiles_radians()});
+            for(const auto& x:a.parts())l->parts.push_back({x.name(),cv(x.hinge_meters()),cv(x.axis()),cv(x.outward()),x.span_meters(),x.width_meters(),x.thickness_meters(),x.gain(),x.offset_radians(),x.surface(),x.color(),x.grid()});}
+        if(l->sections.empty())l->sections.push_back({0,st.length,v.diameter/2,v.diameter/2,0xe8e8e8,0});
+        for(const auto& e:st.engines)l->engines.push_back({pv(e.position),pv(e.direction),std::sqrt(std::max(e.exitArea,.01)/3.14159265358979323846)});
+        for(const auto& t:st.rcs)l->thrusters.push_back({pv(t.position),pv(t.direction)});
+        return l;
+    }
+    // Its moving parts now (core::Sample::parts).
+    std::shared_ptr<const std::vector<float>> parts()const{
+        const auto& st=flight->vehicle().stages[static_cast<std::size_t>(flight->state().stage)];auto p=std::make_shared<std::vector<float>>();const auto thrust=flight->engineThrust();
+        p->reserve(st.engines.size()*3+st.surfaces.size()+st.rcs.size()+1);
+        for(std::size_t i=0;i<st.engines.size();++i){const auto& e=flight->engines()[i];const double full=st.engines[i].breathing?1e300:st.engines[i].thrust;
+            p->push_back(static_cast<float>(st.engines[i].breathing?(e.on?e.spool:0.):full>0?thrust[i]/full:0.));p->push_back(static_cast<float>(e.pitch));p->push_back(static_cast<float>(e.yaw));}
+        for(const auto& x:flight->surfaces())p->push_back(static_cast<float>(x.deflection));
+        for(double d:flight->thrusters())p->push_back(static_cast<float>(d));
+        p->push_back(static_cast<float>(flight->sample().air.pressure));return p;
     }
     core::Object object()const{
         const auto& v=flight->vehicle();const double length=v.stages[flight->state().stage].length;
         core::Object o;o.id=sceneId;o.name=name=="flight"?v.name:v.name+" ("+name+")";o.source="Albert flight physics";o.appearance={core::Shape::Cylinder,{v.diameter,length,v.diameter},0xe8e8e8};
-        o.radiusMeters=length/2;o.defaultDistanceMeters=6*length;o.minDistanceMeters=length;o.samples.push_back(scene());return o;
+        o.radiusMeters=length/2;o.defaultDistanceMeters=6*length;o.minDistanceMeters=length;o.samples.push_back(scene());o.look=look();return o;
     }
     void publish(bool force){
         const auto now=std::chrono::steady_clock::now();

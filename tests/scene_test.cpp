@@ -36,5 +36,11 @@ int main(){try{
     std::thread two([&]{for(int i=0;i<64;++i)b.push_back(concurrent.submit(Focus{"moon"}));});one.join();two.join();
     size_t count=0;while(concurrent.drain([&](Command&){++count;return Reply{};})){}
     require(count==128,"Concurrent producers lost commands");for(auto& t:a)require(t.result.get().code==Code::Ok,"Concurrent command failed");for(auto& t:b)require(t.result.get().code==Code::Ok,"Concurrent command failed");
-    std::cout<<"Scene OK: precision, validation, interpolation, bounded history, cancellation and concurrent queue\n";return 0;
+    { // A vehicle's moving parts interpolate with the rest; non-finite ones are refused.
+        Scene parts;Object o=object();o.id="vehicle";o.samples[0].parts=std::make_shared<std::vector<float>>(std::vector<float>{0,1});
+        o.samples[1].parts=std::make_shared<std::vector<float>>(std::vector<float>{1,3});parts.create(o);
+        const auto e=parts.evaluate("vehicle",101);require(e.state.parts&&std::abs((*e.state.parts)[0]-.5f)<1e-6f&&std::abs((*e.state.parts)[1]-2)<1e-6f,"Vehicle parts not interpolated");
+        Object bad=object();bad.id="bad";bad.samples[0].parts=std::make_shared<std::vector<float>>(std::vector<float>{std::numeric_limits<float>::quiet_NaN()});rejects([&]{parts.create(bad);});
+    }
+    std::cout<<"Scene OK: precision, validation, interpolation, vehicle parts, bounded history, cancellation and concurrent queue\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

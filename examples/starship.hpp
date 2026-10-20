@@ -100,24 +100,54 @@ inline void shipSystems(api::StageDefinition* s){
     n->set_area_meters2(1);n->set_heat_capacity_joules_per_kelvin(1.58e4);n->set_emissivity(.3);n->set_absorptivity(.4);n->set_limit_kelvin(1100);
     for(const double y:{-(radius+1),radius+1})put(s->add_hard_points_meters(),shipPinAt,y,0);
 }
+constexpr double pinAt=6,pinOut=radius+1,finLimit=30*deg,finMoment=.77; // Hard points by the grid fins: 6 m below the nose, 5.5 m off the axis (body ±y).
+// How they look (the scene only), from each one's nose `at` m along its stage: stainless steel; the ship's nose a tangent ogive
+// (11 m) in sections, black tiles on its windward half (+z), four flaps (hinged on its sides along x: +45° square to the
+// flow, -45° folded to the lee) turning with surfaces 1-4 when `moving`, else folded; the booster's vented hot-staging ring
+// and four grid fins (on their radial spindles: ±y with surface 1, ±z with surface 2 when `moving`); both vehicles' catch pins.
+inline void put(api::Vector3* o,const Vec& v){put(o,v.x,v.y,v.z);}
+inline void section(api::StageAppearance* a,double from,double to,double r0,double r1,std::uint32_t colour,double tiles){
+    auto* x=a->add_sections();x->set_from_meters(from);x->set_to_meters(to);x->set_radius_from_meters(r0);x->set_radius_to_meters(r1);x->set_color(colour);x->set_tiles_radians(tiles);}
+inline void hinged(api::StageAppearance* a,const char* name,Vec hinge,Vec axis,Vec out,double span,double width,double thick,unsigned surface,double gain,double offset,std::uint32_t colour,bool grid=false){
+    auto* x=a->add_parts();x->set_name(name);put(x->mutable_hinge_meters(),hinge);put(x->mutable_axis(),axis);put(x->mutable_outward(),out);x->set_span_meters(span);x->set_width_meters(width);
+    x->set_thickness_meters(thick);x->set_surface(surface);x->set_gain(gain);x->set_offset_radians(offset);x->set_color(colour);x->set_grid(grid);}
+constexpr std::uint32_t steel=0xc9c9c6,shield=0x161616,vents=0x3c3c3c;
+inline void shipLook(api::StageAppearance* a,double at,bool moving){
+    const double l=11,rho=(radius*radius+l*l)/(2*radius);auto r=[&](double x){return std::sqrt(rho*rho-(l-x)*(l-x))+radius-rho;};
+    const double cuts[]{0,.4,1.2,2.5,4,6,8.5,11};for(int i=0;i+1<8;++i)section(a,at+cuts[i],at+cuts[i+1],std::max(r(cuts[i]),.05),r(cuts[i+1]),steel,pi);
+    section(a,at+l,at+shipLength,radius,radius,steel,pi);
+    for(const double side:{-1.,1.}){ // Forward flaps on the nose, aft ones by the engines; the left one turns the other way.
+        const unsigned fwd=side<0?1:2,aft=side<0?3:4;const double g=moving?-side:0,o=moving?side*45*deg:side*90*deg;
+        hinged(a,side<0?"flap forward left":"flap forward right",{at+8,side*r(8),0},{1,0,0},{0,side,0},7,3.4,.35,moving?fwd:0,g,o,steel);
+        hinged(a,side<0?"flap aft left":"flap aft right",{at+44.5,side*radius,0},{1,0,0},{0,side,0},10,5,.4,moving?aft:0,g,o,steel);
+        hinged(a,"pin",{at+shipPinAt,side*radius,0},{0,side,0},{1,0,0},1.2,1,1,0,0,0,vents);}
+}
+inline void boosterLook(api::StageAppearance* a,double at,bool moving){
+    section(a,at,at+2,radius,radius,vents,0);section(a,at+2,at+boosterLength,radius,radius,steel,0);
+    for(const double side:{-1.,1.}){
+        hinged(a,"grid fin",{at+4.5,side*(radius+1.6),0},{0,side,0},{0,0,1},3,5,.5,moving?1:0,side,0,0x2e2e2e,true);
+        hinged(a,"grid fin",{at+4.5,0,side*(radius+1.6)},{0,0,side},{0,1,0},3,5,.5,moving?2:0,side,0,0x2e2e2e,true);
+        hinged(a,"pin",{at+pinAt,side*radius,0},{0,side,0},{1,0,0},1.2,1,1,0,0,0,vents);}
+}
 // The stack (stage 0: booster burning with the full ship on top; stage 1: the ship), the ship alone and the booster alone.
 inline api::VehicleDefinition stack(){
     api::VehicleDefinition v;v.set_name("Starship-class stack (approximate, public figures)");v.set_diameter_meters(2*radius);v.set_attitude_torque_newton_meters(5e7);
     auto parts=[](bool boosterFull){auto p=ship(true);for(auto x:booster(boosterFull)){x.from+=shipLength;x.to+=shipLength;p.push_back(x);}return p;};
     auto* s0=v.add_stages();s0->set_name("Super Heavy and ship");mass(s0,combine(parts(true)),combine(parts(false)),boosterPropellant,shipLength+boosterLength);
-    raptors(s0,shipLength+boosterLength,true);aerodynamics(s0,shipLength+boosterLength);
-    auto* s1=v.add_stages();s1->set_name("Ship");mass(s1,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s1,shipLength,false);aerodynamics(s1,shipLength);shipSystems(s1);
+    raptors(s0,shipLength+boosterLength,true);aerodynamics(s0,shipLength+boosterLength);shipLook(s0->mutable_appearance(),0,false);boosterLook(s0->mutable_appearance(),shipLength,false);
+    auto* s1=v.add_stages();s1->set_name("Ship");mass(s1,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s1,shipLength,false);aerodynamics(s1,shipLength);shipSystems(s1);shipLook(s1->mutable_appearance(),0,true);
     return v;
 }
 inline api::VehicleDefinition shipAlone(){
     api::VehicleDefinition v;v.set_name("Starship-class ship (approximate)");v.set_diameter_meters(2*radius);
     auto* s=v.add_stages();s->set_name("Ship");mass(s,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s,shipLength,false);aerodynamics(s,shipLength);shipSystems(s);
+    shipLook(s->mutable_appearance(),0,true);
     return v;
 }
-constexpr double pinAt=6,pinOut=radius+1,finLimit=30*deg,finMoment=.77; // Hard points by the grid fins: 6 m below the nose, 5.5 m off the axis (body ±y).
 inline api::VehicleDefinition superHeavy(){
     api::VehicleDefinition v;v.set_name("Super Heavy-class booster (approximate)");v.set_diameter_meters(2*radius);
     auto* s=v.add_stages();s->set_name("Booster");mass(s,combine(booster(true)),combine(booster(false)),boosterPropellant,boosterLength);raptors(s,boosterLength,true);aerodynamics(s,boosterLength);
+    boosterLook(s->mutable_appearance(),0,true);
     for(const double y:{-pinOut,pinOut})put(s->add_hard_points_meters(),pinAt,y,0);
     // Four grid fins by the nose as two pairs, always out: pitch and yaw moments by deflection in engines-first flight (0.77 a
     // radian on the stage's references: a pair's ~36 m², 18 m² a fin, at C_Nδ 2.5, 39 m from the centre of mass) and a constant

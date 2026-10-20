@@ -23,6 +23,7 @@ void validate(Sample& s){
        !finite(s.velocityMetersPerSecond)||length(s.velocityMetersPerSecond)>3e8) throw std::invalid_argument("Invalid timestamp, position or velocity");
     if(s.attitude){auto& q=*s.attitude;const double n=std::hypot(std::hypot(q.x,q.y),std::hypot(q.z,q.w));
         if(!std::isfinite(n)||n<1e-12) throw std::invalid_argument("Invalid quaternion");q={q.x/n,q.y/n,q.z/n,q.w/n};}
+    if(s.parts&&(s.parts->size()>1024||!std::all_of(s.parts->begin(),s.parts->end(),[](float x){return std::isfinite(x);})))throw std::invalid_argument("Invalid vehicle parts");
 }
 Scene::Scene(){
     for(auto o:std::array<Object,3>{Object{"earth","Terra","NASA/JPL Horizons"},Object{"moon","Lua","NASA/JPL Horizons"},Object{"sun","Sol","NASA/JPL Horizons"}}){
@@ -124,6 +125,8 @@ Evaluated Scene::evaluate(const ObjectId& id,double now) const{
     r.velocityMetersPerSecond=a.velocityMetersPerSecond*(1-t)+b->velocityMetersPerSecond*t;
     r.hasVelocity=a.hasVelocity&&b->hasVelocity;
     if(a.attitude&&b->attitude)r.attitude=blend(*a.attitude,*b->attitude,t);
+    if(a.parts&&b->parts&&a.parts->size()==b->parts->size()){auto p=std::make_shared<std::vector<float>>(*a.parts);
+        for(std::size_t i=0;i<p->size();++i)(*p)[i]+=static_cast<float>(t)*((*b->parts)[i]-(*p)[i]);r.parts=std::move(p);}
     return {r,false};
 }
 Snapshot Scene::snapshot(double now,const CameraState& camera) const{Snapshot result{revision_,now,{},camera,{},{},{},{},false};result.clock.utcSeconds=now;result.simulation.utcSeconds=now;for(const auto& [id,l]:layers_)result.layers.push_back({id,l.name,l.source,l.anchor,l.kind,l.frame,l.data->positions.size(),l.color,l.widthPixels,l.clearanceMeters,l.visible});for(const auto& [id,m]:models_)result.models.push_back({id,m->source,m->sourceBytes,m->vertices,m->triangles,m->sizeUnits,m->radiusUnits});for(const auto& [id,o]:objects_){(void)id;result.objects.push_back(o);result.objects.back().samples.assign(1,evaluate(id,now).state);}return result;}

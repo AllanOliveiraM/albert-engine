@@ -105,6 +105,21 @@ void earthLayers(){
 }
 )";
     albert::gpu::define("albert:corona",corona);
+    // vehicle.cpp: a rocket plume's glow on its cone (uv.y 1 at the nozzle, 0 at the tail), brightest down its axis and near
+    // the nozzle, fading to the edges and the tail; colours in linear light, strength its brightness, filtered by the air.
+    Program plume;plume.attributes=surfaceAttributes;plume.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32}};
+    plume.wgsl=std::string(surface)+R"(
+struct Material { core: vec3f, edge: vec3f, strength: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+@fragment fn fs_main(v: Surface) -> @location(0) vec4f {
+    let mu = abs(dot(normalize(v.worldNormal), normalize(frame.camera.xyz - v.world)));
+    let along = clamp(v.uv.y, 0.0, 1.0);
+    let glow = pow(mu, 1.6) * smoothstep(0.0, 0.7, along) * (0.35 + 0.65 * along);
+    let colour = mix(material.edge, material.core, mu * along);
+    return vec4f(linearToSrgb(colour * airFilter(v.world)), glow * material.strength);
+}
+)";
+    albert::gpu::define("albert:plume",plume);
     Program clouds;clouds.attributes=surfaceAttributes;clouds.textures={"cloudMap","detailMap","previousDetailMap"};
     clouds.uniforms=cloudUniforms;for(auto u:{std::pair{"solarDirection",Uniform::vec3},{"moonPosition",Uniform::vec3},{"eclipseSunPosition",Uniform::vec3},{"eclipseEnabled",Uniform::f32},{"visibility",Uniform::f32}})clouds.uniforms.emplace_back(u.first,u.second);
     clouds.wgsl=std::string(surface)+"struct Material { "+cloudFields+", solarDirection: vec3f, moonPosition: vec3f, eclipseSunPosition: vec3f, eclipseEnabled: f32, visibility: f32 };\n@group(2) @binding(0) var<uniform> material: Material;\n"

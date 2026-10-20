@@ -21,7 +21,18 @@ struct Sample {
     Vector positionMeters,velocityMetersPerSecond;
     std::optional<Quaternion> attitude; // Local axes -> geocentric ICRF, XYZW.
     bool hasVelocity=false;
+    // A vehicle's moving parts (Object::look), interpolated as the rest: per engine its thrust share (0: off) and gimbal pitch
+    // and yaw (rad); per surface its deflection (rad); per thruster its duty; last, the ambient pressure (Pa). Up to 1024.
+    std::shared_ptr<const std::vector<float>> parts;
 };
+// How a vehicle looks beyond a plain shape, in metres along its stage (x aft of the nose, y right, z down, as the flight API's;
+// drawn about the stage's middle): its body as frustums (black tiles on an arc centred on +z), parts on hinges turning by a
+// surface's deflection (gain, offset; surface 1-based, 0: fixed), its engines' bells and plumes, its thrusters' jets.
+struct LookSection {double from=0,to=0,radiusFrom=.5,radiusTo=.5;std::uint32_t color=0xd8d8d8;double tiles=0;};
+struct LookPart {std::string name;Vector hinge,axis{1,0,0},outward{0,1,0};double span=1,width=1,thickness=.1,gain=1,offset=0;unsigned surface=0;std::uint32_t color=0x505050;bool grid=false;};
+struct LookEngine {Vector position,direction{1,0,0};double exitRadius=.5;};
+struct LookThruster {Vector position,direction{1,0,0};};
+struct VehicleLook {double length=1,diameter=1;std::vector<LookSection> sections;std::vector<LookPart> parts;std::vector<LookEngine> engines;std::vector<LookThruster> thrusters;};
 enum class Shape {Builtin,Sphere,Box,Cylinder,Model};
 struct Appearance {Shape shape=Shape::Sphere;Vector sizeMeters{1000,1000,1000};std::uint32_t color=0x77cddd;std::string modelId;double metersPerUnit=1;};
 struct Object {
@@ -30,6 +41,7 @@ struct Object {
     double radiusMeters=500,defaultDistanceMeters=2000,minDistanceMeters=550;
     bool builtin=false,visible=true,providerManaged=false;std::uint64_t instance=0;
     std::vector<Sample> samples;
+    std::shared_ptr<const VehicleLook> look; // A vehicle's, drawn instead of the shape (with Sample::parts).
 };
 struct Evaluated {Sample state;bool stale=false;};
 struct CameraState {ObjectId target="earth";Vector positionMeters;double distanceMeters=0;bool transitioning=false;};
