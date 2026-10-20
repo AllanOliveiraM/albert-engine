@@ -12,7 +12,7 @@ Ticket Bridge::submit(Command command){
 }
 size_t Bridge::drain(const std::function<Reply(Command&)>& apply){
     const auto start=std::chrono::steady_clock::now();size_t count=0;
-    while(count<8){
+    while(count<capacity){ // Within 2 ms: a flight's samples, its arms and the clock come many a frame.
         std::optional<Pending> p;
         {std::lock_guard lock(mutex_);if(queue_.empty())break;p.emplace(std::move(queue_.front()));queue_.pop_front();}
         Reply result;
@@ -26,6 +26,7 @@ size_t Bridge::drain(const std::function<Reply(Command&)>& apply){
     }
     return count;
 }
+size_t Bridge::waiting() const{std::lock_guard lock(mutex_);return queue_.size();}
 void Bridge::publish(Snapshot s){snapshot_.store(std::make_shared<const Snapshot>(std::move(s)));}
 std::shared_ptr<const Snapshot> Bridge::snapshot() const{return snapshot_.load();}
 void Bridge::close(){std::lock_guard lock(mutex_);closed_=true;for(auto& p:queue_)p.promise.set_value({Code::Unavailable,"Application is shutting down",0});queue_.clear();}

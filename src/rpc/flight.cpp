@@ -226,6 +226,7 @@ struct Slot {
     // The keeper republishes a flight that is not stepping (paused, before real time) when the scene's
     // state of its central body changes, e.g. once Horizons data replaces ERFA's (Mars: ~1000 km).
     // wallAt, wallUtc, clockRate: the last publication's wall time and instant, and the rate between them (the scene clock's).
+    std::shared_ptr<const std::vector<float>> siteAngles; // As last sent.
     ph::V3 publishedOrigin{};double siteUtc=-1,publishedUtc=-1e300,wallAt=0,wallUtc=0,clockRate=0;std::thread keeper;std::mutex keeperLock;std::condition_variable keeperWake;bool keeperStop=false;
     void keep(){
         std::unique_lock l(keeperLock);
@@ -377,6 +378,7 @@ struct Slot {
     void publish(bool force){
         const auto now=std::chrono::steady_clock::now();
         if(!force&&now-published<std::chrono::milliseconds(33))return;
+        if(!force&&bridge.waiting()>core::Bridge::capacity/2)return; // The frame loop behind (a window out of view): room for what must apply.
         published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
         heard.put(sceneId,center==ph::Center::earth?std::make_shared<const Sound>(heardSound()):nullptr); // Read by the frame loop without the flight's lock.
         // The stack got shorter, or the same instant again (the keeper; appending would be refused as
@@ -386,8 +388,8 @@ struct Slot {
             shown=flight->state().stage;
         }else (void)bridge.submit(core::Append{sceneId,{s}});
         publishedUtc=s.utcSeconds;publishedOrigin=at;
-        if(siteUtc>=0&&s.utcSeconds>siteUtc)if(auto a=angles()){ // The site's arms as they swing (its place is the Earth's).
-            core::Sample x{s.utcSeconds,{},{},core::Quaternion{},false};x.parts=std::move(a);(void)bridge.submit(core::Append{siteId,{std::move(x)}});siteUtc=s.utcSeconds;}
+        if(siteUtc>=0&&s.utcSeconds>siteUtc)if(auto a=angles();a&&(!siteAngles||*a!=*siteAngles)){ // The site's arms as they swing (its place is the Earth's), and once still.
+            core::Sample x{s.utcSeconds,{},{},core::Quaternion{},false};x.parts=a;(void)bridge.submit(core::Append{siteId,{std::move(x)}});siteUtc=s.utcSeconds;siteAngles=std::move(a);}
         // The scene's instant and the app's flight panel from the flight the camera follows (any, when it follows none).
         const auto snap=bridge.snapshot();const std::string followed=snap?snap->camera.target:std::string();
         if(followed==sceneId||(followed!="flight"&&followed.rfind("flight.",0)!=0)){
@@ -661,7 +663,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}
     shown=0;(void)wait(bridge.submit(core::Remove{sceneId}));(void)wait(bridge.submit(core::Remove{siteId}));
     if(auto s=failed(wait(bridge.submit(core::Create{object()})));!s.ok())return s;
-    siteUtc=-1;if(auto o=siteObject(r)){const double u=o->samples.back().utcSeconds;if(auto s=failed(wait(bridge.submit(core::Create{std::move(*o)})));!s.ok())return s;siteUtc=u;}
+    siteUtc=-1;siteAngles.reset();if(auto o=siteObject(r)){const double u=o->samples.back().utcSeconds;if(auto s=failed(wait(bridge.submit(core::Create{std::move(*o)})));!s.ok())return s;siteUtc=u;}
     publishedOrigin=origin(flight->state().time).position;publishedUtc=ph::utcFromTt(flight->state().time); // The keeper's reference.
     if(auto s=failed(wait(bridge.submit(core::SetTime{ph::utcFromTt(t),0.,false})));!s.ok())return s;
     if(r.focus_camera())(void)wait(bridge.submit(core::Focus{sceneId,true}));

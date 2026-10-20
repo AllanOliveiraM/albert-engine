@@ -26,8 +26,9 @@ struct Reply {Code code=Code::Ok;std::string message;std::uint64_t revision=0;};
 struct Ticket {std::future<Reply> result;std::shared_ptr<std::atomic_bool> cancelled;};
 class Bridge {
 public:
-    static constexpr size_t capacity=256;
+    static constexpr size_t capacity=2048; // Some seconds of a stalled frame loop (a window out of view).
     Ticket submit(Command command);
+    size_t waiting() const; // Commands queued: senders of what only draws can hold back when it is more than half full.
     size_t drain(const std::function<Reply(Command&)>& apply);
     void publish(Snapshot snapshot);
     std::shared_ptr<const Snapshot> snapshot() const;

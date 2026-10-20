@@ -123,7 +123,7 @@ inline void shipLook(api::StageAppearance* a,double at,bool moving){
     const double cuts[]{0,.4,1.2,2.5,4,6,8.5,11};for(int i=0;i+1<8;++i)section(a,at+cuts[i],at+cuts[i+1],std::max(r(cuts[i]),.05),r(cuts[i+1]),steel,pi);
     section(a,at+l,at+shipLength,radius,radius,steel,pi);
     for(const double side:{-1.,1.}){ // Forward flaps on the nose, aft ones by the engines; the left one turns the other way.
-        const unsigned fwd=side<0?1:2,aft=side<0?3:4;const double g=moving?-side:0,o=moving?side*45*deg:side*90*deg;
+        const unsigned fwd=side<0?1:2,aft=side<0?3:4;const double g=moving?side:0,o=moving?-side*45*deg:-side*90*deg; // Folded: up to -z.
         hinged(a,side<0?"flap forward left":"flap forward right",{at+8,side*r(8),0},{1,0,0},{0,side,0},7,3.4,.35,moving?fwd:0,g,o,steel);
         hinged(a,side<0?"flap aft left":"flap aft right",{at+44.5,side*radius,0},{1,0,0},{0,side,0},10,5,.4,moving?aft:0,g,o,steel);
         hinged(a,"pin",{at+shipPinAt,side*radius,0},{0,side,0},{1,0,0},1.2,1,1,0,0,0,vents);}
@@ -312,6 +312,9 @@ public:
     void start(double t){start_=t;}
     static constexpr double gateSpeed=80;
     double dt=.02,boostbackPitch=-5*deg; // boostbackPitch: above the horizon (negative: below).
+    // The boostback and the fall aim this far east of the tower (over the sea, away from the tower's side), the landing
+    // burn then bringing it onto the arms' axis from there while still high (m).
+    double offshore=300;
 private:
     Vec boostbackDirection(Vec miss)const{const Vec h=unit(miss*-1);return h*std::cos(boostbackPitch)+up_*std::sin(boostbackPitch);} // miss: horizontal.
     void steer(Command& c,const State& s,Vec d)const{ // Body x along d by the grid fins (engines off, in the air), the roll by the RCS.
@@ -336,12 +339,12 @@ private:
     // The mass to plan the landing with: the booster's now, at most its own with the propellant a boostback leaves.
     static double landingMass(double m){return std::min(m,boosterEmpty+170e3);}
     // Where the fall reaches the gate: ballistic until a burn of 13 engines at 90% lit there would reach it at its height (checked
-    // every 2 s), then that burn: horizontal from the tower (m); seconds: the time to it.
+    // every 2 s), then that burn: horizontal from the point offshore (m); seconds: the time to it.
     Vec landing(const State& s,double* seconds=nullptr)const{
         const double mass=landingMass(s.mass),accel=13*.9*raptorSea/mass,low=catchHeight(s)+hoverAbove+gate(mass)+50;Vec r=s.position,v=s.velocity;int n=0,m=0;
         auto height=[&](Vec p){return dot(p+site_*-1,up_);};auto gated=[&](Vec& p,Vec& u){fly(p,u,mass,accel,.25,[&]{++m;return -dot(u,up_)<=gateSpeed||height(p)<0;});};
         fly(r,v,mass,0,.5,[&]{if(++n%4==0&&dot(v,up_)<0&&height(r)<40e3){Vec p=r,u=v;const int k=m;gated(p,u);m=k;if(height(p)<=low)return true;}return height(r)<0&&dot(v,up_)<0;});
-        gated(r,v);if(seconds)*seconds=.5*(n-1)+.25*m;const Vec rel=r+site_*-1;return rel+up_*-dot(rel,up_);
+        gated(r,v);if(seconds)*seconds=.5*(n-1)+.25*m;const Vec rel=r+site_*-1;return rel+up_*-dot(rel,up_)+offshore_*-1.;
     }
     // The drag coefficient engines first (the stage's base table and the fins').
     static double baseDrag(double v,double h){const double m=v/sound(h),x[]{0,.8,1.2,2,5},y[]{1,1.1,1.4,1.2,1};
@@ -356,6 +359,6 @@ private:
             const Vec a1=acc(r,v),v1=v+a1*(h/2),r1=r+v*(h/2),a2=acc(r1,v1),v2=v+a2*(h/2),r2=r+v1*(h/2),a3=acc(r2,v2),v3=v+a3*h,r3=r+v2*h,a4=acc(r3,v3);
             r=r+(v+v1*2+v2*2+v3)*(h/6);v=v+(a1+a2*2+a3*2+a4)*(h/6);}
     }
-    Phase phase_=Phase::wait;Vec back_,aimed_;double start_=0,miss_=0,seconds_=0,caught_=0;int engines_=13,age_=0;bool off_=false;
+    Phase phase_=Phase::wait;Vec back_,aimed_,offshore_=cross(north_,up_)*offshore;double start_=0,miss_=0,seconds_=0,caught_=0;int engines_=13,age_=0;bool off_=false;
 };
 }

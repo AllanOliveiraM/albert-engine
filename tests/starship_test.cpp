@@ -40,6 +40,7 @@ int main(int argc,char** argv){try{
     require(m.ship.deorbit>6e4&&m.ship.deorbit<1.7e5,"The ship's deorbit burn not on the pass over the tower a day on");
     require(m.ship.caught>m.ship.entry&&m.ship.offAxis<1.5&&m.ship.speed<.1&&m.ship.propellant>5e3,"The ship not caught and at rest on the arms");
     require(m.ship.maxTile<1700&&m.ship.overheats==0,"The ship's heat shield past its limit");
+    require(m.towerClearance>0&&m.ship.towerClearance>0,"A vehicle through the tower");
     std::puts("Starship-class mission: orbit, booster caught and at rest, the ship home a day later, caught and at rest");
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
