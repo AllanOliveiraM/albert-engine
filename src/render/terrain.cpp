@@ -213,6 +213,13 @@ bool Terrain::update(const Vector3& camera,const Frustum* frustum,bool horizonCu
         for(auto it=g.nodes.begin();it!=g.nodes.end();)if(((it->first>>56)&31)>0&&g.frame-it->second.lastUsed>600){g.parent.remove(*it->second.mesh);it->second.mesh->geometry()->dispose();it=g.nodes.erase(it);}else ++it;
         if(g.shapes.size()>20000)g.shapes.clear();
     }
+    // Past 768 built nodes (the ground racing under the camera at a high time rate builds hundreds a second), the least recently
+    // used of those unused for 60 frames go at once, down to 512: their GPU copies with them.
+    if(constexpr std::size_t most=768;g.nodes.size()>most){
+        std::vector<std::pair<unsigned,std::uint64_t>> old;for(const auto& [key,n]:g.nodes)if(((key>>56)&31)>0&&n.lastUsed+60<g.frame)old.emplace_back(n.lastUsed,key);
+        std::sort(old.begin(),old.end());
+        for(const auto& [used,key]:old){if(g.nodes.size()<=most/3*2)break;const auto it=g.nodes.find(key);g.parent.remove(*it->second.mesh);it->second.mesh->geometry()->dispose();g.nodes.erase(it);}
+    }
     return covered;
 }
 void Terrain::hide(){for(const auto& k:impl_->selected)if(auto* n=impl_->node(k))n->mesh->visible=false;impl_->selected.clear();}

@@ -22,6 +22,7 @@ namespace {
 using namespace threepp;
 constexpr std::uint32_t objectStride=256;   // Object uniforms (224 bytes) at the dynamic-offset alignment.
 constexpr unsigned evictAfter=240;          // Frames without use before GPU copies are released.
+constexpr std::size_t bufferBudget=384u<<20; // Index and vertex buffers past it: the least recently used go at once.
 WGPUStringView sv(std::string_view s){return{s.data(),s.size()};}
 WGPUBlendFactor factor(BlendFactor f){
     switch(f){case BlendFactor::Zero:return WGPUBlendFactor_Zero;case BlendFactor::One:return WGPUBlendFactor_One;case BlendFactor::SrcColor:return WGPUBlendFactor_Src;
@@ -498,6 +499,19 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         for(auto it=attributes.begin();it!=attributes.end();)if(frame-it->second.used>evictAfter||it->second.owner.expired()){release(it->second);it=attributes.erase(it);}else ++it;
         for(auto it=textures.begin();it!=textures.end();)if(frame-it->second.used>evictAfter){release(it->second);it=textures.erase(it);}else ++it;
         for(auto it=materials.begin();it!=materials.end();)if(frame-it->second.used>evictAfter){release(it->second);it=materials.erase(it);}else ++it;
+        // Past the budget, the least recently used buffers not drawn in the last frame go now, down to three quarters of it: a scene
+        // that makes geometry fast (the planet turning under the camera at a high rate) would fill the GPU's memory well within
+        // the frames above (2 GB on a small one).
+        std::size_t bytes=0;for(const auto& [k,x]:geometries)bytes+=x.index.bytes;for(const auto& [k,x]:attributes)bytes+=x.buffer.bytes;
+        if(bytes>bufferBudget){
+            struct Old {unsigned used;unsigned id;const BufferAttribute* attribute;std::size_t bytes;};std::vector<Old> old;
+            for(const auto& [k,x]:geometries)if(x.used+1<frame)old.push_back({x.used,k,nullptr,x.index.bytes});
+            for(const auto& [k,x]:attributes)if(x.used+1<frame)old.push_back({x.used,0,k,x.buffer.bytes});
+            std::sort(old.begin(),old.end(),[](const Old& a,const Old& b){return a.used<b.used;});
+            for(const auto& o:old){if(bytes<=bufferBudget/4*3)break;
+                if(o.attribute){const auto it=attributes.find(o.attribute);release(it->second);attributes.erase(it);}else{const auto it=geometries.find(o.id);release(it->second);geometries.erase(it);}
+                bytes-=o.bytes;}
+        }
     }
 };
 SceneRenderer::SceneRenderer(Context& context):impl_(std::make_unique<Impl>(context)){}
@@ -697,6 +711,6 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         g.pendingMap=cb;g.mapPending=true;
     }
     wgpuInstanceProcessEvents(g.gpu.instance());
-    if(g.frame%60==0)g.evict();
+    if(g.frame%20==0)g.evict();
 }
 }

@@ -270,7 +270,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
     Navigator nav,bnav;nav.base=towerSite();nav.design(create.definition());nav.align(ship,7); // The stack's computer, aligned on the pad; the booster's from it at separation.
     std::printf("%s de Starbase, %s\n",ship.vehicle().c_str(),fast?"o mais rápido possível":"tempo real");
     BoosterReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());siteWorks(back);GravityTurn ascent(heading*deg,.13); // A small kick: lofted, so the booster's way back stays short.
-    bool spawned=false,orbit=false,bucket=false,coasting=false,shut=false,mirror=false,peaked=false,fleeing=false;double report=0,maxQ=0,maxQAt=0,spawnAt=0,caughtAt=0,lostAt=-1;
+    bool flapsOut=false,spawned=false,orbit=false,bucket=false,coasting=false,shut=false,mirror=false,peaked=false,fleeing=false;double report=0,maxQ=0,maxQAt=0,spawnAt=0,caughtAt=0,lostAt=-1;
     std::vector<std::string> marks,found; // Events seen since the last step, for the timeline; the FDIR's findings, for the count.
     const bool trace=std::getenv("ALBERT_TRACE")!=nullptr,attitude=trace&&std::string(std::getenv("ALBERT_TRACE")).rfind("attitude",0)==0,fine=attitude&&std::string(std::getenv("ALBERT_TRACE"))=="attitude-fine";double traced=0,turned=0;
     Countdown count(create.definition(),ship,{{"MAX-Q",62},{"MECO",153},{"SEPARAÇÃO A QUENTE",160},{"BOOSTBACK",168},{"QUEIMA DE POUSO DO BOOSTER",392},{"CAPTURA DO BOOSTER",417},
@@ -311,6 +311,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
             if(c.ignite&&!spawned)step.add_commands()->set_ignite(true);if(c.cutoff)step.add_commands()->set_cutoff(true);
             auto* q=step.add_commands()->mutable_torque_newton_meters();q->set_x(c.torque.x);q->set_y(c.torque.y);q->set_z(c.torque.z);
             auto* g=step.add_commands()->mutable_gimbal();g->set_pitch_radians(c.gimbalPitch);g->set_yaw_radians(c.gimbalYaw); // The Raptors steer the stack.
+            if(spawned&&!flapsOut&&ship.surfaces_size()>=4){flapsOut=true;for(unsigned i=1;i<=4;++i){auto* k=step.add_commands();k->set_surface_radians(45*deg);k->set_index(i);}} // The ship's flaps held straight out, as on the stack.
             if(ascent.phase()==GravityTurn::Phase::orbit){orbit=true;out.seco=t;marks.push_back("SECO");out.perigee=GravityTurn::perigee(vec(ship.position_meters()),vec(ship.velocity_meters_per_second()));
                 out.apoapsis=GravityTurn::apoapsis(vec(ship.position_meters()),vec(ship.velocity_meters_per_second()));std::printf("%7.2f s  SECO: perigeu %.0f km, apogeu %.0f km, girando a %.2f°/s\n",t,out.perigee/1e3,out.apoapsis/1e3,norm(vec(ship.angular_rate_radians_per_second()))/deg);}}
         call([&](grpc::ClientContext& c){return flight.Step(&c,step,&ship);});nav.update(ship);

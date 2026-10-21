@@ -116,7 +116,7 @@ constexpr Fin fins[]{{1,0},{-1,0},{0,-1}};
 constexpr double finAt=7.5,pinAt=finAt+.8,finSpan=3.7,finWidth=6.1,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.15;
 // How they look (the scene only), from each one's nose `at` m along its stage: stainless steel; the ship's nose a tangent ogive
 // (11 m) in sections, black tiles on its windward half (+z), four flaps (hinged on its sides along x: +45° square to the
-// flow, -45° folded to the lee) turning with surfaces 1-4 when `moving`, else still at mid travel (riding up the stack, as flown); the booster's vented hot-staging ring
+// flow, -45° folded to the lee) turning with surfaces 1-4 when `moving`, else straight out, square to the hull (riding up the stack, as flown); the booster's vented hot-staging ring
 // and its three grid fins (on their radial spindles, with surfaces 1-3 when `moving`); both vehicles' catch pins.
 inline void put(api::Vector3* o,const Vec& v){put(o,v.x,v.y,v.z);}
 inline void section(api::StageAppearance* a,double from,double to,double r0,double r1,std::uint32_t colour,double tiles){
@@ -132,7 +132,7 @@ inline void shipLook(api::StageAppearance* a,double at,bool moving){
     const double cuts[]{0,.4,1.2,2.5,4,6,8.5,11};for(int i=0;i+1<8;++i)section(a,at+cuts[i],at+cuts[i+1],std::max(r(cuts[i]),.05),r(cuts[i+1]),steel,pi);
     section(a,at+l,at+shipLength,radius,radius,steel,pi);tank(a,at+14,at+48,!moving); // Frosted: full riding on the booster.
     for(const double side:{-1.,1.}){ // Forward flaps on the nose, aft ones by the engines; the left one turns the other way.
-        const unsigned fwd=side<0?1:2,aft=side<0?3:4;const double g=moving?side:0,o=-side*45*deg; // At mid travel (deflection 0): half way from out to folded up to -z.
+        const unsigned fwd=side<0?1:2,aft=side<0?3:4;const double g=moving?side:0,o=moving?-side*45*deg:0.; // Still: straight out (deflection +45°, square to the hull); folded: up to -z.
         // Trapezoids thinning out, their leading edges swept back to a shorter tip, the trailing edges square to the body.
         hinged(a,side<0?"flap forward left":"flap forward right",{at+8,side*r(8),0},{1,0,0},{0,side,0},7,3.4,.35,moving?fwd:0,g,o,steel,false,2.6,2.2,.15);
         hinged(a,side<0?"flap aft left":"flap aft right",{at+44.5,side*radius,0},{1,0,0},{0,side,0},10,5,.4,moving?aft:0,g,o,steel,false,5.5,2.25,.18);
