@@ -250,11 +250,14 @@ message StageDefinition {
 // Its body: frustums along x (a nose as several), each a colour (0xRRGGBB) and an arc of black tiles centred on +z (radians;
 // 0: none). Parts on hinges (flaps, fins): a plate from the hinge line (through hinge_meters along axis, span_meters long)
 // out along `outward` (width_meters, thickness_meters thick), turned about the axis by gain × the deflection of its surface
-// (1-based; 0: fixed) plus offset_radians; grid: a grid fin's lattice, centred on its spindle (the hinge). The engines' bells and plumes and the thrusters' jets
+// (1-based; 0: fixed) plus offset_radians; grid: a grid fin's lattice, centred on its spindle (the hinge). A plate's outer edge,
+// width_meters out: tip_span_meters long along the axis (unset: span_meters), its centre tip_shift_meters along the axis from the
+// hinge's (a swept edge), tip_thickness_meters thick (unset: as at the hinge): a trapezoid tapering out, as flaps are. The engines' bells and plumes and the thrusters' jets
 // come from their definitions.
 message BodySection { double from_meters=1; double to_meters=2; double radius_from_meters=3; double radius_to_meters=4; uint32 color=5; double tiles_radians=6; }
 message HingedPart { string name=1; Vector3 hinge_meters=2; Vector3 axis=3; Vector3 outward=4; double span_meters=5; double width_meters=6; double thickness_meters=7;
-  uint32 surface=8; double gain=9; double offset_radians=10; uint32 color=11; bool grid=12; }
+  uint32 surface=8; double gain=9; double offset_radians=10; uint32 color=11; bool grid=12; optional double tip_span_meters=13; double tip_shift_meters=14;
+  optional double tip_thickness_meters=15; }
 // A propellant tank's span (m aft of the nose): frosted on the outside below the liquid (filled from its aft end by the stage's
 // propellant left, or always when `full`: an upper stage's tanks riding along).
 message Tank { double from_meters=1; double to_meters=2; bool full=3; }

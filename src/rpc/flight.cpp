@@ -383,7 +383,8 @@ struct Slot {
         auto cv=[](const api::Vector3& x){return core::Vector{x.x(),x.y(),x.z()};};auto pv=[](ph::V3 x){return core::Vector{x.x,x.y,x.z};};
         if(r.has_definition()&&stage<r.definition().stages_size()){const auto& a=r.definition().stages(stage).appearance();
             for(const auto& x:a.sections())l->sections.push_back({x.from_meters(),x.to_meters(),x.radius_from_meters(),x.radius_to_meters(),x.color(),x.tiles_radians()});
-            for(const auto& x:a.parts())l->parts.push_back({x.name(),cv(x.hinge_meters()),cv(x.axis()),cv(x.outward()),x.span_meters(),x.width_meters(),x.thickness_meters(),x.gain(),x.offset_radians(),x.surface(),x.color(),x.grid()});
+            for(const auto& x:a.parts()){l->parts.push_back({x.name(),cv(x.hinge_meters()),cv(x.axis()),cv(x.outward()),x.span_meters(),x.width_meters(),x.thickness_meters(),x.gain(),x.offset_radians(),x.surface(),x.color(),x.grid()});
+                auto& q=l->parts.back();if(x.has_tip_span_meters())q.tipSpan=std::clamp(x.tip_span_meters(),0.,1e4);q.tipShift=std::isfinite(x.tip_shift_meters())?std::clamp(x.tip_shift_meters(),-1e4,1e4):0.;if(x.has_tip_thickness_meters())q.tipThickness=std::clamp(x.tip_thickness_meters(),0.,1e3);}
             for(const auto& x:a.tanks())l->tanks.push_back({x.from_meters(),x.to_meters(),x.full()});}
         if(l->sections.empty())l->sections.push_back({0,st.length,v.diameter/2,v.diameter/2,0xe8e8e8,0});
         for(const auto& e:st.engines)l->engines.push_back({pv(e.position),pv(e.direction),std::sqrt(std::max(e.exitArea,.01)/3.14159265358979323846)});

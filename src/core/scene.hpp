@@ -30,7 +30,8 @@ struct Sample {
 // drawn about the stage's middle): its body as frustums (black tiles on an arc centred on +z), parts on hinges turning by a
 // surface's deflection (gain, offset; surface 1-based, 0: fixed), its engines' bells and plumes, its thrusters' jets.
 struct LookSection {double from=0,to=0,radiusFrom=.5,radiusTo=.5;std::uint32_t color=0xd8d8d8;double tiles=0;};
-struct LookPart {std::string name;Vector hinge,axis{1,0,0},outward{0,1,0};double span=1,width=1,thickness=.1,gain=1,offset=0;unsigned surface=0;std::uint32_t color=0x505050;bool grid=false;};
+struct LookPart {std::string name;Vector hinge,axis{1,0,0},outward{0,1,0};double span=1,width=1,thickness=.1,gain=1,offset=0;unsigned surface=0;std::uint32_t color=0x505050;bool grid=false;
+    double tipSpan=-1,tipShift=0,tipThickness=-1;}; // The plate's outer edge: its length along the hinge and its centre's shift along it, its thickness there (negative: as at the hinge).
 struct LookEngine {Vector position,direction{1,0,0};double exitRadius=.5;};
 struct LookThruster {Vector position,direction{1,0,0};};
 struct LookTank {double from=0,to=0;bool full=false;}; // Frosted below its liquid: filled from aft by the stage's fill, or always.

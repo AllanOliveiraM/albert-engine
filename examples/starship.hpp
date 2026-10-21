@@ -122,8 +122,9 @@ inline void put(api::Vector3* o,const Vec& v){put(o,v.x,v.y,v.z);}
 inline void section(api::StageAppearance* a,double from,double to,double r0,double r1,std::uint32_t colour,double tiles){
     auto* x=a->add_sections();x->set_from_meters(from);x->set_to_meters(to);x->set_radius_from_meters(r0);x->set_radius_to_meters(r1);x->set_color(colour);x->set_tiles_radians(tiles);}
 inline void tank(api::StageAppearance* a,double from,double to,bool full){auto* t=a->add_tanks();t->set_from_meters(from);t->set_to_meters(to);t->set_full(full);}
-inline void hinged(api::StageAppearance* a,const char* name,Vec hinge,Vec axis,Vec out,double span,double width,double thick,unsigned surface,double gain,double offset,std::uint32_t colour,bool grid=false){
-    auto* x=a->add_parts();x->set_name(name);put(x->mutable_hinge_meters(),hinge);put(x->mutable_axis(),axis);put(x->mutable_outward(),out);x->set_span_meters(span);x->set_width_meters(width);
+inline void hinged(api::StageAppearance* a,const char* name,Vec hinge,Vec axis,Vec out,double span,double width,double thick,unsigned surface,double gain,double offset,std::uint32_t colour,bool grid=false,
+    double tipSpan=-1,double tipShift=0,double tipThick=-1){ // tip: the plate's outer edge (negative: as at the hinge).
+    auto* x=a->add_parts();if(tipSpan>=0)x->set_tip_span_meters(tipSpan);x->set_tip_shift_meters(tipShift);if(tipThick>=0)x->set_tip_thickness_meters(tipThick);x->set_name(name);put(x->mutable_hinge_meters(),hinge);put(x->mutable_axis(),axis);put(x->mutable_outward(),out);x->set_span_meters(span);x->set_width_meters(width);
     x->set_thickness_meters(thick);x->set_surface(surface);x->set_gain(gain);x->set_offset_radians(offset);x->set_color(colour);x->set_grid(grid);}
 constexpr std::uint32_t steel=0xc9c9c6,shield=0x161616,vents=0x3c3c3c;
 inline void shipLook(api::StageAppearance* a,double at,bool moving){
@@ -132,8 +133,9 @@ inline void shipLook(api::StageAppearance* a,double at,bool moving){
     section(a,at+l,at+shipLength,radius,radius,steel,pi);tank(a,at+14,at+48,!moving); // Frosted: full riding on the booster.
     for(const double side:{-1.,1.}){ // Forward flaps on the nose, aft ones by the engines; the left one turns the other way.
         const unsigned fwd=side<0?1:2,aft=side<0?3:4;const double g=moving?side:0,o=-side*45*deg; // At mid travel (deflection 0): half way from out to folded up to -z.
-        hinged(a,side<0?"flap forward left":"flap forward right",{at+8,side*r(8),0},{1,0,0},{0,side,0},7,3.4,.35,moving?fwd:0,g,o,steel);
-        hinged(a,side<0?"flap aft left":"flap aft right",{at+44.5,side*radius,0},{1,0,0},{0,side,0},10,5,.4,moving?aft:0,g,o,steel);
+        // Trapezoids thinning out, their leading edges swept back to a shorter tip, the trailing edges square to the body.
+        hinged(a,side<0?"flap forward left":"flap forward right",{at+8,side*r(8),0},{1,0,0},{0,side,0},7,3.4,.35,moving?fwd:0,g,o,steel,false,2.6,2.2,.15);
+        hinged(a,side<0?"flap aft left":"flap aft right",{at+44.5,side*radius,0},{1,0,0},{0,side,0},10,5,.4,moving?aft:0,g,o,steel,false,5.5,2.25,.18);
         hinged(a,"pin",{at+shipPinAt,side*radius,0},{0,side,0},{1,0,0},pinOut-radius,1,1,0,0,0,vents);
         hinged(a,"chine",{at+27.5,side*radius,0},{1,0,0},{0,side,0},33,.5,.25,0,0,0,steel);} // Along its sides, tiles to steel.
 }

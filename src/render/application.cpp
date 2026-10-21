@@ -2492,6 +2492,12 @@ int albert::runRenderer(int argc, char** argv) {
 
                 camera->position.add(movement);
                 controls.target.copy(target);
+                // Around a vehicle (anything not a body): orbiting about the local vertical under it, the horizon level, eased in;
+                // about the scene's axis again around the bodies themselves.
+                Vector3 wanted(0,1,0);
+                if(focus.front()!='@'&&!registry.get(focus).builtin){const Vector3 earth=targetFor(targets::Earth),moon=targetFor(targets::Moon); // The nearer body, by its size.
+                    Vector3 away=target;away.sub(target.distanceTo(moon)<.273f*target.distanceTo(earth)?moon:earth);if(away.lengthSq()>0)wanted=away.normalize();}
+                camera->up.lerp(wanted,1.f-std::exp(-4.f*dt)).normalize();
             }
 
             // Damping de rotacao e zoom do mouse

@@ -1,6 +1,7 @@
 #include "vehicle.hpp"
 #include "lighting.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 using namespace threepp;
 namespace albert {
@@ -9,6 +10,16 @@ constexpr float pi=3.14159265358979f;
 // The flight API's body axes (x forward, y right, z down) as the node's local ones (y along the nose, x along body -y).
 Vector3 axisOf(core::Vector v){return {static_cast<float>(-v.y),static_cast<float>(v.x),static_cast<float>(v.z)};}
 std::shared_ptr<Mesh> part(std::shared_ptr<BufferGeometry> g,std::shared_ptr<Material> m){auto x=Mesh::create(std::move(g),std::move(m));x->castShadow=x->receiveShadow=true;return x;}
+// A plate from its hinge (x 0, along z, span long, t thick) out to its tip edge (x w, tip long centred at shift, tt thick): six
+// flat faces, each wound outward.
+std::shared_ptr<BufferGeometry> plate(float w,float t,float span,float tip,float shift,float tt){
+    const Vector3 c[8]{{0,-t/2,-span/2},{0,-t/2,span/2},{0,t/2,span/2},{0,t/2,-span/2},{w,-tt/2,shift-tip/2},{w,-tt/2,shift+tip/2},{w,tt/2,shift+tip/2},{w,tt/2,shift-tip/2}};
+    Vector3 mid;for(const auto& v:c)mid.add(v);mid.multiplyScalar(1.f/8);std::vector<float> p;
+    for(auto q:{std::array<int,4>{0,4,5,1},{3,2,6,7},{0,1,2,3},{4,7,6,5},{0,3,7,4},{1,5,6,2}}){
+        Vector3 a=c[q[1]],b=c[q[2]],f;a.sub(c[q[0]]);b.sub(c[q[0]]);a.cross(b);for(int i:q)f.add(c[i]);f.multiplyScalar(.25f).sub(mid);
+        if(a.dot(f)<0)std::swap(q[1],q[3]);for(int i:{q[0],q[1],q[2],q[0],q[2],q[3]})p.insert(p.end(),{c[i].x,c[i].y,c[i].z});}
+    auto g=BufferGeometry::create();g->setAttribute("position",FloatBufferAttribute::create(std::move(p),3));g->computeVertexNormals();return g;
+}
 std::shared_ptr<ShaderMaterial> plumeMaterial(){ // webgpu_programs "albert:plume": soft, added to what is behind.
     auto m=ShaderMaterial::create();m->name="albert:plume";m->transparent=true;m->depthWrite=false;m->side=Side::Front;m->blending=Blending::Additive;
     m->uniforms={{"core",Uniform(Vector3(1,.75f,.4f))},{"edge",Uniform(Vector3(1,.35f,.08f))},{"strength",Uniform(0.f)},{"diamonds",Uniform(0.f)}};return m;
@@ -37,7 +48,8 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         Vector3 out=axisOf(p.outward);out.sub(Vector3(x.axis).multiplyScalar(out.dot(x.axis)));if(out.lengthSq()<1e-12f)out.set(1,0,0);out.normalize();
         Vector3 normal;normal.crossVectors(x.axis,out);Matrix4 basis;basis.makeBasis(out,normal,x.axis);x.base.setFromRotationMatrix(basis);
         const float w=static_cast<float>(p.width),t=static_cast<float>(p.thickness),span=static_cast<float>(p.span);const auto m=assistedMaterial(Color(p.color),.6f,.45f);
-        if(!p.grid){auto g=BoxGeometry::create(w,t,span);g->translate(w/2,0,0);x.pivot->add(part(g,m));}
+        if(!p.grid){if(p.tipSpan<0&&p.tipShift==0&&p.tipThickness<0){auto g=BoxGeometry::create(w,t,span);g->translate(w/2,0,0);x.pivot->add(part(g,m));}
+            else x.pivot->add(part(plate(w,t,span,static_cast<float>(p.tipSpan<0?p.span:p.tipSpan),static_cast<float>(p.tipShift),static_cast<float>(p.tipThickness<0?p.thickness:p.tipThickness)),m));}
         else for(int i=0;i<=4;++i){auto a=BoxGeometry::create(w,t,span*.03f);a->translate(0,0,span*(i/4.f-.5f));x.pivot->add(part(a,m)); // Centred on its spindle.
             auto b=BoxGeometry::create(w*.03f,t,span);b->translate(w*(i/4.f-.5f),0,0);x.pivot->add(part(b,m));}
         root_->add(x.pivot);parts_.push_back(std::move(x));
