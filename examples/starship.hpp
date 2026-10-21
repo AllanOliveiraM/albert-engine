@@ -491,6 +491,7 @@ protected:
     // The hover's velocity loop at the attitude's bandwidth over this: half (its slow motion over the arms leaves the attitude
     // loop the room a third gives a moving vehicle; the landing bench's sweep: 8 m/s of wind across caught at 2, not at 3).
     double hoverSplit=2;
+    bool holdAlong=false; // Hovering within 3 m of the axis along the arms: held there, only centred across them (the booster's).
     double corridor=15,towerTop=146,armTop=.25; // towerTop: over its base; armTop: the arms' rails over their height (m).
     // Over the axis, its pins over the arms and still: ready to go down onto them (across the rails within 0.1 m, the pins then
     // in the grooves between each rail's bars, inside their crests 0.2 m out; along them within 4 m: they are 20 m long).
@@ -509,7 +510,7 @@ protected:
         // clear of the tower. Going down onto them, along the rails (20 m: anywhere on them will do) held where it is: still
         // along them as the pins land, nothing to swing on them after.
         const double above=cg(s.propellant)-pin_,lever=std::max(length_-cg(s.propellant),1.);const Vec tilt=s.toBody.r1*offset.y+s.toBody.r2*offset.z;
-        Vec at=flat+push_*(-above/std::max(norm(gravity(s.position)),1.))+(tilt+up_*-dot(tilt,up_))*(above/lever);if(descend){const Vec east=cross(north_,up_);at=at+east*-dot(at,east);}
+        Vec at=flat+push_*(-above/std::max(norm(gravity(s.position)),1.))+(tilt+up_*-dot(tilt,up_))*(above/lever);if(const Vec east=cross(north_,up_);descend||(holdAlong&&std::abs(dot(at,east))<3))at=at+east*-dot(at,east); // holdAlong: within 3 m of the axis along them, held there too: only centred across.
         // And a slow integral of how far it sits off that point (10 s against the position loop's own gain, 0.375 kv²; at most
         // 0.5 m/s² of push): the steady error a lag or an unmodelled push leaves (a PD attitude loop under the wind's moment on the
         // hull leans the thrust a little short of what is asked). Begun afresh each time it comes over the arms.
@@ -565,7 +566,7 @@ class BoosterReturn:public TowerApproach {
 public:
     enum class Phase {wait,flip,boostback,coast,landing,final,hover,descend,caught,divert,down};
     BoosterReturn(Vec site,double latitude,double longitude,double arms,double rest)
-        :TowerApproach(site,latitude,longitude,arms,rest,boosterLength,pinAt,combine(booster(true)),combine(booster(false)),boosterPropellant){hoverAbove=4;}
+        :TowerApproach(site,latitude,longitude,arms,rest,boosterLength,pinAt,combine(booster(true)),combine(booster(false)),boosterPropellant){hoverAbove=4;holdAlong=true;}
     Phase phase()const{return phase_;}
     double predicted()const{return miss_;}  // The latest predicted landing's distance from where it is aimed (m).
     const char* gaveUp()const{return why_;} // Why the catch was given up (null while it is on).
@@ -601,7 +602,7 @@ public:
             if(dot(e,back_)>=0||s.propellant<120e3){set_.use(c,s,0);phase_=Phase::coast;if(dot(e,back_)<-2e3)giveUp(s,"boostback incompleto: o pouso cai antes da costa");}break;}
         case Phase::coast:{ // Engines first through the descent: held by the RCS above the air, then the grid fins tilt the body so its
             // crossflow lift (away from the nose's tilt) carries the impact onto the aim; the landing burn when the stop needs it.
-            if(catch_&&over<divert)aim_=east_*corridor; // Low enough: the fins carry it from off the coast onto the approach.
+            if(catch_&&over<divert)aim_=east_*front; // Low enough: the fins carry it from off the coast onto the approach.
             if(age_--<=0){aimed_=landing(s,&seconds_);age_=25;miss_=norm(aimed_);if(over<15e3&&reach(s)>3e3)giveUp(s,"pouso previsto fora do alcance da torre");}
             const Vec e=aimed_;const double seconds=seconds_;const Vec vhat=unit(s.velocity);
             if(s.q<2e3){hold(c,s,entry(s));pointed_=bodyX(s);} // The fins take it over from where the RCS holds it.
@@ -639,7 +640,7 @@ public:
                     fly(r,v,s.mass,a,.1,[&]{++n;return -dot(v,up_)<=gateSpeed||dot(r+site_*-1,up_)<aim;},.85,3*std::max(a-g0,1.));end=r;u=v;secs=.1*n;return dot(r+site_*-1,up_);};
                 Vec e1,e2,u1,u2;double t1=0,t2=0;const double h1=run(a1,e1,u1,t1),h2=run(a2,e2,u2,t2),f=h1>h2+1e-3?(aim-h2)/(h1-h2):1,g=std::clamp(f,0.,2.);
                 accel_=std::clamp(a2+(a1-a2)*f,.4*most,most);const Vec end=e2+(e1+e2*-1.)*g,rel=end+site_*-1,u=u2+(u1+u2*-1.)*g;
-                gated_=rel+up_*-dot(rel,up_)+(catch_?east_*corridor:aim_)*-1.;gatedV_=u+up_*-dot(u,up_);tgo_=std::max(t2+(t1-t2)*g,2.);}
+                gated_=rel+up_*-dot(rel,up_)+(catch_?east_*front:aim_)*-1.;gatedV_=u+up_*-dot(u,up_);tgo_=std::max(t2+(t1-t2)*g,2.);}
             // Leaning the thrust off retrograde by α pushes across by about (T - N) α, N the body's normal force a radian (normalForce
             // q S): thrust-steered (toward the push) once T > N, body-steered (away from it, within the tables' first 10°) while the
             // air is thick. The push a radian as measured (the IMU's force across the flow over the angle of attack held), once
@@ -668,10 +669,17 @@ public:
             // gives, within the hull's swing clear of the tower, its velocity loop's lag allowed for), at most 8 m/s and kv/2 of the
             // distance a second, that speed's error at kv, a third of the attitude's bandwidth. Well below the height that clears
             // what is around it: held where it is while it climbs.
+            // On the arms' line or in their V, going for the axis: along the line the velocity loop onto it (onto(): closing no
+            // faster than it can still brake there, its attitude's lag allowed for, at most 8 m/s); across it, onto the line with
+            // no speed across on arrival (-6 n/T² - 4 v/T, T the time its fall takes to the hover point at the braking it flies),
+            // solved again every cycle: it slides in from the front of the V as the real catches do, centred between the rails.
             const double kv=std::min(.6,bandwidth(s)/3);Vec side;
-            if(above<-5)side=across*-std::max(kv,.4);else side=onto(s,to,kv,8,20*deg);
+            const bool line=catch_&&(std::abs(dot(flat,north_))<=4||in_);const double T=std::max(2*std::max(above,0.)/std::max(1-vz,1.),std::sqrt(6.)*3/bandwidth(s)); // At least what keeps it within a third of its attitude's bandwidth.
+            if(above<-5)side=across*-std::max(kv,.4);
+            else if(line){const double n=dot(to,north_),vn=dot(across,north_);side=onto(s,to+north_*-n,kv,8,20*deg);side=side+north_*(-dot(side,north_)-6*n/(T*T)-4*vn/T);}
+            else side=onto(s,to,kv,8,20*deg);
             side=side+push_*-1.;{const double most=limit*std::tan(lean(s,flat,side,20*deg))/std::tan(20*deg);if(norm(side)>most)side=side*(most/norm(side));} // The observer's push netted.
-            count(c,s,thrust(c,s,up_*up+side));close_=catch_&&centred(s,flat);
+            count(c,s,thrust(c,s,up_*up+side),set_.count());close_=catch_&&centred(s,flat); // On the 3 it took over with: none put out on the way in.
             if(catch_&&above<1&&norm(flat)<3)phase_=Phase::hover;
             else if(!catch_&&(norm(s.contact)>0||above<.3)){set_.use(c,s,0);phase_=Phase::down;}
             break;}
@@ -691,7 +699,7 @@ public:
                 // least, engines out until that is under 70% of it), held upright; caught after 0.3 s.
                 hang(c,s,&set_);c.throttle=.4;if(set_.count()>1&&set_.count()*.4*raptorSea>.7*s.mass*g0)set_.use(c,s,set_.count()-1);
                 if(touch_<0)touch_=t;if(t-touch_>=.3){phase_=Phase::caught;caught_=t;}break;}
-            touch_=-1;count(c,s,overArms(c,s,flat,over,phase_==Phase::descend,std::max(set_.count(),1),set_.centre(),&set_,hurry_?2:1));
+            touch_=-1;count(c,s,overArms(c,s,flat,over,phase_==Phase::descend,std::max(set_.count(),1),set_.centre(),&set_,hurry_?2:1),set_.count()); // None put out over the arms: a cutoff there kicks it across (its thrust's centre jumps); the throttle does it.
             break;
         case Phase::caught: // On the arms, the engines at their least while they take the load, the thrust's line through the pins
             // until it hangs still (or 15 s: its rocking about the pins is hardly damped once they are off), then off; slipping off
@@ -747,7 +755,9 @@ public:
     // The boostback and the fall aim this far east of the tower (over the sea, away from the tower's side), the landing
     // burn then bringing it onto the arms' axis from there while still high (m); without the catch, onto the sea this far east.
     // divert: the height (m) below which the fins carry it from there onto the approach point.
-    double offshore=300,sea=1500,divert=30e3;
+    // front: the landing burn's point that far east of the axis, in front of the arms' V: the final approach slides in from there
+    // as the real catches do (Flight 5's: down outside the tips, then in across them).
+    double offshore=300,sea=1500,divert=30e3,front=40;
 private:
     // Gives the catch up for good: the arms stay open, the aim goes out to sea (from west of the tower, inland away from it, north
     // of the tank farm); from low (the last of the landing burn, over the arms), away from the tower at once.
@@ -788,7 +798,7 @@ private:
     double top(const State& s)const{return catch_?catchHeight(s)+hoverAbove:stand(s);} // The height (over the site) the burns stop at.
     Vec goal(Vec flat)const{return catch_?approach(flat):flat+aim_*-1.;} // From the point it is going for to it.
     // The predicted landing's distance from the approach point (m): what the landing burn would have to divert.
-    double reach(const State&)const{return norm(aimed_+aim_+cross(north_,up_)*-corridor);}
+    double reach(const State&)const{return norm(aimed_+aim_+cross(north_,up_)*-front);}
     // Whether braking now straight up on `engines` working engines (of the 13 by default) at full stops the fall above `top` m
     // over the site (the drag as predicted, two thirds of it: on the safe side); dry: only while what is left lasts at their flow.
     bool stops(const State& s,double top,int engines=-1,bool dry=false)const{
