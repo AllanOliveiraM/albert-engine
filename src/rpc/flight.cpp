@@ -92,6 +92,7 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
         for(const auto& e:sd.engines()){st.engines.push_back({e.name().substr(0,128),get(e.position_meters()),e.has_direction()?get(e.direction()):ph::V3{1,0,0},e.vacuum_thrust_newtons(),
             e.exhaust_velocity_meters_per_second(),e.exit_area_meters2(),e.has_min_throttle()?e.min_throttle():1.,e.gimbal_radians(),e.gimbal_rate_radians_per_second()});
             st.engines.back().start=e.start_kilograms();if(!(st.engines.back().start>=0&&finite(st.engines.back().start)))throw std::invalid_argument("Invalid engine start cost");
+            st.engines.back().relight=e.relight_seconds();st.engines.back().starts=e.max_starts();if(!(e.relight_seconds()>=0&&e.relight_seconds()<=1e6))throw std::invalid_argument("Invalid engine relight time");
             if(e.air_breathing()){auto& x=st.engines.back();x.breathing=true;x.thrustTable=jetTable(e.thrust_table(),"jet thrust");x.fuelTable=jetTable(e.fuel_table(),"jet fuel");x.spool=e.spool_seconds();}
             else st.engines.back().spool=e.spool_seconds();} // A rocket's start transient.
         for(const auto& h:sd.hard_points_meters())st.hardPoints.push_back(get(h));
@@ -133,7 +134,7 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
         auto engines=st.engines;if(engines.empty()&&st.thrust>0)engines.push_back({st.name,{st.nozzle,0,0},{1,0,0},st.thrust,st.exhaust,st.exitArea,st.minThrottle,st.gimbal,0}); // The shorthand, as the core reads it.
         for(const auto& e:engines){auto* x=d->add_engines();x->set_name(e.name);put(e.position,x->mutable_position_meters());put(e.direction,x->mutable_direction());x->set_vacuum_thrust_newtons(e.thrust);
             x->set_exhaust_velocity_meters_per_second(e.exhaust);x->set_exit_area_meters2(e.exitArea);x->set_min_throttle(e.minThrottle);x->set_gimbal_radians(e.gimbal);x->set_gimbal_rate_radians_per_second(e.gimbalRate);
-            x->set_start_kilograms(e.start);
+            x->set_start_kilograms(e.start);x->set_relight_seconds(e.relight);x->set_max_starts(e.starts);
             if(e.spool>0)x->set_spool_seconds(e.spool);
             if(e.breathing){x->set_air_breathing(true);x->set_spool_seconds(e.spool);for(const auto& [t,o]:{std::pair{&e.thrustTable,x->mutable_thrust_table()},std::pair{&e.fuelTable,x->mutable_fuel_table()}}){
                 for(double m:t->mach)o->add_mach(m);for(double a:t->angle)o->add_altitude_km(a);for(double v:t->values)o->add_values(v);}}}
@@ -615,7 +616,7 @@ struct Slot {
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         {const auto thrust=flight->engineThrust();const auto& es=v.stages[static_cast<std::size_t>(s.stage)].engines;
          for(std::size_t i=0;i<es.size();++i){const auto& e=flight->engines()[i];auto* x=o->add_engines();x->set_name(es[i].name);x->set_on((e.on&&s.burning)||(e.silent&&e.claims));x->set_failed(e.failed&&!e.silent);x->set_throttle(e.throttle);
-            x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);x->set_spool(e.spool);}
+            x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);x->set_spool(e.spool);x->set_ready(flight->ready(i));}
          const auto& fs=v.stages[static_cast<std::size_t>(s.stage)].surfaces;
          for(std::size_t i=0;i<fs.size();++i){auto* x=o->add_surfaces();x->set_name(fs[i].name);x->set_deflection_radians(flight->surfaces()[i].deflection);x->set_command_radians(flight->surfaces()[i].target);}
          for(double u:flight->thrusters())o->add_thruster_duty(u);

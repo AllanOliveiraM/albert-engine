@@ -438,7 +438,7 @@ void Flight::ignite(int engine){
     if(engines_.empty())throw std::logic_error("Stage has no engine");
     const Stage& st=vehicle_.stages[s_.stage];if(!(s_.propellant>st.residual))throw std::logic_error("Stage has no propellant");
     if(s_.landed)throw std::logic_error("Vehicle has landed");
-    auto start=[&](std::size_t i){if(!engines_[i].on)s_.propellant=std::max(st.residual,s_.propellant-st.engines[i].start);engines_[i].on=true;}; // Spinning it up costs propellant.
+    auto start=[&](std::size_t i){if(!engines_[i].on){if(!ready(i))return;s_.propellant=std::max(st.residual,s_.propellant-st.engines[i].start);++engines_[i].started;}engines_[i].on=true;}; // Spinning it up costs propellant; one not ready stays off.
     // A silent failure takes the command as a healthy engine would (it says it is lit) and gives nothing.
     if(engine>=0){const std::size_t i=pick(engine,engines_.size());auto& e=engines_[i];if(e.failed&&!e.silent)throw std::logic_error("Engine has failed");if(e.failed)e.claims=true;else start(i);}
     else{bool any=false;for(std::size_t i=0;i<engines_.size();++i){auto& e=engines_[i];if(!e.failed)start(i);else e.claims=e.silent;any=any||!e.failed||e.silent;}
@@ -446,8 +446,13 @@ void Flight::ignite(int engine){
     s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& e){return e.on;});
 }
 void Flight::cutoff(int engine){
-    if(engine>=0){auto& e=engines_[pick(engine,engines_.size())];e.on=e.claims=false;}else for(auto& e:engines_)e.on=e.claims=false;
+    auto stop=[&](EngineState& e){if(e.on){e.stopped=true;e.offAt=s_.time;}e.on=e.claims=false;};
+    if(engine>=0)stop(engines_[pick(engine,engines_.size())]);else for(auto& e:engines_)stop(e);
     s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& e){return e.on;});
+}
+bool Flight::ready(std::size_t i)const{
+    const auto& e=engines_.at(i);const auto& d=vehicle_.stages[s_.stage].engines[i];
+    return !e.failed&&(d.starts==0||e.started<d.starts)&&(d.relight<=0||!e.stopped||secondsSinceJ2000(s_.time-e.offAt)>=d.relight);
 }
 void Flight::stick(int engine){if(engine>=0)engines_[pick(engine,engines_.size())].stuck=true;else for(auto& e:engines_)e.stuck=true;}
 void Flight::stickSurface(int index){if(index>=0)surfaces_[pick(index,surfaces_.size())].stuck=true;else for(auto& f:surfaces_)f.stuck=true;}
@@ -633,7 +638,7 @@ std::uint64_t Flight::hash()const{
     const double d[]{s_.position.x,s_.position.y,s_.position.z,s_.velocity.x,s_.velocity.y,s_.velocity.z,s_.attitude.w,s_.attitude.x,s_.attitude.y,s_.attitude.z,
         s_.rate.x,s_.rate.y,s_.rate.z,s_.propellant,s_.heatLoad,s_.throttle,s_.gimbalPitch,s_.gimbalYaw,s_.torque.x,s_.torque.y,s_.torque.z,padPosition_.x,padPosition_.y,padPosition_.z};
     mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const double pad[]{padAttitude_.w,padAttitude_.x,padAttitude_.y,padAttitude_.z};mix(pad,sizeof pad);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
-    for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed,e.silent,e.claims,e.stuck};mix(x,sizeof x);mix(b,sizeof b);}
+    for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed,e.silent,e.claims,e.stuck,e.stopped,static_cast<int>(e.started)};mix(x,sizeof x);mix(b,sizeof b);mix(&e.offAt,sizeof e.offAt);}
     for(const auto& x:structures_){const double a[]{x.angle,x.target};mix(a,sizeof a);}
     {const int why=static_cast<int>(broken_);mix(&why,sizeof why);mix(&brokenAt_,sizeof brokenAt_);mix(&brokenSpeed_,sizeof brokenSpeed_);mix(&s_.gas,sizeof s_.gas);}
     for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);const int k=f.stuck;mix(&k,sizeof k);}for(double u:duty_)mix(&u,8);for(std::size_t i=0;i<open_.size();++i){mix(&credit_[i],8);mix(&until_[i],sizeof until_[i]);const int o=open_[i];mix(&o,sizeof o);}

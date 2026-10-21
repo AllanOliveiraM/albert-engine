@@ -43,6 +43,7 @@ struct Thruster {std::string name;V3 position,direction{1,0,0};double thrust=0,e
 // falls by the ambient pressure on it); deepest throttle; gimbal limit (rad, pitch about body y, yaw about body z) and the
 // actuators' rate (rad/s, 0: instant).
 struct Engine {std::string name;V3 position,direction{1,0,0};double thrust=0,exhaust=0,exitArea=0,minThrottle=1,gimbal=0,gimbalRate=0,start=0; // start: kg an ignition costs.
+    double relight=0;unsigned starts=0; // relight: s it stays off before it can start again (0: at once); starts: most ignitions a flight (0: any).
     // Air-breathing (a jet): thrust at full throttle and fuel per newton-second (kg/N/s) from tables of Mach and altitude (km,
     // the tables' angle axis), none without air; the spool follows the throttle with this time constant (s). thrust, exhaust
     // and exitArea are then unused.
@@ -188,7 +189,7 @@ public:
     // Each engine of the stage: on, failed, throttle, gimbal as moved (rad) and as commanded.
     // spool: a jet's (0-1), a rocket's start (0-1); silent: failed, reported healthy; claims: what a silent one says it is
     // doing (lit as commanded); stuck: its gimbal frozen where it is.
-    struct EngineState {bool on=false,failed=false;double throttle=1,pitch=0,yaw=0,targetPitch=0,targetYaw=0,spool=0;bool silent=false,claims=false,stuck=false;};
+    struct EngineState {bool on=false,failed=false;double throttle=1,pitch=0,yaw=0,targetPitch=0,targetYaw=0,spool=0;bool silent=false,claims=false,stuck=false;bool stopped=false;Tt offAt=0;unsigned started=0;}; // stopped: cut off once (offAt then).
     const std::vector<EngineState>& engines()const{return engines_;}
     struct SurfaceState {double deflection=0,target=0;bool stuck=false;}; // stuck: frozen where it is.
     const std::vector<SurfaceState>& surfaces()const{return surfaces_;}
@@ -196,6 +197,7 @@ public:
     const std::vector<StructureState>& structures()const{return structures_;} // By Environment::structures (fixed ones at 0).
     const std::vector<double>& thrusters()const{return duty_;} // Duty cycles.
     std::vector<double> firing()const; // Each thruster's jet now: its valve (1 open, 0 shut) when it pulses, else its duty.
+    bool ready(std::size_t engine)const; // Engine `engine` (0-based) could be lit now: working, starts left, off long enough.
     const std::vector<double>& temperatures()const{return temperatures_;} // Thermal nodes (K), the stage's.
     // A breakup: why (none; the hull struck the ground or a structure; a thermal node past its failure), when and how fast the
     // strike was (m/s). From then on the engines are out and commands do nothing: the pieces fall as the stage did.
