@@ -6,6 +6,9 @@
 #include "core/time.hpp"
 #include <curl/curl.h>
 #include <algorithm>
+#include <atomic>
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -89,6 +92,7 @@ std::string horizonsURL(const Query& request){
 struct Horizons::Impl {
     struct Entry {Table table;double fetchedMono,lastUse,ttl;};
     std::filesystem::path directory;Transport transport;Now utcNow,monotonicNow;std::mutex mutex;std::map<std::string,Entry> cache;
+    std::atomic<double> offlineUntil{-1}; // Monotonic: Horizons out of reach until then (a minute after a failed request).
     explicit Impl(Transport value,Now utc,Now mono,std::filesystem::path path):directory(std::move(path)),transport(std::move(value)),utcNow(std::move(utc)),monotonicNow(std::move(mono)){
         if(curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK)throw std::runtime_error("Horizons HTTP initialization failed");
         if(!utcNow)utcNow=[](){return time::clock().utcSeconds();};
@@ -97,6 +101,25 @@ struct Horizons::Impl {
     }
     ~Impl(){curl_global_cleanup();}
 };
+// Out of reach: the request's body and centre from any table kept on disk, whatever its step (the cache's files read for their
+// identity), that covers its interval, else at least the instant now; the finest such (the app runs on what it has while
+// Horizons is down).
+std::optional<Table> kept(const std::filesystem::path& directory,const Query& request,double now){
+    const std::string prefix=(request.comet.empty()?std::to_string(request.target):command(request))+"/"+request.center+"/",suffix="/ICRF-KM-S-TDB-NONE-v1";
+    std::optional<Table> best;bool bestFull=false;double bestStep=1e300;std::error_code ec;
+    for(std::filesystem::directory_iterator it(directory,ec),end;it!=end&&!ec;it.increment(ec))if(it->path().extension()==".json"&&it->is_regular_file(ec))try{
+        std::string identity;{std::ifstream file(it->path(),std::ios::binary);identity=nlohmann::json::parse(file).at("identity").get<std::string>();}
+        if(identity.rfind(prefix,0)!=0||identity.size()<prefix.size()+suffix.size()||identity.compare(identity.size()-suffix.size(),suffix.size(),suffix)!=0)continue;
+        const std::string step=identity.substr(prefix.size(),identity.size()-prefix.size()-suffix.size());
+        if(auto saved=loadResponse(directory,identity,4*1024*1024)){
+            auto points=parseVectors(saved->payload);if(points.size()<2)continue;const double t=astro::utcToTdb(now),seconds=stepSeconds(step);
+            const bool full=points.front().jdTDB<=astro::utcToTdb(request.startUtc)+1e-7&&points.back().jdTDB>=astro::utcToTdb(request.endUtc)-1e-7;
+            if(!full&&!(points.front().jdTDB<=t&&points.back().jdTDB>=t))continue;
+            if(best&&((bestFull&&!full)||(bestFull==full&&seconds>=bestStep)))continue;
+            best=Table{std::move(points),saved->fetchedUtc,true,"NASA/JPL Horizons (disk cache, offline)"};bestFull=full;bestStep=seconds;}
+    }catch(const std::exception&){}
+    return best;
+}
 Horizons::Horizons(Transport value,Now utc,Now mono,std::filesystem::path path):impl_(std::make_unique<Impl>(std::move(value),std::move(utc),std::move(mono),std::move(path))){}
 Horizons::~Horizons()=default;
 Table Horizons::query(Query request,DownloadProgress* progress){
@@ -114,7 +137,12 @@ Table Horizons::query(Query request,DownloadProgress* progress){
         const bool current=points.front().jdTDB<=now&&points.back().jdTDB>=now+30./86400.;
         if(age>=-30&&((age<=ttl&&full)||(request.bootstrapCache&&age<=86400.&&current)))return {std::move(points),saved->fetchedUtc,true,"NASA/JPL Horizons (disk cache)"};
     }catch(const std::exception&){}
-    const auto response=impl_->transport(key,progress);auto points=parseVectors(response);
+    std::string response;
+    if(impl_->monotonicNow()<impl_->offlineUntil){if(auto value=kept(impl_->directory,request,impl_->utcNow()))return *value;}
+    try{response=impl_->transport(key,progress);}
+    catch(const std::exception&){if(progress)progress->checkCancelled();impl_->offlineUntil=impl_->monotonicNow()+60;
+        if(auto value=kept(impl_->directory,request,impl_->utcNow()))return *value;throw;}
+    impl_->offlineUntil=-1;auto points=parseVectors(response);
     const double start=astro::utcToTdb(request.startUtc),end=astro::utcToTdb(request.endUtc);
     if(points.front().jdTDB>start+1e-7||points.back().jdTDB<end-1e-7)throw std::runtime_error("Horizons table does not cover requested interval");
     Table result{std::move(points),impl_->utcNow(),false,"NASA/JPL Horizons"};
