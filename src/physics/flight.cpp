@@ -206,7 +206,7 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     const Geodetic geo=geodetic(env_.planet,rf);const M3 ned=nedFromFixed(geo.latitude,geo.longitude);
     Air atm=!env_.atmosphere?Air{}:env_.air?env_.air->at(s.time,geo.latitude,geo.longitude,geo.height):climatology(env_.center,geo.height);
     if(!env_.wind)atm.wind={}; // Air at rest with the ground.
-    if(atm.density>0)atm.wind+=gustNed_; // Turbulence over the step (none in vacuum).
+    if(atm.density>0)atm.wind+=gustNed_+wind_; // Turbulence over the step and the added wind (none in vacuum).
     const V3 relative=s.velocity-cross(o.omega,s.position),air=bt*(relative-back*(transpose(ned)*atm.wind));const double speed=norm(air);
     const double q=.5*atm.density*speed*speed,mach=atm.sound>0?speed/atm.sound:0.;
     const double alpha=speed>0?std::atan2(air.z,air.x):0.,beta=speed>0?std::asin(std::clamp(air.y/speed,-1.,1.)):0.;
@@ -314,7 +314,8 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     double gas=0; // The thrusters' own gas when the stage has a supply, else they burn its propellant.
     if(st.gas>0?s.gas>0:s.propellant>0)for(std::size_t i=0;i<st.rcs.size();++i)if(duty_[i]>0){const Thruster& t=st.rcs[i];const V3 f=t.direction*(duty_[i]*t.thrust);fr+=f;mr+=cross(V3{ms.cg-t.position.x,t.position.y,t.position.z},f);
         (st.gas>0?gas:flow)+=duty_[i]*t.thrust/t.exhaust;}
-    const V3 force=fa+ft+fs+fc+fr,moment=ma+mt+mc+mr+V3{std::clamp(s.torque.x,-lim,lim),std::clamp(s.torque.y,-lim,lim),std::clamp(s.torque.z,-lim,lim)};
+    const V3 fx=push_.x!=0||push_.y!=0||push_.z!=0?bt*(back*(transpose(ned)*push_)):V3{}; // The outside force.
+    const V3 force=fa+ft+fs+fc+fr+fx,moment=ma+mt+mc+mr+V3{std::clamp(s.torque.x,-lim,lim),std::clamp(s.torque.y,-lim,lim),std::clamp(s.torque.z,-lim,lim)};
     // d(Iω)/dt with the propellant's inertia loss; the exhaust carries transverse angular
     // momentum ṁ l² ω through the nozzle (jet damping).
     const V3 iw{ms.inertia.x*s.rate.x,ms.inertia.y*s.rate.y,ms.inertia.z*s.rate.z};V3 rhs=moment-cross(s.rate,iw);
@@ -368,7 +369,7 @@ Tt Flight::advance(Tt dt){
         Tt h=left;bool depleted=false;const double flow=massFlow();
         if(step_>0){
             Tt limit=step_;
-            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&!s_.contact&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0&&std::all_of(duty_.begin(),duty_.end(),[](double d){return d==0;})){ // Ballistic, torque-free, above the atmosphere and the ground.
+            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&!s_.contact&&push_.x==0&&push_.y==0&&push_.z==0&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0&&std::all_of(duty_.begin(),duty_.end(),[](double d){return d==0;})){ // Ballistic, torque-free, above the atmosphere and the ground.
                 const double speed=norm(s_.velocity),spin=norm(s_.rate),c=secondsSinceJ2000(coast_),h=geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height;
                 const double r=norm(s_.position),fall=.5*env_.planet.gm/(r*r)*c*c; // Gravity can close the gap as fast as speed.
                 if(h>airTop(env_.center)+speed*c&&!(h-env_.ground<=speed*c+fall+vehicle_.stages[s_.stage].length))
@@ -443,7 +444,8 @@ void Flight::cutoff(int engine){
     if(engine>=0)engines_[pick(engine,engines_.size())].on=false;else for(auto& e:engines_)e.on=false;
     s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& e){return e.on;});
 }
-void Flight::fail(int engine){auto& e=engines_[pick(engine,engines_.size())];e.failed=true;e.on=false;s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& x){return x.on;});}
+void Flight::terminate(){if(broken_==Breakup::none)breakUp(Breakup::terminated,norm(s_.velocity));}
+void Flight::fail(int engine,bool silent){auto& e=engines_[pick(engine,engines_.size())];e.failed=true;e.silent=silent;e.on=false;s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& x){return x.on;});}
 void Flight::slew(double seconds){
     const auto& st=vehicle_.stages[s_.stage];const auto& es=st.engines;
     for(std::size_t i=0;i<engines_.size();++i){auto& e=engines_[i];const double step=es[i].gimbalRate*seconds;
@@ -615,7 +617,7 @@ std::uint64_t Flight::hash()const{
     for(const auto& x:structures_){const double a[]{x.angle,x.target};mix(a,sizeof a);}
     {const int why=static_cast<int>(broken_);mix(&why,sizeof why);mix(&brokenAt_,sizeof brokenAt_);mix(&brokenSpeed_,sizeof brokenSpeed_);mix(&s_.gas,sizeof s_.gas);}
     for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);}for(double u:duty_)mix(&u,8);
-    {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z};mix(t,sizeof t);}for(double t:temperatures_)mix(&t,8);for(const auto& w:wheels_){mix(&w.brake,8);mix(&w.steer,8);}
+    {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z,wind_.x,wind_.y,wind_.z,push_.x,push_.y,push_.z};mix(t,sizeof t);}for(double t:temperatures_)mix(&t,8);for(const auto& w:wheels_){mix(&w.brake,8);mix(&w.steer,8);}
     for(const auto& e:engines_)mix(&e.spool,8);
     return h;
 }

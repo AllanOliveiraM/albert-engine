@@ -165,17 +165,25 @@ public:
     Tt advance(Tt dt);
     void steps(Tt fixed,Tt coast=0){step_=fixed;coast_=coast;}
     // Engine commands: engine -1 for every engine of the stage, else its index. A failed engine stays off (engine out).
-    void ignite(int engine=-1);void cutoff(int engine=-1);void fail(int engine);void separate();void release();
+    // silent: it fails but reports itself healthy (its thrust drops all the same).
+    void ignite(int engine=-1);void cutoff(int engine=-1);void fail(int engine,bool silent=false);void separate();void release();
     void throttle(double t,int engine=-1);void gimbal(double pitch,double yaw,int engine=-1);void torque(V3 t);
     void surface(double deflection,int index=-1); // rad, clamped to each surface's limit; reached at its rate.
     void thruster(double duty,int index=-1);      // A thruster's duty cycle (0-1) directly, until the next torque command.
     void brake(double fraction,int index=-1);     // Wheel brakes, 0-1.
     void steer(double angle,int index=-1);        // Wheel steering (rad), clamped to each wheel's limit.
     void swing(double angle,int index=-1);        // A hinged structure's angle (rad), clamped to its range; reached at its rate.
+    // Interference, until changed: wind added to the weather's at the vehicle (NED, m/s; in air only); an outside force on it
+    // (NED, N, at the centre of mass: what its accelerometers feel). terminate: the flight termination system (breaks it up).
+    void gust(V3 ned){wind_=ned;}
+    void push(V3 ned){push_=ned;}
+    void terminate();
+    V3 gust()const{return wind_;}
+    V3 push()const{return push_;}
     struct WheelState {double brake=0,steer=0;};
     const std::vector<WheelState>& wheels()const{return wheels_;}
     // Each engine of the stage: on, failed, throttle, gimbal as moved (rad) and as commanded.
-    struct EngineState {bool on=false,failed=false;double throttle=1,pitch=0,yaw=0,targetPitch=0,targetYaw=0,spool=0;}; // spool: a jet's (0-1).
+    struct EngineState {bool on=false,failed=false;double throttle=1,pitch=0,yaw=0,targetPitch=0,targetYaw=0,spool=0;bool silent=false;}; // spool: a jet's (0-1); silent: failed, reported healthy.
     const std::vector<EngineState>& engines()const{return engines_;}
     struct SurfaceState {double deflection=0,target=0;};
     const std::vector<SurfaceState>& surfaces()const{return surfaces_;}
@@ -185,7 +193,7 @@ public:
     const std::vector<double>& temperatures()const{return temperatures_;} // Thermal nodes (K), the stage's.
     // A breakup: why (none; the hull struck the ground or a structure; a thermal node past its failure), when and how fast the
     // strike was (m/s). From then on the engines are out and commands do nothing: the pieces fall as the stage did.
-    enum class Breakup {none,ground,structure,heat};
+    enum class Breakup {none,ground,structure,heat,terminated};
     Breakup breakup()const{return broken_;}
     Tt breakupTime()const{return brokenAt_;}
     double breakupSpeed()const{return brokenSpeed_;}
@@ -210,7 +218,7 @@ private:
     V3 sun(Tt t)const; // Relative to the centre, from the third-body cache.
     double bodies(Tt t)const;
     void slew(double seconds); // Gimbals toward their commands at their rates; the gusts advance.
-    Turbulence turbulence_;V3 gustNed_; // The gust over the step (NED, m/s).
+    Turbulence turbulence_;V3 gustNed_,wind_,push_; // The gust over the step, the added wind (NED, m/s), the outside force (NED, N).
     double flowOf(std::size_t i)const; // Engine i's propellant flow (kg/s).
     void allocate(); // Thruster duties for the torque command.
     Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_;std::vector<WheelState> wheels_;

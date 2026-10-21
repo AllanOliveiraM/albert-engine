@@ -196,6 +196,8 @@ Server::Server(core::Bridge& bridge,unsigned port,catalog::Manager* catalog,AirS
 unsigned Server::port() const{return static_cast<unsigned>(impl_->port);}
 std::vector<FlightServices::Sound> Server::flightSounds()const{return impl_->flights.sounds();}
 std::vector<FlightServices::Gauge> Server::flightGauges()const{return impl_->flights.gauges();}
+void Server::inject(const std::string& id,const ::albert::v1::FlightCommand& c){impl_->flights.inject(id,c);}
+std::vector<std::string> Server::flights()const{return impl_->flights.flights();}
 void Server::physicsDefaults(const ::albert::v1::PhysicsSettings& d){impl_->flights.physicsDefaults(d);}
 Server::~Server(){impl_->bridge.close();impl_->server->Shutdown(std::chrono::system_clock::now()+std::chrono::seconds(1));}
 }

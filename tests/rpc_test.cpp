@@ -138,6 +138,24 @@ int main(int argc,char** argv){try{
         {grpc::ClientContext c;c.set_deadline(std::chrono::system_clock::now()+std::chrono::milliseconds(30));api::StepRequest r;r.set_ticks(600000);
             require(!flight->Step(&c,r,&s).ok(),"Long step finished before its deadline");}
         {grpc::ClientContext c;require(flight->GetFlight(&c,{},&s).ok()&&s.tick()==3000,"A cancelled step changed the flight");}
+        {api::FlightSample p;{grpc::ClientContext c;api::CreateFlightRequest q=create;q.set_flight_id("probe");q.set_focus_camera(false);require(flight->CreateFlight(&c,q,&p).ok(),"Probe flight");}
+            {grpc::ClientContext c;api::StepRequest r;r.set_flight_id("probe");r.set_ticks(3000);r.add_commands()->set_ignite(true);require(flight->Step(&c,r,&p).ok()&&!p.clamped(),"Probe liftoff");}
+        // Interference, on a flight of its own: an uplink in the step's sample; an accelerometer biased, then dead; a gust in the air's wind; a push felt
+        // by the IMU; the operator's injected command at the next step; an engine failing silently; the termination.
+        {grpc::ClientContext c;api::StepRequest r;r.set_flight_id("probe");r.set_ticks(10);r.add_commands()->set_uplink("ABORTAR");auto* f=r.add_commands()->mutable_sensor_fault();
+            f->set_sensor(api::SensorFault::ACCELEROMETER);f->set_mode(api::SensorFault::BIAS);f->mutable_value()->set_x(1);auto* g=r.add_commands()->mutable_gust_ned_meters_per_second();g->set_x(7);g->set_z(-2);
+            require(flight->Step(&c,r,&p).ok()&&p.uplinks_size()==1&&p.uplinks(0)=="ABORTAR","Uplink");
+            require(std::abs(p.measured_specific_force_meters_per_second2().x()-p.specific_force_meters_per_second2().x()-1)<1e-3&&p.imus_size()==1&&p.imus(0).valid(),"Accelerometer bias");
+            require(std::abs(p.wind_ned_meters_per_second().x()-7)<1e-9&&std::abs(p.wind_ned_meters_per_second().z()+2)<1e-9,"Gust in the wind");}
+        {grpc::ClientContext c;api::StepRequest r;r.set_flight_id("probe");r.set_ticks(10);auto* f=r.add_commands()->mutable_sensor_fault();f->set_sensor(api::SensorFault::ACCELEROMETER);f->set_mode(api::SensorFault::DEAD);
+            require(flight->Step(&c,r,&p).ok()&&!p.imus(0).valid()&&p.measured_specific_force_meters_per_second2().x()==0&&p.uplinks_size()==0,"Dead accelerometer; an uplink once");}
+        {grpc::ClientContext c;api::StepRequest r;r.set_flight_id("probe");r.set_ticks(10);r.add_commands()->mutable_sensor_fault();const double a=p.specific_force_meters_per_second2().x();
+            r.add_commands()->mutable_force_ned_newtons()->set_z(-p.mass_kilograms()); // 1 m/s² up.
+            require(flight->Step(&c,r,&p).ok()&&p.imus(0).valid()&&std::abs(p.specific_force_meters_per_second2().x()-a-1)<.05,"Honest again; the push felt");}
+        {api::FlightCommand k;k.set_fail_silent(true);k.set_index(1);server.inject("probe",k);grpc::ClientContext c;api::StepRequest r;r.set_flight_id("probe");r.set_ticks(10);
+            require(flight->Step(&c,r,&p).ok()&&p.engines(0).on()&&!p.engines(0).failed()&&p.engines(0).thrust_newtons()==0&&p.thrust_newtons()==0,"Silent failure, injected");}
+        {grpc::ClientContext c;api::StepRequest r;r.set_flight_id("probe");r.set_ticks(10);r.add_commands()->set_terminate(true);require(flight->Step(&c,r,&p).ok()&&p.breakup().cause()==api::Breakup::TERMINATED,"Termination");}
+            {grpc::ClientContext c;api::FlightRequest q;q.set_flight_id("probe");require(flight->EndFlight(&c,q,&applied).ok(),"Probe ended");}}
         {grpc::ClientContext c;api::StepRequest r;r.set_ticks(1);r.add_commands()->set_separate(true);r.add_commands()->set_separate(true);
             require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Separating past the last stage accepted");}
         std::this_thread::sleep_for(std::chrono::milliseconds(50));

@@ -14,6 +14,8 @@ public:
     std::vector<FlightServices::Sound> flightSounds()const; // See FlightServices::sounds.
     std::vector<FlightServices::Gauge> flightGauges()const; // See FlightServices::gauges.
     void physicsDefaults(const ::albert::v1::PhysicsSettings& defaults); // See FlightServices::physicsDefaults.
+    void inject(const std::string& id,const ::albert::v1::FlightCommand& command); // See FlightServices::inject.
+    std::vector<std::string> flights()const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

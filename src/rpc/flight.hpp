@@ -34,6 +34,10 @@ public:
         struct Milestone {std::string name;double utc=0;bool planned=false;};std::vector<Milestone> milestones;};
     std::vector<Gauge> gauges()const;
     void physicsDefaults(const ::albert::v1::PhysicsSettings& defaults); // For flights that leave switches unset (the Física menu).
+    // The operator's interference (the app's panel): a command (an engine's failure, a gust, a force, a sensor's fault, the
+    // termination, an uplink) applied ahead of the flight program's at that flight's next step; the flights by id.
+    void inject(const std::string& id,const ::albert::v1::FlightCommand& command);
+    std::vector<std::string> flights()const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

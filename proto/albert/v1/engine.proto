@@ -376,7 +376,8 @@ message PhysicsSettings {
 }
 // Inertial measurement unit and barometer errors (IEEE 952 terms, representative grades);
 // the seed makes the noise reproducible.
-message ImuSettings { enum Grade { IDEAL=0; TACTICAL=1; INDUSTRIAL=2; NAVIGATION=3; } Grade grade=1; uint64 seed=2; } // NAVIGATION: a launch vehicle's.
+// count: redundant units (1-3, unset 1), each with its own errors (FlightSample.imus); NAVIGATION: a launch vehicle's grade.
+message ImuSettings { enum Grade { IDEAL=0; TACTICAL=1; INDUSTRIAL=2; NAVIGATION=3; } Grade grade=1; uint64 seed=2; uint32 count=3; }
 message Gimbal { double pitch_radians=1; double yaw_radians=2; } // + pitch: nose up; + yaw: nose right.
 message FlightCommand {
   oneof command {
@@ -391,12 +392,26 @@ message FlightCommand {
     double brake=13;                    // Wheel brakes, 0-1 (index: the wheel).
     double steer_radians=14;            // Wheel steering, clamped to its limit (index: the wheel).
     double structure_radians=15;        // A hinged structure's angle, clamped to its range, reached at its rate (index: the structure).
+    // Interference (a test's or the operator's), until changed: wind added to the weather's at the vehicle (NED, m/s; in air
+    // only); an outside force on it (NED, N, at its centre of mass).
+    Vector3 gust_ned_meters_per_second=16; Vector3 force_ned_newtons=17;
+    SensorFault sensor_fault=18;        // A sensor made to fail or lie.
+    bool fail_silent=19;                // The engine fails but reports itself healthy (its thrust reads true).
+    bool terminate=20;                  // The flight termination system: it breaks up (Breakup.TERMINATED).
+    string uplink=21;                   // A message for the flight software (up to 64 characters), in the next sample's uplinks.
   }
   // ignite, cutoff, throttle, gimbal and fail: the engine; thruster_duty: the thruster; surface_radians: the surface; brake, steer: the wheel;
   // structure_radians: the structure. 0 for every one of the stage (the hinged structures), n for its n-th (the order of
   // FlightSample.engines, thruster_duty, surfaces and CreateFlightRequest.structures).
   uint32 index=9;
 }
+// A sensor made to fail or lie from now on (NONE: honest again): DEAD (no reading: invalid; an IMU unit's outputs zero and
+// valid false), STUCK (its last reading repeated), BIAS (`value` added), DRIFT (an offset growing at `value` a second), NOISE
+// (white noise of σ value.x added). value: body m/s² (accelerometer) or rad/s (gyroscope); NED m (GNSS position); m (radar,
+// x); body rotation vector, rad (star tracker); kg (gauge, x). unit: which IMU (ImuSettings.count).
+message SensorFault { enum Sensor { ACCELEROMETER=0; GYROSCOPE=1; GNSS=2; RADAR_ALTIMETER=3; STAR_TRACKER=4; PROPELLANT_GAUGE=5; }
+  enum Mode { NONE=0; DEAD=1; STUCK=2; BIAS=3; DRIFT=4; NOISE=5; }
+  Sensor sensor=1; Mode mode=2; Vector3 value=3; uint32 unit=4; }
 // Separates the active stage, which flies on as flight `flight_id` (another id): `definition` (its stage 0 the part that fell
 // off), its nose `nose_offset_meters` aft of this vehicle's nose, from this flight's state at that instant (the velocity plus
 // ω × r, the same attitude and rate), with the propellant left (up to its stage's), the same air, gravity, physics and
@@ -417,7 +432,7 @@ message FlightEvent {
 }
 // Why and when a vehicle broke up: its hull struck the ground or a structure (at that speed along the contact's normal, m/s)
 // or a thermal node passed its failure temperature.
-message Breakup { enum Cause { NONE=0; GROUND=1; STRUCTURE=2; HEAT=3; } Cause cause=1; double elapsed_seconds=2; double speed_meters_per_second=3; }
+message Breakup { enum Cause { NONE=0; GROUND=1; STRUCTURE=2; HEAT=3; TERMINATED=4; } Cause cause=1; double elapsed_seconds=2; double speed_meters_per_second=3; }
 message FlightSample {
   uint64 tick=1; double elapsed_seconds=2; double utc_unix_seconds=3;
   // Ideal sensors at the centre of mass: IMU specific force (zero in free fall) and
@@ -459,7 +474,11 @@ message FlightSample {
   Breakup breakup=60;                       // Unset cause: whole. Once broken up the engines are out and commands do nothing.
   double thruster_gas_kilograms=61;         // The thrusters' own gas left (with StageDefinition.thruster_gas_kilograms).
   PropellantGaugeReading propellant_gauge=62; // With SensorSettings.propellant_gauge.
+  repeated ImuReading imus=63;              // Each IMU unit over the last Step (the first as fields 37-40).
+  repeated string uplinks=64;               // Messages for the flight software since the last Step (FlightCommand.uplink).
 }
+message ImuReading { Vector3 specific_force_meters_per_second2=1; Vector3 angular_rate_radians_per_second=2; Vector3 delta_velocity_meters_per_second=3;
+  Vector3 delta_angle_radians=4; bool valid=5; }
 message PropellantGaugeReading { bool valid=1; double elapsed_seconds=2; double propellant_kilograms=3; }
 message WheelSample { string name=1; double brake=2; double steer_radians=3; }
 message ThermalSample { string name=1; double temperature_kelvin=2; double heat_flux_watts_per_meter2=3; bool over_limit=4; }

@@ -518,6 +518,18 @@ dos tanques ([navigation.hpp](../examples/navigation.hpp)):
 
 O booster herda a estimativa da pilha na separação. Na missão o erro fica em ~2–4 m em órbita e 1–2 cm perto da torre.
 
+**Interferência** (de um teste ou do operador). Comandos do `FlightCommand` que valem até serem trocados:
+- `gust_ned_meters_per_second`: vento somado ao do tempo, só neste voo;
+- `force_ned_newtons`: uma força externa no centro de massa, que o IMU sente;
+- `sensor_fault`: um sensor que falha ou mente. Os modos são `DEAD` (sem leitura), `STUCK` (repete a última), `BIAS`, `DRIFT`
+  (desvio que cresce) e `NOISE`. Vale para acelerômetro ou giroscópio de cada unidade de IMU (`ImuSettings.count` até 3),
+  GNSS, radar, rastreador e medidor;
+- `fail_silent`: o motor falha mas se diz saudável; o empuxo que ele informa cai;
+- `terminate`: o FTS, que quebra o veículo (`Breakup.TERMINATED`);
+- `uplink`: uma mensagem para o software de voo, entregue nos `uplinks` da amostra.
+
+O app injeta qualquer um deles (`Server::inject`), à frente dos comandos do programa de voo no próximo passo.
+
 **Falhas de motor.** Os guiamentos leem dos motores quais falharam (`EngineSample.failed`, o que os sensores de um motor
 real dizem) e escolhem os que usam: os primeiros que funcionam numa ordem de preferência (o centro, o anel do meio, os de
 fora), trocando na hora um que falhe aceso; com 3 ou menos, o conjunto cujo centro de empuxo fica sobre a linha perpendicular

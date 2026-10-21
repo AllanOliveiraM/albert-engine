@@ -230,16 +230,46 @@ struct Slot {
     std::optional<ph::Gnss> gnss;std::optional<ph::RadarAltimeter> radar;std::optional<ph::StarTracker> tracker;std::optional<ph::PropellantGauge> level;
     ph::Gnss::Reading gnssReading;ph::RadarAltimeter::Reading radarReading;ph::StarTracker::Reading trackerReading;ph::PropellantGauge::Reading gaugeReading;
     double gnssLast=0,radarLast=0,trackerLast=0,gaugeLast=0;
+    // Sensors made to fail or lie (SensorFault): by sensor (accelerometer, gyroscope, GNSS, radar, star tracker, gauge) and
+    // IMU unit; the redundant IMU units past the first; uplinks for the flight software; commands the operator injects.
+    struct Lie {int mode=0;ph::V3 value,offset;};std::array<std::array<Lie,3>,6> lies{};std::optional<ph::Noise> lieNoise;
+    std::vector<ph::Imu> units;std::vector<ph::Imu::Reading> unitReadings;std::array<bool,3> unitValid{true,true,true};
+    std::vector<std::string> uplinks;std::vector<api::FlightCommand> injected;
+    ph::V3 noise(double sigma){return sigma>0?ph::V3{sigma*lieNoise->gaussian(),sigma*lieNoise->gaussian(),sigma*lieNoise->gaussian()}:ph::V3{};}
+    // A lie on a vector reading (rate: as read; delta: its increment over dt, for an IMU), its last output as `held`.
+    void lie(Lie& l,ph::V3& rate,ph::V3* delta,ph::V3 heldRate,ph::V3 heldDelta,double dt,bool& valid){
+        switch(l.mode){
+        case 1:rate={};if(delta)*delta={};valid=false;break;
+        case 2:rate=heldRate;if(delta)*delta=heldDelta;break;
+        case 3:rate=rate+l.value;if(delta)*delta=*delta+l.value*dt;break;
+        case 4:l.offset=l.offset+l.value*dt;rate=rate+l.offset;if(delta)*delta=*delta+l.offset*dt;break;
+        case 5:{const ph::V3 n=noise(l.value.x);rate=rate+n;if(delta)*delta=*delta+n*dt;break;}
+        default:break;}
+    }
+    // The IMU units' readings with their lies (unit u: lies[0][u] accelerometer, lies[1][u] gyroscope).
+    void lieImu(ph::Imu::Reading& r,const ph::Imu::Reading& held,std::size_t u,double dt){
+        bool valid=true;lie(lies[0][u],r.specificForce,&r.deltaVelocity,held.specificForce,held.deltaVelocity,dt,valid);
+        lie(lies[1][u],r.rate,&r.deltaAngle,held.rate,held.deltaAngle,dt,valid);unitValid[u]=valid;
+    }
     void sense(){
         const double now=elapsed();const auto& s=flight->state();auto due=[&](const auto& d,double last){return d&&now-last>=d->model().period-1e-9;};
         if(!due(gnss,gnssLast)&&!due(radar,radarLast)&&!due(tracker,trackerLast)&&!due(level,gaugeLast))return;
         const ph::Sample x=flight->sample();
-        if(due(level,gaugeLast)){gaugeReading=level->measure(now,s.propellant);gaugeLast=now;}
-        if(due(gnss,gnssLast)){gnssReading=gnss->measure(now,now-gnssLast,x.fixedPosition,x.fixedVelocity,ph::nedFromFixed(x.geodetic.latitude,x.geodetic.longitude),
-            x.geodetic.height,ph::norm(x.nedVelocity),center==ph::Center::earth,x.heatFlux);gnssLast=now;}
-        if(radar&&now-radarLast>=radar->model().period-1e-9){const ph::V3 b=radar->model().boresight;radarReading=radar->measure(now,x.geodetic.height-flight->environment().ground,ph::matrix(x.nedAttitude)*(b/ph::norm(b)));radarLast=now;}
+        if(due(level,gaugeLast)){const auto held=gaugeReading;const double dt=std::min(now-gaugeLast,1e3);gaugeReading=level->measure(now,s.propellant);gaugeLast=now;
+            if(auto& l=lies[5][0];l.mode){ph::V3 v{gaugeReading.propellant,0,0};bool valid=true;lie(l,v,nullptr,{held.propellant,0,0},{},dt,valid);gaugeReading.valid=valid;gaugeReading.propellant=std::max(0.,v.x);}}
+        if(due(gnss,gnssLast)){const auto held=gnssReading;const double dt=std::min(now-gnssLast,1e3);const ph::M3 ned=ph::nedFromFixed(x.geodetic.latitude,x.geodetic.longitude);
+            gnssReading=gnss->measure(now,now-gnssLast,x.fixedPosition,x.fixedVelocity,ned,x.geodetic.height,ph::norm(x.nedVelocity),center==ph::Center::earth,x.heatFlux);gnssLast=now;
+            if(auto& l=lies[2][0];l.mode&&gnssReading.valid){ph::V3 off,dv;bool valid=true; // The lie in the local NED frame.
+                lie(l,off,nullptr,ned*(held.position-x.fixedPosition),{},dt,valid);gnssReading.valid=valid;
+                if(l.mode==2){gnssReading.position=held.position;gnssReading.velocity=held.velocity;}else gnssReading.position=gnssReading.position+ph::transpose(ned)*off;(void)dv;}}
+        if(radar&&now-radarLast>=radar->model().period-1e-9){const auto held=radarReading;const double dt=std::min(now-radarLast,1e3);const ph::V3 b=radar->model().boresight;
+            radarReading=radar->measure(now,x.geodetic.height-flight->environment().ground,ph::matrix(x.nedAttitude)*(b/ph::norm(b)));radarLast=now;
+            if(auto& l=lies[3][0];l.mode){ph::V3 v{radarReading.range,0,0};bool valid=radarReading.valid||l.mode==2;lie(l,v,nullptr,{held.range,0,0},{},dt,valid);radarReading.valid=valid;radarReading.range=std::max(0.,v.x);}}
         if(tracker&&now-trackerLast>=tracker->model().period-1e-9){const ph::V3 sun=flight->sunFromVehicle(),p=s.position;const double r=ph::norm(p);
-            trackerReading=tracker->measure(now,s.attitude,sun/ph::norm(sun),p*(-1/r),std::asin(std::min(1.,flight->environment().planet.radius/r)),s.rate);trackerLast=now;}
+            const auto held=trackerReading;const double dt=std::min(now-trackerLast,1e3);
+            trackerReading=tracker->measure(now,s.attitude,sun/ph::norm(sun),p*(-1/r),std::asin(std::min(1.,flight->environment().planet.radius/r)),s.rate);trackerLast=now;
+            if(auto& l=lies[4][0];l.mode&&(trackerReading.valid||l.mode==2)){ph::V3 e;bool valid=true;lie(l,e,nullptr,{},{},dt,valid);trackerReading.valid=valid;
+                if(l.mode==2)trackerReading.attitude=held.attitude;else{const double a=ph::norm(e);if(a>0)trackerReading.attitude=ph::normalized(trackerReading.attitude*ph::Q{std::cos(a/2),e.x/a*std::sin(a/2),e.y/a*std::sin(a/2),e.z/a*std::sin(a/2)});}}}
     }
     ph::Tt step=ph::second/1000,start=0;std::uint64_t tick=0;int shown=0;std::vector<api::FlightEvent> events;
     std::chrono::steady_clock::time_point published{};
@@ -503,14 +533,19 @@ struct Slot {
         if(ticks>600000)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 600000 ticks per step"};
         if(commands.size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 commands per step"};
         ph::Flight next=*flight; // Commands apply atomically.
-        std::vector<api::CreateFlightRequest> spawned;
+        std::vector<api::CreateFlightRequest> spawned;struct Lying {int sensor,unit;Lie lie;};std::vector<Lying> lying;
         try{for(const auto& c:commands){const int e=static_cast<int>(c.kind>>16)-1; // The engine in the high bits: 0 every one.
             const std::uint32_t k=c.kind&0xffff;
-            if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface&&k!=wire::brake&&k!=wire::steer&&k!=wire::swing)throw std::invalid_argument("This command takes no index");
+            if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface&&k!=wire::brake&&k!=wire::steer&&k!=wire::swing
+                &&k!=wire::failSilent&&k!=wire::sensor)throw std::invalid_argument("This command takes no index");
             switch(c.kind&0xffff){
             case wire::ignite:next.ignite(e);break;case wire::cutoff:next.cutoff(e);break;case wire::separate:next.separate();break;case wire::release:next.release();break;
             case wire::throttle:next.throttle(c.a,e);break;case wire::gimbal:next.gimbal(c.a,c.b,e);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
             case wire::fail:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e);break;
+            case wire::failSilent:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e,true);break;
+            case wire::gust:next.gust({c.a,c.b,c.c});break;case wire::push:next.push({c.a,c.b,c.c});break;case wire::terminate:next.terminate();break;
+            case wire::sensor:{const int sensor=e&15,mode=(e>>4)&15,unit=(e>>8)&15;if(e<0||sensor>5||mode>5||unit>2||(unit>0&&sensor>1))throw std::invalid_argument("No such sensor fault");
+                lying.push_back({sensor,unit,Lie{mode,{c.a,c.b,c.c},{}}});break;}
             case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;case wire::brake:next.brake(c.a,e);break;case wire::steer:next.steer(c.a,e);break;case wire::swing:next.swing(c.a,e);break;
             case wire::spawn:{if(e>=0||!(c.a>=0&&c.a<static_cast<double>(log.spawns_size())))throw std::invalid_argument("No such spawn");const auto k=static_cast<std::size_t>(c.a);
                 if(next.state().stage+1>=static_cast<int>(next.vehicle().stages.size()))throw std::logic_error("No stage to separate");
@@ -536,10 +571,13 @@ struct Slot {
                 for(std::size_t i=0;i<nodes.size();++i)if(nodes[i].limit>0&&t[i]>nodes[i].limit&&!(hot.size()>i&&hot[i])){event(api::FlightEvent::OVERHEAT,wire::overheat);events.back().set_index(static_cast<unsigned>(i));hot.resize(nodes.size());hot[i]=true;}}
         }
         if(cancelled()){events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
-        ph::Imu sensor=*imu;const auto inc=next.increments();
-        if(inc.seconds>0)reading=sensor.measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,next.sample().air.pressure);
+        ph::Imu sensor=*imu;auto others=units;const auto inc=next.increments();
+        for(const auto& l:lying)lies[static_cast<std::size_t>(l.sensor)][static_cast<std::size_t>(l.unit)]=l.lie;
+        if(inc.seconds>0){const double p=next.sample().air.pressure;const auto held=reading;
+            reading=sensor.measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,p);lieImu(reading,held,0,inc.seconds);
+            for(std::size_t u=0;u<others.size();++u){const auto was=unitReadings[u];unitReadings[u]=others[u].measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,p);lieImu(unitReadings[u],was,u+1,inc.seconds);}}
         if(next.state().stage!=flight->state().stage)hot.clear();overheated=std::move(hot);
-        *flight=std::move(next);*imu=std::move(sensor);tick+=ticks;eventBits|=bits;note(commands,ticks);if(ticks)sense();
+        *flight=std::move(next);*imu=std::move(sensor);units=std::move(others);tick+=ticks;eventBits|=bits;note(commands,ticks);if(ticks)sense();
         for(auto& q:spawned)children.push_back(std::move(q));
         if(ticks)publish(changed||flight->state().stage!=shown);
         return grpc::Status::OK;
@@ -569,7 +607,7 @@ struct Slot {
         o->set_burning(s.burning);o->set_clamped(s.clamped);o->set_landed(s.landed);o->set_leg_contact(s.contact);o->set_heat_load_joules_per_meter2(s.heatLoad);o->set_heat_flux_watts_per_meter2(x.heatFlux);o->set_throttle(s.throttle);
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         {const auto thrust=flight->engineThrust();const auto& es=v.stages[static_cast<std::size_t>(s.stage)].engines;
-         for(std::size_t i=0;i<es.size();++i){const auto& e=flight->engines()[i];auto* x=o->add_engines();x->set_name(es[i].name);x->set_on(e.on&&s.burning);x->set_failed(e.failed);x->set_throttle(e.throttle);
+         for(std::size_t i=0;i<es.size();++i){const auto& e=flight->engines()[i];auto* x=o->add_engines();x->set_name(es[i].name);x->set_on((e.on&&s.burning)||e.silent);x->set_failed(e.failed&&!e.silent);x->set_throttle(e.throttle);
             x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);x->set_spool(e.spool);}
          const auto& fs=v.stages[static_cast<std::size_t>(s.stage)].surfaces;
          for(std::size_t i=0;i<fs.size();++i){auto* x=o->add_surfaces();x->set_name(fs[i].name);x->set_deflection_radians(flight->surfaces()[i].deflection);x->set_command_radians(flight->surfaces()[i].target);}
@@ -589,6 +627,9 @@ struct Slot {
         o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());put(x.contactForce,o->mutable_contact_force_newtons());o->set_data_port(data?data->port():0);
         put(reading.specificForce,o->mutable_measured_specific_force_meters_per_second2());put(reading.rate,o->mutable_measured_angular_rate_radians_per_second());
         put(reading.deltaVelocity,o->mutable_delta_velocity_meters_per_second());put(reading.deltaAngle,o->mutable_delta_angle_radians());o->set_measured_static_pressure_pascals(reading.pressure);
+        for(std::size_t u=0;u<=unitReadings.size();++u){const auto& r=u?unitReadings[u-1]:reading;auto* m=o->add_imus();put(r.specificForce,m->mutable_specific_force_meters_per_second2());
+            put(r.rate,m->mutable_angular_rate_radians_per_second());put(r.deltaVelocity,m->mutable_delta_velocity_meters_per_second());put(r.deltaAngle,m->mutable_delta_angle_radians());m->set_valid(unitValid[u]);}
+        for(auto& u:uplinks)o->add_uplinks(std::move(u));uplinks.clear();
     }
 };
 struct FlightServices::Impl {
@@ -690,6 +731,10 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
         imu.emplace(ph::imuModel(g==api::ImuSettings::TACTICAL?ph::ImuGrade::tactical:g==api::ImuSettings::INDUSTRIAL?ph::ImuGrade::industrial:g==api::ImuSettings::NAVIGATION?ph::ImuGrade::navigation:ph::ImuGrade::ideal),r.imu().seed());
         const ph::Sample x=flight->sample();const double dt=p.seconds;
         reading=imu->measure(dt,x.specificForce,flight->state().rate,x.specificForce*dt,flight->state().rate*dt,x.air.pressure);
+        units.clear();unitReadings.clear();const unsigned count=std::clamp(r.imu().count(),1u,3u); // The redundant units, seeded apart.
+        for(unsigned u=1;u<count;++u){units.emplace_back(imu->model(),r.imu().seed()^(0x9e3779b97f4a7c15ull*u));
+            unitReadings.push_back(units.back().measure(dt,x.specificForce,flight->state().rate,x.specificForce*dt,flight->state().rate*dt,x.air.pressure));}
+        lies={};unitValid={true,true,true};lieNoise.emplace(r.imu().seed()^0x6c696573ull);uplinks.clear();injected.clear();
     }
     { // Navigation sensors, from the request (seeded apart from the IMU), measuring once at the pad.
         const auto& q=r.sensors();const std::uint64_t seed=q.seed();gnss.reset();radar.reset();tracker.reset();level.reset();gnssLast=radarLast=trackerLast=gaugeLast=-1e300;
@@ -829,8 +874,32 @@ grpc::Status FlightServices::ReplayFlight(grpc::ServerContext* context,grpc::Ser
     if(out->state_hash()!=log.state_hash()||out->tick()!=log.tick())return{grpc::StatusCode::DATA_LOSS,"Replay diverged from the recorded state"};
     return grpc::Status::OK;
 }
+namespace {
+// The interference commands as the slot's (false: none of them). uplink: a message for the flight software.
+bool interference(const api::FlightCommand& c,std::vector<Slot::Command>& commands,std::vector<std::string>& uplinks){
+    const std::uint32_t e=c.index()<<16;auto v=[](const api::Vector3& x){return std::array<double,3>{x.x(),x.y(),x.z()};};
+    switch(c.command_case()){
+    case api::FlightCommand::kGustNedMetersPerSecond:{const auto x=v(c.gust_ned_meters_per_second());commands.push_back({wire::gust,x[0],x[1],x[2]});return true;}
+    case api::FlightCommand::kForceNedNewtons:{const auto x=v(c.force_ned_newtons());commands.push_back({wire::push,x[0],x[1],x[2]});return true;}
+    case api::FlightCommand::kFailSilent:if(c.fail_silent())commands.push_back({wire::failSilent|e});return true;
+    case api::FlightCommand::kTerminate:if(c.terminate())commands.push_back({wire::terminate});return true;
+    case api::FlightCommand::kSensorFault:{const auto& f=c.sensor_fault();const auto x=v(f.value());
+        const std::uint32_t code=static_cast<std::uint32_t>(f.sensor())|static_cast<std::uint32_t>(f.mode())<<4|std::min(f.unit(),15u)<<8;
+        commands.push_back({wire::sensor|(code+1)<<16,x[0],x[1],x[2]});return true;}
+    case api::FlightCommand::kUplink:uplinks.push_back(c.uplink().substr(0,64));return true;
+    default:return false;
+    }
+}
+}
+void FlightServices::inject(const std::string& id,const api::FlightCommand& c){
+    const auto slot=impl_->find(flightName(id));if(!slot)throw std::invalid_argument("No flight "+id);
+    std::lock_guard lock(slot->mutex);if(slot->injected.size()<64)slot->injected.push_back(c);
+}
+std::vector<std::string> FlightServices::flights()const{
+    std::vector<std::string> out;std::lock_guard l(impl_->lock);for(const auto& [id,slot]:impl_->slots){std::lock_guard g(slot->mutex);if(slot->flight)out.push_back(id);}return out;
+}
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
-    std::vector<Slot::Command> commands;
+    std::vector<Slot::Command> commands;std::vector<std::string> uplinks;
     for(int j=0;j<r->commands_size();++j){const auto& c=r->commands(j);
         if(c.index()>0xfffe)return{grpc::StatusCode::INVALID_ARGUMENT,"No such engine, wheel, surface, thruster or structure"};
         const std::uint32_t e=c.index()<<16; // In the kind's high bits (the replay log keeps the record format).
@@ -849,13 +918,17 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
         case api::FlightCommand::kSteerRadians:commands.push_back({wire::steer|e,c.steer_radians()});break;
         case api::FlightCommand::kStructureRadians:commands.push_back({wire::swing|e,c.structure_radians()});break;
         case api::FlightCommand::kSpawn:commands.push_back({wire::spawn|e,-1,static_cast<double>(j)});break; // b: the request's command, for its payload.
-        default:return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
+        default:if(!interference(c,commands,uplinks))return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
         }
     }
     std::shared_ptr<Slot> slot;try{slot=impl_->find(flightName(r->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     {std::lock_guard lock(slot->mutex);
     if(slot->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
+    for(const auto& c:slot->injected){ // What the operator injected since the last step, ahead of the flight program's commands.
+        std::vector<Slot::Command> mine;if(c.command_case()==api::FlightCommand::kFail){if(c.fail())mine.push_back({wire::fail|c.index()<<16});}else interference(c,mine,uplinks);
+        commands.insert(commands.begin(),mine.begin(),mine.end());}
+    slot->injected.clear();for(auto& u:uplinks)slot->uplinks.push_back(std::move(u));
     const int before=slot->log.spawns_size(); // Spawn payloads into the log (a: their index there); dropped again if the step fails.
     for(auto& c:commands)if((c.kind&0xffff)==wire::spawn){*slot->log.add_spawns()=r->commands(static_cast<int>(c.b)).spawn();c.a=slot->log.spawns_size()-1;c.b=0;}
     const double now=slot->flight?ph::utcFromTt(slot->flight->state().time):0.;
