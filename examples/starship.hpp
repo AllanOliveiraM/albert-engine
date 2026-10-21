@@ -23,6 +23,7 @@ namespace albert::example::starship {
 namespace api=::albert::v1;
 constexpr double pi=3.14159265358979323846,deg=pi/180,g0=9.80665,radius=4.5,shipLength=52.1,boosterLength=72.3;
 constexpr double raptorSea=280e3*g0,raptorExit=1.33,raptorVacuum=raptorSea+101325*raptorExit,raptorExhaust=350*g0,rvacThrust=258e3*g0*280/230,rvacExhaust=380*g0;
+constexpr double pinOut=radius+1.5; // The catch pins' ends off the axis (m): 1.5 m out of the hull, the rails clear of it.
 constexpr double boosterEmpty=275e3,boosterPropellant=3800e3,shipEmpty=100e3,shipPropellant=1600e3,engineMass=1.72e3,reserve=.13*boosterPropellant;
 // A solid cylinder from `from` to `to` m aft of the nose: mass, its centre, and principal moments about that centre.
 struct Part {double mass,from,to;};
@@ -97,10 +98,11 @@ inline void shipSystems(api::StageDefinition* s){
         auto* a=s->add_thrusters();a->set_name("rcs y");put(a->mutable_position_meters(),x,side*radius,0);put(a->mutable_direction(),0,0,push);a->set_thrust_newtons(1e4);a->set_exhaust_velocity_meters_per_second(700);
         auto* b=s->add_thrusters();b->set_name("rcs z");put(b->mutable_position_meters(),x,0,side*radius);put(b->mutable_direction(),0,push,0);b->set_thrust_newtons(1e4);b->set_exhaust_velocity_meters_per_second(700);}
     for(int i=0;i<6;++i){auto* n=s->add_thermal_nodes();n->set_name("tile "+std::to_string(i+1));put(n->mutable_position_meters(),4+8*i,0,radius);put(n->mutable_normal(),0,0,1);
-        n->set_area_meters2(1);n->set_heat_capacity_joules_per_kelvin(6e3);n->set_emissivity(.85);n->set_absorptivity(.85);n->set_conductance_watts_per_kelvin(1);n->set_limit_kelvin(1700);}
+        n->set_area_meters2(1);n->set_heat_capacity_joules_per_kelvin(6e3);n->set_emissivity(.85);n->set_absorptivity(.85);n->set_conductance_watts_per_kelvin(1);n->set_limit_kelvin(1700);
+        n->set_failure_kelvin(1950);} // Silica tiles past ~1950 K: the steel under them goes, and the ship with it.
     auto* n=s->add_thermal_nodes();n->set_name("leeward steel");put(n->mutable_position_meters(),25,0,-radius);put(n->mutable_normal(),0,0,-1);
-    n->set_area_meters2(1);n->set_heat_capacity_joules_per_kelvin(1.58e4);n->set_emissivity(.3);n->set_absorptivity(.4);n->set_limit_kelvin(1100);
-    for(const double y:{-(radius+1),radius+1})put(s->add_hard_points_meters(),shipPinAt,y,0);
+    n->set_area_meters2(1);n->set_heat_capacity_joules_per_kelvin(1.58e4);n->set_emissivity(.3);n->set_absorptivity(.4);n->set_limit_kelvin(1100);n->set_failure_kelvin(1300); // Stainless past ~1300 K: too weak for the tank pressure.
+    for(const double y:{-pinOut,pinOut})put(s->add_hard_points_meters(),shipPinAt,y,0);
 }
 // The booster's grid fins as on V3 (2026): three, ~50% larger than the four before (27 m² each, C_Nδ 2.5) and lower, their
 // spindles 7.5 m below the top, two over the catch fittings (body ±y) and one on -z. Three and asymmetric is what SpaceX
@@ -108,7 +110,7 @@ inline void shipSystems(api::StageDefinition* s){
 // (catch fittings) 9 m below the top, 5.5 m off the axis, under the ±y fins.
 struct Fin {double y,z;}; // The spindle's direction (body y, z).
 constexpr Fin fins[]{{1,0},{-1,0},{0,-1}};
-constexpr double pinAt=9,pinOut=radius+1,finAt=7.5,finSpan=3.7,finWidth=6.1,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.15;
+constexpr double pinAt=9,finAt=7.5,finSpan=3.7,finWidth=6.1,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.15;
 // How they look (the scene only), from each one's nose `at` m along its stage: stainless steel; the ship's nose a tangent ogive
 // (11 m) in sections, black tiles on its windward half (+z), four flaps (hinged on its sides along x: +45° square to the
 // flow, -45° folded to the lee) turning with surfaces 1-4 when `moving`, else folded; the booster's vented hot-staging ring
@@ -128,17 +130,17 @@ inline void shipLook(api::StageAppearance* a,double at,bool moving){
         const unsigned fwd=side<0?1:2,aft=side<0?3:4;const double g=moving?side:0,o=moving?-side*45*deg:-side*90*deg; // Folded: up to -z.
         hinged(a,side<0?"flap forward left":"flap forward right",{at+8,side*r(8),0},{1,0,0},{0,side,0},7,3.4,.35,moving?fwd:0,g,o,steel);
         hinged(a,side<0?"flap aft left":"flap aft right",{at+44.5,side*radius,0},{1,0,0},{0,side,0},10,5,.4,moving?aft:0,g,o,steel);
-        hinged(a,"pin",{at+shipPinAt,side*radius,0},{0,side,0},{1,0,0},1.2,1,1,0,0,0,vents);}
+        hinged(a,"pin",{at+shipPinAt,side*radius,0},{0,side,0},{1,0,0},pinOut-radius,1,1,0,0,0,vents);}
 }
 inline void boosterLook(api::StageAppearance* a,double at,bool moving){
     section(a,at,at+2,radius,radius,vents,0);section(a,at+2,at+boosterLength,radius,radius,steel,0);
     for(unsigned i=0;i<3;++i){const Fin f=fins[i];const double r=radius+finSpan/2; // +δ turns it about its spindle, pushing along body x × spindle.
         hinged(a,"grid fin",{at+finAt,f.y*r,f.z*r},{0,f.y,f.z},{0,-f.z,f.y},finSpan,finWidth,.6,moving?i+1:0,1,0,0x2e2e2e,true);}
-    for(const double side:{-1.,1.})hinged(a,"pin",{at+pinAt,side*radius,0},{0,side,0},{1,0,0},1.2,1,1,0,0,0,vents);
+    for(const double side:{-1.,1.})hinged(a,"pin",{at+pinAt,side*radius,0},{0,side,0},{1,0,0},pinOut-radius,1,1,0,0,0,vents);
 }
 // The stack (stage 0: booster burning with the full ship on top; stage 1: the ship), the ship alone and the booster alone.
 inline api::VehicleDefinition stack(){
-    api::VehicleDefinition v;v.set_name("Starship-class stack (approximate, public figures)");v.set_diameter_meters(2*radius);v.set_attitude_torque_newton_meters(5e7);
+    api::VehicleDefinition v;v.set_name("Starship-class stack (approximate, public figures)");v.set_crash_speed_meters_per_second(5); // A steel hull: striking anything faster breaks it up.v.set_diameter_meters(2*radius);v.set_attitude_torque_newton_meters(5e7);
     auto parts=[](bool boosterFull){auto p=ship(true);for(auto x:booster(boosterFull)){x.from+=shipLength;x.to+=shipLength;p.push_back(x);}return p;};
     auto* s0=v.add_stages();s0->set_name("Super Heavy");mass(s0,combine(parts(true)),combine(parts(false)),boosterPropellant,shipLength+boosterLength);
     raptors(s0,shipLength+boosterLength,true);aerodynamics(s0,shipLength+boosterLength);shipLook(s0->mutable_appearance(),0,false);boosterLook(s0->mutable_appearance(),shipLength,false);
@@ -146,13 +148,13 @@ inline api::VehicleDefinition stack(){
     return v;
 }
 inline api::VehicleDefinition shipAlone(){
-    api::VehicleDefinition v;v.set_name("Starship-class ship (approximate)");v.set_diameter_meters(2*radius);
+    api::VehicleDefinition v;v.set_name("Starship-class ship (approximate)");v.set_crash_speed_meters_per_second(5); // A steel hull: striking anything faster breaks it up.v.set_diameter_meters(2*radius);
     auto* s=v.add_stages();s->set_name("Starship");mass(s,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s,shipLength,false);aerodynamics(s,shipLength);shipSystems(s);
     shipLook(s->mutable_appearance(),0,true);
     return v;
 }
 inline api::VehicleDefinition superHeavy(){
-    api::VehicleDefinition v;v.set_name("Super Heavy-class booster (approximate)");v.set_diameter_meters(2*radius);
+    api::VehicleDefinition v;v.set_name("Super Heavy-class booster (approximate)");v.set_crash_speed_meters_per_second(5); // A steel hull: striking anything faster breaks it up.v.set_diameter_meters(2*radius);
     auto* s=v.add_stages();s->set_name("Super Heavy");mass(s,combine(booster(true)),combine(booster(false)),boosterPropellant,boosterLength);raptors(s,boosterLength,true);aerodynamics(s,boosterLength);
     boosterLook(s->mutable_appearance(),0,true);
     for(const double y:{-pinOut,pinOut})put(s->add_hard_points_meters(),pinAt,y,0);
@@ -276,10 +278,19 @@ protected:
     void roll(Command& c,const State& s)const{c.torque.x=8e6*rollError(s)-4e7*s.rate.x;c.torqueOn=true;} // The pins over the arms.
     // Across onto the tower's axis without overshooting: toward it at min(0.15 d, √(2 · 1 m/s² · d)), that speed's error at 0.4/s
     // (a third of the attitude loop's bandwidth).
+    // flat: from the axis to the vehicle; it heads for the approach() point.
     Vec toAxis(const State& s,Vec flat)const{
-        const double d=norm(flat);const Vec across=s.velocity+up_*-dot(s.velocity,up_),want=d>0?flat*(-std::min(.15,std::sqrt(2/d))):Vec{};
+        flat=approach(flat);const double d=norm(flat);const Vec across=s.velocity+up_*-dot(s.velocity,up_),want=d>0?flat*(-std::min(.15,std::sqrt(2/d))):Vec{};
         return (want+across*-1)*.4;
     }
+    // From where to head across at the arms' height (an offset from it, like flat): the arms open eastward into a V and the hull
+    // must not cross them, so off their line (more than 4 m to the side) onto it first, east of their tips (corridor m east of
+    // the axis), then along it onto the axis.
+    Vec approach(Vec flat)const{
+        const Vec east=cross(north_,up_);const double e=dot(flat,east),n=dot(flat,north_);
+        return std::abs(n)>4?flat+east*-std::max(e,corridor):flat;
+    }
+    double corridor=40;
     // Over the tower's axis, still and aligned with the arms: ready to go down onto them.
     bool settled(const State& s,Vec flat)const{
         return norm(flat)<.4&&norm(s.velocity+up_*-dot(s.velocity,up_))<.3&&std::abs(dot(s.velocity,up_))<.5&&std::abs(rollError(s))<3*deg&&std::abs(s.rate.x)<.01;
@@ -333,14 +344,14 @@ public:
             const double up=std::max(brake+norm(g)-drag(s)*(norm(s.velocity)>0?-vz/norm(s.velocity):0),0.);
             // At most the tilt whose thrust across beats the crossflow lift it raises (T sin θ - q S C sin²θ peaks at sin θ = T/2qSC).
             const double side0=1.2*boosterLength*2*radius/(pi*radius*radius),best=std::asin(std::min(1.,std::max(s.thrust,1.)/(2*std::max(s.q,1.)*pi*radius*radius*side0)));
-            const double tilt=std::tan(std::min(20*deg,best))*std::max(up,norm(g));Vec side=engines_==13?flat*(-6/(tgo*tgo))+across*(-4/tgo):toAxis(s,flat);
+            const double tilt=std::tan(std::min(20*deg,best))*std::max(up,norm(g));Vec side=engines_==13?approach(flat)*(-6/(tgo*tgo))+across*(-4/tgo):toAxis(s,flat);
             if(norm(side)>tilt)side=side*(tilt/norm(side));
             const Vec a=up_*up+side;c.throttle=std::clamp(s.mass*norm(a)/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(a),set_.centre());if(engines_==3)roll(c,s);
             if(engines_==3&&(above<2||vz>-1))phase_=Phase::hover;break;}
         case Phase::hover:case Phase::descend: // Over the tower, then down at 1 m/s until the pins rest on the arms.
             if(phase_==Phase::hover&&armsClosed&&settled(s,flat))phase_=Phase::descend;
             overArms(c,s,flat,over,phase_==Phase::descend,std::max(set_.count(),1),set_.centre());
-            if(norm(s.contact)>0){if(touch_<0)touch_=t;if(t-touch_>=.3){c.throttle=.4;phase_=Phase::caught;caught_=t;}}else touch_=-1;break; // On the arms for 0.3 s.
+            if(norm(s.contact)>0&&norm(flat)<2){if(touch_<0)touch_=t;if(t-touch_>=.3){c.throttle=.4;phase_=Phase::caught;caught_=t;}}else touch_=-1;break; // On the arms for 0.3 s.
         case Phase::caught: // The engines at their least, held upright, while the arms take the load, then off; slipping off in that second: back down.
             if(!off_){if(norm(s.contact)==0){phase_=Phase::descend;touch_=-1;break;}aim(c,s,up_,set_.centre());c.throttle=.4;if(t-caught_>1){set_.use(c,s,0);off_=true;}}
             else{c.torqueOn=true;c.torque={};}break;

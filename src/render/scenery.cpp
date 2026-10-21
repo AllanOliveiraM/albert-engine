@@ -55,7 +55,7 @@ Site::Site(const core::Scenery& s){
         Matrix4 m;m.makeBasis(across,y,z);m.setPosition(vec(p.centre));const std::size_t k=carrier(p.structure);
         for(auto& g:local){g->applyMatrix4(m);by[{k,p.color}].push_back(relative(k,std::move(g)));}
     }
-    for(std::size_t i=0;i<n;++i){const auto& b=s.bars[i];const Vector3 a=vec(b.from),e=vec(b.to);Vector3 dir=Vector3(e).sub(a);const float l=dir.length();if(l<1e-4f)continue; // Round steel bars.
+    for(std::size_t i=0;i<n;++i){const auto& b=s.bars[i];const Vector3 a=vec(b.from),e=vec(b.to);Vector3 dir=Vector3(e).sub(a);const float l=dir.length();if(l<1e-4f||!(b.radius>0))continue; // Round steel bars (radius 0: not drawn).
         auto g=CylinderGeometry::create(static_cast<float>(b.radius),static_cast<float>(b.radius),l,24);Quaternion q;q.setFromUnitVectors(Vector3(0,1,0),dir.normalize());
         Matrix4 m;m.compose(Vector3(a).add(e).multiplyScalar(.5f),q,Vector3(1,1,1));g->applyMatrix4(m);const std::size_t k=carrier(static_cast<unsigned>(i+1));by[{k,steel}].push_back(relative(k,std::move(g)));}
     for(const auto& [key,pieces]:by){

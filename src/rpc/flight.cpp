@@ -66,6 +66,7 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
     if(d.stages_size()<1||d.stages_size()>32||d.name().size()>128)throw std::invalid_argument("A vehicle needs 1-32 stages and a name of at most 128 bytes");
     ph::Vehicle v;v.name=d.name().empty()?"Custom vehicle":d.name();v.torque=d.attitude_torque_newton_meters();v.diameter=d.has_diameter_meters()?d.diameter_meters():1.;
     v.sunArea=d.solar_area_meters2();v.reflectivity=d.has_reflectivity()?d.reflectivity():1.3;v.jetDamping=!d.has_jet_damping()||d.jet_damping();v.inertiaRate=d.has_inertia_rate()?d.inertia_rate():1.;
+    if(d.has_crash_speed_meters_per_second()){v.crashSpeed=d.crash_speed_meters_per_second();if(!(v.crashSpeed>0&&std::isfinite(v.crashSpeed)))throw std::invalid_argument("Invalid crash speed");}
     if(!(v.torque>=0)||!(v.diameter>0)||!(v.sunArea>=0)||!(v.reflectivity>=0)||!finite(v.inertiaRate)||!std::isfinite(v.torque))throw std::invalid_argument("Invalid vehicle torque, diameter, solar area, reflectivity or inertia rate");
     for(const auto& sd:d.stages()){
         { // The look (the scene only): bounded and finite.
@@ -98,7 +99,8 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
             st.surfaces.push_back(std::move(x));}
         for(const auto& n:sd.thermal_nodes()){ph::ThermalNode x;x.name=n.name().substr(0,128);x.position=get(n.position_meters());x.normal=get(n.normal());x.area=n.area_meters2();x.capacity=n.heat_capacity_joules_per_kelvin();
             if(n.has_emissivity())x.emissivity=n.emissivity();if(n.has_absorptivity())x.absorptivity=n.absorptivity();x.conductance=n.conductance_watts_per_kelvin();if(n.has_structure_kelvin())x.structure=n.structure_kelvin();
-            if(n.has_heating_factor())x.factor=n.heating_factor();if(n.has_start_kelvin())x.start=n.start_kelvin();x.limit=n.limit_kelvin();st.thermal.push_back(std::move(x));}
+            if(n.has_heating_factor())x.factor=n.heating_factor();if(n.has_start_kelvin())x.start=n.start_kelvin();x.limit=n.limit_kelvin();x.failure=n.failure_kelvin();
+            if(!(x.failure>=0&&std::isfinite(x.failure)))throw std::invalid_argument("Invalid failure temperature");st.thermal.push_back(std::move(x));}
         for(const auto& t:sd.thrusters())st.rcs.push_back({t.name().substr(0,128),get(t.position_meters()),get(t.direction()),t.thrust_newtons(),t.exhaust_velocity_meters_per_second()});
         const auto& a=sd.aerodynamics();auto& ae=st.aero;ae.area=a.reference_area_meters2();ae.length=a.reference_length_meters();ae.span=a.reference_span_meters();
         if(!(ae.area>=0)||!std::isfinite(ae.area)||!finite(ae.length)||!finite(ae.span))throw std::invalid_argument("Invalid aerodynamic references: "+st.name);
@@ -114,6 +116,7 @@ void put(const ph::Table& t,api::AeroTable* o){for(double x:t.mach)o->add_mach(x
 void put(const ph::Table3& t,api::SurfaceTable* o){for(double x:t.mach)o->add_mach(x);for(double x:t.angle)o->add_angle_degrees(x);for(double x:t.deflection)o->add_deflection_degrees(x);for(double x:t.values)o->add_values(x);}
 void put(const ph::Vehicle& v,api::VehicleDefinition* o){
     o->set_name(v.name);o->set_attitude_torque_newton_meters(v.torque);o->set_diameter_meters(v.diameter);o->set_solar_area_meters2(v.sunArea);o->set_reflectivity(v.reflectivity);
+    if(v.crashSpeed>0)o->set_crash_speed_meters_per_second(v.crashSpeed);
     o->set_jet_damping(v.jetDamping);o->set_inertia_rate(v.inertiaRate);
     for(const auto& st:v.stages){auto* d=o->add_stages();
         d->set_name(st.name);d->set_propellant_kilograms(st.propellant);d->set_mass_full_kilograms(st.massFull);d->set_mass_empty_kilograms(st.massEmpty);d->set_cg_full_meters(st.cgFull);d->set_cg_empty_meters(st.cgEmpty);
@@ -136,7 +139,7 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
             if(f.placed)put(f.position,x->mutable_position_meters());if(f.normalSet)put(f.normal,x->mutable_normal());}
         for(const auto& n:st.thermal){auto* x=d->add_thermal_nodes();x->set_name(n.name);put(n.position,x->mutable_position_meters());put(n.normal,x->mutable_normal());x->set_area_meters2(n.area);
             x->set_heat_capacity_joules_per_kelvin(n.capacity);x->set_emissivity(n.emissivity);x->set_absorptivity(n.absorptivity);x->set_conductance_watts_per_kelvin(n.conductance);
-            x->set_structure_kelvin(n.structure);x->set_heating_factor(n.factor);x->set_start_kelvin(n.start);x->set_limit_kelvin(n.limit);}
+            x->set_structure_kelvin(n.structure);x->set_heating_factor(n.factor);x->set_start_kelvin(n.start);x->set_limit_kelvin(n.limit);x->set_failure_kelvin(n.failure);}
         for(const auto& t:st.rcs){auto* x=d->add_thrusters();x->set_name(t.name);put(t.position,x->mutable_position_meters());put(t.direction,x->mutable_direction());x->set_thrust_newtons(t.thrust);x->set_exhaust_velocity_meters_per_second(t.exhaust);}
     }
 }
@@ -365,7 +368,7 @@ struct Slot {
         for(const auto& x:r.scenery()){core::SceneryPart q;q.shape=static_cast<core::SceneryPart::Shape>(x.shape());q.centre=cv(x.centre_enu_meters());
             q.size={x.size_meters().x(),x.size_meters().y(),x.size_meters().z()};q.heading=x.heading_degrees()*deg;q.tilt=x.tilt_degrees()*deg;q.inner=x.inner_diameter_meters();
             q.bar=x.bar_meters();q.color=x.color();q.structure=x.structure();look->parts.push_back(q);}
-        for(const auto& x:r.structures()){look->bars.push_back({cv(x.start_enu_meters()),cv(x.end_enu_meters()),x.radius_meters()});
+        for(const auto& x:r.structures()){look->bars.push_back({cv(x.start_enu_meters()),cv(x.end_enu_meters()),x.has_drawn()&&!x.drawn()?0.:x.radius_meters()}); // 0: not drawn.
             if(x.has_hinge_enu_meters()){auto& b=look->bars.back();const auto& k=x.hinge_axis();b.hinged=true;b.pivot=cv(x.hinge_enu_meters());b.axis=x.has_hinge_axis()?core::Vector{k.x(),k.y(),k.z()}:core::Vector{0,0,1};}}
         const ph::Tt t=flight->state().time;const ph::M3 back=ph::transpose(flight->environment().rotation.at(t).fixed);const ph::V3 at=back*p;const ph::Q q=ph::quaternion(back*enu),a=ph::quaternion(enu);
         core::Object o;o.id=siteId;o.name=name=="flight"?"Local de lancamento":"Local de lancamento ("+name+")";o.source="Flight request scenery and structures";
@@ -499,6 +502,7 @@ struct Slot {
         const std::size_t pending=events.size();std::uint32_t bits=0;
         auto event=[&](api::FlightEvent::Kind kind,std::uint32_t bit){api::FlightEvent e;e.set_kind(kind);e.set_elapsed_seconds(ph::secondsSinceJ2000(next.state().time-start));e.set_stage(static_cast<unsigned>(next.state().stage));events.push_back(std::move(e));bits|=bit;changed=true;};
         std::vector<bool> hot=overheated; // Nodes already reported, per the committed flight.
+        ph::Flight::Breakup was=next.breakup();
         const ph::Tt total=step*static_cast<ph::Tt>(ticks),chunk=step*4096;
         for(ph::Tt left=total;left>0;){
             if(cancelled()){events.resize(pending);return{grpc::StatusCode::CANCELLED,"Step cancelled; flight unchanged"};}
@@ -506,6 +510,8 @@ struct Slot {
             if((before.clamped&&!after.clamped)||(before.contact&&!after.contact))event(api::FlightEvent::LIFTOFF,wire::liftoff);
             if(before.burning&&!after.burning&&after.propellant<=0)event(api::FlightEvent::DEPLETED,wire::depleted);
             if((!before.landed&&after.landed)||(!before.contact&&after.contact))event(api::FlightEvent::TOUCHDOWN,wire::touchdown);
+            if(was==ph::Flight::Breakup::none&&next.breakup()!=ph::Flight::Breakup::none){event(api::FlightEvent::BREAKUP,wire::breakup);events.back().set_index(static_cast<unsigned>(next.breakup()));}
+            was=next.breakup();
             if(after.stage==before.stage){const auto& nodes=next.vehicle().stages[static_cast<std::size_t>(after.stage)].thermal;const auto& t=next.temperatures(); // A node past its limit.
                 for(std::size_t i=0;i<nodes.size();++i)if(nodes[i].limit>0&&t[i]>nodes[i].limit&&!(hot.size()>i&&hot[i])){event(api::FlightEvent::OVERHEAT,wire::overheat);events.back().set_index(static_cast<unsigned>(i));hot.resize(nodes.size());hot[i]=true;}}
         }
@@ -550,6 +556,8 @@ struct Slot {
          for(double u:flight->thrusters())o->add_thruster_duty(u);
          const auto& ws=v.stages[static_cast<std::size_t>(s.stage)].wheels;for(std::size_t i=0;i<ws.size();++i){auto* w=o->add_wheels();w->set_name(ws[i].name);w->set_brake(flight->wheels()[i].brake);w->set_steer_radians(flight->wheels()[i].steer);}
          for(const auto& x:flight->structures())o->add_structure_radians(x.angle);
+         if(flight->breakup()!=ph::Flight::Breakup::none){auto* b=o->mutable_breakup();b->set_cause(static_cast<api::Breakup::Cause>(flight->breakup()));
+             b->set_elapsed_seconds(ph::secondsSinceJ2000(flight->breakupTime()-start));b->set_speed_meters_per_second(flight->breakupSpeed());}
          const auto& nodes=v.stages[static_cast<std::size_t>(s.stage)].thermal;for(std::size_t i=0;i<nodes.size();++i){auto* t=o->add_thermal_nodes();t->set_name(nodes[i].name);
             t->set_temperature_kelvin(flight->temperatures()[i]);t->set_heat_flux_watts_per_meter2(ph::nodeHeating(nodes[i],x.heatFlux,x.airBody));t->set_over_limit(nodes[i].limit>0&&flight->temperatures()[i]>nodes[i].limit);}put(x.rcsForce,o->mutable_thruster_force_newtons());put(x.rcsMoment,o->mutable_thruster_moment_newton_meters());}
         for(auto& e:events)*o->add_events()=std::move(e);events.clear();

@@ -6,6 +6,16 @@
 namespace albert::physics {
 namespace {
 constexpr double degrees=180/3.14159265358979323846;
+// The closest points of segments p0-p1 and q0-q1, as their parameters (0-1) along each (Ericson, Real-Time Collision
+// Detection, 5.1.9).
+void closest(V3 p0,V3 p1,V3 q0,V3 q1,double& s,double& t){
+    const V3 d1=p1-p0,d2=q1-q0,r=p0-q0;const double a=dot(d1,d1),e=dot(d2,d2),f=dot(d2,r);
+    if(a<=1e-12&&e<=1e-12){s=t=0;return;}
+    if(a<=1e-12){s=0;t=std::clamp(f/e,0.,1.);return;}
+    const double c=dot(d1,r);if(e<=1e-12){t=0;s=std::clamp(-c/a,0.,1.);return;}
+    const double b=dot(d1,d2),den=a*e-b*b;s=den>1e-12?std::clamp((b*f-c*e)/den,0.,1.):0.;t=(b*s+f)/e;
+    if(t<0){t=0;s=std::clamp(-c/a,0.,1.);}else if(t>1){t=1;s=std::clamp((b-c)/a,0.,1.);}
+}
 struct Mass {double m,cg;V3 inertia;};
 Mass mass(const Stage& st,double propellant){
     const double f=st.propellant>0?std::clamp(propellant/st.propellant,0.,1.):0.;
@@ -281,6 +291,15 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
             }
         }
     }
+    if(vehicle_.crashSpeed>0&&!env_.structures.empty()&&!s.clamped){ // The hull against the structures: spring, damper and friction at its surface.
+        const double rh=vehicle_.diameter/2;const V3 wi=b*s.rate,nf=o.fixed*(s.position+b*V3{ms.cg,0,0}),tf=o.fixed*(s.position+b*V3{ms.cg-st.length,0,0});
+        for(std::size_t i=0;i<segments_.size();++i){const auto& x=env_.structures[i];const auto& g=segments_[i];double u,v;closest(nf,tf,g.a,g.b,u,v);
+            const V3 d=nf+(tf-nf)*u-(g.a+(g.b-g.a)*v);const double dist=norm(d);if(!(dist<rh+x.radius)||!(dist>0))continue;
+            const V3 pc=nf+(tf-nf)*u-d*(rh/dist),p=back*pc,r=p-s.position,n=back*(d/dist);
+            const V3 vel=s.velocity+cross(wi,r)-cross(o.omega,p)-back*cross(g.spin,pc-g.pivot);const double vn=dot(vel,n);const V3 vt=vel-n*vn;
+            const double fn=std::max(0.,x.stiffness*(rh+x.radius-dist)-x.damping*vn);const V3 f=n*fn-vt*(x.friction*fn/std::max(norm(vt),.05));
+            const V3 fb=bt*f;fc+=fb;mc+=cross(bt*r,fb);}
+    }
     V3 fs; // Solar radiation pressure, 1361 W/m² at 1 au, shadowed by the central body.
     if(vehicle_.sunArea>0&&env_.solarPressure){
         constexpr double au=149597870700.,pressure=1361./299792458.;const V3 d=sun(s.time)-s.position;const double dn=norm(d);
@@ -375,7 +394,8 @@ Tt Flight::advance(Tt dt){
             if(near<reach+norm(s_.velocity-cross(o.omega,s_.position))*static_cast<double>(h)*1e-9+10)h=std::min(h,std::max<Tt>(1000,static_cast<Tt>(.5/rate*1e9)));
         }
         if(flow>0){const double t=s_.propellant/flow*1e9;if(t<=static_cast<double>(h)+1){h=std::clamp<Tt>(static_cast<Tt>(t),1,h);depleted=true;}} // Within 1 ns.
-        slew(static_cast<double>(h)*1e-9);heat(static_cast<double>(h)*1e-9);integrate(h);left-=h;
+        const Breakup was=broken_;slew(static_cast<double>(h)*1e-9);heat(static_cast<double>(h)*1e-9);integrate(h);left-=h;strike();
+        if(broken_!=was)return dt-left; // A breakup ends the call: its instant kept.
         if(!depleted&&s_.burning&&!(s_.propellant>0))depleted=true; // A jet whose flow rose within the step (its spool) ran dry in it.
         if(depleted){s_.propellant=0;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);return dt-left;}
         if(!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
@@ -402,6 +422,7 @@ std::size_t pick(int engine,std::size_t count){ // An engine's index, checked.
     return static_cast<std::size_t>(engine);}
 }
 void Flight::ignite(int engine){
+    if(broken_!=Breakup::none)return; // Nothing left to command.
     if(engines_.empty())throw std::logic_error("Stage has no engine");
     if(!(s_.propellant>0))throw std::logic_error("Stage has no propellant");
     if(s_.landed)throw std::logic_error("Vehicle has landed");
@@ -447,9 +468,33 @@ double Flight::structureGap(V3 fixed)const{ // From the centre of mass to the ne
 void Flight::heat(double seconds){ // Explicit in the flow (the step's start), implicit in each node's temperature.
     const auto& nodes=vehicle_.stages[s_.stage].thermal;if(nodes.empty()||!(seconds>0))return;
     const Sample x=sample();const double sky=x.air.temperature>0?x.air.temperature:3.; // The air around, or deep space.
-    for(std::size_t i=0;i<nodes.size();++i)temperatures_[i]=nodeStep(nodes[i],temperatures_[i],nodeHeating(nodes[i],x.heatFlux,x.airBody),sky,seconds);
+    for(std::size_t i=0;i<nodes.size();++i){temperatures_[i]=nodeStep(nodes[i],temperatures_[i],nodeHeating(nodes[i],x.heatFlux,x.airBody),sky,seconds);
+        if(nodes[i].failure>0&&temperatures_[i]>nodes[i].failure&&broken_==Breakup::none)breakUp(Breakup::heat,0);}
+}
+void Flight::breakUp(Breakup why,double speed){
+    broken_=why;brokenAt_=s_.time;brokenSpeed_=speed;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);s_.torque={};
+}
+void Flight::strike(){
+    if(!(vehicle_.crashSpeed>0)||broken_!=Breakup::none||s_.clamped||s_.landed)return;
+    const Stage& st=vehicle_.stages[s_.stage];const Mass ms=mass(st,s_.propellant);const Orientation o=env_.rotation.at(s_.time);const M3 b=matrix(s_.attitude),back=transpose(o.fixed);
+    const double rh=vehicle_.diameter/2;const V3 wi=b*s_.rate;
+    auto ground=[&](V3 r){const V3 p=s_.position+r;return s_.velocity+cross(wi,r)-cross(o.omega,p);}; // Relative to the ground, inertial axes.
+    if(std::isfinite(env_.ground)&&!env_.water)for(const double x:{ms.cg,ms.cg-st.length}){ // Either end of the hull (a flat disc) below the ground, coming down.
+        const V3 r=b*V3{x,0,0};const Geodetic g=geodetic(env_.planet,o.fixed*(s_.position+r));
+        const V3 up=back*V3{std::cos(g.latitude)*std::cos(g.longitude),std::cos(g.latitude)*std::sin(g.longitude),std::sin(g.latitude)};
+        const double a=dot(b*V3{1,0,0},up),low=g.height-rh*std::sqrt(std::max(1-a*a,0.)),down=-dot(ground(r),up);
+        if(!(low<env_.ground)||!(down>0))continue;
+        if(down>vehicle_.crashSpeed){breakUp(Breakup::ground,down);return;}
+        s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.); // Set down gently: at rest where it touched.
+        padPosition_=o.fixed*s_.position;padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return;}
+    const V3 nf=o.fixed*(s_.position+b*V3{ms.cg,0,0}),tf=o.fixed*(s_.position+b*V3{ms.cg-st.length,0,0});
+    for(std::size_t i=0;i<segments_.size();++i){const auto& g=segments_[i];double u,v;closest(nf,tf,g.a,g.b,u,v); // Into a structure faster than the hull takes.
+        const V3 d=nf+(tf-nf)*u-(g.a+(g.b-g.a)*v);const double dist=norm(d);if(!(dist<rh+env_.structures[i].radius)||!(dist>0))continue;
+        const V3 pc=nf+(tf-nf)*u-d*(rh/dist),p=back*pc;const double in=-dot(ground(p-s_.position)-back*cross(g.spin,pc-g.pivot),back*(d/dist));
+        if(in>vehicle_.crashSpeed){breakUp(Breakup::structure,in);return;}}
 }
 void Flight::surface(double d,int index){
+    if(broken_!=Breakup::none)return; // Nothing left to command.
     if(!std::isfinite(d))throw std::invalid_argument("Invalid deflection");
     const auto& fs=vehicle_.stages[s_.stage].surfaces;
     auto set=[&](std::size_t i){auto& f=surfaces_[i];f.target=std::clamp(d,-fs[i].limit,fs[i].limit);if(!(fs[i].rate>0))f.deflection=f.target;};
@@ -479,6 +524,7 @@ void Flight::place(const std::vector<double>& before,double seconds){
     }
 }
 void Flight::thruster(double d,int index){
+    if(broken_!=Breakup::none)return; // Nothing left to command.
     if(!std::isfinite(d))throw std::invalid_argument("Invalid duty cycle");
     const double u=std::clamp(d,0.,1.);if(index>=0)duty_[pick(index,duty_.size())]=u;else std::fill(duty_.begin(),duty_.end(),u);
 }
@@ -527,6 +573,7 @@ void Flight::separate(){
     if(s_.clamped||s_.landed){padPosition_=env_.rotation.at(s_.time).fixed*s_.position;}
 }
 void Flight::throttle(double t,int engine){
+    if(broken_!=Breakup::none)return; // Nothing left to command.
     if(!std::isfinite(t))throw std::invalid_argument("Invalid throttle");
     const auto& es=vehicle_.stages[s_.stage].engines;
     auto set=[&](std::size_t i){engines_[i].throttle=std::clamp(t,es[i].minThrottle,1.);};
@@ -535,6 +582,7 @@ void Flight::throttle(double t,int engine){
     s_.throttle=std::clamp(t,low,1.);
 }
 void Flight::gimbal(double p,double y,int engine){
+    if(broken_!=Breakup::none)return; // Nothing left to command.
     if(!std::isfinite(p)||!std::isfinite(y))throw std::invalid_argument("Invalid gimbal");
     const auto& es=vehicle_.stages[s_.stage].engines;
     auto set=[&](std::size_t i){auto& e=engines_[i];const double g=es[i].gimbal;e.targetPitch=std::clamp(p,-g,g);e.targetYaw=std::clamp(y,-g,g);
@@ -544,6 +592,7 @@ void Flight::gimbal(double p,double y,int engine){
     s_.gimbalPitch=std::clamp(p,-g,g);s_.gimbalYaw=std::clamp(y,-g,g);
 }
 void Flight::torque(V3 t){
+    if(broken_!=Breakup::none)return; // Nothing left to command.
     if(!std::isfinite(t.x)||!std::isfinite(t.y)||!std::isfinite(t.z))throw std::invalid_argument("Invalid torque");
     s_.torque=t;allocate();
 }
@@ -555,6 +604,7 @@ std::uint64_t Flight::hash()const{
     mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const double pad[]{padAttitude_.w,padAttitude_.x,padAttitude_.y,padAttitude_.z};mix(pad,sizeof pad);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
     for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed};mix(x,sizeof x);mix(b,sizeof b);}
     for(const auto& x:structures_){const double a[]{x.angle,x.target};mix(a,sizeof a);}
+    {const int why=static_cast<int>(broken_);mix(&why,sizeof why);mix(&brokenAt_,sizeof brokenAt_);mix(&brokenSpeed_,sizeof brokenSpeed_);}
     for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);}for(double u:duty_)mix(&u,8);
     {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z};mix(t,sizeof t);}for(double t:temperatures_)mix(&t,8);for(const auto& w:wheels_){mix(&w.brake,8);mix(&w.steer,8);}
     for(const auto& e:engines_)mix(&e.spool,8);

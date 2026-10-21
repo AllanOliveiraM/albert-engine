@@ -75,7 +75,9 @@ struct Stage {
 // torque: ideal attitude torque limit (N m per axis). inertiaRate scales the İω term and
 // jetDamping enables the exhaust momentum flux: 1/true is the complete variable-mass model.
 // sunArea, reflectivity: cannonball solar radiation pressure (m², Cr); 0 area disables it.
-struct Vehicle {std::string name;std::vector<Stage> stages;double torque=0,inertiaRate=1;bool jetDamping=true;double diameter=1,sunArea=0,reflectivity=1.3;};
+// crashSpeed: with it the hull is a solid (a capsule from nose to tail, diameter wide) that strikes the ground and the
+// structures, breaking up when faster (m/s, along the contact's normal); 0: as before, only legs, wheels and hard points touch.
+struct Vehicle {std::string name;std::vector<Stage> stages;double torque=0,inertiaRate=1;bool jetDamping=true;double diameter=1,sunArea=0,reflectivity=1.3,crashSpeed=0;};
 // Fraction of the solar disc seen from r past a spherical body of the given radius at the
 // origin (conical umbra and penumbra, Montenbruck and Gill 3.4.2), or a sphere just under r
 // when r is inside it; sun relative to the body.
@@ -177,6 +179,12 @@ public:
     const std::vector<StructureState>& structures()const{return structures_;} // By Environment::structures (fixed ones at 0).
     const std::vector<double>& thrusters()const{return duty_;} // Duty cycles.
     const std::vector<double>& temperatures()const{return temperatures_;} // Thermal nodes (K), the stage's.
+    // A breakup: why (none; the hull struck the ground or a structure; a thermal node past its failure), when and how fast the
+    // strike was (m/s). From then on the engines are out and commands do nothing: the pieces fall as the stage did.
+    enum class Breakup {none,ground,structure,heat};
+    Breakup breakup()const{return broken_;}
+    Tt breakupTime()const{return brokenAt_;}
+    double breakupSpeed()const{return brokenSpeed_;}
     std::vector<double> engineThrust()const; // Each engine's thrust now (N, after the ambient pressure).
     const State& state()const{return s_;}
     V3 sunFromVehicle()const{return sun(s_.time)-s_.position;} // Inertial (m).
@@ -204,6 +212,9 @@ private:
     Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_;std::vector<WheelState> wheels_;
     std::vector<StructureState> structures_;struct Segment {V3 a,b,pivot,spin;};std::vector<Segment> segments_; // Where the structures are now (spin: rad/s, body-fixed).
     Tt step_=0,coast_=0;Increments increments_;
+    Breakup broken_=Breakup::none;Tt brokenAt_=0;double brokenSpeed_=0;
+    void breakUp(Breakup why,double speed); // Engines out, thrusters off: what is left falls.
+    void strike(); // The hull against the ground and the structures, after a step.
     void heat(double seconds); // The thermal nodes over a step, from its start's flow.
     double structureGap(V3 fixed)const;
     void place(const std::vector<double>& before={},double seconds=0); // The structures where their angles put them; spin: from `before` over `seconds`.

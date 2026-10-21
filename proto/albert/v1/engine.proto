@@ -197,7 +197,8 @@ message SurfaceDefinition { string name=1; double limit_radians=2; double rate_r
 // (0: never). Unset: emissivity and absorptivity 0.85, structure and start 300 K, factor 1.
 message ThermalNodeDefinition { string name=1; Vector3 position_meters=2; Vector3 normal=3; double area_meters2=4; double heat_capacity_joules_per_kelvin=5;
   optional double emissivity=6; optional double absorptivity=7; double conductance_watts_per_kelvin=8; optional double structure_kelvin=9;
-  optional double heating_factor=10; optional double start_kelvin=11; double limit_kelvin=12; }
+  optional double heating_factor=10; optional double start_kelvin=11; double limit_kelvin=12;
+  double failure_kelvin=13; } // Past it the vehicle breaks up (0: never; FlightSample.breakup).
 // A reaction-control thruster on the stage's propellant; with any, torque_newton_meters fires them.
 message ThrusterDefinition { string name=1; Vector3 position_meters=2; Vector3 direction=3; double thrust_newtons=4; double exhaust_velocity_meters_per_second=5; }
 message Aerodynamics {
@@ -254,6 +255,9 @@ message VehicleDefinition {
   optional double diameter_meters=4;                // Shown in the scene; unset: 1.
   double solar_area_meters2=5; optional double reflectivity=6; // Radiation pressure (0 area: none); unset reflectivity 1.3.
   optional bool jet_damping=7; optional double inertia_rate=8; // Exhaust momentum flux and the İω term; unset: on and 1.
+  // The hull as a solid (a capsule nose to tail, diameter wide) striking the ground and the structures, breaking up faster than
+  // this along the contact's normal; unset: only legs, wheels and hard points touch (FlightSample.breakup).
+  optional double crash_speed_meters_per_second=9;
 }
 message VehicleRequest { Vehicle vehicle=1; optional double payload_kilograms=2; }
 message CreateFlightRequest {
@@ -313,7 +317,8 @@ message StructureDefinition { string name=1; Vector3 start_enu_meters=2; Vector3
   // Hinged (with hinge_enu_meters): it turns about hinge_axis (east, north, up; unset: up) through that point by an angle from
   // the pose above (right-handed), commanded by FlightCommand.structure_radians within [min_radians, max_radians] and reached
   // at swing_rate_radians_per_second (0: at once); it starts at start_radians.
-  Vector3 hinge_enu_meters=8; Vector3 hinge_axis=9; double swing_rate_radians_per_second=10; double min_radians=11; double max_radians=12; double start_radians=13; }
+  Vector3 hinge_enu_meters=8; Vector3 hinge_axis=9; double swing_rate_radians_per_second=10; double min_radians=11; double max_radians=12; double start_radians=13;
+  optional bool drawn=14; } // Drawn as a steel bar with the site's scenery (unset: yes; no when the scenery shows it its own way).
 message FlightRequest { string flight_id=1; } // Empty: "flight".
 message FlightList { repeated string flight_ids=1; }
 message StartState {
@@ -391,9 +396,13 @@ message Milestone { string name=1; optional double utc_unix_seconds=2; bool plan
 message FlightEvent {
   // LIFTOFF: clamp release or the last contact (leg, wheel, water, structure) ending; TOUCHDOWN: CG stop or a first contact.
   // OVERHEAT: a thermal node above its limit (index: the node, FlightSample.thermal_nodes order).
-  enum Kind { KIND_UNSPECIFIED=0; LIFTOFF=1; DEPLETED=2; TOUCHDOWN=3; OVERHEAT=4; }
+  // BREAKUP: the vehicle broke up (FlightSample.breakup; index: its cause).
+  enum Kind { KIND_UNSPECIFIED=0; LIFTOFF=1; DEPLETED=2; TOUCHDOWN=3; OVERHEAT=4; BREAKUP=5; }
   Kind kind=1; double elapsed_seconds=2; uint32 stage=3; uint32 index=4;
 }
+// Why and when a vehicle broke up: its hull struck the ground or a structure (at that speed along the contact's normal, m/s)
+// or a thermal node passed its failure temperature.
+message Breakup { enum Cause { NONE=0; GROUND=1; STRUCTURE=2; HEAT=3; } Cause cause=1; double elapsed_seconds=2; double speed_meters_per_second=3; }
 message FlightSample {
   uint64 tick=1; double elapsed_seconds=2; double utc_unix_seconds=3;
   // Ideal sensors at the centre of mass: IMU specific force (zero in free fall) and
@@ -432,6 +441,7 @@ message FlightSample {
   repeated WheelSample wheels=57;           // The stage's wheels.
   Vector3 contact_force_newtons=58;         // From the ground, water and structures, body axes.
   repeated double structure_radians=59;     // Each structure's angle about its hinge (0 when fixed), in the request's order.
+  Breakup breakup=60;                       // Unset cause: whole. Once broken up the engines are out and commands do nothing.
 }
 message WheelSample { string name=1; double brake=2; double steer_radians=3; }
 message ThermalSample { string name=1; double temperature_kelvin=2; double heat_flux_watts_per_meter2=3; bool over_limit=4; }

@@ -7,7 +7,7 @@ namespace albert::physics {
 // (body axes), its area (m²), heat capacity (J/K: mass × specific heat), emissivity and absorptivity, the conductance to
 // the structure behind it (W/K) held at `structure` K, a heating factor on the stagnation-point flux (calibration for its
 // shape; 1 at the stagnation point) and the temperature it fails above (K; 0: never).
-struct ThermalNode {std::string name;V3 position,normal{1,0,0};double area=1,capacity=1e4,emissivity=.85,absorptivity=.85,conductance=0,structure=300,factor=1,start=300,limit=0;};
+struct ThermalNode {std::string name;V3 position,normal{1,0,0};double area=1,capacity=1e4,emissivity=.85,absorptivity=.85,conductance=0,structure=300,factor=1,start=300,limit=0,failure=0;}; // failure: past it (K) the vehicle breaks up; 0: never.
 // The convective flux a node receives: the stagnation-point flux (Sutton-Graves) times its factor and the modified
 // Newtonian distribution cos θ (θ between its outward normal and the oncoming flow; nothing on the lee side).
 double nodeHeating(const ThermalNode& n,double stagnation,V3 airBody);

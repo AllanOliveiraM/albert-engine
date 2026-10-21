@@ -414,6 +414,24 @@ int main(){try{
         near(swung.sample().geodetic.height-h,.3-1000*9.79/1e7,2e-3,"Rests on the bar swung in");
         hinge.structures[0].rate=1;Flight moving(hv,hinge,Flight::free(hinge,hv,t0,{.5,-1.4,h+50},{},{0,pi/2,0}));moving.swing(pi);for(int i=0;i<500;++i)moving.advance(second/1000);
         near(moving.structures()[0].angle,.5,1e-9,"Swings at its rate");near(moving.structures()[0].target,pi/2,0,"Within its range");
+        // A solid hull (crash speed 5 m/s): dropped upright at 20 m/s it breaks up striking the ground; at 2 m/s it does not.
+        // Driven sideways into a bar at 10 m/s it breaks up there, at 1 m/s the bar holds it off; a tile past its failure
+        // temperature breaks it up too; then nothing lights.
+        Vehicle solid=v;solid.crashSpeed=5;solid.stages[0].engines={Engine{"e",{9,0,0},{1,0,0},1e5,3000,.5,.4,0,0}};solid.stages[0].propellant=1000;solid.stages[0].massFull=11000;
+        Environment flat=tower;flat.structures.clear();
+        auto fall=[&](double speed){Flight f(solid,flat,Flight::free(flat,solid,t0,{.5,-1.4,4.5+.1},{0,0,speed},{0,pi/2,0}));
+            for(int i=0;i<3000&&f.breakup()==Flight::Breakup::none&&!f.state().landed;++i)f.advance(second/1000);return f;}; // Its lower end 10 cm up.
+        const Flight hard=fall(20),soft=fall(2);
+        near(hard.breakup()==Flight::Breakup::ground?1:0,1,0,"Breaks up striking the ground at 20 m/s");near(hard.breakupSpeed(),20,.5,"at the speed it struck (m/s)");
+        near(soft.breakup()==Flight::Breakup::none&&soft.state().landed?1:0,1,0,"Whole at 2 m/s, at rest where it touched");
+        Environment bar=tower;bar.structures[0].a=fixedPosition(earth,{.5+.5e-6,-1.4,300});bar.structures[0].b=fixedPosition(earth,{.5-.5e-6,-1.4,300}); // North-south, 300 m up.
+        auto side=[&](double speed){Flight f(solid,bar,Flight::free(bar,solid,t0,{.5,-1.4-2.2/(6378e3*std::cos(.5)),300},{0,speed,0},{0,pi/2,0})); // Just off it.
+            for(int i=0;i<500&&f.breakup()==Flight::Breakup::none;++i)f.advance(second/1000);return f;};
+        const Flight struck=side(10),touched=side(1);
+        near(struck.breakup()==Flight::Breakup::structure?1:0,1,0,"Breaks up driven into a bar at 10 m/s");near(touched.breakup()==Flight::Breakup::none?1:0,1,0,"Held off by the bar at 1 m/s");
+        Vehicle tiled=solid;ThermalNode tile;tile.name="tile";tile.start=300;tile.failure=290;tiled.stages[0].thermal={tile};
+        Flight hot(tiled,flat,Flight::free(flat,tiled,t0,{.5,-1.4,1000},{},{0,pi/2,0}));hot.advance(second/100);hot.ignite();
+        near(hot.breakup()==Flight::Breakup::heat?1:0,1,0,"Breaks up past a tile's failure temperature");near(hot.state().burning?1:0,0,0,"Then nothing lights");
     }
     // Coast: from a 300 km circular orbit, one revolution with 1 s steps above the atmosphere
     // against 10 ms steps.

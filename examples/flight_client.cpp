@@ -75,7 +75,7 @@ int main(int argc,char** argv){try{
     if(homeOnly){ex::starship::homecoming(*flight,fast,warp,560,ex::starship::faults(failures));return 0;}
     if(pad){auto camera=api::CameraService::NewStub(channel);ex::starship::onPad(*flight,*camera);return 0;}
     if(starship){auto camera=api::CameraService::NewStub(channel); // --follow-booster: the camera on the booster from staging.
-        ex::starship::mission(*flight,fast,warp,false,follow?std::function<void()>([&]{api::FocusRequest f;f.set_id("flight.booster");api::Applied a;ex::call([&](grpc::ClientContext& c){return camera->Focus(&c,f,&a);});}):std::function<void()>(),ex::starship::faults(failures));return 0;}
+        ex::starship::mission(*flight,fast,warp,false,follow?std::function<void()>([&]{api::FocusRequest f;f.set_id("flight.booster");api::Applied a;ex::call([&](grpc::ClientContext& c){return camera->Focus(&c,f,&a);});}):std::function<void()>(),ex::starship::faults(failures),chosen?utc:0.);return 0;}
     if(!exported.empty()){ // A preset as JSON, to edit and fly with --definition.
         const std::map<std::string,api::Vehicle> presets{{"launcher",api::GENERIC_LAUNCHER},{"saturn-v",api::SATURN_V},{"lander",api::GENERIC_LANDER},{"lunar-ascent",api::GENERIC_LUNAR_ASCENT},{"mars-ascent",api::GENERIC_MARS_ASCENT}};
         const auto kind=presets.find(exported);if(kind==presets.end())throw std::invalid_argument("--export-vehicle: launcher, saturn-v, lander, lunar-ascent or mars-ascent");

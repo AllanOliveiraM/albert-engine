@@ -65,7 +65,7 @@ public:
             {set_.keep(c,s);const int n=std::max(set_.count(),1);const double demand=overArms(c,s,flat,over,phase_==Phase::descend,n,set_.centre());c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
                 // As light as it gets, 2 Raptors at their least lift more than its weight: down to 1 (and up again when short, while one works).
                 if(n>1&&demand<.45*n*raptorSea)set_.use(c,s,n-1);else if(n<set_.working(s,3)&&demand>.9*n*raptorSea)set_.use(c,s,n+1);}
-            if(norm(s.contact)>0){c.throttle=.4;phase_=Phase::caught;caught_=t;}
+            if(norm(s.contact)>0&&norm(flat)<2){c.throttle=.4;phase_=Phase::caught;caught_=t;} // The pins on the arms (not the hull on them off the axis).
             break;
         case Phase::caught: // On the arms, the engine at its least while they take the load, then off once it hangs still.
             if(!off_){hang(c,s);c.throttle=.4;}else{c.torqueOn=true;c.torque={};}

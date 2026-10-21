@@ -37,7 +37,8 @@ struct VehicleLook {double length=1,diameter=1;std::vector<LookSection> sections
 // round tanks (diameters size x by y, size z long, hollow inside `inner`) and trusses (a lattice box size z long, bars `bar`
 // thick), each turned by `heading` (rad: its y toward it, clockwise from north) and tilted (rad: its z leaning from up toward
 // its y), and turning with a hinged structure (1-based; 0: fixed); and the structures that carry the flight's physics as
-// steel bars, a hinged one about its axis through its pivot by its angle (Sample::parts: one per structure).
+// steel bars (radius 0: not drawn), a hinged one about its axis through its pivot by its angle (Sample::parts: one per
+// structure).
 struct SceneryPart {enum class Shape {Box,Cylinder,Truss} shape=Shape::Box;Vector centre,size{1,1,1};double heading=0,tilt=0,inner=0,bar=0;std::uint32_t color=0xb0b0b0;unsigned structure=0;};
 struct SceneryBar {Vector from,to;double radius=.5;bool hinged=false;Vector pivot,axis{0,0,1};};
 struct Scenery {std::vector<SceneryPart> parts;std::vector<SceneryBar> bars;};
