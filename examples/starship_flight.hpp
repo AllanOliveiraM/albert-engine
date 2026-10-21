@@ -272,7 +272,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
     BoosterReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());siteWorks(back);GravityTurn ascent(heading*deg,.13); // A small kick: lofted, so the booster's way back stays short.
     bool flapsOut=false,spawned=false,orbit=false,bucket=false,coasting=false,shut=false,mirror=false,peaked=false,fleeing=false;double report=0,maxQ=0,maxQAt=0,spawnAt=0,caughtAt=0,lostAt=-1;
     std::vector<std::string> marks,found; // Events seen since the last step, for the timeline; the FDIR's findings, for the count.
-    const bool trace=std::getenv("ALBERT_TRACE")!=nullptr,attitude=trace&&std::string(std::getenv("ALBERT_TRACE")).rfind("attitude",0)==0,fine=attitude&&std::string(std::getenv("ALBERT_TRACE"))=="attitude-fine";double traced=0,turned=0;
+    const bool trace=std::getenv("ALBERT_TRACE")!=nullptr,attitude=trace&&std::string(std::getenv("ALBERT_TRACE")).rfind("attitude",0)==0,fine=attitude&&std::string(std::getenv("ALBERT_TRACE"))=="attitude-fine";double traced=0,turned=0;bool entered=false;
     Countdown count(create.definition(),ship,{{"MAX-Q",62},{"MECO",153},{"SEPARAÇÃO A QUENTE",160},{"BOOSTBACK",168},{"QUEIMA DE POUSO DO BOOSTER",392},{"CAPTURA DO BOOSTER",417},
         {"SECO",510}}); // The public profile's times after liftoff, as planned (Flights 7 and 8, 2025, roughly).
     auto clock=[&]{return count.clock(ship.elapsed_seconds());}; // The mission's time (T, s).
@@ -345,6 +345,8 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
                 std::printf("%7.2f s  booster: %s (h %.2f km, v %.0f m/s, %.0f t de propelante, %.0f m a leste e %.0f m ao norte da torre, pouso previsto a %.0f m do ponto sobre o mar)\n",
                     spawnAt+boost.elapsed_seconds(),labels[static_cast<int>(last)],boost.geodetic().height_meters()/1e3,speedOf(boost),boost.propellant_kilograms()/1e3,east,north,back.predicted());}
             out.towerClearance=std::min(out.towerClearance,clearance(boost,boosterLength));
+            if(trace&&!entered&&back.phase()==BoosterReturn::Phase::coast&&boost.geodetic().height_meters()<50e3){entered=true;const auto [e,n]=aside(boost);const auto& v=boost.velocity_ned_meters_per_second(); // ALBERT_TRACE: the landing bench's start (Gate).
+                std::printf("GATE east %.1f north %.1f height %.1f vn %.2f ve %.2f vd %.2f propellant %.0f\n",e,n,boost.geodetic().height_meters()-towerGround,v.x(),v.y(),v.z(),boost.propellant_kilograms());}
             if(attitude&&back.phase()>=BoosterReturn::Phase::flip){const double now=spawnAt+boost.elapsed_seconds();if(now>=turned){turned=now+(fine?0:.25); // ALBERT_TRACE=attitude: its turning, four times a second (attitude-fine: every step).
                 const State x=state(boost);double rcs=0;for(const double d:boost.thruster_duty())rcs+=d;std::printf("ATT %.2f %s h %.2f km q %.0f Pa rate %.2f %.2f %.2f °/s fins",now,labels[static_cast<int>(back.phase())],boost.geodetic().height_meters()/1e3,x.q,x.rate.x/deg,x.rate.y/deg,x.rate.z/deg);
                 for(const double f:x.surfaces)std::printf(" %.1f",f/deg);std::printf(" rcs %.2f gimbal %.2f %.2f lit %d\n",rcs,boost.engines_size()?boost.engines(0).gimbal().pitch_radians()/deg:0.,boost.engines_size()?boost.engines(0).gimbal().yaw_radians()/deg:0.,static_cast<int>(std::count_if(boost.engines().begin(),boost.engines().end(),[](const api::EngineSample& e){return e.on();})));}}
@@ -384,7 +386,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
 // approach and the catch or the escape, the site as in the mission (the arms on its own flight). The defaults: the mission's
 // booster as it lights its landing burn. wind: added to the air from the start (NED, m/s). Its outcome as Mission's booster
 // fields (caught, at rest, down or lost and where, the tower's clearance, why given up, FDIR).
-struct Gate {double east=1939,north=-206,height=5680,vn=39,ve=-343,vd=815,propellant=195e3;std::uint64_t seed=7;Vec wind;};
+struct Gate {double east=23761.6,north=-2558.9,height=49994,vn=64.91,ve=-590.15,vd=1021.34,propellant=197667;std::uint64_t seed=7;Vec wind;};
 inline Mission landing(api::FlightService::Stub& flight,const Gate& g,std::vector<Fault> faults={},bool quiet=true){
     Mission out;api::CreateFlightRequest create;create.set_vehicle(api::CUSTOM);*create.mutable_definition()=superHeavy();
     create.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);addTower(create);avionics(create,g.seed);
