@@ -503,6 +503,15 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
 SceneRenderer::SceneRenderer(Context& context):impl_(std::make_unique<Impl>(context)){}
 SceneRenderer::~SceneRenderer()=default;
 unsigned SceneRenderer::drawn()const{return impl_->drawn;}
+std::string SceneRenderer::memory()const{
+    const auto& g=*impl_;double index=0,vertex=0,texels=0,uniform=0;
+    for(const auto& [k,x]:g.geometries)index+=static_cast<double>(x.index.bytes);
+    for(const auto& [k,x]:g.attributes)vertex+=static_cast<double>(x.buffer.bytes);
+    for(const auto& [k,x]:g.textures)texels+=static_cast<double>(x.width)*x.height*static_cast<double>(x.texel)*(x.levels>1?4./3:1.)*((x.texture?1:0)+(x.pending?1:0));
+    for(const auto& [k,x]:g.materials)uniform+=static_cast<double>(x.uniforms.bytes);
+    char out[256];std::snprintf(out,sizeof out,"GPU: %zu index %.1f MB, %zu attributes %.1f MB, %zu textures %.1f MB, %zu materials %.1f MB",
+        g.geometries.size(),index/1048576,g.attributes.size(),vertex/1048576,g.textures.size(),texels/1048576,g.materials.size(),uniform/1048576);return out;
+}
 std::size_t SceneRenderer::vertexBytes()const{std::size_t n=0;for(const auto& [k,a]:impl_->attributes)n+=a.buffer.bytes;return n;}
 double SceneRenderer::gpuMilliseconds()const{return impl_->gpuMs;}
 const Clouds* SceneRenderer::clouds()const{return impl_->clouds.get();}

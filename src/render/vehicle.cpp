@@ -49,7 +49,8 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         Vector3 normal;normal.crossVectors(x.axis,out);Matrix4 basis;basis.makeBasis(out,normal,x.axis);x.base.setFromRotationMatrix(basis);
         const float w=static_cast<float>(p.width),t=static_cast<float>(p.thickness),span=static_cast<float>(p.span);const auto m=assistedMaterial(Color(p.color),.6f,.45f);
         if(!p.grid){if(p.tipSpan<0&&p.tipShift==0&&p.tipThickness<0){auto g=BoxGeometry::create(w,t,span);g->translate(w/2,0,0);x.pivot->add(part(g,m));}
-            else x.pivot->add(part(plate(w,t,span,static_cast<float>(p.tipSpan<0?p.span:p.tipSpan),static_cast<float>(p.tipShift),static_cast<float>(p.tipThickness<0?p.thickness:p.tipThickness)),m));}
+            else{const float along=Vector3(static_cast<float>(-p.axis.y),static_cast<float>(-p.axis.x),static_cast<float>(p.axis.z)).dot(x.axis)<0?-1.f:1.f; // The shift along the axis as placed (axisOf turns x the other way).
+                x.pivot->add(part(plate(w,t,span,static_cast<float>(p.tipSpan<0?p.span:p.tipSpan),along*static_cast<float>(p.tipShift),static_cast<float>(p.tipThickness<0?p.thickness:p.tipThickness)),m));}}
         else for(int i=0;i<=4;++i){auto a=BoxGeometry::create(w,t,span*.03f);a->translate(0,0,span*(i/4.f-.5f));x.pivot->add(part(a,m)); // Centred on its spindle.
             auto b=BoxGeometry::create(w*.03f,t,span);b->translate(w*(i/4.f-.5f),0,0);x.pivot->add(part(b,m));}
         root_->add(x.pivot);parts_.push_back(std::move(x));

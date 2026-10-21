@@ -78,18 +78,18 @@ float albert::Display::exposure()const{return impl_->scene->exposure;}
 namespace {
 // ALBERT_FRAME_STATS=1: mean, p99 and worst frame time every 300 frames (stdout).
 double workMs=0,presentMs=0,gpuMs=-1; // Per-frame parts on WebGPU: app work and recording; acquire, submit and present; scene pass on the GPU.
-void frameStats(){
+void frameStats(const albert::gpu::SceneRenderer& scene){
     static const bool on=std::getenv("ALBERT_FRAME_STATS")!=nullptr;if(!on)return;
     static std::vector<double> times,gpu;static double work=0,present=0;static auto last=std::chrono::steady_clock::now();if(gpuMs>=0)gpu.push_back(gpuMs);
     const auto now=std::chrono::steady_clock::now();times.push_back(std::chrono::duration<double,std::milli>(now-last).count());last=now;work+=workMs;present+=presentMs;
     if(times.size()<300)return;
     std::sort(times.begin(),times.end());double sum=0;for(double t:times)sum+=t;const double n=static_cast<double>(times.size());
     std::sort(gpu.begin(),gpu.end());const double g50=gpu.empty()?-1:gpu[gpu.size()/2],g99=gpu.empty()?-1:gpu[gpu.size()*99/100];
-    std::printf("frames: mean %.2f ms, p99 %.2f ms, worst %.2f ms (work %.2f, present %.2f; GPU scene median %.2f, p99 %.2f)\n",sum/n,times[times.size()*99/100],times.back(),work/n,present/n,g50,g99);std::fflush(stdout);times.clear();gpu.clear();work=present=0;
+    std::printf("frames: mean %.2f ms, p99 %.2f ms, worst %.2f ms (work %.2f, present %.2f; GPU scene median %.2f, p99 %.2f); %s\n",sum/n,times[times.size()*99/100],times.back(),work/n,present/n,g50,g99,scene.memory().c_str());std::fflush(stdout);times.clear();gpu.clear();work=present=0;
 }
 }
 bool albert::Display::frame(const std::function<void()>& work){
-    auto& d=*impl_;frameStats();
+    auto& d=*impl_;frameStats(*d.scene);
     if(!d.window->isOpen())return false;
     d.window->poll();
     const auto t0=std::chrono::steady_clock::now();
