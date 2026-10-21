@@ -1,15 +1,16 @@
 #pragma once
 // A Starship-class flight built only from Albert's generic physics: the vehicle as definitions (no preset in the core), the
-// flight program here. Public figures (Wikipedia, SpaceX Super Heavy and SpaceX Starship, read 2026-10-19): Super Heavy
-// 71 m × 9 m, 275 t empty, 3,400 t of propellant, 33 Raptor 2 giving 73.5 MN at sea level, Isp 327 s at sea level and 347 s
-// in vacuum, the 13 inner engines gimballed, staging near 64 km about 141 s after liftoff, landing burn about 6 min after,
-// caught by the tower's arms on hard points by two grid fins; the ship (Block 1) 50.3 m, ~100 t empty (2021), 1,200 t of
-// propellant, 3 Raptors and 3 Raptor Vacuum (380 s), 12.25 MN in all. Derived here, so approximate: a Raptor's vacuum thrust
-// 2.36 MN = 73.5 MN / 33 × 347 / 327, its exit area 1.34 m² from that difference over 101,325 Pa (Raptor's ~1.3 m nozzle);
-// a Raptor Vacuum's 1.86 MN = (12.25 MN - 3 × 2.23 MN) / 3; 1.6 t an engine; the tanks' places; the aerodynamics (crossflow
-// on a 9 m cylinder); the grid fins' moments and drag; the booster's RCS (30 kN cold gas); the propellant left at main engine
-// cutoff (450 t, 13%: the Δv of a boostback from ~1.7 km/s downrange and a landing); the tower's arms (steel rails, shock-
-// absorbed). Not a model of any flight: the timeline is compared with the public profile only.
+// flight program here. Public figures, Starship V3 (read 2026-10-20): Super Heavy 72.3 m × 9 m of a 124.4 m stack, its
+// propellant 400 t over V2's (3,800 t here, from the 3,400 t of earlier boosters), 33 Raptor 3; the ship 52.1 m, 100 t more
+// than V2 (1,600 t here), 3 Raptor 3 and 3 Raptor Vacuum; Raptor 3 by SpaceX's August 2024 card: 280 tf (2.75 MN) at sea
+// level, 350 s, 1,525 kg (1,720 kg with what the vehicle carries for it); the 13 inner engines gimballed; three grid fins (see
+// fins); staging near 64 km about 150 s after liftoff, landing burn about 6 min after, the catch on the tower's arms. Earlier
+// figures kept: Super Heavy 275 t empty, the ship ~100 t (2021). Derived here, so approximate: a Raptor 3's exit area 1.33 m²
+// (Raptor's ~1.3 m nozzle), so its vacuum thrust 2.88 MN and 334 s at sea level; a Raptor Vacuum 3's 3.08 MN (V2's 258 tf
+// scaled as Raptor 2 to 3: 230 to 280 tf; no public figure), 380 s; the tanks' places (LOX 78%, CH4 22%); the aerodynamics
+// (crossflow on a 9 m cylinder); the grid fins' forces; the booster's RCS (30 kN cold gas); the propellant left at main engine
+// cutoff (13%: the Δv of a boostback from ~1.7 km/s downrange and a landing); the tower's arms (steel rails, shock-absorbed).
+// Not a model of any flight: the timeline is compared with the public profile only.
 #include "albert/v1/engine.pb.h"
 #include "gravity_turn.hpp"
 #include <algorithm>
@@ -20,9 +21,9 @@
 #include <vector>
 namespace albert::example::starship {
 namespace api=::albert::v1;
-constexpr double pi=3.14159265358979323846,deg=pi/180,g0=9.80665,radius=4.5,shipLength=50.3,boosterLength=71;
-constexpr double raptorSea=73.5e6/33,raptorVacuum=raptorSea*347/327,raptorExhaust=347*g0,raptorExit=(raptorVacuum-raptorSea)/101325,rvacThrust=(12.25e6-3*raptorSea)/3,rvacExhaust=380*g0;
-constexpr double boosterEmpty=275e3,boosterPropellant=3400e3,shipEmpty=100e3,shipPropellant=1200e3,engineMass=1.6e3,reserve=450e3;
+constexpr double pi=3.14159265358979323846,deg=pi/180,g0=9.80665,radius=4.5,shipLength=52.1,boosterLength=72.3;
+constexpr double raptorSea=280e3*g0,raptorExit=1.33,raptorVacuum=raptorSea+101325*raptorExit,raptorExhaust=350*g0,rvacThrust=258e3*g0*280/230,rvacExhaust=380*g0;
+constexpr double boosterEmpty=275e3,boosterPropellant=3800e3,shipEmpty=100e3,shipPropellant=1600e3,engineMass=1.72e3,reserve=.13*boosterPropellant;
 // A solid cylinder from `from` to `to` m aft of the nose: mass, its centre, and principal moments about that centre.
 struct Part {double mass,from,to;};
 struct MassProperties {double mass=0,cg=0;double ix=0,iy=0;};
@@ -33,9 +34,9 @@ inline MassProperties combine(const std::vector<Part>& parts,double shift=0){ //
 }
 // The ship's parts and the booster's, from each one's own nose; full or empty of propellant.
 inline std::vector<Part> ship(bool full){std::vector<Part> p{{shipEmpty-6*engineMass,0,shipLength},{6*engineMass,shipLength-3.3,shipLength}};
-    if(full){p.push_back({.78*shipPropellant,30,46});p.push_back({.22*shipPropellant,14,30});}return p;}
+    if(full){p.push_back({.78*shipPropellant,30,48});p.push_back({.22*shipPropellant,14,30});}return p;}
 inline std::vector<Part> booster(bool full){std::vector<Part> p{{boosterEmpty-33*engineMass,0,boosterLength},{33*engineMass,boosterLength-3.3,boosterLength}};
-    if(full){p.push_back({2650e3,35,68});p.push_back({750e3,6,35});}return p;}
+    if(full){p.push_back({.78*boosterPropellant,35.6,69.3});p.push_back({.22*boosterPropellant,6,35.6});}return p;}
 inline void put(api::Vector3* o,double x,double y,double z){o->set_x(x);o->set_y(y);o->set_z(z);}
 // Coefficients on the 9 m disc (π r²) for a cylinder of this length: axial drag nose-first or base-first by Mach, and the
 // crossflow (Cd 1.2 on the side, L D / π r² times) for lift, side force and drag at any angle.
@@ -139,20 +140,20 @@ inline void boosterLook(api::StageAppearance* a,double at,bool moving){
 inline api::VehicleDefinition stack(){
     api::VehicleDefinition v;v.set_name("Starship-class stack (approximate, public figures)");v.set_diameter_meters(2*radius);v.set_attitude_torque_newton_meters(5e7);
     auto parts=[](bool boosterFull){auto p=ship(true);for(auto x:booster(boosterFull)){x.from+=shipLength;x.to+=shipLength;p.push_back(x);}return p;};
-    auto* s0=v.add_stages();s0->set_name("Super Heavy and ship");mass(s0,combine(parts(true)),combine(parts(false)),boosterPropellant,shipLength+boosterLength);
+    auto* s0=v.add_stages();s0->set_name("Super Heavy");mass(s0,combine(parts(true)),combine(parts(false)),boosterPropellant,shipLength+boosterLength);
     raptors(s0,shipLength+boosterLength,true);aerodynamics(s0,shipLength+boosterLength);shipLook(s0->mutable_appearance(),0,false);boosterLook(s0->mutable_appearance(),shipLength,false);
-    auto* s1=v.add_stages();s1->set_name("Ship");mass(s1,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s1,shipLength,false);aerodynamics(s1,shipLength);shipSystems(s1);shipLook(s1->mutable_appearance(),0,true);
+    auto* s1=v.add_stages();s1->set_name("Starship");mass(s1,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s1,shipLength,false);aerodynamics(s1,shipLength);shipSystems(s1);shipLook(s1->mutable_appearance(),0,true);
     return v;
 }
 inline api::VehicleDefinition shipAlone(){
     api::VehicleDefinition v;v.set_name("Starship-class ship (approximate)");v.set_diameter_meters(2*radius);
-    auto* s=v.add_stages();s->set_name("Ship");mass(s,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s,shipLength,false);aerodynamics(s,shipLength);shipSystems(s);
+    auto* s=v.add_stages();s->set_name("Starship");mass(s,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s,shipLength,false);aerodynamics(s,shipLength);shipSystems(s);
     shipLook(s->mutable_appearance(),0,true);
     return v;
 }
 inline api::VehicleDefinition superHeavy(){
     api::VehicleDefinition v;v.set_name("Super Heavy-class booster (approximate)");v.set_diameter_meters(2*radius);
-    auto* s=v.add_stages();s->set_name("Booster");mass(s,combine(booster(true)),combine(booster(false)),boosterPropellant,boosterLength);raptors(s,boosterLength,true);aerodynamics(s,boosterLength);
+    auto* s=v.add_stages();s->set_name("Super Heavy");mass(s,combine(booster(true)),combine(booster(false)),boosterPropellant,boosterLength);raptors(s,boosterLength,true);aerodynamics(s,boosterLength);
     boosterLook(s->mutable_appearance(),0,true);
     for(const double y:{-pinOut,pinOut})put(s->add_hard_points_meters(),pinAt,y,0);
     // The three grid fins, always out, each where it is: its normal force along body x × its spindle (finSlope a radian of

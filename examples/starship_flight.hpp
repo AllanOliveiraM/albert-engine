@@ -108,6 +108,8 @@ struct Pacer {
 struct Home {double deorbit=0,entry=0,maxTile=0,caught=0,offAxis=0,speed=0,propellant=0,towerClearance=1e9;int overheats=0;}; // towerClearance: see clearance().
 // The ship home from orbit to a catch, then 30 s on the arms; warp: the orbit's time compression in real time. Throws on a
 // failure.
+// A mission event for the broadcast's timeline: done now (the step's start), or planned at a UTC instant.
+inline void mark(api::StepRequest& q,const char* name,double plannedUtc=-1){auto* m=q.add_milestones();m->set_name(name);if(plannedUtc>=0){m->set_utc_unix_seconds(plannedUtc);m->set_planned(true);}}
 // An engine failure to inject (as the engines' own sensors would report it): on "stack" (before staging), "booster" or
 // "ship", at its mission time (s) or as its guidance enters a phase (BoosterReturn's or ShipReturn's, by name), the engine's
 // number (1-based). Written "flight@time:engine" or "flight@phase:engine", several joined by commas.
@@ -131,10 +133,12 @@ inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pac
     ShipReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());Home out;double report=0,caughtAt=-1;
     const char* names[]{"em órbita","orientação retrógrada","queima de saída de órbita","planeio até o ar","reentrada","giro","queima de pouso","pairando","descendo","capturada"};auto last=back.phase();
     bool open=false; // The arms: opened for the way down past them, closed over the hover.
+    std::vector<std::string> marks; // Events seen since the last step, for the timeline.
     for(;;){
         const double t=ship.elapsed_seconds();back.armsClosed=armsClosed(ship);const Command c=back.step(t,state(ship));
         api::StepRequest q;q.set_ticks(static_cast<unsigned>(std::clamp(std::llround(back.nextStep()*1000),1LL,600000LL)));apply(q,c);
         {static const char* phases[]{"orbit","orient","deorbit","glide","entry","flip","landing","hover","descend","caught"};inject(faults,"ship",t,phases[static_cast<int>(back.phase())],q);}
+        for(const auto& m:marks)mark(q,m.c_str());marks.clear();
         if(!open&&back.phase()!=ShipReturn::Phase::hover&&back.phase()!=ShipReturn::Phase::descend&&back.phase()!=ShipReturn::Phase::caught){arms(q,true);open=true;}
         if(open&&back.phase()==ShipReturn::Phase::hover){arms(q,false);open=false;}
         call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,q,&ship);});
@@ -144,6 +148,8 @@ inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pac
         out.towerClearance=std::min(out.towerClearance,clearance(ship,shipLength));
         if(back.phase()!=last){last=back.phase();const double now=ship.elapsed_seconds();
             if(last==ShipReturn::Phase::deorbit)out.deorbit=now;else if(last==ShipReturn::Phase::entry)out.entry=now;else if(last==ShipReturn::Phase::caught)caughtAt=out.caught=now;
+            static const char* events[]{nullptr,nullptr,"SAÍDA DE ÓRBITA",nullptr,"REENTRADA","GIRO","QUEIMA DE POUSO DA NAVE",nullptr,nullptr,"CAPTURA DA NAVE"};
+            if(const char* e=events[static_cast<int>(last)])marks.push_back(e);
             std::printf("%9.1f s  nave: %s (h %.2f km, v %.0f m/s, %.0f t de propelante, pouso previsto %.1f km além e %.1f km à direita da torre)\n",now,names[static_cast<int>(last)],
                 ship.geodetic().height_meters()/1e3,speedOf(ship),ship.propellant_kilograms()/1e3,back.along()/1e3,back.beside()/1e3);}
         const double now=ship.elapsed_seconds();
@@ -173,18 +179,23 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
     api::FlightSample ship,boost;call([&](grpc::ClientContext& c){return flight.CreateFlight(&c,create,&ship);});
     std::printf("%s de Starbase, %s\n",ship.vehicle().c_str(),fast?"o mais rápido possível":"tempo real");
     BoosterReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());GravityTurn ascent(heading*deg,.07); // A small kick: lofted, so the booster's way back stays short.
-    bool spawned=false,orbit=false,bucket=false,coasting=false,closing=false,close=false;double report=0,maxQ=0,maxQAt=0,spawnAt=0,caughtAt=0;
+    bool spawned=false,orbit=false,bucket=false,coasting=false,closing=false,close=false,first=true,peaked=false;double report=0,maxQ=0,maxQAt=0,spawnAt=0,caughtAt=0;
+    std::vector<std::string> marks; // Events seen since the last step, for the timeline.
     const char* labels[]{"espera","giro","boostback","costa","queima de pouso","pairando","descendo","capturado"};auto last=back.phase();
     static const char* names[]{"wait","flip","boostback","coast","landing","hover","descend","caught"}; // For the failures.
     for(;;){
         const double t=ship.elapsed_seconds();
         api::StepRequest step;step.set_ticks(20);inject(faults,spawned?"ship":"stack",t,nullptr,step);
+        if(first){const double t0=ship.utc_unix_seconds();first=false;mark(step,"DECOLAGEM"); // The public profile's times, as planned.
+            for(const auto& [name,at]:std::initializer_list<std::pair<const char*,double>>{{"MAX-Q",55},{"MECO",150},{"SEPARAÇÃO A QUENTE",151},{"BOOSTBACK",161},
+                {"SECO",453},{"QUEIMA DE POUSO DO BOOSTER",423},{"CAPTURA DO BOOSTER",478}})mark(step,name,t0+at);}
+        for(const auto& m:marks)mark(step,m.c_str());marks.clear();
         if(!spawned&&ship.stage()==0&&!ship.clamped()&&ship.propellant_kilograms()<=reserve){ // MECO and hot staging: the booster becomes its own flight.
             api::StepRequest stage;stage.add_commands()->set_cutoff(true);auto* sp=stage.add_commands()->mutable_spawn();sp->set_flight_id("booster");*sp->mutable_definition()=superHeavy();
             sp->set_nose_offset_meters(shipLength);call([&](grpc::ClientContext& c){return flight.Step(&c,stage,&ship);});
             {api::FlightRequest q;q.set_flight_id("booster");call([&](grpc::ClientContext& c){return flight.GetFlight(&c,q,&boost);});}
             std::printf("%7.2f s  MECO e separação a quente: h %.1f km, v %.0f m/s; booster com %.0f t\n",t,ship.geodetic().height_meters()/1e3,speedOf(ship),boost.propellant_kilograms()/1e3);
-            spawned=true;spawnAt=t;if(onSpawn)onSpawn();out.meco=t;out.mecoHeight=ship.geodetic().height_meters();back.start(boost.elapsed_seconds());step.add_commands()->set_ignite(true);ascent.upper(reading(ship));
+            spawned=true;spawnAt=t;if(onSpawn)onSpawn();mark(step,"MECO");mark(step,"SEPARAÇÃO A QUENTE");out.meco=t;out.mecoHeight=ship.geodetic().height_meters();back.start(boost.elapsed_seconds());step.add_commands()->set_ignite(true);ascent.upper(reading(ship));
         }
         if(!spawned&&!bucket&&t>=40){step.add_commands()->set_throttle(.8);bucket=true;} // Through max-Q to cutoff at 80%.
         if(close){arms(step,false);close=false;}
@@ -193,16 +204,19 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
             if(c.ignite&&!spawned)step.add_commands()->set_ignite(true);if(c.cutoff)step.add_commands()->set_cutoff(true);
             auto* q=step.add_commands()->mutable_torque_newton_meters();q->set_x(c.torque.x);q->set_y(c.torque.y);q->set_z(c.torque.z);
             auto* g=step.add_commands()->mutable_gimbal();g->set_pitch_radians(c.gimbalPitch);g->set_yaw_radians(c.gimbalYaw); // The Raptors steer the stack.
-            if(ascent.phase()==GravityTurn::Phase::orbit){orbit=true;out.seco=t;out.perigee=GravityTurn::perigee(vec(ship.position_meters()),vec(ship.velocity_meters_per_second()));
+            if(ascent.phase()==GravityTurn::Phase::orbit){orbit=true;out.seco=t;marks.push_back("SECO");out.perigee=GravityTurn::perigee(vec(ship.position_meters()),vec(ship.velocity_meters_per_second()));
                 out.apoapsis=GravityTurn::apoapsis(vec(ship.position_meters()),vec(ship.velocity_meters_per_second()));std::printf("%7.2f s  SECO: perigeu %.0f km, apogeu %.0f km, girando a %.2f°/s\n",t,out.perigee/1e3,out.apoapsis/1e3,norm(vec(ship.angular_rate_radians_per_second()))/deg);}}
         call([&](grpc::ClientContext& c){return flight.Step(&c,step,&ship);});
         if(ship.dynamic_pressure_pascals()>maxQ){maxQ=ship.dynamic_pressure_pascals();maxQAt=ship.elapsed_seconds();}
+        else if(!peaked&&maxQ>1e4&&ship.dynamic_pressure_pascals()<.97*maxQ){peaked=true;marks.push_back("MAX-Q");}
         if(spawned){ // Caught, it stays a flight: resting on the arms.
             back.armsClosed=armsClosed(boost);const Command c=back.step(boost.elapsed_seconds(),state(boost));api::StepRequest b;b.set_flight_id("booster");b.set_ticks(20);apply(b,c); // The booster's own clock: 0 at its spawn.
             inject(faults,"booster",spawnAt+boost.elapsed_seconds(),names[static_cast<int>(back.phase())],b);
             if(!closing&&back.phase()==BoosterReturn::Phase::hover){arms(b,false);closing=true;close=true;} // Around it as it hovers; the site shows the ship's flight's arms: those too.
             call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,b,&boost);});
             if(back.phase()!=last){last=back.phase();if(last==BoosterReturn::Phase::caught)caughtAt=spawnAt+boost.elapsed_seconds();
+                if(last==BoosterReturn::Phase::boostback)marks.push_back("BOOSTBACK");else if(last==BoosterReturn::Phase::landing)marks.push_back("QUEIMA DE POUSO DO BOOSTER");
+                else if(last==BoosterReturn::Phase::caught)marks.push_back("CAPTURA DO BOOSTER");
                 const auto [east,north]=aside(boost);
                 std::printf("%7.2f s  booster: %s (h %.2f km, v %.0f m/s, %.0f t de propelante, %.0f m a leste e %.0f m ao norte da torre, pouso previsto a %.0f m do ponto sobre o mar)\n",
                     spawnAt+boost.elapsed_seconds(),labels[static_cast<int>(last)],boost.geodetic().height_meters()/1e3,speedOf(boost),boost.propellant_kilograms()/1e3,east,north,back.predicted());}

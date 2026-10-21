@@ -199,15 +199,18 @@ Prepared prepare(const api::CreateFlightRequest& r,double utc){
 }
 }
 // One flight (FlightServices keeps one per id): its physics, sensors, scene object, data plane, real-time pacer and log.
-// The flights' sounds by scene id: written as they publish, read by the frame loop; its lock is held for nothing else.
-struct Sounds {
-    std::mutex lock;std::map<std::string,std::shared_ptr<const FlightServices::Sound>> by;
-    void put(const std::string& id,std::shared_ptr<const FlightServices::Sound> s){std::lock_guard l(lock);if(s)by[id]=std::move(s);else by.erase(id);}
+// What the flights show (their sounds, their gauges) by scene id: written as they publish, read by the frame loop; its lock is
+// held for nothing else.
+template<class T> struct Board {
+    std::mutex lock;std::map<std::string,std::shared_ptr<const T>> by;
+    void put(const std::string& id,std::shared_ptr<const T> s){std::lock_guard l(lock);if(s)by[id]=std::move(s);else by.erase(id);}
+    std::vector<T> all(){std::vector<T> out;std::lock_guard l(lock);for(const auto& [id,s]:by)out.push_back(*s);return out;}
 };
+struct Boards {Board<FlightServices::Sound> sounds;Board<FlightServices::Gauge> gauges;void drop(const std::string& id){sounds.put(id,nullptr);gauges.put(id,nullptr);}};
 struct Slot {
-    using Sound=FlightServices::Sound;
+    using Sound=FlightServices::Sound;using Gauge=FlightServices::Gauge;
     struct Command {std::uint32_t kind;double a=0,b=0,c=0;};
-    core::Bridge& bridge;AirSources sources;std::string name,sceneId,siteId;Sounds& heard;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
+    core::Bridge& bridge;AirSources sources;std::string name,sceneId,siteId;Boards& boards;std::unique_ptr<wire::Server> data;std::mutex mutex;std::optional<ph::Flight> flight;std::optional<ph::Imu> imu;ph::Imu::Reading reading;std::string atmosphere;
     // Navigation sensors, each measuring at the end of the step that completes its period.
     std::optional<ph::Gnss> gnss;std::optional<ph::RadarAltimeter> radar;std::optional<ph::StarTracker> tracker;
     ph::Gnss::Reading gnssReading;ph::RadarAltimeter::Reading radarReading;ph::StarTracker::Reading trackerReading;double gnssLast=0,radarLast=0,trackerLast=0;
@@ -241,8 +244,8 @@ struct Slot {
     // the camera and holds the clock at the flight's instant.
     bool atInstant()const{const auto snap=bridge.snapshot();return snap&&std::abs(snap->utcSeconds-ph::utcFromTt(flight->state().time))<1;}
     void stopKeeper(){{std::lock_guard l(keeperLock);keeperStop=true;}keeperWake.notify_all();if(keeper.joinable())keeper.join();}
-    Slot(core::Bridge& b,AirSources s,std::string id,Sounds& sounds)
-        :bridge(b),sources(std::move(s)),name(std::move(id)),sceneId(name=="flight"?name:"flight."+name),siteId(name=="flight"?"site":"site."+name),heard(sounds){
+    Slot(core::Bridge& b,AirSources s,std::string id,Boards& shown)
+        :bridge(b),sources(std::move(s)),name(std::move(id)),sceneId(name=="flight"?name:"flight."+name),siteId(name=="flight"?"site":"site."+name),boards(shown){
         data=std::make_unique<wire::Server>([this](const wire::Request& q,wire::Response& r){
             std::vector<Command> commands; // Fixed order: fail, cutoff, separate, release, ignite, throttle, gimbal, torque.
             const std::uint32_t engine=std::min<std::uint32_t>(q.engine,0xffff)<<16; // Out of range: refused by the flight.
@@ -380,7 +383,8 @@ struct Slot {
         if(!force&&now-published<std::chrono::milliseconds(33))return;
         if(!force&&bridge.waiting()>core::Bridge::capacity/2)return; // The frame loop behind (a window out of view): room for what must apply.
         published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
-        heard.put(sceneId,center==ph::Center::earth?std::make_shared<const Sound>(heardSound()):nullptr); // Read by the frame loop without the flight's lock.
+        boards.sounds.put(sceneId,center==ph::Center::earth?std::make_shared<const Sound>(heardSound()):nullptr); // Read by the frame loop without the flight's lock.
+        boards.gauges.put(sceneId,std::make_shared<const Gauge>(gauge()));
         // The stack got shorter, or the same instant again (the keeper; appending would be refused as
         // out of order): replace the cylinder in place (the camera stays on it).
         if(flight->state().stage!=shown||s.utcSeconds<=publishedUtc){
@@ -413,6 +417,22 @@ struct Slot {
         // The flow's noise (drag power: the aerodynamic force times the airspeed) and what the booms need.
         e.length=st.length;e.diameter=flight->vehicle().diameter;e.mach=x.mach;e.sound=x.air.sound;e.pressure=x.air.pressure;e.dragPower=ph::norm(x.aeroForce)*x.mach*x.air.sound;
         return s;
+    }
+    // The flight for the broadcast's panels and timeline (see FlightServices::gauges).
+    Gauge gauge()const{
+        const ph::Sample x=flight->sample();const auto& st=flight->vehicle().stages[static_cast<std::size_t>(flight->state().stage)];Gauge g;
+        g.id=sceneId;g.label=st.name;g.start=ph::utcFromTt(start);g.utc=ph::utcFromTt(flight->state().time);g.speed=ph::norm(x.nedVelocity);g.height=x.geodetic.height;
+        g.propellant=st.propellant>0?flight->state().propellant/st.propellant:0;
+        for(std::size_t i=0;i<st.engines.size();++i){const auto& e=flight->engines()[i];const auto& n=st.engines[i];
+            g.engines.push_back({static_cast<float>(n.position.y),static_cast<float>(n.position.z),static_cast<float>(std::sqrt(std::max(n.exitArea,.01)/3.14159265358979323846)),
+                static_cast<float>(e.throttle),e.on&&flight->state().burning,e.failed});}
+        g.milestones=milestones;return g;
+    }
+    std::vector<Gauge::Milestone> milestones; // The mission's events this flight was given (StepRequest.milestones).
+    void note(const google::protobuf::RepeatedPtrField<api::Milestone>& given,double now){ // A done one replaces the planned one of its name.
+        for(const auto& m:given){const std::string n=m.name().substr(0,40);if(n.empty())continue;const double at=m.has_utc_unix_seconds()&&std::isfinite(m.utc_unix_seconds())?m.utc_unix_seconds():now;
+            auto it=std::find_if(milestones.begin(),milestones.end(),[&](const Gauge::Milestone& x){return x.name==n;});
+            if(it==milestones.end()){if(milestones.size()<64)milestones.push_back({n,at,m.planned()});}else if(it->planned)*it={n,at,m.planned()};}
     }
     core::FlightTelemetry telemetry()const{
         const ph::Sample x=flight->sample();const auto& st=flight->state();
@@ -544,7 +564,7 @@ struct Slot {
 };
 struct FlightServices::Impl {
     core::Bridge& bridge;AirSources sources;
-    Sounds sounds; // Before the slots, which use it.
+    Boards boards; // Before the slots, which use it.
     std::mutex lock;std::map<std::string,std::shared_ptr<Slot>> slots;
     std::mutex defaultsLock;api::PhysicsSettings defaults; // Albert's (the Fisica page), for unset switches.
     static constexpr std::size_t maxFlights=64;            // Each holds threads and a socket.
@@ -566,7 +586,7 @@ struct FlightServices::Impl {
     std::shared_ptr<Slot> make(const std::string& id){ // Built before it enters the map: a throwing constructor leaves no entry.
         std::lock_guard l(lock);if(const auto it=slots.find(id);it!=slots.end())return it->second;
         if(slots.size()>=maxFlights)throw std::length_error("At most 64 flights at once");
-        auto x=std::make_shared<Slot>(bridge,sources,id,sounds);slots.emplace(id,x);return x;}
+        auto x=std::make_shared<Slot>(bridge,sources,id,boards);slots.emplace(id,x);return x;}
     // A slot without a flight (a failed creation, an ended flight) leaves the map, if it is still the one there.
     void drop(const std::string& id,const std::shared_ptr<Slot>& x){
         std::lock_guard l(lock);const auto it=slots.find(id);if(it==slots.end()||it->second!=x)return;
@@ -577,7 +597,7 @@ struct FlightServices::Impl {
         std::shared_ptr<Slot> x;try{x=make(r.flight_id());}catch(const std::length_error& e){return{grpc::StatusCode::RESOURCE_EXHAUSTED,e.what()};}
         auto st=x->create(r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),cancelled,out);
         if(!st.ok()){drop(r.flight_id(),x);return st;}
-        if(find(r.flight_id())!=x){x->stopPacing();{std::lock_guard g(x->mutex);x->flight.reset();}sounds.put(x->sceneId,nullptr);(void)bridge.submit(core::Remove{x->sceneId});(void)bridge.submit(core::Remove{x->siteId});
+        if(find(r.flight_id())!=x){x->stopPacing();{std::lock_guard g(x->mutex);x->flight.reset();}boards.drop(x->sceneId);(void)bridge.submit(core::Remove{x->sceneId});(void)bridge.submit(core::Remove{x->siteId});
             return{grpc::StatusCode::ABORTED,"The flight was ended while being created"};}
         if(made)*made=x;return st;
     }
@@ -633,7 +653,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     made->steps(stepNs,static_cast<ph::Tt>(std::llround(p.coast*1e9)));
     if(cancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
     stopPacing();std::lock_guard lock(mutex);
-    flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;this->atmosphere=atmosphere;center=p.body;degree=p.degree;
+    flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;milestones.clear();this->atmosphere=atmosphere;center=p.body;degree=p.degree;
     physics.set_third_bodies(env.sunMoon);physics.set_relativity(env.relativity);physics.set_atmosphere(env.atmosphere);physics.set_wind(env.wind);physics.set_solar_radiation_pressure(env.solarPressure);
     physics.set_turbulence_meters_per_second(env.turbulence);physics.set_turbulence_seed(env.turbulenceSeed);
     { // The IMU starts with one sample at the pad.
@@ -719,7 +739,10 @@ grpc::Status FlightServices::GetVehicle(grpc::ServerContext*,const api::VehicleR
 }
 void FlightServices::physicsDefaults(const api::PhysicsSettings& d){std::lock_guard l(impl_->defaultsLock);impl_->defaults=d;}
 std::vector<FlightServices::Sound> FlightServices::sounds()const{
-    std::vector<Sound> out;std::lock_guard l(impl_->sounds.lock);for(const auto& [id,s]:impl_->sounds.by)out.push_back(*s);return out;
+    return impl_->boards.sounds.all();
+}
+std::vector<FlightServices::Gauge> FlightServices::gauges()const{
+    return impl_->boards.gauges.all();
 }
 grpc::Status FlightServices::ExportFlight(grpc::ServerContext*,const api::FlightRequest* q,grpc::ServerWriter<api::FlightLogChunk>* writer){
     std::string bytes;std::shared_ptr<Slot> slot;
@@ -798,8 +821,9 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     if(slot->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
     const int before=slot->log.spawns_size(); // Spawn payloads into the log (a: their index there); dropped again if the step fails.
     for(auto& c:commands)if((c.kind&0xffff)==wire::spawn){*slot->log.add_spawns()=r->commands(static_cast<int>(c.b)).spawn();c.a=slot->log.spawns_size()-1;c.b=0;}
+    const double now=slot->flight?ph::utcFromTt(slot->flight->state().time):0.;
     if(auto s=slot->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok()){while(slot->log.spawns_size()>before)slot->log.mutable_spawns()->RemoveLast();return s;}
-    slot->fill(out);}
+    slot->note(r->milestones(),now);slot->fill(out);}
     impl_->adopt(*slot);return grpc::Status::OK;
 }
 grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::FlightRequest* q,api::FlightSample* out){
@@ -815,7 +839,7 @@ grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::FlightReq
     if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     slot->stopPacing();core::Reply reply;
     {std::lock_guard lock(slot->mutex);
-        if(slot->flight){slot->flight.reset();impl_->sounds.put(slot->sceneId,nullptr);
+        if(slot->flight){slot->flight.reset();impl_->boards.drop(slot->sceneId);
             // Off the scene even while the frame loop is behind (the flight itself is gone already).
             for(int i=0;i<200;++i){reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));if(reply.code!=core::Code::Exhausted)break;std::this_thread::sleep_for(std::chrono::milliseconds(25));}
             (void)impl_->bridge.submit(core::Remove{slot->siteId});out->set_revision(reply.revision);}

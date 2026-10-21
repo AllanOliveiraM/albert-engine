@@ -323,6 +323,10 @@ estágio), o mesmo ar, gravidade, chaves físicas e sensores (com sementes novas
 a andar por conta própria — o booster que volta, a nave que segue —; o log dele se reproduz sozinho e o do pai recria o
 filho no replay.
 
+**Marcos da missão.** `StepRequest.milestones` dá ao voo eventos da missão (nome de até 40 caracteres, instante UTC ou o
+início do passo, previsto ou acontecido; o acontecido substitui o previsto do mesmo nome). A cena os mostra, com os de todos os
+voos, na linha do tempo dos painéis de transmissão, junto do relógio T+ desde o início do voo principal.
+
 **Água e estruturas.** `water` faz da superfície do sítio água do mar (o veículo flutua, é freado pela água e nunca "pousa":
 amerissagem); `structures` põe segmentos fixos ao chão, em metros leste-norte-cima do sítio, com raio, mola, amortecedor e
 atrito — os braços de uma torre de captura —, tocados pelos `hard_points_meters` dos estágios; a amostra traz a força de
@@ -442,7 +446,8 @@ O `--starship` ([starship_flight.hpp](../examples/starship_flight.hpp)) usa só 
 núcleo.
 
 **Veículos e base**
-- **Veículos:** a pilha e o Super Heavy são `CUSTOM` com `VehicleDefinition` (de [starship.hpp](../examples/starship.hpp)):
+- **Veículos:** a pilha e o Super Heavy são `CUSTOM` com `VehicleDefinition` (de [starship.hpp](../examples/starship.hpp)),
+  com os números públicos da V3 (booster de 72,3 m, nave de 52,1 m, Raptor 3 de 280 tf):
   - 33 motores, dos quais 13 com cardã de 15° a 20°/s;
   - RCS de 8 propulsores;
   - três grid fins como na V3 (27 m² cada, 50% maiores, mais baixas; duas sobre os pinos de captura em ±y e uma em -z, uma

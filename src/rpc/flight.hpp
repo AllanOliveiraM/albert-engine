@@ -26,6 +26,13 @@ public:
     // and booms), by its scene object's id; none off the Earth (the acoustics are Earth air's).
     struct Sound {std::string id;double utc=0;physics::acoustics::Emission emission;physics::Planet planet;std::shared_ptr<const physics::AirModel> air;};
     std::vector<Sound> sounds()const;
+    // Each flight as the broadcast shows it: its stage's name, its first instant and now (UTC), speed over the ground (m/s),
+    // height (m), the share of the stage's propellant left, each engine (where its nozzle is off the axis and how wide, body
+    // y and z in metres; lit, its throttle; failed) and the mission's events it was given (StepRequest.milestones).
+    struct Gauge {std::string id,label;double start=0,utc=0,speed=0,height=0,propellant=0;
+        struct Engine {float y=0,z=0,radius=0,throttle=0;bool on=false,failed=false;};std::vector<Engine> engines;
+        struct Milestone {std::string name;double utc=0;bool planned=false;};std::vector<Milestone> milestones;};
+    std::vector<Gauge> gauges()const;
     void physicsDefaults(const ::albert::v1::PhysicsSettings& defaults); // For flights that leave switches unset (the Física menu).
 private:
     struct Impl;std::unique_ptr<Impl> impl_;

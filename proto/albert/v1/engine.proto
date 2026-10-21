@@ -382,7 +382,12 @@ message FlightCommand {
 // ω × r, the same attitude and rate), with the propellant left (up to its stage's), the same air, gravity, physics and
 // sensors (reseeded). It starts at the instant of the command and steps on its own; its log replays alone.
 message Spawn { string flight_id=1; VehicleDefinition definition=2; double nose_offset_meters=3; }
-message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; } // Up to 600000 ticks.
+// Up to 600000 ticks. milestones: the mission's events for the broadcast's timeline (up to 64 a flight; a done one replaces
+// the planned one of its name), shown with every flight's.
+message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; repeated Milestone milestones=4; }
+// An event of the mission (up to 40 characters: "MAX-Q", "MECO"...): when it happened (unset: at the step's start) or is
+// planned (UTC, Unix seconds).
+message Milestone { string name=1; optional double utc_unix_seconds=2; bool planned=3; }
 message FlightEvent {
   // LIFTOFF: clamp release or the last contact (leg, wheel, water, structure) ending; TOUCHDOWN: CG stop or a first contact.
   // OVERHEAT: a thermal node above its limit (index: the node, FlightSample.thermal_nodes order).

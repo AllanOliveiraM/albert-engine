@@ -17,6 +17,7 @@ public:
     Display(const Display&)=delete;Display& operator=(const Display&)=delete;
     threepp::PeripheralsEventSource& events();
     [[nodiscard]] bool isOpen()const;
+    [[nodiscard]] bool focused()const; // The window has the input focus.
     void close();
     [[nodiscard]] float aspect()const;
     void onResize(std::function<void(threepp::WindowSize)> f);

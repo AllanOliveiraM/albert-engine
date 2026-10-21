@@ -72,6 +72,7 @@ void albert::Display::setClouds(bool on,float strength,double seconds,float east
 bool albert::Display::cloudsShown()const{return impl_->scene->cloudsShown();}
 void albert::Display::setSamples(unsigned samples){impl_->scene->samples=samples>1?4u:1u;}
 void albert::Display::setVsync(bool on){impl_->context->setVsync(on);}
+bool albert::Display::focused()const{return glfwGetWindowAttrib(impl_->window->handle(),GLFW_FOCUSED)!=0;}
 void albert::Display::setEarthshine(const Object3D* earth,float radius){impl_->scene->earthshine={earth,earth?radius:0.f};}
 float albert::Display::exposure()const{return impl_->scene->exposure;}
 namespace {
