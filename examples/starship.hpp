@@ -345,6 +345,12 @@ protected:
         const Vec v=s.velocity+up_*-dot(s.velocity,up_);const double n=std::abs(dot(flat,north_)),e=dot(flat,cross(north_,up_));
         return close_?n<.6&&e>-1.5&&e<9:n<.4&&e>-1&&e<8&&std::abs(dot(v,north_))<.3&&norm(v)<3;
     }
+    // Hanging on the pins with the engine on: the body upright and the thrust's line through the pins (the pivot), so nothing is
+    // left to swing when it cuts.
+    void hang(Command& c,const State& s,const Engines* by=nullptr)const{
+        const Vec e=mul(s.toBody,cross(bodyX(s),up_)),w=s.rate,o=by?by->centre():Vec{};const double lever=length_-pin_,gain=pitchInertia(s.propellant)/std::max(s.thrust*lever,1.);
+        c.gimbalPitch=std::clamp(gain*(1.44*e.y-2*w.y)-o.z/lever,-15*deg,15*deg);c.gimbalYaw=std::clamp(gain*(1.44*e.z-2*w.z)+o.y/lever,-15*deg,15*deg);c.torque={};roll(c,s,by);
+    }
     Vec site_,north_,up_;double arms_,rest_,length_,pin_,propellant_;MassProperties full_,empty_;bool close_=false;
 };
 // The booster's way back from staging, at 50 Hz, deciding all the way whether the catch can still be made:
@@ -457,13 +463,20 @@ public:
             // onto the arms anyway, faster (nothing left to get away on).
             {const double usable=s.propellant-residual,second=g0*s.mass/raptorExhaust,finish=(std::max(over-catchHeight(s),0.)+3)*second;
                 if(usable<finish&&usable>20*second)giveUp(s,"propelante insuficiente para terminar a captura");else hurry_=usable<finish;}
+            if(norm(s.contact)>0)hover_=t; // On the arms (or touching them): not stuck over them.
             if(catch_&&t-hover_>25&&!hurry_)giveUp(s,"tempo demais sobre os braços");
             if(phase_==Phase::divert)break;
             if(hurry_&&armsClosed&&norm(flat)<1)phase_=Phase::descend;
-            count(c,s,overArms(c,s,flat,over,phase_==Phase::descend,std::max(set_.count(),1),set_.centre(),&set_,hurry_?2:1));
-            if(norm(s.contact)>0&&norm(flat)<2){if(touch_<0)touch_=t;if(t-touch_>=.3){c.throttle=.4;phase_=Phase::caught;caught_=t;}}else touch_=-1;break; // On the arms for 0.3 s.
-        case Phase::caught: // The engines at their least, held upright, while the arms take the load, then off; slipping off in that second: back down.
-            if(!off_){if(norm(s.contact)==0){phase_=Phase::descend;touch_=-1;break;}aim(c,s,up_,set_.centre());c.throttle=.4;if(t-caught_>1){set_.use(c,s,0);off_=true;}}
+            if(phase_==Phase::descend&&norm(s.contact)>0&&norm(flat)<2){ // The pins on the arms: the weight handed to them (the thrust at its
+                // least, engines out until that is under 70% of it), held upright; caught after 0.3 s.
+                hang(c,s,&set_);c.throttle=.4;if(set_.count()>1&&set_.count()*.4*raptorSea>.7*s.mass*g0)set_.use(c,s,set_.count()-1);
+                if(touch_<0)touch_=t;if(t-touch_>=.3){phase_=Phase::caught;caught_=t;}break;}
+            touch_=-1;count(c,s,overArms(c,s,flat,over,phase_==Phase::descend,std::max(set_.count(),1),set_.centre(),&set_,hurry_?2:1));break;
+        case Phase::caught: // On the arms, the engines at their least while they take the load, the thrust's line through the pins
+            // until it hangs still (or 15 s), then off; slipping off in the first second: back down.
+            if(!off_){if(norm(s.contact)==0&&t-caught_<1){phase_=Phase::descend;touch_=-1;break;}hang(c,s,&set_);c.throttle=.4;
+                if(set_.count()>1&&set_.count()*.4*raptorSea>.85*s.mass*g0)set_.use(c,s,set_.count()-1); // Their least would lift it off the arms.
+                if(t-caught_>2&&(std::hypot(s.rate.y,s.rate.z)<.002||t-caught_>15)){set_.use(c,s,0);off_=true;}}
             else{c.torqueOn=true;c.torque={};}break;
         case Phase::divert:{ // Away from the tower toward the aim as fast as a 20° tilt allows, its height held until 150 m clear
             // of the tower (or it has left only what landing takes), then down still heading there.

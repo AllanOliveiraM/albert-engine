@@ -19,20 +19,25 @@ private:
 // standard deviation, drawn once; scale: scale-factor error standard deviation.
 struct Channel {double white=0,instability=0,correlation=100,walk=0,bias=0,scale=0;};
 struct ImuModel {Channel accelerometer,gyroscope;double pressureNoise=0,pressureBias=0;}; // Pa.
-enum class ImuGrade {ideal,tactical,industrial};
+enum class ImuGrade {ideal,tactical,industrial,navigation}; // navigation: a launch vehicle's (ring laser or fibre gyros).
 ImuModel imuModel(ImuGrade grade);
 // Measures specific force, rate, their increments over dt and static pressure.
 // GNSS receiver: position and velocity with white noise (σ per axis in the local horizontal, vertical, and on velocity) and a
 // first-order Gauss-Markov position drift (σ, correlation time: ionosphere, orbits, clocks), one fix a period while below
 // the height and speed limits (0: none; the export rules' 18 km and 515 m/s make a civil receiver; the defaults, a space
 // receiver to 3000 km). Earth only.
-struct GnssModel {double horizontal=1.5,vertical=3,velocity=.05,drift=1,correlation=300,period=.1,maxHeight=3e6,maxSpeed=0;};
+// RTK: within rtkRange (m; 0: none) of a base station (ECEF), the corrections it sends cancel the drift and most of the noise:
+// σ rtkSigma + rtkPpm × range on each axis, rtkVelocity on velocity; the fix lost with probability rtkDropout + (range /
+// rtkRange)² (the link fading out to its edge), the plain fix then. blackout: the heat flux (W/m²) above which the plasma
+// sheath stops every fix (0: never).
+struct GnssModel {double horizontal=1.5,vertical=3,velocity=.05,drift=1,correlation=300,period=.1,maxHeight=3e6,maxSpeed=0,
+    rtkRange=0,rtkSigma=.02,rtkPpm=1e-6,rtkVelocity=.02,rtkDropout=.02,blackout=0;V3 base;};
 class Gnss {
 public:
-    struct Reading {bool valid=false;double time=0;V3 position,velocity;}; // ECEF (m, m/s), at `time` (s since the start).
+    struct Reading {bool valid=false,rtk=false;double time=0;V3 position,velocity;}; // ECEF (m, m/s), at `time` (s since the start).
     Gnss(const GnssModel& model,std::uint64_t seed);
     // ned: rows north, east and down at the point (nedFromFixed); a fix when available, else invalid.
-    Reading measure(double time,double dt,V3 position,V3 velocity,const M3& ned,double height,double speed,bool available);
+    Reading measure(double time,double dt,V3 position,V3 velocity,const M3& ned,double height,double speed,bool available,double heatFlux=0);
     const GnssModel& model()const{return model_;}
 private:
     GnssModel model_;Noise noise_;V3 drift_;
@@ -62,6 +67,18 @@ public:
     const StarTrackerModel& model()const{return model_;}
 private:
     StarTrackerModel model_;Noise noise_;
+};
+// Propellant gauges (the tanks' level sensors): what is left with white noise σ = fraction × it + floor (kg) and a bias of
+// biasFraction × it drawn once, a reading a period.
+struct GaugeModel {double fraction=.005,floor=300,biasFraction=.003,period=.1;};
+class PropellantGauge {
+public:
+    struct Reading {bool valid=false;double time=0,propellant=0;};
+    PropellantGauge(const GaugeModel& model,std::uint64_t seed);
+    Reading measure(double time,double propellant);
+    const GaugeModel& model()const{return model_;}
+private:
+    GaugeModel model_;Noise noise_;double bias_=0;
 };
 class Imu {
 public:

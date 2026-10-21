@@ -68,7 +68,7 @@ public:
             if(phase_==Phase::descend&&norm(s.contact)>0&&norm(flat)<2){c.throttle=.4;phase_=Phase::caught;caught_=t;} // The pins on the arms (not a closing arm on the hull).
             break;
         case Phase::caught: // On the arms, the engine at its least while they take the load, then off once it hangs still.
-            if(!off_){hang(c,s);c.throttle=.4;}else{c.torqueOn=true;c.torque={};}
+            if(!off_){hang(c,s,&set_);c.throttle=.4;}else{c.torqueOn=true;c.torque={};}
             if(!off_&&t-caught_>2&&(std::hypot(s.rate.y,s.rate.z)<.002||t-caught_>15)){set_.use(c,s,0);off_=true;}break;
         }
         return c;
@@ -78,12 +78,6 @@ private:
     // The flaps' drag at their openings now (times |sin α|; their entry trim before any), on the reference area.
     double flapDrag(const State& s)const{
         double d=0;for(std::size_t i=0;i<4;++i)d+=flapCn*flaps[i].area/(pi*radius*radius)*std::sin(45*deg+(s.surfaces.size()==4?s.surfaces[i]:i<2?-30*deg:13*deg));return d;}
-    // Hanging on the pins with the engine on: the body upright and the thrust's line through the pins (the pivot), so nothing is
-    // left to swing when it cuts.
-    void hang(Command& c,const State& s)const{
-        const Vec e=mul(s.toBody,cross(bodyX(s),up_)),w=s.rate,o=set_.centre();const double lever=shipLength-shipPinAt,gain=pitchInertia(s.propellant)/std::max(s.thrust*lever,1.);
-        c.gimbalPitch=std::clamp(gain*(1.44*e.y-2*w.y)-o.z/lever,-15*deg,15*deg);c.gimbalYaw=std::clamp(gain*(1.44*e.z-2*w.z)+o.y/lever,-15*deg,15*deg);c.torque={};roll(c,s);
-    }
     static Vec inertial(const State& s){return s.velocity+cross(Vec{0,0,7.292115e-5},s.position);}
     // The torque that over a half-second pulse brings the body's rates to the local horizontal frame's (nose along the
     // inertial velocity's horizontal, belly down: turning once an orbit) plus a turn toward it at 0.005/s (faster than the

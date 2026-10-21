@@ -23,6 +23,9 @@ ImuModel imuModel(ImuGrade grade){ // Representative datasheet values, not a spe
     if(grade==ImuGrade::tactical){
         m.gyroscope={.1*deg/std::sqrt(hour),1.07*1*deg/hour,300,.01*deg/hour/std::sqrt(hour),3*deg/hour,100e-6};
         m.accelerometer={.05/std::sqrt(hour),1.07*50e-6*g0,300,1e-6*g0,500e-6*g0,300e-6};m.pressureNoise=2;m.pressureBias=20;
+    }else if(grade==ImuGrade::navigation){
+        m.gyroscope={.002*deg/std::sqrt(hour),1.07*.003*deg/hour,300,.0005*deg/hour/std::sqrt(hour),.01*deg/hour,5e-6};
+        m.accelerometer={.01/std::sqrt(hour),1.07*10e-6*g0,300,.1e-6*g0,25e-6*g0,50e-6};m.pressureNoise=1;m.pressureBias=10;
     }else if(grade==ImuGrade::industrial){
         m.gyroscope={.3*deg/std::sqrt(hour),1.07*10*deg/hour,100,.1*deg/hour/std::sqrt(hour),30*deg/hour,500e-6};
         m.accelerometer={.1/std::sqrt(hour),1.07*100e-6*g0,100,5e-6*g0,2e-3*g0,1e-3};m.pressureNoise=5;m.pressureBias=50;
@@ -51,12 +54,20 @@ Imu::Reading Imu::measure(double dt,V3 f,V3 w,V3 dv,V3 da,double p){
     return r;
 }
 Gnss::Gnss(const GnssModel& m,std::uint64_t seed):model_(m),noise_(seed){drift_={m.drift*noise_.gaussian(),m.drift*noise_.gaussian(),m.drift*noise_.gaussian()};}
-Gnss::Reading Gnss::measure(double time,double dt,V3 p,V3 v,const M3& ned,double height,double speed,bool available){
+Gnss::Reading Gnss::measure(double time,double dt,V3 p,V3 v,const M3& ned,double height,double speed,bool available,double heatFlux){
     if(model_.drift>0&&dt>0){const double k=std::exp(-dt/model_.correlation),w=model_.drift*std::sqrt(1-k*k);drift_={k*drift_.x+w*noise_.gaussian(),k*drift_.y+w*noise_.gaussian(),k*drift_.z+w*noise_.gaussian()};}
     const V3 e{model_.horizontal*noise_.gaussian(),model_.horizontal*noise_.gaussian(),model_.vertical*noise_.gaussian()},u{model_.velocity*noise_.gaussian(),model_.velocity*noise_.gaussian(),model_.velocity*noise_.gaussian()};
+    const V3 k{noise_.gaussian(),noise_.gaussian(),noise_.gaussian()},kv{noise_.gaussian(),noise_.gaussian(),noise_.gaussian()};const double lost=noise_.uniform();
     Reading r;r.time=time; // The noise is drawn whether or not there is a fix: the sequence does not depend on availability.
-    if(!available||(model_.maxHeight>0&&height>model_.maxHeight)||(model_.maxSpeed>0&&speed>model_.maxSpeed))return r;
-    const M3 back=transpose(ned);r.valid=true;r.position=p+back*(e+drift_);r.velocity=v+back*u;return r;
+    if(!available||(model_.maxHeight>0&&height>model_.maxHeight)||(model_.maxSpeed>0&&speed>model_.maxSpeed)||(model_.blackout>0&&heatFlux>model_.blackout))return r;
+    r.valid=true;const double range=norm(p-model_.base);
+    if(model_.rtkRange>0&&range<model_.rtkRange&&lost>=model_.rtkDropout+range*range/(model_.rtkRange*model_.rtkRange)){
+        r.rtk=true;r.position=p+k*(model_.rtkSigma+model_.rtkPpm*range);r.velocity=v+kv*model_.rtkVelocity;return r;}
+    const M3 back=transpose(ned);r.position=p+back*(e+drift_);r.velocity=v+back*u;return r;
+}
+PropellantGauge::PropellantGauge(const GaugeModel& m,std::uint64_t seed):model_(m),noise_(seed){bias_=m.biasFraction*noise_.gaussian();}
+PropellantGauge::Reading PropellantGauge::measure(double time,double p){
+    Reading r;r.time=time;r.valid=true;r.propellant=std::max(0.,p*(1+bias_)+(model_.fraction*p+model_.floor)*noise_.gaussian());return r;
 }
 RadarAltimeter::RadarAltimeter(const RadarModel& m,std::uint64_t seed):model_(m),noise_(seed){}
 RadarAltimeter::Reading RadarAltimeter::measure(double time,double height,V3 b){

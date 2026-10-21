@@ -35,8 +35,14 @@ e de velocidade mais deriva de Gauss-Markov; só na Terra; limites de altura e v
 3000 km, com 18 km e 515 m/s um civil), altímetro radar (alcance inclinado pelo eixo de mira até o solo plano do sítio,
 dentro do meio ângulo do feixe e do alcance; ruído máx(piso, fração do alcance)) e rastreador de estrelas (atitude com ruído
 através e em torno do eixo de mira; nada a menos do ângulo de exclusão do Sol, dentro do disco do corpo central mais uma
-margem, ou acima da taxa limite). Cada um mede no fim do passo que completa o seu período; `physics_test` confere os
-desvios contra os ajustes (GNSS 1,53/2,96 m e 0,050 m/s para 1,5/3/0,05; radar 0,99 m a 100 m; rastreador 4,95″/42″).
+margem, ou acima da taxa limite). O GNSS tem ainda:
+- **RTK**, com uma estação base no sítio: dentro do alcance, σ de 2 cm + 1 ppm da distância por eixo e 2 cm/s; o fixo se
+  perde com probabilidade 2% + (distância/alcance)², e então vale o fixo comum;
+- **apagão por plasma**, acima de um fluxo de calor.
+
+Os medidores dos tanques dão o propelante com ruído de 0,5% + 300 kg e um viés de 0,3% sorteado uma vez. Cada sensor mede no
+fim do passo que completa o seu período. `physics_test` confere os desvios contra os ajustes: GNSS 1,53/2,96 m e 0,050 m/s
+para 1,5/3/0,05; RTK 2,1 cm; radar 0,99 m a 100 m; rastreador 4,95″/42″; medidor 0,80 t a 100 t.
 
 Chaves por voo (`Environment`: `sunMoon`, `relativity`, `atmosphere`, `wind`, `solarPressure`, `turbulence`; na API, `PhysicsSettings`, e
 o grau 0 da gravidade como massa pontual) removem cada modelo para estudos e validação.
@@ -54,8 +60,8 @@ Sensores: `Flight::increments()` integra no RK4 a força específica e a taxa an
 (incrementos de velocidade e ângulo de um IMU strapdown). `Imu` aplica os erros da IEEE 952 por
 eixo — ruído branco (VRW/ARW), instabilidade de viés como Gauss-Markov, passeio aleatório da
 taxa, viés e fator de escala sorteados uma vez — e erros de barômetro, com ruído determinístico
-e portátil (xoshiro256** + Box-Muller); graus `ideal`, `tactical` e `industrial` com valores
-representativos de catálogo, não de um produto.
+e portátil (xoshiro256** + Box-Muller). Os graus `ideal`, `tactical`, `industrial` e `navigation` (o de um lançador: giros
+de 0,01°/h) têm valores representativos de catálogo, não de um produto.
 
 Sensores ideais em `Flight::sample()`: força específica no corpo (o que um IMU mede:
 zero em queda livre, +g no pad), taxas angulares, pressão estática, ar, Mach, pressão

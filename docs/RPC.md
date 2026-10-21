@@ -508,6 +508,16 @@ núcleo.
      centro de massa). Desce a 1 m/s até os pinos, e pendurada nos braços com o motor ainda ligado, o empuxo passa pelos
      pinos até parar de balançar.
 
+**Navegação.** O software de voo não lê a verdade do simulador; ela fica só para as checagens do teste. A pilha, a nave e o
+booster voam com IMU de grau navegação, GNSS espacial com RTK da base na torre (até 30 km), rastreador de estrelas e medidores
+dos tanques ([navigation.hpp](../examples/navigation.hpp)):
+- inercial strapdown no referencial terrestre (RK4, gravidade J2, Coriolis);
+- Kalman por eixo com os fixos, recusando os que fogem 5σ da estimativa;
+- atitude puxada para a do rastreador, por um modelo próprio da orientação da Terra (precessão IAU 1976 e GMST);
+- `q` pela velocidade estimada e a atmosfera padrão, sem o vento.
+
+O booster herda a estimativa da pilha na separação. Na missão o erro fica em ~2–4 m em órbita e 1–2 cm perto da torre.
+
 **Falhas de motor.** Os guiamentos leem dos motores quais falharam (`EngineSample.failed`, o que os sensores de um motor
 real dizem) e escolhem os que usam: os primeiros que funcionam numa ordem de preferência (o centro, o anel do meio, os de
 fora), trocando na hora um que falhe aceso; com 3 ou menos, o conjunto cujo centro de empuxo fica sobre a linha perpendicular

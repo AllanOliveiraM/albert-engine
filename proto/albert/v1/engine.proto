@@ -340,12 +340,20 @@ message LocalStart { Geodetic position=1; Vector3 velocity_ned_meters_per_second
   Vector3 angular_rate_radians_per_second=6; } // Body rates relative to the ground.
 message InertialStart { Vector3 position_meters=1; Vector3 velocity_meters_per_second=2; Quaternion attitude=3; Vector3 angular_rate_radians_per_second=4; } // Body to inertial; body rates.
 // Navigation sensors (docs/PHYSICS.md), reproducible from the seed; unset values: the defaults noted.
-message SensorSettings { GnssSettings gnss=1; RadarAltimeterSettings radar_altimeter=2; StarTrackerSettings star_tracker=3; uint64 seed=4; }
+message SensorSettings { GnssSettings gnss=1; RadarAltimeterSettings radar_altimeter=2; StarTrackerSettings star_tracker=3; uint64 seed=4;
+  PropellantGaugeSettings propellant_gauge=5; }
 // White noise 1.5 m horizontal, 3 m vertical, 0.05 m/s; Gauss-Markov drift 1 m over 300 s; 10 Hz; below 3000 km, no speed
 // limit (a space receiver; 18000 m and 515 m/s make a civil one). Earth flights only.
 message GnssSettings { bool enabled=1; optional double horizontal_sigma_meters=2; optional double vertical_sigma_meters=3;
   optional double velocity_sigma_meters_per_second=4; optional double drift_sigma_meters=5; optional double drift_correlation_seconds=6;
-  optional double period_seconds=7; optional double max_height_meters=8; optional double max_speed_meters_per_second=9; }
+  optional double period_seconds=7; optional double max_height_meters=8; optional double max_speed_meters_per_second=9;
+  // RTK with a base station at the site (unset range: none): within the range, σ 0.02 m + 1 ppm of the range a axis and
+  // 0.02 m/s, the fix lost with probability 0.02 + (range / max)² (then the plain one). The plasma sheath's blackout above
+  // the heat flux (W/m²; unset: none).
+  optional double rtk_range_meters=10; optional double rtk_sigma_meters=11; optional double rtk_ppm=12;
+  optional double rtk_velocity_sigma_meters_per_second=13; optional double rtk_dropout=14; optional double blackout_heat_flux_watts_per_meter2=15; }
+// The tanks' level sensors: σ 0.5% of what is left + 300 kg, a 0.3% bias drawn once; 10 Hz.
+message PropellantGaugeSettings { bool enabled=1; optional double sigma_fraction=2; optional double floor_kilograms=3; optional double bias_fraction=4; optional double period_seconds=5; }
 // Slant range along the boresight (body; +z, down by default) to the ground, within 20° of the vertical and 2500 m; noise
 // max(0.3 m, 1% of the range); 20 Hz.
 message RadarAltimeterSettings { bool enabled=1; optional Vector3 boresight=2; optional double half_angle_radians=3; optional double max_range_meters=4;
@@ -368,7 +376,7 @@ message PhysicsSettings {
 }
 // Inertial measurement unit and barometer errors (IEEE 952 terms, representative grades);
 // the seed makes the noise reproducible.
-message ImuSettings { enum Grade { IDEAL=0; TACTICAL=1; INDUSTRIAL=2; } Grade grade=1; uint64 seed=2; }
+message ImuSettings { enum Grade { IDEAL=0; TACTICAL=1; INDUSTRIAL=2; NAVIGATION=3; } Grade grade=1; uint64 seed=2; } // NAVIGATION: a launch vehicle's.
 message Gimbal { double pitch_radians=1; double yaw_radians=2; } // + pitch: nose up; + yaw: nose right.
 message FlightCommand {
   oneof command {
@@ -450,10 +458,12 @@ message FlightSample {
   repeated double structure_radians=59;     // Each structure's angle about its hinge (0 when fixed), in the request's order.
   Breakup breakup=60;                       // Unset cause: whole. Once broken up the engines are out and commands do nothing.
   double thruster_gas_kilograms=61;         // The thrusters' own gas left (with StageDefinition.thruster_gas_kilograms).
+  PropellantGaugeReading propellant_gauge=62; // With SensorSettings.propellant_gauge.
 }
+message PropellantGaugeReading { bool valid=1; double elapsed_seconds=2; double propellant_kilograms=3; }
 message WheelSample { string name=1; double brake=2; double steer_radians=3; }
 message ThermalSample { string name=1; double temperature_kelvin=2; double heat_flux_watts_per_meter2=3; bool over_limit=4; }
-message GnssReading { bool valid=1; double elapsed_seconds=2; Vector3 position_ecef_meters=3; Vector3 velocity_ecef_meters_per_second=4; }
+message GnssReading { bool valid=1; double elapsed_seconds=2; Vector3 position_ecef_meters=3; Vector3 velocity_ecef_meters_per_second=4; bool rtk=5; } // rtk: corrected by the site's base.
 message RadarAltimeterReading { bool valid=1; double elapsed_seconds=2; double range_meters=3; }
 message StarTrackerReading { bool valid=1; double elapsed_seconds=2; Quaternion attitude=3; }
 message SurfaceSample { string name=1; double deflection_radians=2; double command_radians=3; }

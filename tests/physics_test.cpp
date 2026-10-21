@@ -346,6 +346,15 @@ int main(){try{
         GnssModel civil=gm;civil.maxHeight=18000;civil.maxSpeed=515;Gnss limited(civil,1);
         require(!limited.measure(0,.1,p,v,ned,20000,100,true).valid&&!limited.measure(0,.1,p,v,ned,1000,600,true).valid&&limited.measure(0,.1,p,v,ned,1000,100,true).valid,"GNSS export limits");
         require(!limited.measure(0,.1,p,v,ned,1000,100,false).valid,"No GNSS off the Earth");
+        // RTK from a base 1 km off: 2 cm + 1 ppm a axis, the fix lost 2% + (1/30)² of the time; beyond its range, plain fixes;
+        // the plasma's blackout over its heat flux. The tanks' gauges: 0.5% + 300 kg noise about the bias.
+        {GnssModel rm=gm;rm.rtkRange=30e3;rm.base=p+V3{ned.m[0][0],ned.m[0][1],ned.m[0][2]}*1000.;rm.blackout=1e6;Gnss rtk(rm,9);double se=0;int fixed=0;
+            for(int i=0;i<n;++i){const auto r=rtk.measure(i*.1,.1,p,v,ned,100,50,true);if(r.rtk){++fixed;se+=dot(r.position-p,r.position-p)/3;}}
+            std::printf("RTK: sigma %.4f m, %.1f%% fixed\n",std::sqrt(se/fixed),100.*fixed/n);near(std::sqrt(se/fixed),.021,.002,"RTK sigma");near(1.*fixed/n,1-.02-1./900,.01,"RTK fixes");
+            rm.base=p+V3{ned.m[0][0],ned.m[0][1],ned.m[0][2]}*40e3;Gnss far(rm,9);require(!far.measure(0,.1,p,v,ned,100,50,true).rtk,"RTK beyond its range");
+            require(!rtk.measure(0,.1,p,v,ned,100,50,true,2e6).valid,"GNSS through the plasma");
+            PropellantGauge gauge({},5);double sg=0,sg2=0;for(int i=0;i<n;++i){const double x=gauge.measure(i,100e3).propellant;sg+=x;sg2+=x*x;}
+            const double gm0=sg/n,gs=std::sqrt(sg2/n-gm0*gm0);std::printf("gauge at 100 t: mean %.0f kg, sigma %.0f kg\n",gm0,gs);near(gs,800,40,"Gauge noise");near(gm0,100e3,1500,"Gauge bias");}
         RadarAltimeter radar({},3);double sum=0,sq=0;
         for(int i=0;i<n;++i){const auto r=radar.measure(i,100,{0,0,1});sum+=r.range;sq+=r.range*r.range;}
         const double mean=sum/n,sigma=std::sqrt(sq/n-mean*mean);std::printf("radar at 100 m: mean %.3f m, sigma %.3f m\n",mean,sigma);
