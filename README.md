@@ -278,17 +278,19 @@ Albert chega ao fim do S-II a 0,3 m/s da velocidade medida e corta o S-IVB 1,9 s
 órbita de 186,5 × 183,1 km (Apollo 11: 186,0 × 183,2 km).
 
 O `--starship` voa um Starship montado só com a física genérica, por definições na API (nada dele no núcleo; valores
-públicos aproximados da V3 em examples/starship.hpp). A pilha sobe com 33 Raptor 3 e separa a quente aos 139 s, a 78 km.
-A nave segue até uma órbita de 180 × 204 km. O Super Heavy vira outro voo e volta à torre: boostback, descida guiada pelas
-três grid fins, queima de pouso em 13 e depois 3 motores e captura nos braços. Ele fica a 0,04 m do eixo da torre, com 78 t
-de sobra. Tirado o booster dos braços, a nave espera em órbita a passagem que a traz de volta sobre Starbase, cerca de 22 h
+públicos aproximados da V3 em examples/starship.hpp). A pilha sobe com 33 Raptor 3 e separa a quente aos 136 s, a 63 km.
+A nave segue até uma órbita de 181 × 214 km. O Super Heavy vira outro voo e volta à torre: boostback de ~55 s, apogeu de
+~100 km, descida guiada pelas três grid fins, queima de pouso em 13 e depois 3 motores (~25 s até sobre os braços, como nos
+voos de 2025) e captura nos braços, a 0,4 m do eixo da torre, com 52 t de sobra. A guiagem decide em tempo real: se a
+captura deixa de ser possível (motores, propelante, alcance), desiste e cai longe da torre ou no mar. Tirado o booster dos braços, a nave espera em órbita a passagem que a traz de volta sobre Starbase, cerca de 22 h
 depois. Então queima para sair de órbita, reentra de barriga guiada pela inclinação lateral, com flaps e RCS segurando a
 atitude e o escudo térmico abaixo do limite. Ela se vira para os motores, queima para pousar e é capturada nos mesmos braços.
 Em tempo real, a órbita passa acelerada (`--warp=1000`, o padrão) e o resto em 1×. `--follow-booster` leva a câmera para o
 booster na separação. Os veículos aparecem como são definidos: corpo, flaps e grid fins mexendo, sinos com o cardã, plumas
 que se abrem no vácuo e jatos do RCS. Starbase está no chão: a torre, os braços (abertos na subida, fechando em volta do
 booster e da nave que pairam), a mesa de lançamento, os tanques. `--pad` mostra a pilha na mesa, com a câmera dando a volta. Os guiamentos aguentam motores falhando (`--fail=booster@landing:1`
-e outras): trocam o motor perdido por outro e seguem até a captura.
+e outras): trocam o motor perdido por outro e seguem até a captura ou, quando ela fica impossível, abortam para longe da
+torre.
 
 Com dois voos ou mais, um quadro no canto mostra o outro voo ("Segunda vista dos voos" em Ajustes), com sua própria câmera
 presa ao veículo; um clique nele passa a seguir aquele voo. Como numa transmissão, cada veículo tem seu painel embaixo

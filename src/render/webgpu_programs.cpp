@@ -106,20 +106,37 @@ void earthLayers(){
 )";
     albert::gpu::define("albert:corona",corona);
     // vehicle.cpp: a rocket plume's glow on its cone (uv.y 1 at the nozzle, 0 at the tail), brightest down its axis and near
-    // the nozzle, fading to the edges and the tail; colours in linear light, strength its brightness, filtered by the air.
-    Program plume;plume.attributes=surfaceAttributes;plume.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32}};
+    // the nozzle, fading to the edges and the tail, with bright shock diamonds near the nozzle in thick air; colours in linear
+    // light, strength its brightness, filtered by the air.
+    Program plume;plume.attributes=surfaceAttributes;plume.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32},{"diamonds",Uniform::f32}};
     plume.wgsl=std::string(surface)+R"(
-struct Material { core: vec3f, edge: vec3f, strength: f32 };
+struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32 };
 @group(2) @binding(0) var<uniform> material: Material;
 @fragment fn fs_main(v: Surface) -> @location(0) vec4f {
     let mu = abs(dot(normalize(v.worldNormal), normalize(frame.camera.xyz - v.world)));
     let along = clamp(v.uv.y, 0.0, 1.0);
-    let glow = pow(mu, 1.6) * smoothstep(0.0, 0.7, along) * (0.35 + 0.65 * along);
+    let bands = pow(0.5 + 0.5 * cos(along * 37.7), 6.0) * smoothstep(0.45, 0.85, along); // Shock diamonds near the nozzle (diamonds: 0-1).
+    let glow = pow(mu, 1.6) * smoothstep(0.0, 0.7, along) * (0.35 + 0.65 * along) * (1.0 + 1.4 * material.diamonds * bands);
     let colour = mix(material.edge, material.core, mu * along);
     return vec4f(linearToSrgb(colour * airFilter(v.world)), glow * material.strength);
 }
 )";
     albert::gpu::define("albert:plume",plume);
+    // vehicle.cpp: the shock layer's glow around a vehicle entering the air (a shell offset to its windward side): faint where
+    // looked through face-on, brightest at its rim, the core colour face-on; strength from the heating.
+    Program plasma;plasma.attributes=surfaceAttributes;plasma.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32}};
+    plasma.wgsl=std::string(surface)+R"(
+struct Material { core: vec3f, edge: vec3f, strength: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+@fragment fn fs_main(v: Surface) -> @location(0) vec4f {
+    let mu = abs(dot(normalize(v.worldNormal), normalize(frame.camera.xyz - v.world)));
+    let rim = pow(1.0 - mu, 2.2);
+    let glow = 0.15 * mu + rim;
+    let colour = mix(material.edge, material.core, mu);
+    return vec4f(linearToSrgb(colour * airFilter(v.world)), glow * material.strength);
+}
+)";
+    albert::gpu::define("albert:plasma",plasma);
     Program clouds;clouds.attributes=surfaceAttributes;clouds.textures={"cloudMap","detailMap","previousDetailMap"};
     clouds.uniforms=cloudUniforms;for(auto u:{std::pair{"solarDirection",Uniform::vec3},{"moonPosition",Uniform::vec3},{"eclipseSunPosition",Uniform::vec3},{"eclipseEnabled",Uniform::f32},{"visibility",Uniform::f32}})clouds.uniforms.emplace_back(u.first,u.second);
     clouds.wgsl=std::string(surface)+"struct Material { "+cloudFields+", solarDirection: vec3f, moonPosition: vec3f, eclipseSunPosition: vec3f, eclipseEnabled: f32, visibility: f32 };\n@group(2) @binding(0) var<uniform> material: Material;\n"

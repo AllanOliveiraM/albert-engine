@@ -323,6 +323,16 @@ estágio), o mesmo ar, gravidade, chaves físicas e sensores (com sementes novas
 a andar por conta própria — o booster que volta, a nave que segue —; o log dele se reproduz sozinho e o do pai recria o
 filho no replay.
 
+**Colisões e destruição.** `VehicleDefinition.crash_speed_meters_per_second` faz do casco um sólido que bate no chão e nas
+estruturas e se quebra acima dessa velocidade; `ThermalNodeDefinition.failure_kelvin` quebra o veículo quando o nó passa
+dela. A amostra traz `breakup` (causa, instante, velocidade) e o evento `BREAKUP`; quebrado, os motores apagam, os comandos não
+fazem nada e os pedaços caem até o chão. A cena mostra a bola de fogo, a fumaça e os destroços. Uma estrutura com
+`drawn: false` não é desenhada como barra (o cenário a mostra).
+
+**Propelente como nos tanques.** `StageDefinition.boiloff_per_day` (a fração que evapora por dia), `residual_kilograms` (o
+que os motores não tiram), `thruster_gas_kilograms` (o gás próprio dos propulsores, na amostra
+`thruster_gas_kilograms`) e `EngineDefinition.start_kilograms` (o propelante de cada partida).
+
 **Marcos da missão.** `StepRequest.milestones` dá ao voo eventos da missão (nome de até 40 caracteres, instante UTC ou o
 início do passo, previsto ou acontecido; o acontecido substitui o previsto do mesmo nome). A cena os mostra, com os de todos os
 voos, na linha do tempo dos painéis de transmissão, junto do relógio T+ desde o início do voo principal.
@@ -462,16 +472,27 @@ núcleo.
 
 **Voo**
 1. **Subida:** o programa genérico de subida dirige a pilha pelos cardãs, a 80% de empuxo a partir dos 40 s.
-2. **Separação:** com 450 t no booster, o `spawn` cria o voo `booster`. Os dois voos andam em passo travado, cada um com
-   seus comandos por `index`.
-3. **Boostback e descida:** o `BoosterReturn` fecha o boostback em 3 motores quando o pouso previsto passa na torre. O
-   previsor balístico inclui a queima de pouso. Na descida, as grid fins inclinam o corpo para que a sustentação de
-   escoamento cruzado leve o ponto de pouso à torre; o momento pedido é repartido entre as três resolvendo o sistema 3 × 3 da
-   geometria delas.
-4. **Pouso:** a queima de pouso vai até um portão a 80 m/s em 13 motores. A partir daí, 3 motores param o booster 10 m
-   acima dos braços, com o rolamento alinhando os pinos.
-5. **Captura:** o booster desce a 1 m/s. Os motores ficam no mínimo por 1 s enquanto os braços tomam a carga. Ele
-   descansa 30 s e é tirado dos braços (`EndFlight`).
+2. **Separação:** com 570 t no booster (15% do propelante), o `spawn` cria o voo `booster`. Os dois voos andam em passo
+   travado, cada um com seus comandos por `index`.
+3. **Boostback e descida:** o `BoosterReturn` faz o boostback em 13 motores a 60% (uns 55 s, como nos voos), fechando em 3
+   quando o pouso previsto chega a um ponto 300 m mar adentro, a leste da torre. Acima do ar o RCS (que gasta o gás dos
+   tanques, isto é, propelante) segura a atitude com que ele vai entrar no ar, sem virar no apogeu. No ar, as grid fins
+   inclinam o corpo para que a força normal leve o pouso previsto ao ponto de entrada do corredor dos braços (abaixo de
+   30 km). O ganho é a força lateral medida pelo IMU por grau de inclinação. A malha de atitude compensa a rigidez
+   aerodinâmica do próprio corpo.
+4. **Pouso:** a queima de pouso em 13 motores, planejada a 70% (folga para perder motores), resolve a cada 0,2 s o empuxo
+   que chega ao portão (80 m/s) na altura certa e inclina o empuxo para corrigir o ponto previsto. Com o ar denso ela
+   inclina o corpo para o lado oposto, porque a força normal vence o empuxo lateral; o sinal e o ganho vêm do que o IMU
+   mede. Do portão, 3 motores (2 ou 1 quando no mínimo eles erguem demais; mais se faltar) entram pelo corredor até o eixo.
+   O rolamento põe os pinos sobre os braços por cardã diferencial. Os braços fecham quando ele está centrado entre os
+   trilhos (folga de 0,8 m), e ele desce a 1 m/s até os pinos. Fora do corredor ele mantém a base acima do topo da torre e
+   a contorna, nunca passando sobre ela.
+5. **Decisões:** a captura é reavaliada o tempo todo: motores com cardã, propelante para terminar dali (incluindo
+   contornar), alcance do ponto previsto, se a queda ainda para acima dos braços com todos os motores, tempo sobre os
+   braços. Se ela deixa de ser possível, é abandonada de vez. O booster vai para longe da torre: para o mar a leste, ou,
+   se estiver a oeste dela, para o interior longe da torre e dos tanques. Ele segura a altura até 150 m da torre e desce
+   freando. Sem propelante para fugir, termina a captura. Capturado, ele fica 1 s com os motores no mínimo enquanto os
+   braços tomam a carga, descansa 30 s e é tirado dos braços (`EndFlight`).
 6. **A nave de volta** ([ship_return.hpp](../examples/ship_return.hpp)), com flaps posicionados (`position_meters`), RCS,
    nós térmicos no escudo e pinos:
    - **Saída de órbita:** em órbita, nariz para a frente e barriga para a Terra, mantidos por um pulso de RCS de 0,5 s a cada

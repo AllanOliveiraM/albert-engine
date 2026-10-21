@@ -262,7 +262,8 @@ fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geom
     let roughness = min(max(roughnessIn, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
     let diffuse = albedo * (1.0 - metalness); let f0 = mix(vec3f(0.04), albedo, metalness);
     let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
-    return nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * diffuse / PI_L;
+    // The ambient light also mirrored, as by an even sky (f0 of it, less when rough): metal in the shade is not black.
+    return nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * (diffuse + f0 * (1.0 - 0.5 * roughness)) / PI_L;
 }
 fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
     let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;

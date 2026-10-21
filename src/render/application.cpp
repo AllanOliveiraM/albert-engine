@@ -1093,7 +1093,7 @@ int albert::runRenderer(int argc, char** argv) {
         // The flight's sound at the camera: muted until "Som do voo" is ticked (the device opens then); its emissions over
         // the last ten minutes and the listener's last place.
         bool soundOn=false;std::unique_ptr<albert::Sound> sound;
-        struct Heard {std::vector<albert::physics::acoustics::Emission> emissions;std::size_t booms=0;};std::map<std::string,Heard> heardFlights; // By scene id.
+        struct Heard {std::vector<albert::physics::acoustics::Emission> emissions;std::size_t booms=0;bool blasted=false;};std::map<std::string,Heard> heardFlights; // By scene id.
         std::optional<std::pair<double,albert::physics::V3>> lastListener;albert::physics::V3 listenerVelocity;
         const bool soundStats=std::getenv("ALBERT_SOUND_STATS")!=nullptr;auto soundReport=std::chrono::steady_clock::now();
 #endif
@@ -2848,6 +2848,10 @@ int albert::runRenderer(int argc, char** argv) {
                         const auto booms=ac::booms(emissions,simulatedUtc,here,source.planet,at); // One more cone over the camera, just now: its boom.
                         if(booms.size()>h.booms&&booms.back().time>simulatedUtc-1&&sound)sound->boom(booms.back().overpressure,booms.back().duration,side);
                         h.booms=booms.size();
+                        if(!h.blasted)if(const auto e=std::find_if(emissions.begin(),emissions.end(),[](const ac::Emission& x){return x.blast>0;});e!=emissions.end()){ // It blew up: its blast, once arrived.
+                            const double r=ph::norm(here-e->position),c=at(ph::geodetic(source.planet,here)).sound;
+                            if(simulatedUtc>=e->time+r/(c>0?c:340.)){h.blasted=true;const auto b=ac::blast(e->blast,r,at(ph::geodetic(source.planet,here)).pressure);
+                                if(sound&&b.overpressure>.01)sound->boom(b.overpressure,std::max(4*b.duration,.08),side);}}
                         if(soundStats&&steadyNow>=soundReport) // ALBERT_SOUND_STATS: once a second.
                             std::printf("sound %s: %s, %.1f dB SPL (%.1f dB above 20 Hz, engines %.1f dB) from %.0f m, %.2f s late, Doppler %.3f, %zu booms\n",source.id.c_str(),
                                 heard.audible?"audible":"silent",heard.audible?ac::overall(heard.levels):-1e9,[&]{ac::Spectrum a=heard.levels;if(!heard.audible)a.fill(-1e9);for(int b=0;b<12;++b)a[static_cast<std::size_t>(b)]=-1e9;return ac::overall(a);}(),

@@ -76,11 +76,14 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
             for(const auto& x:a.parts()){const auto ok=[](const api::Vector3& v){return finite(v.x())&&finite(v.y())&&finite(v.z());};
                 if(!ok(x.hinge_meters())||!ok(x.axis())||!ok(x.outward())||!(x.span_meters()>0)||!(x.width_meters()>0)||!(x.thickness_meters()>0)||!finite(x.span_meters())||!finite(x.width_meters())||!finite(x.thickness_meters())
                    ||!finite(x.gain())||!finite(x.offset_radians())||x.surface()>static_cast<unsigned>(sd.surfaces_size()))throw std::invalid_argument("Invalid hinged part");}
+            if(a.tanks_size()>8)throw std::invalid_argument("At most 8 tanks a stage");
+            for(const auto& x:a.tanks())if(!finite(x.from_meters())||!finite(x.to_meters())||!(x.to_meters()>x.from_meters()))throw std::invalid_argument("Invalid tank");
         }
         if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256||sd.wheels_size()>32||sd.hard_points_meters_size()>32)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters, 256 thermal nodes, 32 wheels and 32 hard points a stage");
         ph::Stage st;st.name=sd.name().substr(0,128);st.propellant=sd.propellant_kilograms();st.massFull=sd.mass_full_kilograms();st.massEmpty=sd.mass_empty_kilograms();
         st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
         st.length=sd.length_meters();st.reference=sd.aerodynamic_reference_meters();st.noseRadius=sd.has_nose_radius_meters()?sd.nose_radius_meters():1.;
+        st.boiloff=sd.boiloff_per_day();st.residual=sd.residual_kilograms();st.gas=sd.has_thruster_gas_kilograms()?sd.thruster_gas_kilograms():0.;
         st.legStiffness=sd.leg_stiffness_newtons_per_meter();st.legDamping=sd.leg_damping_newton_seconds_per_meter();st.friction=sd.has_friction()?sd.friction():.6;
         for(double x:{st.cgFull,st.cgEmpty,st.reference})if(!finite(x))throw std::invalid_argument("Non-finite position: "+st.name);
         if(!(st.length>0)||!(st.noseRadius>0)||!(st.legStiffness>=0)||!(st.legDamping>=0)||!(st.friction>=0)||!std::isfinite(st.length+st.legStiffness+st.legDamping+st.friction))throw std::invalid_argument("Invalid length, nose radius or legs: "+st.name);
@@ -88,6 +91,7 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
         if(!st.legs.empty()&&!(st.legStiffness>0))throw std::invalid_argument("Legs need a stiffness: "+st.name);
         for(const auto& e:sd.engines()){st.engines.push_back({e.name().substr(0,128),get(e.position_meters()),e.has_direction()?get(e.direction()):ph::V3{1,0,0},e.vacuum_thrust_newtons(),
             e.exhaust_velocity_meters_per_second(),e.exit_area_meters2(),e.has_min_throttle()?e.min_throttle():1.,e.gimbal_radians(),e.gimbal_rate_radians_per_second()});
+            st.engines.back().start=e.start_kilograms();if(!(st.engines.back().start>=0&&finite(st.engines.back().start)))throw std::invalid_argument("Invalid engine start cost");
             if(e.air_breathing()){auto& x=st.engines.back();x.breathing=true;x.thrustTable=jetTable(e.thrust_table(),"jet thrust");x.fuelTable=jetTable(e.fuel_table(),"jet fuel");x.spool=e.spool_seconds();}}
         for(const auto& h:sd.hard_points_meters())st.hardPoints.push_back(get(h));
         for(const auto& w:sd.wheels())st.wheels.push_back({w.name().substr(0,128),get(w.position_meters()),w.stiffness_newtons_per_meter(),w.damping_newton_seconds_per_meter(),
@@ -121,11 +125,13 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
     for(const auto& st:v.stages){auto* d=o->add_stages();
         d->set_name(st.name);d->set_propellant_kilograms(st.propellant);d->set_mass_full_kilograms(st.massFull);d->set_mass_empty_kilograms(st.massEmpty);d->set_cg_full_meters(st.cgFull);d->set_cg_empty_meters(st.cgEmpty);
         put(st.inertiaFull,d->mutable_inertia_full_kilogram_meters2());put(st.inertiaEmpty,d->mutable_inertia_empty_kilogram_meters2());d->set_length_meters(st.length);
-        d->set_aerodynamic_reference_meters(st.reference);d->set_nose_radius_meters(st.noseRadius);for(const auto& l:st.legs)put(l,d->add_legs_meters());
+        d->set_aerodynamic_reference_meters(st.reference);d->set_nose_radius_meters(st.noseRadius);d->set_boiloff_per_day(st.boiloff);d->set_residual_kilograms(st.residual);
+        if(st.gas>0)d->set_thruster_gas_kilograms(st.gas);for(const auto& l:st.legs)put(l,d->add_legs_meters());
         d->set_leg_stiffness_newtons_per_meter(st.legStiffness);d->set_leg_damping_newton_seconds_per_meter(st.legDamping);d->set_friction(st.friction);
         auto engines=st.engines;if(engines.empty()&&st.thrust>0)engines.push_back({st.name,{st.nozzle,0,0},{1,0,0},st.thrust,st.exhaust,st.exitArea,st.minThrottle,st.gimbal,0}); // The shorthand, as the core reads it.
         for(const auto& e:engines){auto* x=d->add_engines();x->set_name(e.name);put(e.position,x->mutable_position_meters());put(e.direction,x->mutable_direction());x->set_vacuum_thrust_newtons(e.thrust);
             x->set_exhaust_velocity_meters_per_second(e.exhaust);x->set_exit_area_meters2(e.exitArea);x->set_min_throttle(e.minThrottle);x->set_gimbal_radians(e.gimbal);x->set_gimbal_rate_radians_per_second(e.gimbalRate);
+            x->set_start_kilograms(e.start);
             if(e.breathing){x->set_air_breathing(true);x->set_spool_seconds(e.spool);for(const auto& [t,o]:{std::pair{&e.thrustTable,x->mutable_thrust_table()},std::pair{&e.fuelTable,x->mutable_fuel_table()}}){
                 for(double m:t->mach)o->add_mach(m);for(double a:t->angle)o->add_altitude_km(a);for(double v:t->values)o->add_values(v);}}}
         for(const auto& h:st.hardPoints)put(h,d->add_hard_points_meters());
@@ -336,7 +342,8 @@ struct Slot {
         auto cv=[](const api::Vector3& x){return core::Vector{x.x(),x.y(),x.z()};};auto pv=[](ph::V3 x){return core::Vector{x.x,x.y,x.z};};
         if(r.has_definition()&&stage<r.definition().stages_size()){const auto& a=r.definition().stages(stage).appearance();
             for(const auto& x:a.sections())l->sections.push_back({x.from_meters(),x.to_meters(),x.radius_from_meters(),x.radius_to_meters(),x.color(),x.tiles_radians()});
-            for(const auto& x:a.parts())l->parts.push_back({x.name(),cv(x.hinge_meters()),cv(x.axis()),cv(x.outward()),x.span_meters(),x.width_meters(),x.thickness_meters(),x.gain(),x.offset_radians(),x.surface(),x.color(),x.grid()});}
+            for(const auto& x:a.parts())l->parts.push_back({x.name(),cv(x.hinge_meters()),cv(x.axis()),cv(x.outward()),x.span_meters(),x.width_meters(),x.thickness_meters(),x.gain(),x.offset_radians(),x.surface(),x.color(),x.grid()});
+            for(const auto& x:a.tanks())l->tanks.push_back({x.from_meters(),x.to_meters(),x.full()});}
         if(l->sections.empty())l->sections.push_back({0,st.length,v.diameter/2,v.diameter/2,0xe8e8e8,0});
         for(const auto& e:st.engines)l->engines.push_back({pv(e.position),pv(e.direction),std::sqrt(std::max(e.exitArea,.01)/3.14159265358979323846)});
         for(const auto& t:st.rcs)l->thrusters.push_back({pv(t.position),pv(t.direction)});
@@ -345,12 +352,16 @@ struct Slot {
     // Its moving parts now (core::Sample::parts).
     std::shared_ptr<const std::vector<float>> parts()const{
         const auto& st=flight->vehicle().stages[static_cast<std::size_t>(flight->state().stage)];auto p=std::make_shared<std::vector<float>>();const auto thrust=flight->engineThrust();
-        p->reserve(st.engines.size()*3+st.surfaces.size()+st.rcs.size()+1);
+        p->reserve(st.engines.size()*3+st.surfaces.size()+st.rcs.size()+5);
         for(std::size_t i=0;i<st.engines.size();++i){const auto& e=flight->engines()[i];const double full=st.engines[i].breathing?1e300:st.engines[i].thrust;
             p->push_back(static_cast<float>(st.engines[i].breathing?(e.on?e.spool:0.):full>0?thrust[i]/full:0.));p->push_back(static_cast<float>(e.pitch));p->push_back(static_cast<float>(e.yaw));}
         for(const auto& x:flight->surfaces())p->push_back(static_cast<float>(x.deflection));
         for(double d:flight->thrusters())p->push_back(static_cast<float>(d));
-        p->push_back(static_cast<float>(flight->sample().air.pressure));return p;
+        const ph::Sample x=flight->sample();p->push_back(static_cast<float>(x.air.pressure));p->push_back(static_cast<float>(x.heatFlux)); // Pa, W/m² (stagnation).
+        p->push_back(static_cast<float>(st.propellant>0?flight->state().propellant/st.propellant:0.)); // The tanks' fill.
+        p->push_back(static_cast<float>(x.mach));
+        p->push_back(flight->breakup()==ph::Flight::Breakup::none?-1.f:static_cast<float>(ph::secondsSinceJ2000(flight->state().time-flight->breakupTime()))); // Since breaking up (s).
+        return p;
     }
     core::Object object()const{
         const auto& v=flight->vehicle();const double length=v.stages[flight->state().stage].length;
@@ -419,6 +430,7 @@ struct Slot {
         e.noise={x.thrust,flow>0?exhaust/flow:0.,std::sqrt(4*area/3.14159265358979323846),.0035};e.on=flight->state().burning&&x.thrust>0;
         // The flow's noise (drag power: the aerodynamic force times the airspeed) and what the booms need.
         e.length=st.length;e.diameter=flight->vehicle().diameter;e.mach=x.mach;e.sound=x.air.sound;e.pressure=x.air.pressure;e.dragPower=ph::norm(x.aeroForce)*x.mach*x.air.sound;
+        if(flight->breakup()!=ph::Flight::Breakup::none)e.blast=.03*flight->state().propellant+1e3; // Broken up: what was left going off, ~3% of it as TNT (an estimate).
         return s;
     }
     // The flight for the broadcast's panels and timeline (see FlightServices::gauges).
@@ -555,7 +567,7 @@ struct Slot {
          for(std::size_t i=0;i<fs.size();++i){auto* x=o->add_surfaces();x->set_name(fs[i].name);x->set_deflection_radians(flight->surfaces()[i].deflection);x->set_command_radians(flight->surfaces()[i].target);}
          for(double u:flight->thrusters())o->add_thruster_duty(u);
          const auto& ws=v.stages[static_cast<std::size_t>(s.stage)].wheels;for(std::size_t i=0;i<ws.size();++i){auto* w=o->add_wheels();w->set_name(ws[i].name);w->set_brake(flight->wheels()[i].brake);w->set_steer_radians(flight->wheels()[i].steer);}
-         for(const auto& x:flight->structures())o->add_structure_radians(x.angle);
+         for(const auto& x:flight->structures())o->add_structure_radians(x.angle);o->set_thruster_gas_kilograms(flight->state().gas);
          if(flight->breakup()!=ph::Flight::Breakup::none){auto* b=o->mutable_breakup();b->set_cause(static_cast<api::Breakup::Cause>(flight->breakup()));
              b->set_elapsed_seconds(ph::secondsSinceJ2000(flight->breakupTime()-start));b->set_speed_meters_per_second(flight->breakupSpeed());}
          const auto& nodes=v.stages[static_cast<std::size_t>(s.stage)].thermal;for(std::size_t i=0;i<nodes.size();++i){auto* t=o->add_thermal_nodes();t->set_name(nodes[i].name);

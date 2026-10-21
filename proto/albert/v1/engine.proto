@@ -216,6 +216,7 @@ message EngineDefinition {
   // Air-breathing (a jet): thrust at full throttle and fuel per newton-second against Mach and altitude, none without air;
   // the spool follows the throttle with spool_seconds (0: instant). The rocket fields above (thrust, exhaust, exit area) are unused.
   bool air_breathing=10; EngineTable thrust_table=11; EngineTable fuel_table=12; double spool_seconds=13;
+  double start_kilograms=14;                 // Propellant each ignition costs (spinning the turbopumps up).
 }
 message EngineTable { repeated double mach=1; repeated double altitude_km=2; repeated double values=3; } // values[m * altitudes + a]; bilinear, clamped.
 // A wheel: contact point, strut stiffness and damping, rolling resistance and braking μ along its heading, cornering μ
@@ -238,6 +239,9 @@ message StageDefinition {
   repeated WheelDefinition wheels=21;       // Up to 32.
   repeated Vector3 hard_points_meters=22;   // Points that strike structures (catch pins); up to 32.
   StageAppearance appearance=23;            // How it looks in the scene (unset: a cylinder of the vehicle's diameter).
+  // The propellant as cryogens and plumbing hold it: a share of what is left boiled off a day (vented, always); what the
+  // engines cannot draw (residuals: they starve at it); the thrusters' own gas (unset: they burn the propellant).
+  double boiloff_per_day=24; double residual_kilograms=25; optional double thruster_gas_kilograms=26;
 }
 // How a stage looks in the scene only (the physics never reads it); positions in metres along the stage as its other parts.
 // Its body: frustums along x (a nose as several), each a colour (0xRRGGBB) and an arc of black tiles centred on +z (radians;
@@ -248,7 +252,10 @@ message StageDefinition {
 message BodySection { double from_meters=1; double to_meters=2; double radius_from_meters=3; double radius_to_meters=4; uint32 color=5; double tiles_radians=6; }
 message HingedPart { string name=1; Vector3 hinge_meters=2; Vector3 axis=3; Vector3 outward=4; double span_meters=5; double width_meters=6; double thickness_meters=7;
   uint32 surface=8; double gain=9; double offset_radians=10; uint32 color=11; bool grid=12; }
-message StageAppearance { repeated BodySection sections=1; repeated HingedPart parts=2; } // Up to 64 of each.
+// A propellant tank's span (m aft of the nose): frosted on the outside below the liquid (filled from its aft end by the stage's
+// propellant left, or always when `full`: an upper stage's tanks riding along).
+message Tank { double from_meters=1; double to_meters=2; bool full=3; }
+message StageAppearance { repeated BodySection sections=1; repeated HingedPart parts=2; repeated Tank tanks=3; } // Up to 64 sections and parts, 8 tanks.
 message VehicleDefinition {
   string name=1; repeated StageDefinition stages=2;  // 1-32 stages, up to 64 engines and 32 legs each, tables up to 128 x 128.
   double attitude_torque_newton_meters=3;           // Ideal torque limit per axis (torque_newton_meters).
@@ -442,6 +449,7 @@ message FlightSample {
   Vector3 contact_force_newtons=58;         // From the ground, water and structures, body axes.
   repeated double structure_radians=59;     // Each structure's angle about its hinge (0 when fixed), in the request's order.
   Breakup breakup=60;                       // Unset cause: whole. Once broken up the engines are out and commands do nothing.
+  double thruster_gas_kilograms=61;         // The thrusters' own gas left (with StageDefinition.thruster_gas_kilograms).
 }
 message WheelSample { string name=1; double brake=2; double steer_radians=3; }
 message ThermalSample { string name=1; double temperature_kelvin=2; double heat_flux_watts_per_meter2=3; bool over_limit=4; }

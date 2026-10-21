@@ -113,6 +113,12 @@ Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listen
         const double sum=std::pow(10.,engines[k]/10)+std::pow(10.,f/10);h.levels[k]=sum>0?10*std::log10(sum):-1e9;}
     h.rocket=e.on?overall(engines):-1e9;h.delay=now-te;h.distance=r;h.emitted=te;h.audible=true;return h;
 }
+Boom blast(double tnt,double distance,double pressure){
+    const double w=std::max(tnt,1e-3),z=std::max(distance,.1)/std::cbrt(w);
+    const double ratio=808*(1+std::pow(z/4.5,2))/std::sqrt((1+std::pow(z/.048,2))*(1+std::pow(z/.32,2))*(1+std::pow(z/1.35,2)));
+    const double td=std::cbrt(w)*980*(1+std::pow(z/.54,10))/((1+std::pow(z/.02,3))*(1+std::pow(z/.74,6))*std::sqrt(1+std::pow(z/6.9,2)))*1e-3;
+    return{0,ratio*pressure,td};
+}
 Boom carlson(double mach,double pv,double av,double pg,double height,double length,bool ground){
     constexpr double ks=.1;const double m2=std::max(mach*mach-1,1e-6),he=std::max(height,length);
     return{0,(ground?2:1)*std::sqrt(std::max(pv,0.)*std::max(pg,0.))*std::pow(m2,.125)*std::pow(he,-.75)*std::pow(length,.75)*ks,

@@ -57,15 +57,15 @@ public:
             const double above=over-catchHeight(s)-hoverAbove,vz=dot(s.velocity,up_),brake=above>1&&vz<0?vz*vz/(2*above):0,up=brake+norm(gravity(s.position));
             Vec side=toAxis(s,flat);const double limit=std::tan(20*deg)*up;if(norm(side)>limit)side=side*(limit/norm(side));
             set_.keep(c,s);const Vec a=up_*up+side;if(set_.count()==3&&s.mass*norm(a)<.9*2*raptorSea)set_.use(c,s,2);
-            c.throttle=std::clamp(s.mass*norm(a)/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(a),set_.centre());roll(c,s);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
+            c.throttle=std::clamp(s.mass*norm(a)/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(a),set_.centre());roll(c,s,&set_);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
             if(set_.count()<=2&&(above<2||vz>-1))phase_=Phase::hover;
             break;}
         case Phase::hover:case Phase::descend: // Over the tower, then down at 1 m/s until the pins rest on the arms.
-            if(phase_==Phase::hover&&armsClosed&&settled(s,flat))phase_=Phase::descend;
-            {set_.keep(c,s);const int n=std::max(set_.count(),1);const double demand=overArms(c,s,flat,over,phase_==Phase::descend,n,set_.centre());c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
+            close_=centred(s,flat);if(phase_==Phase::hover&&armsClosed&&settled(s,flat))phase_=Phase::descend;
+            {set_.keep(c,s);const int n=std::max(set_.count(),1);const double demand=overArms(c,s,flat,over,phase_==Phase::descend,n,set_.centre(),&set_);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
                 // As light as it gets, 2 Raptors at their least lift more than its weight: down to 1 (and up again when short, while one works).
                 if(n>1&&demand<.45*n*raptorSea)set_.use(c,s,n-1);else if(n<set_.working(s,3)&&demand>.9*n*raptorSea)set_.use(c,s,n+1);}
-            if(norm(s.contact)>0&&norm(flat)<2){c.throttle=.4;phase_=Phase::caught;caught_=t;} // The pins on the arms (not the hull on them off the axis).
+            if(phase_==Phase::descend&&norm(s.contact)>0&&norm(flat)<2){c.throttle=.4;phase_=Phase::caught;caught_=t;} // The pins on the arms (not a closing arm on the hull).
             break;
         case Phase::caught: // On the arms, the engine at its least while they take the load, then off once it hangs still.
             if(!off_){hang(c,s);c.throttle=.4;}else{c.torqueOn=true;c.torque={};}

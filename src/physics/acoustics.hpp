@@ -44,7 +44,7 @@ Spectrum ground(double height,double grazing,double soundSpeed);
 // 10 Pa, the source was neither burning nor moving through the air at the emission time, or nothing emitted yet has
 // arrived. air: the air at a point (humidity unknown: 50% RH). Each emission also carries the body's length and diameter
 // (m), its drag power (W: the flow noise) and its Mach number, sound speed (m/s) and pressure (Pa) where it is (the booms).
-struct Emission {double time=0;V3 position,velocity,plume;RocketNoise noise;bool on=false;double length=0,diameter=0,dragPower=0,mach=0,sound=0,pressure=0;};
+struct Emission {double time=0;V3 position,velocity,plume;RocketNoise noise;bool on=false;double length=0,diameter=0,dragPower=0,mach=0,sound=0,pressure=0,blast=0;}; // blast: TNT kg it exploded with, then.
 struct Heard {Spectrum levels{};double delay=0,doppler=1,distance=0,emitted=0,rocket=-1e9;bool audible=false;}; // rocket: the engines' overall level (dB).
 Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listenerVelocity,const Planet& planet,const std::function<Air(const Geodetic&)>& air);
 // The sonic booms that have reached the listener by `now`, oldest first: where the arrival time t + |listener - source(t)| / c̄
@@ -56,6 +56,9 @@ Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listen
 // the ~93 Pa and ~0.3 s measured. A listener riding inside a cone keeps the count: a new boom is one more of them.
 struct Boom {double time=0,overpressure=0,duration=0;};
 std::vector<Boom> booms(const std::vector<Emission>& history,double now,V3 listener,const Planet& planet,const std::function<Air(const Geodetic&)>& air);
+// A blast's peak overpressure and positive phase (Pa, s) at a distance (m) from `tnt` kg of TNT equivalent in air at that
+// pressure: Kinney and Graham (1985), scaled distance Z = r / W^⅓.
+Boom blast(double tnt,double distance,double pressure);
 // Carlson's peak overpressure and duration for those values (Pa, s; heights in m).
 Boom carlson(double mach,double sourcePressure,double sourceSound,double listenerPressure,double height,double length,bool ground);
 }

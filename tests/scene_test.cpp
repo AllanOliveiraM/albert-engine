@@ -14,7 +14,9 @@ int main(){try{
     scene.builtinState("moon",{100,{1,2,3}});require(scene.evaluate("moon",104).stale,"Expired built-in state was reported fresh");
     auto s=scene.evaluate("test",101);require(std::abs(s.state.positionMeters.x-(1e11+10))<1e-5,"Interpolation lost metre precision");
     require(s.state.attitude&&std::abs(s.state.attitude->w-1)<1e-9,"Antipodal quaternion interpolation failed");
-    require(scene.evaluate("test",104).state.positionMeters.x==1e11+20&&scene.evaluate("test",104).stale,"Disconnected stream extrapolated forever");
+    // Past the last sample: on along its velocity for at most a second, then stale.
+    require(std::abs(scene.evaluate("test",102.5).state.positionMeters.x-(1e11+25))<1e-5&&!scene.evaluate("test",102.5).stale,"Not carried on past the last sample");
+    require(std::abs(scene.evaluate("test",104).state.positionMeters.x-(1e11+30))<1e-5&&scene.evaluate("test",104).stale,"Disconnected stream extrapolated forever");
     const auto revision=scene.revision();rejects([&]{scene.samples("test",{{103,{1,0,0}},{102,{2,0,0}}});});
     require(scene.revision()==revision&&scene.get("test").samples.size()==2,"Rejected batch partially changed state");
     rejects([&]{scene.create(object());});rejects([&]{scene.remove("earth");});rejects([&]{scene.samples("moon",{{100,{}}});});

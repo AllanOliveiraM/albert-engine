@@ -22,7 +22,8 @@ struct Sample {
     std::optional<Quaternion> attitude; // Local axes -> geocentric ICRF, XYZW.
     bool hasVelocity=false;
     // A vehicle's moving parts (Object::look), interpolated as the rest: per engine its thrust share (0: off) and gimbal pitch
-    // and yaw (rad); per surface its deflection (rad); per thruster its duty; last, the ambient pressure (Pa). Up to 1024.
+    // and yaw (rad); per surface its deflection (rad); per thruster its duty; then the ambient pressure (Pa), the stagnation
+    // heat flux (W/m²), the tanks' fill (0-1), the Mach number and the seconds since it broke up (negative: whole). Up to 1024.
     std::shared_ptr<const std::vector<float>> parts;
 };
 // How a vehicle looks beyond a plain shape, in metres along its stage (x aft of the nose, y right, z down, as the flight API's;
@@ -32,7 +33,8 @@ struct LookSection {double from=0,to=0,radiusFrom=.5,radiusTo=.5;std::uint32_t c
 struct LookPart {std::string name;Vector hinge,axis{1,0,0},outward{0,1,0};double span=1,width=1,thickness=.1,gain=1,offset=0;unsigned surface=0;std::uint32_t color=0x505050;bool grid=false;};
 struct LookEngine {Vector position,direction{1,0,0};double exitRadius=.5;};
 struct LookThruster {Vector position,direction{1,0,0};};
-struct VehicleLook {double length=1,diameter=1;std::vector<LookSection> sections;std::vector<LookPart> parts;std::vector<LookEngine> engines;std::vector<LookThruster> thrusters;};
+struct LookTank {double from=0,to=0;bool full=false;}; // Frosted below its liquid: filled from aft by the stage's fill, or always.
+struct VehicleLook {double length=1,diameter=1;std::vector<LookSection> sections;std::vector<LookPart> parts;std::vector<LookEngine> engines;std::vector<LookThruster> thrusters;std::vector<LookTank> tanks;};
 // A site's scenery (a launch pad's tower, mount and tanks), in metres east, north and up of its place, drawn only: boxes,
 // round tanks (diameters size x by y, size z long, hollow inside `inner`) and trusses (a lattice box size z long, bars `bar`
 // thick), each turned by `heading` (rad: its y toward it, clockwise from north) and tilted (rad: its z leaning from up toward

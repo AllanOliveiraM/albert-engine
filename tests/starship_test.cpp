@@ -33,6 +33,10 @@ int main(int argc,char** argv){try{
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto flight=albert::v1::FlightService::NewStub(channel);
     if(argc>1&&std::string(argv[1])=="--home"){albert::example::starship::homecoming(*flight,true);return 0;} // The ship's return alone (development).
+    if(argc>1&&std::string(argv[1]).rfind("--booster",0)==0){ // The ascent and the booster's way back alone (development); failures after "=".
+        const std::string a=argv[1];const auto m=albert::example::starship::mission(*flight,true,1000,true,{},a.size()>10?albert::example::starship::faults(a.substr(10)):std::vector<albert::example::starship::Fault>{});
+        std::printf("MECO %.1f s at %.1f km; booster %s, %.2f m off the axis, %.1f m from the tower\n",m.meco,m.mecoHeight/1e3,m.boosterDown?"down":m.boosterLost?"lost":"caught",m.offAxis,
+            m.boosterDown?m.boosterAway:m.towerClearance);return 0;}
     if(argc>1&&std::string(argv[1]).rfind("--fail=",0)==0){ // A mission with engine failures (development).
         const auto f=albert::example::starship::mission(*flight,true,1000,false,{},albert::example::starship::faults(std::string(argv[1]).substr(7)));
         std::printf("booster %.2f m off the axis, ship %.2f m; clearance %.1f and %.1f m\n",f.offAxis,f.ship.offAxis,f.towerClearance,f.ship.towerClearance);return 0;}

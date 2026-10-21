@@ -305,6 +305,17 @@ int main(){try{
             Stage lever=st;lever.rcs={{"long",{1,0,0},{0,0,-1},100,700},{"short",{4,0,0},{0,0,-1},100,700},{"long+",{1,0,0},{0,0,1},100,700}};
             Flight g(Vehicle{"lever",{lever},0},e,s);g.torque({0,200,0});near(g.sample().rcsMoment.y,200,1e-4,"Torque from the long arm");near(g.thrusters()[0],.5,1e-6,"The long arm alone");near(g.thrusters()[1],0,0,"not the short");
         }
+        { // The propellant as tanks hold it: the thrusters on their own gas (the propellant untouched, silent once it is gone);
+          // 1% boiled off a day; an engine's start costs its 10 kg; the engine starves at the 20 kg of residuals.
+            Stage gas=st;gas.gas=1;Flight g(Vehicle{"gas",{gas},0},e,s);g.thruster(1,1);g.advance(second/2);
+            near(g.state().gas,1-100./700*.5,1e-9,"Thrusters burn their own gas");near(g.state().propellant,100,1e-9,"and not the propellant");
+            for(int i=0;i<20;++i)g.advance(second/2);near(g.state().gas,0,0,"Gas spent");near(norm(g.sample().rcsForce),0,0,"then no thrust");
+            Stage tank=st;tank.rcs.clear();tank.boiloff=.01;tank.residual=20;tank.engines={Engine{"e",{10,0,0},{1,0,0},2e4,2000,0,1,0,0,10}};
+            State far=s;far.position={1e9,0,0};Flight boil(Vehicle{"boil",{tank},0},e,far);boil.steps(second/100,second*60);
+            for(int i=0;i<1440;++i)boil.advance(second*60);near(boil.state().propellant,100*std::exp(-.01),1e-6,"1% a day boiled off");
+            Flight burn(Vehicle{"burn",{tank},0},e,far);burn.ignite();near(burn.state().propellant,90,1e-12,"A start costs its propellant");
+            for(int i=0;i<200&&burn.state().burning;++i)burn.advance(second/10);near(burn.state().propellant,20,1e-6,"Starves at the residuals");near(burn.state().burning?1:0,0,0,"out then");
+        }
         Environment air;air.sunMoon=false;air.relativity=false;
         Stage w=st;w.rcs.clear();w.aero.area=2;w.aero.length=3;Surface flap;flap.name="flap";flap.limit=.3;flap.rate=10*3.14159265358979/180;
         flap.pitch={{0},{0},{-10,10},{-.1,.1}};w.surfaces={flap};

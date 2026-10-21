@@ -41,7 +41,7 @@ struct Thruster {std::string name;V3 position,direction{1,0,0};double thrust=0,e
 // zero gimbal (body axes; normalised); vacuum thrust (N), effective exhaust velocity (m/s), nozzle exit area (m²: thrust
 // falls by the ambient pressure on it); deepest throttle; gimbal limit (rad, pitch about body y, yaw about body z) and the
 // actuators' rate (rad/s, 0: instant).
-struct Engine {std::string name;V3 position,direction{1,0,0};double thrust=0,exhaust=0,exitArea=0,minThrottle=1,gimbal=0,gimbalRate=0;
+struct Engine {std::string name;V3 position,direction{1,0,0};double thrust=0,exhaust=0,exitArea=0,minThrottle=1,gimbal=0,gimbalRate=0,start=0; // start: kg an ignition costs.
     // Air-breathing (a jet): thrust at full throttle and fuel per newton-second (kg/N/s) from tables of Mach and altitude (km,
     // the tables' angle axis), none without air; the spool follows the throttle with this time constant (s). thrust, exhaust
     // and exitArea are then unused.
@@ -71,6 +71,9 @@ struct Stage {
     // couples; they burn propellant and leave whatever force results); without, it is the vehicle's ideal torque.
     std::vector<Thruster> rcs;
     std::vector<ThermalNode> thermal; // Thermal-protection nodes, heated by the flow as the vehicle flies.
+    // boiloff: the share of the propellant left lost a day (vented: no thrust, always); residual: what the engines cannot draw
+    // (kg: they starve at it); gas: the thrusters' own supply (kg; 0: they burn the propellant).
+    double boiloff=0,residual=0,gas=0;
 };
 // torque: ideal attitude torque limit (N m per axis). inertiaRate scales the İω term and
 // jetDamping enables the exhaust momentum flux: 1/true is the complete variable-mass model.
@@ -126,6 +129,7 @@ struct State {
     Q attitude;                // Body (x forward, y right, z down) to inertial.
     V3 rate;                   // Body angular velocity relative to inertial (rad/s).
     double propellant=0;       // Remaining in the active stage (kg).
+    double gas=0;              // The thrusters' own gas left (kg), when the stage has a supply.
     double heatLoad=0;         // Stagnation-point heat absorbed since the start (J/m²).
     int stage=0;
     bool burning=false,clamped=false,landed=false,contact=false; // burning: an engine on; contact: a leg on the ground.
@@ -198,7 +202,7 @@ public:
     struct Increments {V3 velocity,angle;double seconds=0;};
     Increments increments(){const Increments r=increments_;increments_={};return r;}
 private:
-    struct Rate {V3 v,a;Q q;V3 w;double m;V3 f;double heat;}; // f: specific force, body axes; heat: W/m².
+    struct Rate {V3 v,a;Q q;V3 w;double m;V3 f;double heat,gas=0;}; // f: specific force, body axes; heat: W/m²; gas: the thrusters' (kg/s).
     Rate rate(const State& s,Sample* out)const;
     void integrate(Tt h);
     void hold(State& s)const; // Clamped pose rides the rotating Earth.
@@ -217,6 +221,7 @@ private:
     void strike(); // The hull against the ground and the structures, after a step.
     void heat(double seconds); // The thermal nodes over a step, from its start's flow.
     double structureGap(V3 fixed)const;
+    void boil(double seconds); // The stage's cryogens boiling off.
     void place(const std::vector<double>& before={},double seconds=0); // The structures where their angles put them; spin: from `before` over `seconds`.
     V3 padPosition_;Q padAttitude_; // ECEF and body→ECEF while clamped/landed.
     mutable std::int64_t perturbed_=std::numeric_limits<std::int64_t>::min();mutable ThirdBody p0_[2]{},p1_[2]{};mutable int bodies_=0;

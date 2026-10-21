@@ -72,6 +72,8 @@ int main(){try{
      double sum=0;int peak=0;const auto l=ac::flowLevels(w,80,6);for(int b=0;b<ac::bands;++b){sum+=std::pow(10.,(l[static_cast<std::size_t>(b)]-120)/10);if(l[static_cast<std::size_t>(b)]>l[static_cast<std::size_t>(peak)])peak=b;}
      near(10*std::log10(sum),10*std::log10(w),.3,"bands over the flow's power (dB)");near(std::log10(ac::bandCentre(peak)/(.2*80/6)),0,.2,"peak band at St 0.2 (log10 of f/f_p)");
      near(ac::flowPower(1e9,2)/ac::flowPower(1e9,.5),1,1e-12,"flat above Mach 0.5");}
+    {const ac::Boom z1=ac::blast(1,1,101325),z10=ac::blast(1000,100,101325); // Kinney and Graham's table: ~10 atm at Z = 1, ~0.1 at Z = 10.
+     near(z1.overpressure/101325,9.95,.1,"blast at a scaled distance of 1 m/kg^1/3 (atm)");near(z10.overpressure/101325,.0985,.002,"and at 10 (atm)");}
     {const Air at=standardAtmosphere(16500);const ac::Boom b=ac::carlson(2,at.pressure,at.sound,101325,16500,62,true);
      near(b.overpressure,93,25,"Concorde's boom, Mach 2 at 16.5 km (Pa; ~93 measured)");near(b.duration,.3,.12,"and its duration (s)");}
     {   // Mach 2 at 10 km, level, eastward over a listener 1.5 m up: the cone arrives h √(M̄²-1) / V after it passes overhead.

@@ -131,7 +131,10 @@ namespace {
 Evaluated sampled(const Object& o,double now){ // Between its samples.
     if(o.samples.empty())return {{},true};const auto& v=o.samples;
     if(now<=v.front().utcSeconds)return {v.front(),now<v.front().utcSeconds};
-    if(now>=v.back().utcSeconds)return {v.back(),now-v.back().utcSeconds>1.};
+    if(now>=v.back().utcSeconds){ // Past the last sample: on along its velocity for a second (a flight's samples come every ~33 ms of its own
+        // clock; frozen in between, a vehicle riding the Earth would jump against what turns with it, the ground and its tower).
+        Sample r=v.back();const double ahead=std::min(now-r.utcSeconds,1.);if(r.hasVelocity)r.positionMeters=r.positionMeters+r.velocityMetersPerSecond*ahead;
+        r.utcSeconds=now;return {r,now-v.back().utcSeconds>1.};}
     const auto b=std::upper_bound(v.begin(),v.end(),now,[](double t,const Sample& s){return t<s.utcSeconds;});const auto& a=*(b-1);
     const double dt=b->utcSeconds-a.utcSeconds,t=(now-a.utcSeconds)/dt;
     Sample r=a;r.utcSeconds=now;
