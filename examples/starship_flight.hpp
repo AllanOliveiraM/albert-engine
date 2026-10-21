@@ -410,6 +410,9 @@ inline Mission landing(api::FlightService::Stub& flight,const Gate& g,std::vecto
             for(const auto& en:boost.engines())lit+=en.on();std::printf("TRACE %.1f %s e %.1f n %.1f h %.1f ve %.2f vn %.2f vz %.2f lit %d prop %.0f arms %.1f push %.2f tilt %.1f\n",t,names[static_cast<int>(back.phase())],e,n,
                 boost.geodetic().height_meters()-towerGround,dot(h,east),dot(h,cross(u,east)),dot(x.velocity,u),lit,boost.propellant_kilograms()/1e3,boost.structure_radians_size()?boost.structure_radians(0)/deg:0.,norm(back.disturbance()),
                 std::acos(std::clamp(dot(x.toBody.r0,unit(x.position)),-1.,1.))/deg);}
+        if(!quiet&&std::getenv("ALBERT_PROFILE")&&std::fmod(t+1e-9,1.)<.02){const auto& v=boost.velocity_ned_meters_per_second();const auto& f=boost.specific_force_meters_per_second2(); // ALBERT_PROFILE: the descent's profile, once a second.
+            const double across=std::hypot(v.x(),v.y());std::printf("PROFILE %.0f %s h %.0f m v %.0f m/s (across %.0f, down %.0f) path %.1f° from vertical, q %.0f kPa, sensed %.1f m/s²\n",t,names[static_cast<int>(back.phase())],
+                boost.geodetic().height_meters()-towerGround,std::hypot(across,v.z()),across,v.z(),std::atan2(across,v.z())/deg,boost.dynamic_pressure_pascals()/1e3,std::hypot(f.x(),f.y(),f.z()));}
         out.towerClearance=std::min(out.towerClearance,clearance(boost,boosterLength));if(back.gaveUp()&&out.gaveUp.empty())out.gaveUp=back.gaveUp();
         if(back.phase()!=last){last=back.phase();if(last==BoosterReturn::Phase::caught)caughtAt=t;
             if(!quiet){const auto [e,n]=aside(boost);std::printf("%7.2f s  %s (h %.0f m, %.0f m a leste, %.0f m ao norte, %.0f t)\n",t,names[static_cast<int>(last)],boost.geodetic().height_meters()-towerGround,e,n,boost.propellant_kilograms()/1e3);}}

@@ -24,6 +24,9 @@ namespace api=::albert::v1;
 constexpr double pi=3.14159265358979323846,deg=pi/180,g0=9.80665,radius=4.5,shipLength=52.1,boosterLength=72.3;
 constexpr double raptorSea=280e3*g0,raptorExit=1.33,raptorVacuum=raptorSea+101325*raptorExit,raptorExhaust=350*g0,rvacThrust=258e3*g0*280/230,rvacExhaust=380*g0;
 constexpr double pinOut=radius+1; // The catch pins' ends off the axis (m): 1 m out of the hull.
+// The axial drag coefficient engines first, by Mach: a blunt base, near a flat disc's above Mach 2 (~1.6), as the descents'
+// telemetry shows (Flight 3's booster: 1206 m/s at 25 km down to 858 m/s at 10 km).
+constexpr double dragMach[]{0,.8,1.2,2,5},baseDragTable[]{1,1.1,1.5,1.65,1.6};
 constexpr double boosterEmpty=275e3,boosterPropellant=3800e3,shipEmpty=100e3,shipPropellant=1600e3,engineMass=1.72e3,reserve=.15*boosterPropellant;
 // A solid cylinder from `from` to `to` m aft of the nose: mass, its centre, and principal moments about that centre.
 struct Part {double mass,from,to;};
@@ -44,7 +47,7 @@ inline void put(api::Vector3* o,double x,double y,double z){o->set_x(x);o->set_y
 inline void aerodynamics(api::StageDefinition* st,double length){
     auto* a=st->mutable_aerodynamics();a->set_reference_area_meters2(pi*radius*radius);a->set_reference_length_meters(length);a->set_reference_span_meters(2*radius);
     a->set_pitch_damping(-20);a->set_yaw_damping(-20);a->set_roll_damping(-1);st->set_aerodynamic_reference_meters(length/2);
-    const std::array<double,5> mach{0,.8,1.2,2,5},nose{.35,.4,.65,.5,.35},base{1,1.1,1.4,1.2,1};const double side=1.2*length*2*radius/(pi*radius*radius);
+    const std::array<double,5> mach{dragMach[0],dragMach[1],dragMach[2],dragMach[3],dragMach[4]},nose{.35,.4,.65,.5,.35},base{baseDragTable[0],baseDragTable[1],baseDragTable[2],baseDragTable[3],baseDragTable[4]};const double side=1.2*length*2*radius/(pi*radius*radius);
     std::vector<double> total,signed_;for(int i=0;i<=18;++i)total.push_back(i*10);for(int i=-18;i<=18;++i)signed_.push_back(i*10);
     auto table=[&](api::AeroTable* t,const std::vector<double>& angles,auto f){for(double m:mach)t->add_mach(m);for(double x:angles)t->add_angle_degrees(x);
         for(std::size_t i=0;i<mach.size();++i)for(double x:angles)t->add_values(f(i,x*deg));};
@@ -113,7 +116,7 @@ inline void shipSystems(api::StageDefinition* s){
 // (catch fittings) 9 m below the top, 5.5 m off the axis, under the ±y fins.
 struct Fin {double y,z;}; // The spindle's direction (body y, z).
 constexpr Fin fins[]{{1,0},{-1,0},{0,-1}};
-constexpr double finAt=7.5,pinAt=finAt+.8,finSpan=3.7,finWidth=6.1,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.15;
+constexpr double finAt=7.5,pinAt=finAt+.8,finSpan=3.7,finWidth=6.1,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.2;
 // How they look (the scene only), from each one's nose `at` m along its stage: stainless steel; the ship's nose a tangent ogive
 // (11 m) in sections, black tiles on its windward half (+z), four flaps (hinged on its sides along x: +45° square to the
 // flow, -45° folded to the lee) turning with surfaces 1-4 when `moving`, else straight out, square to the hull (riding up the stack, as flown); the booster's vented hot-staging ring
@@ -873,8 +876,8 @@ private:
         if(seconds)*seconds=.5*(n-1)-.5*(1-f)+(hb<1e299&&hb>h?tb+(t-tb)*f:t);const Vec rel=p+site_*-1;return rel+up_*-dot(rel,up_)+aim_*-1.;
     }
     // The drag coefficient engines first (the stage's base table and the fins').
-    static double baseDrag(double v,double h){const double m=v/sound(h),x[]{0,.8,1.2,2,5},y[]{1,1.1,1.4,1.2,1};
-        for(int i=0;i<4;++i)if(m<=x[i+1])return 3*finDrag+y[i]+(y[i+1]-y[i])*(m-x[i])/(x[i+1]-x[i]);return 1+3*finDrag;}
+    static double baseDrag(double v,double h){const double m=v/sound(h);const auto& x=dragMach;const auto& y=baseDragTable;
+        for(int i=0;i<4;++i)if(m<=x[i+1])return 3*finDrag+y[i]+(y[i+1]-y[i])*(m-x[i])/(x[i+1]-x[i]);return y[4]+3*finDrag;}
     double drag(const State& s)const{const double h=norm(s.position)-norm(site_),v=norm(s.velocity);return .5*density(h)*baseDrag(v,h)*pi*radius*radius*v*v/s.mass;}
     // RK4 in ECEF (gravity, the Earth's turning, drag engines first, thrust against the air) until done.
     // upright: within that many m/s of falling at gateSpeed, the thrust straight up (the landing burn's last seconds).
