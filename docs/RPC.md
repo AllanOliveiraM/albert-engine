@@ -471,7 +471,8 @@ núcleo.
   - RCS de 8 propulsores;
   - três grid fins como na V3 (27 m² cada, 50% maiores, mais baixas; duas sobre os pinos de captura em ±y e uma em -z, uma
     disposição suposta): superfícies posicionadas com `normal`, a força normal de cada uma onde está;
-  - pinos de captura como `hard_points`, sob as grid fins.
+  - pontos de captura como `hard_points`: como na V3, os braços o apoiam na base das grid fins de ±y (um encaixe sob a raiz
+    de cada uma, 0,8 m abaixo do eixo delas, 1 m para fora do casco).
 - **Torre:** os braços são `structures`, quatro barras de aço amortecidas em pares, formando trilhos. O pino fica no sulco
   entre as barras. Os braços têm dobradiça no carro da torre: abertos 30° para a subida e para a descida passando por eles,
   fecham a 8°/s quando o veículo paira acima, e a descida até os pinos espera que fechem.

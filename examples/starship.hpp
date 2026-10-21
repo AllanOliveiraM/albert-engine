@@ -113,7 +113,7 @@ inline void shipSystems(api::StageDefinition* s){
 // (catch fittings) 9 m below the top, 5.5 m off the axis, under the ±y fins.
 struct Fin {double y,z;}; // The spindle's direction (body y, z).
 constexpr Fin fins[]{{1,0},{-1,0},{0,-1}};
-constexpr double pinAt=9,finAt=7.5,finSpan=3.7,finWidth=6.1,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.15;
+constexpr double finAt=7.5,pinAt=finAt+.8,finSpan=3.7,finWidth=6.1,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.15;
 // How they look (the scene only), from each one's nose `at` m along its stage: stainless steel; the ship's nose a tangent ogive
 // (11 m) in sections, black tiles on its windward half (+z), four flaps (hinged on its sides along x: +45° square to the
 // flow, -45° folded to the lee) turning with surfaces 1-4 when `moving`, else still at mid travel (riding up the stack, as flown); the booster's vented hot-staging ring
@@ -143,7 +143,7 @@ inline void boosterLook(api::StageAppearance* a,double at,bool moving){
     section(a,at,at+2,radius,radius,vents,0);section(a,at+2,at+boosterLength,radius,radius,steel,0);tank(a,at+6,at+69.3,false);
     for(unsigned i=0;i<3;++i){const Fin f=fins[i];const double r=radius+finSpan/2; // +δ turns it about its spindle, pushing along body x × spindle.
         hinged(a,"grid fin",{at+finAt,f.y*r,f.z*r},{0,f.y,f.z},{0,-f.z,f.y},finSpan,finWidth,.6,moving?i+1:0,1,0,0x2e2e2e,true);}
-    for(const double side:{-1.,1.})hinged(a,"pin",{at+pinAt,side*radius,0},{0,side,0},{1,0,0},pinOut-radius,1,1,0,0,0,vents);
+    for(const double side:{-1.,1.})hinged(a,"catch fitting",{at+finAt+.3,side*radius,0},{0,side,0},{1,0,0},pinOut-radius,1,1.6,0,0,0,vents); // V3: under the ±y fins' roots.
     hinged(a,"raceway",{at+37,0,-radius},{1,0,0},{0,0,-1},58,.35,.5,0,0,0,steel); // The cable run down its side.
     for(int i=0;i<20;++i){const double t=(i+.5)*18*deg; // The hot-staging ring's vents.
         hinged(a,"vent",{at+1,radius*std::cos(t),radius*std::sin(t)},{1,0,0},{0,std::cos(t),std::sin(t)},1.5,.04,.7,0,0,0,0x080808);}
