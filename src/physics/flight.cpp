@@ -106,7 +106,8 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
                 for(const Table* t:{&e.thrustTable,&e.fuelTable})if(t->mach.empty()||t->angle.empty()||t->values.size()!=t->mach.size()*t->angle.size())throw std::invalid_argument("Malformed jet table: "+st.name+" "+e.name);
                 if(!(e.spool>=0)||!std::isfinite(e.spool))throw std::invalid_argument("Invalid spool time: "+st.name+" "+e.name);}
             else if(!(e.thrust>0)||!(e.exhaust>0)||!finite({e.thrust,e.exhaust}))throw std::invalid_argument("Engine without finite thrust or exhaust velocity: "+st.name+" "+e.name);
-            if(!(n>0)||!std::isfinite(n)||!std::isfinite(e.position.x)||!std::isfinite(e.position.y)||!std::isfinite(e.position.z)||!(e.exitArea>=0)||!(e.minThrottle>0&&e.minThrottle<=1)||!(e.gimbal>=0)||!(e.gimbalRate>=0))
+            if(!(n>0)||!std::isfinite(n)||!std::isfinite(e.position.x)||!std::isfinite(e.position.y)||!std::isfinite(e.position.z)||!(e.exitArea>=0)||!(e.minThrottle>0&&e.minThrottle<=1)||!(e.gimbal>=0)||!(e.gimbalRate>=0)
+                ||!(e.spool>=0)||!std::isfinite(e.spool))
                 throw std::invalid_argument("Invalid engine: "+st.name+" "+e.name);
             e.direction=e.direction/n;
         }
@@ -157,7 +158,7 @@ State Flight::free(const Environment& e,const Vehicle& v,Tt t,Geodetic g,V3 ned,
     const M3 b=back*fromNed*bodyToNed(euler);s.attitude=quaternion(b);s.rate=transpose(b)*o.omega+relative;
     return s;
 }
-double Flight::flowOf(std::size_t i)const{const Engine& e=vehicle_.stages[s_.stage].engines[i];return s_.burning&&engines_[i].on&&!e.breathing?engines_[i].throttle*e.thrust/e.exhaust:0.;}
+double Flight::flowOf(std::size_t i)const{const Engine& e=vehicle_.stages[s_.stage].engines[i];return s_.burning&&engines_[i].on&&!e.breathing?(e.spool>0?engines_[i].spool:1.)*engines_[i].throttle*e.thrust/e.exhaust:0.;}
 double Flight::massFlow()const{
     if(!(s_.propellant>vehicle_.stages[s_.stage].residual))return 0;
     const auto& es=vehicle_.stages[s_.stage].engines; // A running jet's flow depends on the air: the full sample's.
@@ -170,7 +171,7 @@ std::vector<double> Flight::engineThrust()const{
     const auto& es=vehicle_.stages[s_.stage].engines;std::vector<double> t(es.size());if(es.empty())return t;
     const Sample x=sample();const double p=x.air.pressure;
     for(std::size_t i=0;i<es.size();++i)t[i]=!(s_.burning&&engines_[i].on)?0.:es[i].breathing?(x.air.density>0?engines_[i].spool*es[i].thrustTable(x.mach,x.geodetic.height*1e-3):0.)
-        :std::max(0.,engines_[i].throttle*es[i].thrust-p*es[i].exitArea);
+        :std::max(0.,(es[i].spool>0?engines_[i].spool:1.)*engines_[i].throttle*es[i].thrust-p*es[i].exitArea);
     return t;
 }
 double Flight::bodies(Tt t)const{ // Third bodies at 60 s nodes, linear between them; returns the weight.
@@ -231,7 +232,8 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
         const EngineState& e=engines_[i];if(!e.on)continue;const Engine& en=st.engines[i];
         double t,f;const double l=ms.cg-en.position.x;
         if(en.breathing){t=atm.density>0?e.spool*en.thrustTable(mach,geo.height*1e-3):0.;f=t*en.fuelTable(mach,geo.height*1e-3);} // A jet: its tables.
-        else{t=std::max(0.,e.throttle*en.thrust-atm.pressure*en.exitArea);f=e.throttle*en.thrust/en.exhaust;}
+        else{const double u=en.spool>0?e.spool:1.; // A rocket starting: its chamber filling (thrust and flow by its spool).
+            t=std::max(0.,u*e.throttle*en.thrust-atm.pressure*en.exitArea);f=u*e.throttle*en.thrust/en.exhaust;}
         thrust+=t;flow+=f;jet+=f*l*l;
         // Yaw about body z, then pitch about body y, of the engine's direction.
         const double cp=std::cos(e.pitch),sp=std::sin(e.pitch),cy=std::cos(e.yaw),sy=std::sin(e.yaw);const V3 d=en.direction,yawed{d.x*cy+d.y*sy,-d.x*sy+d.y*cy,d.z};
@@ -361,7 +363,7 @@ void Flight::boil(double seconds){ // Cryogens boiling off the tanks, vented: a 
 Tt Flight::advance(Tt dt){
     if(dt<=0)throw std::invalid_argument("Non-positive step");
     for(Tt left=dt;left>0;){
-        if(s_.clamped&&s_.burning){
+        if(s_.clamped&&s_.burning&&!env_.holdDown){
             const Sample x=sample();const M3 b=matrix(s_.attitude),back=transpose(env_.rotation.at(s_.time).fixed);
             const V3 up=back*(transpose(nedFromFixed(x.geodetic.latitude,x.geodetic.longitude))*V3{0,0,-1});
             if(dot(b*(x.thrustForce+x.aeroForce),up)>x.mass*dot(x.acceleration-x.gravity,up)){s_.clamped=false;return dt-left;}
@@ -436,23 +438,28 @@ void Flight::ignite(int engine){
     const Stage& st=vehicle_.stages[s_.stage];if(!(s_.propellant>st.residual))throw std::logic_error("Stage has no propellant");
     if(s_.landed)throw std::logic_error("Vehicle has landed");
     auto start=[&](std::size_t i){if(!engines_[i].on)s_.propellant=std::max(st.residual,s_.propellant-st.engines[i].start);engines_[i].on=true;}; // Spinning it up costs propellant.
-    if(engine>=0){const std::size_t i=pick(engine,engines_.size());if(engines_[i].failed)throw std::logic_error("Engine has failed");start(i);}
-    else{bool any=false;for(std::size_t i=0;i<engines_.size();++i)if(!engines_[i].failed){start(i);any=true;}if(!any)throw std::logic_error("Every engine has failed");}
-    s_.burning=true;
-}
-void Flight::cutoff(int engine){
-    if(engine>=0)engines_[pick(engine,engines_.size())].on=false;else for(auto& e:engines_)e.on=false;
+    // A silent failure takes the command as a healthy engine would (it says it is lit) and gives nothing.
+    if(engine>=0){const std::size_t i=pick(engine,engines_.size());auto& e=engines_[i];if(e.failed&&!e.silent)throw std::logic_error("Engine has failed");if(e.failed)e.claims=true;else start(i);}
+    else{bool any=false;for(std::size_t i=0;i<engines_.size();++i){auto& e=engines_[i];if(!e.failed)start(i);else e.claims=e.silent;any=any||!e.failed||e.silent;}
+        if(!any)throw std::logic_error("Every engine has failed");}
     s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& e){return e.on;});
 }
+void Flight::cutoff(int engine){
+    if(engine>=0){auto& e=engines_[pick(engine,engines_.size())];e.on=e.claims=false;}else for(auto& e:engines_)e.on=e.claims=false;
+    s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& e){return e.on;});
+}
+void Flight::stick(int engine){if(engine>=0)engines_[pick(engine,engines_.size())].stuck=true;else for(auto& e:engines_)e.stuck=true;}
+void Flight::stickSurface(int index){if(index>=0)surfaces_[pick(index,surfaces_.size())].stuck=true;else for(auto& f:surfaces_)f.stuck=true;}
 void Flight::terminate(){if(broken_==Breakup::none)breakUp(Breakup::terminated,norm(s_.velocity));}
-void Flight::fail(int engine,bool silent){auto& e=engines_[pick(engine,engines_.size())];e.failed=true;e.silent=silent;e.on=false;s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& x){return x.on;});}
+void Flight::fail(int engine,bool silent){auto& e=engines_[pick(engine,engines_.size())];e.claims=silent&&(e.on||e.claims);e.failed=true;e.silent=silent;e.on=false;s_.burning=std::any_of(engines_.begin(),engines_.end(),[](const EngineState& x){return x.on;});}
 void Flight::slew(double seconds){
     const auto& st=vehicle_.stages[s_.stage];const auto& es=st.engines;
     for(std::size_t i=0;i<engines_.size();++i){auto& e=engines_[i];const double step=es[i].gimbalRate*seconds;
-        if(es[i].gimbalRate>0){e.pitch+=std::clamp(e.targetPitch-e.pitch,-step,step);e.yaw+=std::clamp(e.targetYaw-e.yaw,-step,step);}}
-    for(std::size_t i=0;i<engines_.size();++i)if(es[i].breathing){auto& e=engines_[i];const double target=s_.burning&&e.on?e.throttle:0.; // Spool up or down.
-        e.spool=es[i].spool>0?target+(e.spool-target)*std::exp(-seconds/es[i].spool):target;}
-    for(std::size_t i=0;i<surfaces_.size();++i)if(st.surfaces[i].rate>0){const double step=st.surfaces[i].rate*seconds;auto& f=surfaces_[i];f.deflection+=std::clamp(f.target-f.deflection,-step,step);}
+        if(es[i].gimbalRate>0&&!e.stuck){e.pitch+=std::clamp(e.targetPitch-e.pitch,-step,step);e.yaw+=std::clamp(e.targetYaw-e.yaw,-step,step);}}
+    for(std::size_t i=0;i<engines_.size();++i){auto& e=engines_[i];if(!es[i].breathing&&!(es[i].spool>0))continue; // Spool up or down: a jet to its throttle,
+        const double target=s_.burning&&e.on?(es[i].breathing?e.throttle:1.):0.;                                       // a rocket to running
+        e.spool=es[i].spool>0&&(es[i].breathing||target>0)?target+(e.spool-target)*std::exp(-seconds/es[i].spool):target;} // (out at once: its next start from nothing).
+    for(std::size_t i=0;i<surfaces_.size();++i)if(st.surfaces[i].rate>0&&!surfaces_[i].stuck){const double step=st.surfaces[i].rate*seconds;auto& f=surfaces_[i];f.deflection+=std::clamp(f.target-f.deflection,-step,step);}
     { // Hinged structures toward their commands at their rates.
         bool moving=false;std::vector<double> before;
         for(std::size_t i=0;i<structures_.size();++i){auto& x=structures_[i];before.push_back(x.angle);const double step=env_.structures[i].rate*seconds;
@@ -508,7 +515,7 @@ void Flight::surface(double d,int index){
     if(broken_!=Breakup::none)return; // Nothing left to command.
     if(!std::isfinite(d))throw std::invalid_argument("Invalid deflection");
     const auto& fs=vehicle_.stages[s_.stage].surfaces;
-    auto set=[&](std::size_t i){auto& f=surfaces_[i];f.target=std::clamp(d,-fs[i].limit,fs[i].limit);if(!(fs[i].rate>0))f.deflection=f.target;};
+    auto set=[&](std::size_t i){auto& f=surfaces_[i];f.target=std::clamp(d,-fs[i].limit,fs[i].limit);if(!(fs[i].rate>0)&&!f.stuck)f.deflection=f.target;};
     if(index>=0)set(pick(index,fs.size()));else for(std::size_t i=0;i<fs.size();++i)set(i);
 }
 void Flight::brake(double f,int index){
@@ -597,7 +604,7 @@ void Flight::gimbal(double p,double y,int engine){
     if(!std::isfinite(p)||!std::isfinite(y))throw std::invalid_argument("Invalid gimbal");
     const auto& es=vehicle_.stages[s_.stage].engines;
     auto set=[&](std::size_t i){auto& e=engines_[i];const double g=es[i].gimbal;e.targetPitch=std::clamp(p,-g,g);e.targetYaw=std::clamp(y,-g,g);
-        if(!(es[i].gimbalRate>0)){e.pitch=e.targetPitch;e.yaw=e.targetYaw;}};
+        if(!(es[i].gimbalRate>0)&&!e.stuck){e.pitch=e.targetPitch;e.yaw=e.targetYaw;}};
     if(engine>=0){set(pick(engine,es.size()));return;}
     double g=0;for(std::size_t i=0;i<es.size();++i){set(i);g=std::max(g,es[i].gimbal);}
     s_.gimbalPitch=std::clamp(p,-g,g);s_.gimbalYaw=std::clamp(y,-g,g);
@@ -613,10 +620,10 @@ std::uint64_t Flight::hash()const{
     const double d[]{s_.position.x,s_.position.y,s_.position.z,s_.velocity.x,s_.velocity.y,s_.velocity.z,s_.attitude.w,s_.attitude.x,s_.attitude.y,s_.attitude.z,
         s_.rate.x,s_.rate.y,s_.rate.z,s_.propellant,s_.heatLoad,s_.throttle,s_.gimbalPitch,s_.gimbalYaw,s_.torque.x,s_.torque.y,s_.torque.z,padPosition_.x,padPosition_.y,padPosition_.z};
     mix(&s_.time,sizeof s_.time);mix(d,sizeof d);const double pad[]{padAttitude_.w,padAttitude_.x,padAttitude_.y,padAttitude_.z};mix(pad,sizeof pad);const int flags[]{s_.stage,s_.burning,s_.clamped,s_.landed,s_.contact};mix(flags,sizeof flags);
-    for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed};mix(x,sizeof x);mix(b,sizeof b);}
+    for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed,e.silent,e.claims,e.stuck};mix(x,sizeof x);mix(b,sizeof b);}
     for(const auto& x:structures_){const double a[]{x.angle,x.target};mix(a,sizeof a);}
     {const int why=static_cast<int>(broken_);mix(&why,sizeof why);mix(&brokenAt_,sizeof brokenAt_);mix(&brokenSpeed_,sizeof brokenSpeed_);mix(&s_.gas,sizeof s_.gas);}
-    for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);}for(double u:duty_)mix(&u,8);
+    for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);const int k=f.stuck;mix(&k,sizeof k);}for(double u:duty_)mix(&u,8);
     {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z,wind_.x,wind_.y,wind_.z,push_.x,push_.y,push_.z};mix(t,sizeof t);}for(double t:temperatures_)mix(&t,8);for(const auto& w:wheels_){mix(&w.brake,8);mix(&w.steer,8);}
     for(const auto& e:engines_)mix(&e.spool,8);
     return h;

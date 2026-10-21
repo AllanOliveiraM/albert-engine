@@ -92,7 +92,8 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
         for(const auto& e:sd.engines()){st.engines.push_back({e.name().substr(0,128),get(e.position_meters()),e.has_direction()?get(e.direction()):ph::V3{1,0,0},e.vacuum_thrust_newtons(),
             e.exhaust_velocity_meters_per_second(),e.exit_area_meters2(),e.has_min_throttle()?e.min_throttle():1.,e.gimbal_radians(),e.gimbal_rate_radians_per_second()});
             st.engines.back().start=e.start_kilograms();if(!(st.engines.back().start>=0&&finite(st.engines.back().start)))throw std::invalid_argument("Invalid engine start cost");
-            if(e.air_breathing()){auto& x=st.engines.back();x.breathing=true;x.thrustTable=jetTable(e.thrust_table(),"jet thrust");x.fuelTable=jetTable(e.fuel_table(),"jet fuel");x.spool=e.spool_seconds();}}
+            if(e.air_breathing()){auto& x=st.engines.back();x.breathing=true;x.thrustTable=jetTable(e.thrust_table(),"jet thrust");x.fuelTable=jetTable(e.fuel_table(),"jet fuel");x.spool=e.spool_seconds();}
+            else st.engines.back().spool=e.spool_seconds();} // A rocket's start transient.
         for(const auto& h:sd.hard_points_meters())st.hardPoints.push_back(get(h));
         for(const auto& w:sd.wheels())st.wheels.push_back({w.name().substr(0,128),get(w.position_meters()),w.stiffness_newtons_per_meter(),w.damping_newton_seconds_per_meter(),
             w.has_rolling()?w.rolling():.015,w.has_braking()?w.braking():.5,w.has_cornering()?w.cornering():.8,w.steer_limit_radians()});
@@ -132,6 +133,7 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
         for(const auto& e:engines){auto* x=d->add_engines();x->set_name(e.name);put(e.position,x->mutable_position_meters());put(e.direction,x->mutable_direction());x->set_vacuum_thrust_newtons(e.thrust);
             x->set_exhaust_velocity_meters_per_second(e.exhaust);x->set_exit_area_meters2(e.exitArea);x->set_min_throttle(e.minThrottle);x->set_gimbal_radians(e.gimbal);x->set_gimbal_rate_radians_per_second(e.gimbalRate);
             x->set_start_kilograms(e.start);
+            if(e.spool>0)x->set_spool_seconds(e.spool);
             if(e.breathing){x->set_air_breathing(true);x->set_spool_seconds(e.spool);for(const auto& [t,o]:{std::pair{&e.thrustTable,x->mutable_thrust_table()},std::pair{&e.fuelTable,x->mutable_fuel_table()}}){
                 for(double m:t->mach)o->add_mach(m);for(double a:t->angle)o->add_altitude_km(a);for(double v:t->values)o->add_values(v);}}}
         for(const auto& h:st.hardPoints)put(h,d->add_hard_points_meters());
@@ -474,14 +476,16 @@ struct Slot {
     // The flight for the broadcast's panels and timeline (see FlightServices::gauges).
     Gauge gauge()const{
         const ph::Sample x=flight->sample();const auto& st=flight->vehicle().stages[static_cast<std::size_t>(flight->state().stage)];Gauge g;
-        g.id=sceneId;g.label=st.name;g.start=ph::utcFromTt(start);g.utc=ph::utcFromTt(flight->state().time);g.speed=ph::norm(x.nedVelocity);g.height=x.geodetic.height;
+        g.id=sceneId;g.label=st.name;g.start=ph::utcFromTt(start);g.zero=zero.value_or(g.start);g.utc=ph::utcFromTt(flight->state().time);g.speed=ph::norm(x.nedVelocity);g.height=x.geodetic.height;
         g.propellant=st.propellant>0?flight->state().propellant/st.propellant:0;
         for(std::size_t i=0;i<st.engines.size();++i){const auto& e=flight->engines()[i];const auto& n=st.engines[i];
             g.engines.push_back({static_cast<float>(n.position.y),static_cast<float>(n.position.z),static_cast<float>(std::sqrt(std::max(n.exitArea,.01)/3.14159265358979323846)),
                 static_cast<float>(e.throttle),e.on&&flight->state().burning,e.failed});}
+        for(const auto& f:st.surfaces)g.surfaces.push_back(f.name);
         g.milestones=milestones;return g;
     }
     std::vector<Gauge::Milestone> milestones; // The mission's events this flight was given (StepRequest.milestones).
+    std::optional<double> zero; // Its T-0 as the flight software last gave it (StepRequest.clock_zero).
     void note(const google::protobuf::RepeatedPtrField<api::Milestone>& given,double now){ // A done one replaces the planned one of its name.
         for(const auto& m:given){const std::string n=m.name().substr(0,40);if(n.empty())continue;const double at=m.has_utc_unix_seconds()&&std::isfinite(m.utc_unix_seconds())?m.utc_unix_seconds():now;
             auto it=std::find_if(milestones.begin(),milestones.end(),[&](const Gauge::Milestone& x){return x.name==n;});
@@ -537,12 +541,13 @@ struct Slot {
         try{for(const auto& c:commands){const int e=static_cast<int>(c.kind>>16)-1; // The engine in the high bits: 0 every one.
             const std::uint32_t k=c.kind&0xffff;
             if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface&&k!=wire::brake&&k!=wire::steer&&k!=wire::swing
-                &&k!=wire::failSilent&&k!=wire::sensor)throw std::invalid_argument("This command takes no index");
+                &&k!=wire::failSilent&&k!=wire::sensor&&k!=wire::stickGimbal&&k!=wire::stickSurface)throw std::invalid_argument("This command takes no index");
             switch(c.kind&0xffff){
             case wire::ignite:next.ignite(e);break;case wire::cutoff:next.cutoff(e);break;case wire::separate:next.separate();break;case wire::release:next.release();break;
             case wire::throttle:next.throttle(c.a,e);break;case wire::gimbal:next.gimbal(c.a,c.b,e);break;case wire::torque:next.torque({c.a,c.b,c.c});break;
             case wire::fail:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e);break;
             case wire::failSilent:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e,true);break;
+            case wire::stickGimbal:next.stick(e);break;case wire::stickSurface:next.stickSurface(e);break;
             case wire::gust:next.gust({c.a,c.b,c.c});break;case wire::push:next.push({c.a,c.b,c.c});break;case wire::terminate:next.terminate();break;
             case wire::sensor:{const int sensor=e&15,mode=(e>>4)&15,unit=(e>>8)&15;if(e<0||sensor>5||mode>5||unit>2||(unit>0&&sensor>1))throw std::invalid_argument("No such sensor fault");
                 lying.push_back({sensor,unit,Lie{mode,{c.a,c.b,c.c},{}}});break;}
@@ -607,7 +612,7 @@ struct Slot {
         o->set_burning(s.burning);o->set_clamped(s.clamped);o->set_landed(s.landed);o->set_leg_contact(s.contact);o->set_heat_load_joules_per_meter2(s.heatLoad);o->set_heat_flux_watts_per_meter2(x.heatFlux);o->set_throttle(s.throttle);
         o->mutable_gimbal()->set_pitch_radians(s.gimbalPitch);o->mutable_gimbal()->set_yaw_radians(s.gimbalYaw);
         {const auto thrust=flight->engineThrust();const auto& es=v.stages[static_cast<std::size_t>(s.stage)].engines;
-         for(std::size_t i=0;i<es.size();++i){const auto& e=flight->engines()[i];auto* x=o->add_engines();x->set_name(es[i].name);x->set_on((e.on&&s.burning)||e.silent);x->set_failed(e.failed&&!e.silent);x->set_throttle(e.throttle);
+         for(std::size_t i=0;i<es.size();++i){const auto& e=flight->engines()[i];auto* x=o->add_engines();x->set_name(es[i].name);x->set_on((e.on&&s.burning)||(e.silent&&e.claims));x->set_failed(e.failed&&!e.silent);x->set_throttle(e.throttle);
             x->mutable_gimbal()->set_pitch_radians(e.pitch);x->mutable_gimbal()->set_yaw_radians(e.yaw);x->mutable_gimbal_command()->set_pitch_radians(e.targetPitch);x->mutable_gimbal_command()->set_yaw_radians(e.targetYaw);x->set_thrust_newtons(thrust[i]);x->set_spool(e.spool);}
          const auto& fs=v.stages[static_cast<std::size_t>(s.stage)].surfaces;
          for(std::size_t i=0;i<fs.size();++i){auto* x=o->add_surfaces();x->set_name(fs[i].name);x->set_deflection_radians(flight->surfaces()[i].deflection);x->set_command_radians(flight->surfaces()[i].target);}
@@ -677,7 +682,7 @@ FlightServices::~FlightServices(){std::map<std::string,std::shared_ptr<Slot>> go
 grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
     std::vector<std::string> grib,std::vector<ph::SpaceWeatherDay> days,providers::GravityModel gravity,const std::function<bool()>& cancelled,api::FlightSample* out){
     const auto& site=r.site();const ph::Tt t=ph::ttFromUtc(p.utc),stepNs=static_cast<ph::Tt>(std::llround(p.seconds*1e9));
-    ph::Environment env=ph::environment(p.body,gravity.gravity,static_cast<int>(p.degree));env.ground=site.height_meters();
+    ph::Environment env=ph::environment(p.body,gravity.gravity,static_cast<int>(p.degree));env.ground=site.height_meters();env.holdDown=r.hold_down();
     const auto& m=r.physics();auto on=[](bool has,bool value){return !has||value;}; // Logs from before the switches: all on.
     env.sunMoon=on(m.has_third_bodies(),m.third_bodies());env.relativity=on(m.has_relativity(),m.relativity());env.atmosphere=on(m.has_atmosphere(),m.atmosphere());
     env.wind=on(m.has_wind(),m.wind());env.solarPressure=on(m.has_solar_radiation_pressure(),m.solar_radiation_pressure());
@@ -723,7 +728,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     made->steps(stepNs,static_cast<ph::Tt>(std::llround(p.coast*1e9)));
     if(cancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
     stopPacing();std::lock_guard lock(mutex);
-    flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;milestones.clear();this->atmosphere=atmosphere;center=p.body;degree=p.degree;
+    flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;milestones.clear();zero.reset();this->atmosphere=atmosphere;center=p.body;degree=p.degree;
     physics.set_third_bodies(env.sunMoon);physics.set_relativity(env.relativity);physics.set_atmosphere(env.atmosphere);physics.set_wind(env.wind);physics.set_solar_radiation_pressure(env.solarPressure);
     physics.set_turbulence_meters_per_second(env.turbulence);physics.set_turbulence_seed(env.turbulenceSeed);
     { // The IMU starts with one sample at the pad.
@@ -883,6 +888,8 @@ bool interference(const api::FlightCommand& c,std::vector<Slot::Command>& comman
     case api::FlightCommand::kForceNedNewtons:{const auto x=v(c.force_ned_newtons());commands.push_back({wire::push,x[0],x[1],x[2]});return true;}
     case api::FlightCommand::kFailSilent:if(c.fail_silent())commands.push_back({wire::failSilent|e});return true;
     case api::FlightCommand::kTerminate:if(c.terminate())commands.push_back({wire::terminate});return true;
+    case api::FlightCommand::kStickGimbal:if(c.stick_gimbal())commands.push_back({wire::stickGimbal|e});return true;
+    case api::FlightCommand::kStickSurface:if(c.stick_surface())commands.push_back({wire::stickSurface|e});return true;
     case api::FlightCommand::kSensorFault:{const auto& f=c.sensor_fault();const auto x=v(f.value());
         const std::uint32_t code=static_cast<std::uint32_t>(f.sensor())|static_cast<std::uint32_t>(f.mode())<<4|std::min(f.unit(),15u)<<8;
         commands.push_back({wire::sensor|(code+1)<<16,x[0],x[1],x[2]});return true;}
@@ -933,7 +940,7 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     for(auto& c:commands)if((c.kind&0xffff)==wire::spawn){*slot->log.add_spawns()=r->commands(static_cast<int>(c.b)).spawn();c.a=slot->log.spawns_size()-1;c.b=0;}
     const double now=slot->flight?ph::utcFromTt(slot->flight->state().time):0.;
     if(auto s=slot->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok()){while(slot->log.spawns_size()>before)slot->log.mutable_spawns()->RemoveLast();return s;}
-    slot->note(r->milestones(),now);slot->fill(out);}
+    slot->note(r->milestones(),now);if(r->has_clock_zero_utc_unix_seconds()&&std::isfinite(r->clock_zero_utc_unix_seconds()))slot->zero=r->clock_zero_utc_unix_seconds();slot->fill(out);}
     impl_->adopt(*slot);return grpc::Status::OK;
 }
 grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::FlightRequest* q,api::FlightSample* out){

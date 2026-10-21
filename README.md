@@ -295,7 +295,17 @@ torre.
 Com dois voos ou mais, um quadro no canto mostra o outro voo ("Segunda vista dos voos" em Ajustes), com sua própria câmera
 presa ao veículo; um clique nele passa a seguir aquele voo. Como numa transmissão, cada veículo tem seu painel embaixo
 (velocidade em km/h, ou m/s abaixo de 100 m/s; altitude; LOX e CH4; os motores vistos de baixo, acesos, apagados ou em falha),
-e no meio ficam o relógio T+ e os eventos da missão que o programa de voo informa (`StepRequest.milestones`).
+e no meio ficam o relógio T± da missão (a contagem regressiva antes da decolagem) e os eventos que o programa de voo informa
+(`StepRequest.milestones`).
+
+Durante um voo, o painel **Interferência** (Ajustes: "Painel de interferência") mexe nele ao vivo, pelos mesmos comandos da
+API:
+- rajadas de vento e empurrões por dois joysticks (norte/leste) e controles verticais;
+- o mapa de motores do voo escolhido: um clique faz um falhar, falhar calado (ele diz que está bem) ou travar o cardã, como
+  escolhido acima dele; o botão direito faz falhar calado; as superfícies (grid fins, flaps) travadas onde estão;
+- cada sensor falhando ou mentindo (morto, travado, com viés, derivando, com ruído), cada unidade de IMU à parte;
+- SEGURAR e RETOMAR a contagem regressiva, ABORTAR (o software de voo toma a saída mais segura para a fase: na contagem,
+  cancela; na ignição, aborta na plataforma), uma mensagem livre e a terminação do voo (com confirmação).
 
 Em Ajustes ficam as opções de gráficos, Terra, vista, câmera e som (guardadas entre execuções), e a câmera livre: F liga,
 arrastar olha, W/A/S/D/Espaço/Ctrl voam, com a velocidade pela altura, como no Kerbal Space Program; F ou Esc volta.

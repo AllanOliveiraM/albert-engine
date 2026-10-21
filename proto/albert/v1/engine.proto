@@ -215,6 +215,7 @@ message EngineDefinition {
   double gimbal_radians=8; double gimbal_rate_radians_per_second=9; // Rate 0: instant.
   // Air-breathing (a jet): thrust at full throttle and fuel per newton-second against Mach and altitude, none without air;
   // the spool follows the throttle with spool_seconds (0: instant). The rocket fields above (thrust, exhaust, exit area) are unused.
+  // A rocket with spool_seconds: its start transient (thrust and flow rise to running with that time constant after ignition).
   bool air_breathing=10; EngineTable thrust_table=11; EngineTable fuel_table=12; double spool_seconds=13;
   double start_kilograms=14;                 // Propellant each ignition costs (spinning the turbopumps up).
 }
@@ -289,6 +290,9 @@ message CreateFlightRequest {
   // Site height from the measured ground, resolved at creation: Earth Copernicus DEM 30 m +
   // EGM2008 geoid (ellipsoidal); Moon LRO LOLA; Mars MGS MOLA (to ±88°), both ~237 m posts.
   bool terrain_height=13;
+  // The pad's clamps hold the vehicle until a release command, however much it pushes (a launch commit by the flight software);
+  // unset, they let go once its thrust beats its weight.
+  bool hold_down=23;
   // Central body. Coordinates (sites and samples): Earth WGS 84; Moon mean-Earth frame over the
   // 1737.4 km sphere; Mars IAU 2015 frame, east longitude and ellipsoid-normal (planetographic)
   // latitude over the 3396.19 x 3376.20 km ellipsoid. Site heights -10 to 25 km off Earth.
@@ -396,11 +400,14 @@ message FlightCommand {
     // only); an outside force on it (NED, N, at its centre of mass).
     Vector3 gust_ned_meters_per_second=16; Vector3 force_ned_newtons=17;
     SensorFault sensor_fault=18;        // A sensor made to fail or lie.
-    bool fail_silent=19;                // The engine fails but reports itself healthy (its thrust reads true).
+    bool fail_silent=19;                // The engine fails but reports itself healthy, lit as commanded (its thrust reads true).
     bool terminate=20;                  // The flight termination system: it breaks up (Breakup.TERMINATED).
     string uplink=21;                   // A message for the flight software (up to 64 characters), in the next sample's uplinks.
+    // An actuator jammed where it is from now on (its position reads true, its command as given): the engine's gimbal, the
+    // surface.
+    bool stick_gimbal=22; bool stick_surface=23;
   }
-  // ignite, cutoff, throttle, gimbal and fail: the engine; thruster_duty: the thruster; surface_radians: the surface; brake, steer: the wheel;
+  // ignite, cutoff, throttle, gimbal, fail, fail_silent and stick_gimbal: the engine; thruster_duty: the thruster; surface_radians, stick_surface: the surface; brake, steer: the wheel;
   // structure_radians: the structure. 0 for every one of the stage (the hinged structures), n for its n-th (the order of
   // FlightSample.engines, thruster_duty, surfaces and CreateFlightRequest.structures).
   uint32 index=9;
@@ -419,7 +426,9 @@ message SensorFault { enum Sensor { ACCELEROMETER=0; GYROSCOPE=1; GNSS=2; RADAR_
 message Spawn { string flight_id=1; VehicleDefinition definition=2; double nose_offset_meters=3; }
 // Up to 600000 ticks. milestones: the mission's events for the broadcast's timeline (up to 64 a flight; a done one replaces
 // the planned one of its name), shown with every flight's.
-message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; repeated Milestone milestones=4; }
+// clock_zero: the mission's T-0 (UTC, Unix seconds) for the broadcast's clock, as the flight software counts it (moved on
+// through a hold, the liftoff's once it lifts off); unset: the main flight's start.
+message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; repeated Milestone milestones=4; optional double clock_zero_utc_unix_seconds=5; }
 // An event of the mission (up to 40 characters: "MAX-Q", "MECO"...): when it happened (unset: at the step's start) or is
 // planned (UTC, Unix seconds).
 message Milestone { string name=1; optional double utc_unix_seconds=2; bool planned=3; }

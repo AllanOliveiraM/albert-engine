@@ -55,6 +55,7 @@ else()
 endif()
 
 if(ALBERT_RPC)
+    target_sources(albert_render PRIVATE playground.cpp) # The interference panel drives flights through the API.
     target_link_libraries(albert_render PRIVATE albert_rpc)
     target_compile_definitions(albert_render PRIVATE ALBERT_HAS_RPC=1)
 endif()

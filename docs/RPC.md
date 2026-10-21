@@ -301,10 +301,11 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | --- | --- |
 | `ignite`, `cutoff` | Liga/desliga os motores do estágio ativo |
 | `separate` | Solta o estágio ativo; o CG passa ao conjunto superior |
-| `release` | Solta as garras do pad (também ocorre sozinho quando o empuxo supera o peso) |
+| `release` | Solta as garras do pad (também ocorre sozinho quando o empuxo supera o peso, salvo com `hold_down`) |
 | `throttle` | 0–1, limitado ao mínimo de cada motor |
 | `gimbal` | Cardã em arfagem/guinada (rad), limitado ao curso de cada motor e alcançado na taxa dos atuadores |
 | `fail` | O motor falha: apaga e não reacende (exige `engine`) |
+| `stick_gimbal`, `stick_surface` | O cardã do motor, ou a superfície, trava onde está: a posição informada é a real, o comando o que foi dado |
 | `torque_newton_meters` | Torque de atitude nos eixos do corpo: dos propulsores de RCS do estágio, se houver (ciclos alocados, consumo); senão ideal, limitado por eixo |
 | `thruster_duty` | Ciclo de trabalho (0–1) de um propulsor de RCS, até o próximo comando de torque |
 | `surface_radians` | Deflexão comandada de uma superfície de controle, limitada e alcançada na taxa do atuador |
@@ -335,7 +336,13 @@ que os motores não tiram), `thruster_gas_kilograms` (o gás próprio dos propul
 
 **Marcos da missão.** `StepRequest.milestones` dá ao voo eventos da missão (nome de até 40 caracteres, instante UTC ou o
 início do passo, previsto ou acontecido; o acontecido substitui o previsto do mesmo nome). A cena os mostra, com os de todos os
-voos, na linha do tempo dos painéis de transmissão, junto do relógio T+ desde o início do voo principal.
+voos, na linha do tempo dos painéis de transmissão, junto do relógio T± da missão: desde o `clock_zero_utc_unix_seconds` que o
+software de voo informa (o T-0 da sua contagem, que anda numa espera e vira o da decolagem), ou desde o início do voo principal.
+
+**Garras e partida.** Com `CreateFlightRequest.hold_down` as garras seguram o veículo por mais que ele empurre, até um
+`release` (o software de voo solta quando o lançamento está confirmado; sem isso elas soltam sozinhas quando o empuxo vence o
+peso). Um foguete com `spool_seconds` tem partida: o empuxo e o consumo sobem com essa constante de tempo depois da ignição e
+caem a zero no corte (a próxima partida recomeça do nada).
 
 **Água e estruturas.** `water` faz da superfície do sítio água do mar (o veículo flutua, é freado pela água e nunca "pousa":
 amerissagem); `structures` põe segmentos fixos ao chão, em metros leste-norte-cima do sítio, com raio, mola, amortecedor e
@@ -471,6 +478,21 @@ núcleo.
   medidas aproximados, de fotos). `--pad` mostra a pilha na mesa com a câmera dando a volta.
 
 **Voo**
+0. **Contagem** ([countdown.hpp](../examples/countdown.hpp)), no computador da pilha, desde T-60 s, só com os sensores e o
+   retorno dos atuadores:
+   - autotestes a cada segundo sobre os últimos 10 s até a ignição: cada unidade de IMU lendo, sem saída congelada, a
+     gravidade do pad e a rotação da Terra dentro dos seus erros, as unidades entre si; o alinhamento contra elas (nível e
+     rumo por girocompasso); o GNSS com RTK onde a navegação está; o medidor na carga medida em solo; os motores sãos e
+     apagados. Em T-40 s, GO para lançamento;
+   - de T-30 a T-24 s, a varredura dos cardãs: cada motor com cardã a 5° para cada lado em arfagem e guinada e de volta, o
+     retorno dos atuadores a 0,2° do comando;
+   - T-10 s, a água do defletor de chamas;
+   - de T-3 s, a ignição por anéis do centro para fora, 0,4 s entre eles, cada motor conferido no empuxo enquanto sobe (os
+     Raptors levam ~1 s); em T-0, todos no empuxo, as garras soltam (`hold_down`).
+
+   Algo fora antes da ignição cancela a contagem; depois dela, aborto na plataforma: todos os motores cortados, as garras
+   fechadas. O mesmo vale para o que o FDIR achar contando. Os uplinks do operador: HOLD segura a contagem (na ignição,
+   aborta), GO retoma, ABORT cancela.
 1. **Subida:** o programa genérico de subida dirige a pilha pelos cardãs, a 80% de empuxo a partir dos 40 s.
 2. **Separação:** com 570 t no booster (15% do propelante), o `spawn` cria o voo `booster`. Os dois voos andam em passo
    travado, cada um com seus comandos por `index`.
@@ -490,8 +512,28 @@ núcleo.
 5. **Decisões:** a captura é reavaliada o tempo todo: motores com cardã, propelante para terminar dali (incluindo
    contornar), alcance do ponto previsto, se a queda ainda para acima dos braços com todos os motores, tempo sobre os
    braços. Se ela deixa de ser possível, é abandonada de vez. O booster vai para longe da torre: para o mar a leste, ou,
-   se estiver a oeste dela, para o interior longe da torre e dos tanques. Ele segura a altura até 150 m da torre e desce
-   freando. Sem propelante para fugir, termina a captura. Capturado, ele fica 1 s com os motores no mínimo enquanto os
+   se estiver a oeste dela, para o interior longe da torre e dos tanques. Ele segura a altura até ficar fora da
+   infraestrutura de solo pelo seu comprimento e desce freando. Sem propelante para fugir, termina a captura.
+   - **Nunca na torre nem na infraestrutura:** o computador conhece o sítio (a coluna da torre, o braço da nave, os tanques;
+     o pátio com a mesa). A inclinação de cada lei é limitada pelo balanço do casco em torno do centro de massa (a base ~40
+     m abaixo dele vai para o outro lado), para que nenhuma parte chegue a 1,5 m de uma coluna. Um monitor projeta o
+     percurso (1 s de atraso, depois 70% da frenagem da fuga) e, se ele leva o casco a uma coluna, ou se a queda sobre a
+     infraestrutura não para com todos os motores e o propelante que resta, a fuga entra: empuxo de até 3 g com os motores
+     necessários (todos os que funcionam, os fixos também, quando faltar), inclinado para longe até onde o casco permite;
+     abaixo do peso, na inclinação que leva a queda mais longe (cos θ = T/W). Perder o veículo fora da infraestrutura é
+     aceitável; atingi-la, não. Os braços entram no modelo como vigas que giram com o ângulo medido (fechando só quando a
+     captura os fecha em volta dele; reabrindo, previstos se afastando). A rota até eles vai pela linha dos braços ou pelo
+     setor do V (nunca em diagonal pela ponta de um braço), a base acima deles até estar entre eles.
+   - **Bingo:** quando o propelante chega ao que terminar a captura daqui (pelo Δv que falta) mais o que a fuga custa, ele
+     decide de vez: se está para descer nos braços, desce; senão foge enquanto ainda pode.
+   - **A captura:** o que precisa estar sobre os trilhos são os pinos, ~30 m acima do centro de massa. O pairar leva o centro
+     de massa ao ponto em que, com as inclinações que ele mantém (contra o vento medido e para passar o empuxo de um motor
+     fora do eixo pelo centro de massa), os pinos ficam sobre a linha. Ele só desce com os pinos a 0,1 m dela, e só é
+     capturado com eles no sulco entre as barras de cada trilho (a 0,15 m; as cristas ficam a 0,2 m, além delas o pino
+     escorrega). Os braços só começam a fechar se a deriva prevista durante o fechamento cabe na folga. Na descida ele
+     mantém a posição ao longo dos trilhos, e os motores só cortam quando o casco está parado e de pé, sem balanço.
+   - **A nave** tem o mesmo: desiste da captura (fora do alcance, leve demais para descer com um motor no mínimo, bingo, rota
+     de colisão), foge com todos os recursos e desce longe da infraestrutura. Capturado, ele fica 1 s com os motores no mínimo enquanto os
    braços tomam a carga, descansa 30 s e é tirado dos braços (`EndFlight`).
 6. **A nave de volta** ([ship_return.hpp](../examples/ship_return.hpp)), com flaps posicionados (`position_meters`), RCS,
    nós térmicos no escudo e pinos:
@@ -524,7 +566,8 @@ O booster herda a estimativa da pilha na separação. Na missão o erro fica em 
 - `sensor_fault`: um sensor que falha ou mente. Os modos são `DEAD` (sem leitura), `STUCK` (repete a última), `BIAS`, `DRIFT`
   (desvio que cresce) e `NOISE`. Vale para acelerômetro ou giroscópio de cada unidade de IMU (`ImuSettings.count` até 3),
   GNSS, radar, rastreador e medidor;
-- `fail_silent`: o motor falha mas se diz saudável; o empuxo que ele informa cai;
+- `fail_silent`: o motor falha mas se diz saudável (aceso quando mandado acender); o empuxo que ele informa cai;
+- `stick_gimbal`, `stick_surface`: o atuador trava onde está;
 - `terminate`: o FTS, que quebra o veículo (`Breakup.TERMINATED`);
 - `uplink`: uma mensagem para o software de voo, entregue nos `uplinks` da amostra.
 

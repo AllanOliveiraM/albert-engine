@@ -74,6 +74,8 @@ if(ALBERT_RPC)
     target_link_libraries(starship_test PRIVATE albert_rpc)
     add_test(NAME starship_mission COMMAND starship_test)
     set_tests_properties(starship_mission PROPERTIES TIMEOUT 600)
+    add_test(NAME starship_scenarios COMMAND starship_test --scenarios) # Each system failing or lying, and winds.
+    set_tests_properties(starship_scenarios PROPERTIES TIMEOUT 1500)
 endif()
 
 add_executable(time_test time_test.cpp)

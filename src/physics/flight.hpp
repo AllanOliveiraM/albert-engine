@@ -45,7 +45,7 @@ struct Engine {std::string name;V3 position,direction{1,0,0};double thrust=0,exh
     // Air-breathing (a jet): thrust at full throttle and fuel per newton-second (kg/N/s) from tables of Mach and altitude (km,
     // the tables' angle axis), none without air; the spool follows the throttle with this time constant (s). thrust, exhaust
     // and exitArea are then unused.
-    bool breathing=false;Table thrustTable,fuelTable;double spool=0;};
+    bool breathing=false;Table thrustTable,fuelTable;double spool=0;}; // spool on a rocket: its start and shutdown transient's time constant.
 // A wheel (landing gear): its contact point (as legs), strut stiffness and damping, rolling resistance and braking (μ at full
 // brake) along its heading, cornering (μ across it), and its steering limit (rad about body z, + to the right; 0: fixed).
 struct Wheel {std::string name;V3 position;double stiffness=0,damping=0,rolling=.015,braking=.5,cornering=.8,steer=0;};
@@ -112,6 +112,7 @@ struct Environment {
     std::shared_ptr<const Gravity> field; // Owns planet.field.
     std::shared_ptr<const AirModel> air; // Replaces the standard atmosphere when set.
     double ground=-std::numeric_limits<double>::infinity(); // Ellipsoidal height of the surface (m).
+    bool holdDown=false; // The pad's clamps hold until release(), however much it pushes (else they let go once thrust beats weight).
     // water: that surface is water (sea water, 1025 kg/m³): the stack floats by its slices' buoyancy and drag; legs and wheels
     // do not touch it. structures: segments fixed to the body (ECEF ends, m) with a radius, struck by the stages' hard points;
     // a hinged one turns about its axis through its pivot (body-fixed) by an angle from that pose (rad), commanded within
@@ -167,6 +168,7 @@ public:
     // Engine commands: engine -1 for every engine of the stage, else its index. A failed engine stays off (engine out).
     // silent: it fails but reports itself healthy (its thrust drops all the same).
     void ignite(int engine=-1);void cutoff(int engine=-1);void fail(int engine,bool silent=false);void separate();void release();
+    void stick(int engine=-1);void stickSurface(int index=-1); // An actuator jammed where it is: the engine's gimbal, the surface; -1 each one.
     void throttle(double t,int engine=-1);void gimbal(double pitch,double yaw,int engine=-1);void torque(V3 t);
     void surface(double deflection,int index=-1); // rad, clamped to each surface's limit; reached at its rate.
     void thruster(double duty,int index=-1);      // A thruster's duty cycle (0-1) directly, until the next torque command.
@@ -183,9 +185,11 @@ public:
     struct WheelState {double brake=0,steer=0;};
     const std::vector<WheelState>& wheels()const{return wheels_;}
     // Each engine of the stage: on, failed, throttle, gimbal as moved (rad) and as commanded.
-    struct EngineState {bool on=false,failed=false;double throttle=1,pitch=0,yaw=0,targetPitch=0,targetYaw=0,spool=0;bool silent=false;}; // spool: a jet's (0-1); silent: failed, reported healthy.
+    // spool: a jet's (0-1), a rocket's start (0-1); silent: failed, reported healthy; claims: what a silent one says it is
+    // doing (lit as commanded); stuck: its gimbal frozen where it is.
+    struct EngineState {bool on=false,failed=false;double throttle=1,pitch=0,yaw=0,targetPitch=0,targetYaw=0,spool=0;bool silent=false,claims=false,stuck=false;};
     const std::vector<EngineState>& engines()const{return engines_;}
-    struct SurfaceState {double deflection=0,target=0;};
+    struct SurfaceState {double deflection=0,target=0;bool stuck=false;}; // stuck: frozen where it is.
     const std::vector<SurfaceState>& surfaces()const{return surfaces_;}
     struct StructureState {double angle=0,target=0;};
     const std::vector<StructureState>& structures()const{return structures_;} // By Environment::structures (fixed ones at 0).
