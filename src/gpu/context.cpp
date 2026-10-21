@@ -80,6 +80,7 @@ Context::~Context(){
 }
 void Context::resize(int width,int height){
     if(!surface_||width<=0||height<=0)return;width_=width;height_=height;
+    if(current_){stale_=true;return;} // An image of it held (between acquire and present): reconfigured once presented.
     WGPUSurfaceConfiguration c{};c.device=device_;c.format=format_;c.usage=WGPUTextureUsage_RenderAttachment;c.width=static_cast<std::uint32_t>(width);c.height=static_cast<std::uint32_t>(height);
     c.alphaMode=WGPUCompositeAlphaMode_Auto;c.presentMode=vsync_?WGPUPresentMode_Fifo:unsynced_;wgpuSurfaceConfigure(surface_,&c);
 }
@@ -93,5 +94,6 @@ WGPUTextureView Context::acquire(){
 void Context::present(){
     if(!current_)return;wgpuSurfacePresent(surface_);
     wgpuTextureViewRelease(view_);wgpuTextureRelease(current_);view_=nullptr;current_=nullptr;
+    if(stale_){stale_=false;resize(width_,height_);}
 }
 }

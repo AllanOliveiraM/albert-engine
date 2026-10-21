@@ -105,10 +105,11 @@ void Vehicle::animate(const std::vector<float>* parts){
     auto at=[&](std::size_t i){return parts&&i<parts->size()?(*parts)[i]:0.f;};
     if(parts&&parts->size()>=5&&parts->back()>=0){explode(parts->back());return;} // Broken up: its pieces.
     auto tail=[&](std::size_t k,float fallback){return parts&&parts->size()>=5?(*parts)[parts->size()-5+k]:fallback;}; // Pressure, heat flux, fill, Mach.
-    const float pressure=tail(0,101325.f),thin=1-std::clamp(pressure/101325.f,0.f,1.f),heating=tail(1,0),fill=tail(2,0),mach=tail(3,0); // thin: 1 in vacuum.
+    const float pressure=tail(0,101325.f),thin=1-std::clamp(pressure/101325.f,0.f,1.f),heating=tail(1,0),fill=tail(2,0),mach=std::abs(tail(3,0)); // thin: 1 in vacuum.
     shine(heating,fill);
-    { // Condensation round the body near Mach 1 in thick air: strongest at 1, gone by 0.88 and 1.2.
-        const float v=std::clamp(1-std::abs(mach-1.f)/(mach<1?.12f:.2f),0.f,1.f)*std::clamp((pressure-1e4f)/3e4f,0.f,1.f);vapour_->visible=v>.01f;
+    { // Condensation round the body near Mach 1 in thick air: strongest at 1, gone by 0.88 and 1.2; flaring downstream (toward the
+      // nose when it flies engines first).
+        vapour_->scale.y=tail(3,0)<0?-1.f:1.f;const float v=std::clamp(1-std::abs(mach-1.f)/(mach<1?.12f:.2f),0.f,1.f)*std::clamp((pressure-1e4f)/3e4f,0.f,1.f);vapour_->visible=v>.01f;
         vapour_->material()->opacity=.42f*v;}
     const float diamonds=std::clamp((pressure-2e4f)/6e4f,0.f,1.f); // Shock diamonds in the plume, in thick air.
     std::size_t lit=0;for(std::size_t i=0;i<engines;++i)lit+=at(3*i)>.01f;

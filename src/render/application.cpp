@@ -1751,15 +1751,15 @@ int albert::runRenderer(int argc, char** argv) {
             const auto gauges=preferences.broadcast&&rpc?rpc->flightGauges():std::vector<albert::rpc::FlightServices::Gauge>{};
             broadcasting=!gauges.empty();
             if(!gauges.empty()){
-                std::vector<albert::BroadcastVehicle> vehicles;std::vector<albert::BroadcastEvent> events;double start=gauges.front().zero;
-                for(const auto& g:gauges){if(g.id=="flight")start=g.zero;
+                std::vector<albert::BroadcastVehicle> vehicles;std::vector<albert::BroadcastEvent> events;double start=gauges.front().zero,shown=simulatedUtc;
+                for(const auto& g:gauges){if(g.id=="flight"){start=g.zero;if(g.stopped)shown=std::min(shown,g.stop);} // Its clock stopped (a scrub, an abort, its end): there.
                     albert::BroadcastVehicle v;v.label=g.label;v.speed=g.speed;v.height=g.height;v.propellant=g.propellant;
                     for(const auto& e:g.engines)v.engines.push_back({e.y,e.z,e.radius,e.throttle,e.on,e.failed});vehicles.push_back(std::move(v));}
                 for(const auto& g:gauges)for(const auto& m:g.milestones)if(std::none_of(events.begin(),events.end(),[&](const albert::BroadcastEvent& e){return e.name==m.name;}))
                     events.push_back({m.name,m.utc-start,m.planned});
                 std::sort(vehicles.begin(),vehicles.end(),[](const auto& a,const auto& b){return a.engines.size()>b.engines.size();});
                 if(vehicles.size()>2)vehicles.resize(2);if(vehicles.size()==2)vehicles[1].right=true;else vehicles[0].right=vehicles[0].engines.size()<=6;
-                albert::drawBroadcast(vehicles,simulatedUtc-start,events);
+                albert::drawBroadcast(vehicles,shown-start,events);
             }
             if(rpc&&preferences.playground&&menuProgress<=0.f)drawPlayground(*rpc,display,margin); // Live interference on the flights.
 #else
@@ -2239,7 +2239,10 @@ int albert::runRenderer(int argc, char** argv) {
                 std::visit([&](auto& value) {
                     using T=std::decay_t<decltype(value)>;
                     if constexpr(std::is_same_v<T,albert::core::Create>) registry.create(std::move(value.object),value.replace);
-                    else if constexpr(std::is_same_v<T,albert::core::Remove>) {if(registry.get(value.id).builtin)throw std::invalid_argument("Built-in objects cannot be removed");if(focus==value.id)setFocus(targets::Earth);registry.remove(value.id);visualSettings.auxiliary.erase(value.id);}
+                    else if constexpr(std::is_same_v<T,albert::core::Remove>) {if(registry.get(value.id).builtin)throw std::invalid_argument("Built-in objects cannot be removed");if(focus==value.id){Focus next=targets::Earth; // A flight followed ended: on to one still flying (the one it left from first), else the Earth.
+                        for(const auto& [id,object]:registry.objects())if(id!=value.id&&(id=="flight"||id.rfind("flight.",0)==0)&&next!="flight")next=id;
+                        setFocus(next);}
+                        registry.remove(value.id);visualSettings.auxiliary.erase(value.id);}
                     else if constexpr(std::is_same_v<T,albert::core::Visibility>) registry.visible(value.id,value.enabled);
                     else if constexpr(std::is_same_v<T,albert::core::Append>) registry.samples(value.id,std::move(value.values));
                     else if constexpr(std::is_same_v<T,albert::core::Replace>)registry.replace(value.id,std::move(value.values));

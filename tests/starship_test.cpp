@@ -7,6 +7,7 @@
 #include "starship_flight.hpp"
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -60,6 +61,30 @@ int main(int argc,char** argv){try{
             std::printf("SCENARIO %-60s %s (%s%s)\n",*k.spec?k.spec:"nominal",ok?"ok":"FAILED",pad?"scrubbed: ":caught?"caught":m.boosterDown?"down ":m.boosterLost?"lost ":"?",
                 pad?m.scrubbed.c_str():caught?"":(std::to_string(static_cast<int>(m.boosterAway))+" m away").c_str());}
         require(failed==0,"A scenario not ridden out");std::puts("Every scenario ridden out");return 0;}
+    if(argc>1&&std::string(argv[1]).rfind("--landing",0)==0){ // The booster's landing alone (the bench); failures after "=".
+        // ALBERT_WIND=n,e (m/s): a wind added from the start.
+        const std::string a=argv[1];albert::example::starship::Gate g;if(const char* w=std::getenv("ALBERT_WIND"))std::sscanf(w,"%lf,%lf",&g.wind.x,&g.wind.y);
+        const auto m=albert::example::starship::landing(*flight,g,a.size()>10?albert::example::starship::faults(a.substr(10)):std::vector<albert::example::starship::Fault>{},false);
+        std::printf("%s\n",m.caught>0?("caught, at rest "+std::to_string(m.along)+" m along, "+std::to_string(m.across)+" m across, "+std::to_string(m.speed)+" m/s").c_str():
+            ((m.boosterDown?"down ":m.boosterLost?"LOST ":"? ")+std::to_string(static_cast<int>(m.boosterAway))+" m away ("+m.gaveUp+")").c_str());return 0;}
+    if(argc>1&&std::string(argv[1]).rfind("--sweep",0)==0){ // What the landing rides out: winds, failures and where it starts, each from the bench.
+        struct Case {std::string name;albert::example::Vec wind;const char* faults;double east,north;};
+        std::vector<Case> cases{{"nominal",{},"",0,0},{"engine 1 out",{},"booster@landing:1",0,0},{"engine 1 silent",{},"booster@landing:silent:1",0,0},
+            {"gyro drift",{},"booster@landing:imu2.gyro=drift:1e-3,0,0",0,0},{"accel bias",{},"booster@coast:imu1.accel=bias:0.5,0,0",0,0},
+            {"200 m east",{},"",200,0},{"200 m west",{},"",-200,0},{"100 m north",{},"",0,100},{"100 m south",{},"",0,-100}};
+        for(const double speed:{4.,8.})for(int k=0;k<8;++k){const double a=k*45*albert::example::starship::deg; // The air going toward north, north-east...
+            cases.push_back({"wind "+std::to_string(static_cast<int>(speed))+" to "+std::to_string(k*45)+"°",{speed*std::cos(a),speed*std::sin(a),0},"",0,0});}
+        if(std::string(argv[1])=="--sweep=full")for(int k=0;k<8;++k){const double a=k*45*albert::example::starship::deg;
+            cases.push_back({"wind 12 to "+std::to_string(k*45)+"°",{12*std::cos(a),12*std::sin(a),0},"",0,0});
+            cases.push_back({"wind 6 to "+std::to_string(k*45)+"°, engine 1 out",{6*std::cos(a),6*std::sin(a),0},"booster@landing:1",0,0});}
+        int caught=0,safe=0,lost=0;
+        for(const auto& k:cases){albert::example::starship::Gate g;g.wind=k.wind;g.east+=k.east;g.north+=k.north;
+            const auto m=albert::example::starship::landing(*flight,g,albert::example::starship::faults(k.faults));
+            const bool ok=m.caught>0&&m.onRails()&&m.speed<.1,held=m.caught>0&&m.onRails(),clear=(m.boosterDown||m.boosterLost)&&m.clear(); // held: on the arms, still swaying.
+            caught+=ok;safe+=held||clear;lost+=!(held||clear);
+            std::printf("SWEEP %-30s %s\n",k.name.c_str(),held?((ok?"caught at ":"caught, swaying "+std::to_string(m.speed).substr(0,4)+" m/s, at ")+std::to_string(static_cast<int>(m.caught))+" s, "+std::to_string(m.along).substr(0,5)+" m along").c_str():
+                ((clear?"safe: ":"UNSAFE: ")+std::string(m.boosterDown?"down ":m.boosterLost?"lost ":"? ")+std::to_string(static_cast<int>(m.boosterAway))+" m away ("+m.gaveUp+")").c_str());}
+        std::printf("SWEEP %d caught, %d safe, %d unsafe of %zu\n",caught,safe,lost,cases.size());return lost?1:0;}
     if(argc>1&&std::string(argv[1]).rfind("--booster",0)==0){ // The ascent and the booster's way back alone (development); failures after "=".
         const std::string a=argv[1];const auto m=albert::example::starship::mission(*flight,true,1000,true,{},a.size()>10?albert::example::starship::faults(a.substr(10)):std::vector<albert::example::starship::Fault>{});
         std::printf("MECO %.1f s at %.1f km; booster %s, %.2f m off the axis, %.1f m from the tower\n",m.meco,m.mecoHeight/1e3,m.boosterDown?"down":m.boosterLost?"lost":"caught",m.offAxis,

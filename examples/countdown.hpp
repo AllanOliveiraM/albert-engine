@@ -96,7 +96,7 @@ private:
     static void mark(api::StepRequest& q,const char* name,double plannedUtc=-1){auto* m=q.add_milestones();m->set_name(name);if(plannedUtc>=0){m->set_utc_unix_seconds(plannedUtc);m->set_planned(true);}}
     void plan(api::StepRequest& q,double utc,double T)const{for(const auto& e:events_)if(e.at>T)mark(q,e.name.c_str(),utc+e.at-T);} // The events to come at their UTC.
     void stop(api::StepRequest& q,const std::string& why,double T){
-        const bool lit=phase_==Phase::igniting;phase_=Phase::scrubbed;why_=why;
+        const bool lit=phase_==Phase::igniting;phase_=Phase::scrubbed;why_=why;q.set_stop_clock(true); // The broadcast's clock stops there.
         if(lit)q.add_commands()->set_cutoff(true);q.add_commands()->mutable_gimbal(); // Every engine out, every gimbal centred.
         mark(q,lit?"ABORTO NA PLATAFORMA":"CONTAGEM CANCELADA");say(T,std::string(lit?"ABORTO NA PLATAFORMA (motores cortados, garras fechadas): ":"CANCELADA: ")+why);
     }

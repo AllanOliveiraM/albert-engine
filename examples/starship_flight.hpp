@@ -145,7 +145,7 @@ struct Home {double deorbit=0,entry=0,maxTile=0,caught=0,offAxis=0,along=0,acros
 // Why a vehicle broke up, if it did (the flight's Breakup), in words; null while whole.
 inline const char* broken(const api::FlightSample& s){
     if(!s.has_breakup())return nullptr;
-    switch(s.breakup().cause()){case api::Breakup::GROUND:return "bateu no chão";case api::Breakup::STRUCTURE:return "bateu numa estrutura";case api::Breakup::HEAT:return "superaqueceu";default:return nullptr;}
+    switch(s.breakup().cause()){case api::Breakup::GROUND:return "bateu no chão";case api::Breakup::STRUCTURE:return "bateu numa estrutura";case api::Breakup::HEAT:return "superaqueceu";case api::Breakup::TERMINATED:return "terminado pelo FTS";default:return nullptr;}
 }
 // A mission event for the broadcast's timeline: done now (the step's start), or planned at a UTC instant.
 inline void mark(api::StepRequest& q,const char* name,double plannedUtc=-1){auto* m=q.add_milestones();m->set_name(name);if(plannedUtc>=0){m->set_utc_unix_seconds(plannedUtc);m->set_planned(true);}}
@@ -272,7 +272,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
     BoosterReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());siteWorks(back);GravityTurn ascent(heading*deg,.13); // A small kick: lofted, so the booster's way back stays short.
     bool spawned=false,orbit=false,bucket=false,coasting=false,shut=false,mirror=false,peaked=false,fleeing=false;double report=0,maxQ=0,maxQAt=0,spawnAt=0,caughtAt=0,lostAt=-1;
     std::vector<std::string> marks,found; // Events seen since the last step, for the timeline; the FDIR's findings, for the count.
-    const bool trace=std::getenv("ALBERT_TRACE")!=nullptr;double traced=0;
+    const bool trace=std::getenv("ALBERT_TRACE")!=nullptr,attitude=trace&&std::string(std::getenv("ALBERT_TRACE")).rfind("attitude",0)==0,fine=attitude&&std::string(std::getenv("ALBERT_TRACE"))=="attitude-fine";double traced=0,turned=0;
     Countdown count(create.definition(),ship,{{"MAX-Q",62},{"MECO",153},{"SEPARAÇÃO A QUENTE",160},{"BOOSTBACK",168},{"QUEIMA DE POUSO DO BOOSTER",392},{"CAPTURA DO BOOSTER",417},
         {"SECO",510}}); // The public profile's times after liftoff, as planned (Flights 7 and 8, 2025, roughly).
     auto clock=[&]{return count.clock(ship.elapsed_seconds());}; // The mission's time (T, s).
@@ -344,6 +344,9 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
                 std::printf("%7.2f s  booster: %s (h %.2f km, v %.0f m/s, %.0f t de propelante, %.0f m a leste e %.0f m ao norte da torre, pouso previsto a %.0f m do ponto sobre o mar)\n",
                     spawnAt+boost.elapsed_seconds(),labels[static_cast<int>(last)],boost.geodetic().height_meters()/1e3,speedOf(boost),boost.propellant_kilograms()/1e3,east,north,back.predicted());}
             out.towerClearance=std::min(out.towerClearance,clearance(boost,boosterLength));
+            if(attitude&&back.phase()>=BoosterReturn::Phase::flip){const double now=spawnAt+boost.elapsed_seconds();if(now>=turned){turned=now+(fine?0:.25); // ALBERT_TRACE=attitude: its turning, four times a second (attitude-fine: every step).
+                const State x=state(boost);double rcs=0;for(const double d:boost.thruster_duty())rcs+=d;std::printf("ATT %.2f %s h %.2f km q %.0f Pa rate %.2f %.2f %.2f °/s fins",now,labels[static_cast<int>(back.phase())],boost.geodetic().height_meters()/1e3,x.q,x.rate.x/deg,x.rate.y/deg,x.rate.z/deg);
+                for(const double f:x.surfaces)std::printf(" %.1f",f/deg);std::printf(" rcs %.2f gimbal %.2f %.2f lit %d\n",rcs,boost.engines_size()?boost.engines(0).gimbal().pitch_radians()/deg:0.,boost.engines_size()?boost.engines(0).gimbal().yaw_radians()/deg:0.,static_cast<int>(std::count_if(boost.engines().begin(),boost.engines().end(),[](const api::EngineSample& e){return e.on();})));}}
             if(trace&&back.phase()>=BoosterReturn::Phase::landing){const double now=spawnAt+boost.elapsed_seconds();if(now>=traced){traced=now+.5; // ALBERT_TRACE: its way down, twice a second.
                 const auto [e,n]=aside(boost);const State x=state(boost);const Vec u=back.up(),h=x.velocity+u*-dot(x.velocity,u);int lit=0;for(const auto& en:boost.engines())lit+=en.on();
                 std::printf("TRACE %.1f %s e %.1f n %.1f h %.1f ve %.2f vn %.2f vz %.2f lit %d prop %.0f arms %.2f contact %.0f nav %.2f m %.3f m/s push %.2f\n",now,labels[static_cast<int>(back.phase())],e,n,boost.geodetic().height_meters(),
@@ -372,6 +375,46 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
             out.ship=flyHome(flight,ship,pace,warp,nav,faults,count.zero());return out;}
         if(clock()>1500)throw std::runtime_error("Missão não concluída em 25 minutos");
         pace(ship.elapsed_seconds(),1);
+    }
+}
+// The booster's way down alone, for sweeps of what its landing rides out (a test bench, ~40 s simulated a run): from a state
+// falling engines first toward its landing burn (Gate: east and north of the tower's axis and height over its base, m; its
+// velocity north, east and down, m/s; propellant, kg; the computers' seed) through its coast guidance, the burn, the final
+// approach and the catch or the escape, the site as in the mission (the arms on its own flight). The defaults: the mission's
+// booster as it lights its landing burn. wind: added to the air from the start (NED, m/s). Its outcome as Mission's booster
+// fields (caught, at rest, down or lost and where, the tower's clearance, why given up, FDIR).
+struct Gate {double east=1939,north=-206,height=5680,vn=39,ve=-343,vd=815,propellant=195e3;std::uint64_t seed=7;Vec wind;};
+inline Mission landing(api::FlightService::Stub& flight,const Gate& g,std::vector<Fault> faults={},bool quiet=true){
+    Mission out;api::CreateFlightRequest create;create.set_vehicle(api::CUSTOM);*create.mutable_definition()=superHeavy();
+    create.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);addTower(create);avionics(create,g.seed);
+    const double la=towerLatitude*deg,r=6378137;auto* w=create.mutable_start();w->set_stage(0);w->set_propellant_kilograms(g.propellant);auto* l=w->mutable_local();
+    l->mutable_position()->set_latitude_degrees(towerLatitude+g.north/r/deg);l->mutable_position()->set_longitude_degrees(towerLongitude+g.east/(r*std::cos(la))/deg);
+    l->mutable_position()->set_height_meters(towerGround+g.height);put(l->mutable_velocity_ned_meters_per_second(),g.vn,g.ve,g.vd);
+    l->set_heading_degrees(std::atan2(-g.ve,-g.vn)/deg);l->set_pitch_degrees(std::atan2(g.vd,std::hypot(g.vn,g.ve))/deg); // Engines first: its nose against the way it falls.
+    api::FlightSample boost;call([&](grpc::ClientContext& c){return flight.CreateFlight(&c,create,&boost);});
+    if(norm(g.wind)>0){api::StepRequest q;q.set_ticks(1);put(q.add_commands()->mutable_gust_ned_meters_per_second(),g.wind.x,g.wind.y,g.wind.z);call([&](grpc::ClientContext& c){return flight.Step(&c,q,&boost);});}
+    Navigator nav;nav.base=towerSite();nav.design(superHeavy());nav.align(boost,g.seed);
+    BoosterReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());siteWorks(back);back.enter(BoosterReturn::Phase::coast);
+    static const char* names[]{"wait","flip","boostback","coast","landing","final","hover","descend","caught","divert","down"};
+    bool shut=false;double caughtAt=-1;auto last=back.phase();
+    for(;;){const double t=boost.elapsed_seconds();
+        back.armsClosed=armsClosed(boost);armAngles(back,boost);const Command c=back.step(t,nav.state(boost));api::StepRequest b;b.set_ticks(20);apply(b,c);
+        inject(faults,"booster",t,names[static_cast<int>(back.phase())],b);if(back.closeArms()!=shut){shut=back.closeArms();arms(b,!shut);}
+        try{call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,b,&boost);});}
+        catch(const std::exception&){api::StepRequest bare;bare.set_ticks(20);call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,bare,&boost);});} // A command refused: on without it.
+        nav.update(boost);for(const auto& r:nav.reports){out.fdir.push_back("booster: "+r);if(!quiet)std::printf("%7.2f s  FDIR: %s\n",t,r.c_str());}nav.reports.clear();
+        if(!quiet&&std::getenv("ALBERT_TRACE")&&std::fmod(t+1e-9,.5)<.02){const auto [e,n]=aside(boost);const State x=state(boost);const Vec u=back.up(),east{-std::sin(towerLongitude*deg),std::cos(towerLongitude*deg),0},h=x.velocity+u*-dot(x.velocity,u);int lit=0;
+            for(const auto& en:boost.engines())lit+=en.on();std::printf("TRACE %.1f %s e %.1f n %.1f h %.1f ve %.2f vn %.2f vz %.2f lit %d prop %.0f arms %.1f push %.2f tilt %.1f\n",t,names[static_cast<int>(back.phase())],e,n,
+                boost.geodetic().height_meters()-towerGround,dot(h,east),dot(h,cross(u,east)),dot(x.velocity,u),lit,boost.propellant_kilograms()/1e3,boost.structure_radians_size()?boost.structure_radians(0)/deg:0.,norm(back.disturbance()),
+                std::acos(std::clamp(dot(x.toBody.r0,unit(x.position)),-1.,1.))/deg);}
+        out.towerClearance=std::min(out.towerClearance,clearance(boost,boosterLength));if(back.gaveUp()&&out.gaveUp.empty())out.gaveUp=back.gaveUp();
+        if(back.phase()!=last){last=back.phase();if(last==BoosterReturn::Phase::caught)caughtAt=t;
+            if(!quiet){const auto [e,n]=aside(boost);std::printf("%7.2f s  %s (h %.0f m, %.0f m a leste, %.0f m ao norte, %.0f t)\n",t,names[static_cast<int>(last)],boost.geodetic().height_meters()-towerGround,e,n,boost.propellant_kilograms()/1e3);}}
+        if(broken(boost)){out.boosterLost=true;out.boosterAway=offAxis(boost,back.up());std::tie(out.downEast,out.downNorth)=aside(boost);return out;}
+        if(back.gaveUp()&&(back.phase()==BoosterReturn::Phase::down||boost.landed())){out.boosterDown=true;out.boosterAway=offAxis(boost,back.up());std::tie(out.downEast,out.downNorth)=aside(boost);return out;}
+        if(boost.landed()||boost.geodetic().height_meters()<towerGround){out.boosterLost=true;out.boosterAway=offAxis(boost,back.up());std::tie(out.downEast,out.downNorth)=aside(boost);return out;} // Down without giving up: on the site.
+        if(caughtAt>=0&&t-caughtAt>=30){out.caught=caughtAt;out.offAxis=offAxis(boost,back.up());std::tie(out.along,out.across)=aside(boost);out.speed=speedOf(boost);out.propellant=boost.propellant_kilograms();return out;}
+        if(t>300){out.gaveUp=out.gaveUp.empty()?"(tempo esgotado)":out.gaveUp;return out;}
     }
 }
 // The stack on the mount at Starbase, not launched, the camera going once around it in `seconds` (distance: times the

@@ -37,11 +37,12 @@ public:
             else if(phase_!=Phase::landing&&.4*raptorSea>.97*weight)giveUp(s,"leve demais para descer nos braços");
             else if(const double vz=dot(s.velocity,up_),g=norm(gravity(s.position)),left=std::max(over-catchHeight(s),0.),
                 finish=phase_==Phase::landing?1.1*s.mass*(norm(s.velocity)+g*(2*left/std::max(-vz,1.)+17))/raptorExhaust:(left+3)*second; // Its Δv from up high (as the booster's final), or down at 1 m/s and 3 s more.
-                !hurry_&&usable<finish+escapeNeed(s,flat)){ // Bingo, as the booster's.
-                if(phase_==Phase::descend||aligned(s,flat)||!escapes(s,flat))hurry_=true;else giveUp(s,"propelante no limite: captura abandonada enquanto a fuga é possível");}}
+                !hurry_&&(usable<finish||usable<escapeNeed(s,flat)+3*second)){ // Short of finishing, or the bingo: as the booster's.
+                if(usable<finish?!escapes(s,flat):phase_==Phase::descend||aligned(s,flat))hurry_=true;
+                else giveUp(s,usable<finish?"propelante insuficiente para terminar a captura":"propelante no limite: captura abandonada enquanto a fuga é possível");}}
         // Never into the tower, never down onto the ground's works (as the booster's).
         if(phase_>=Phase::landing&&phase_<=Phase::descend&&!(phase_==Phase::descend&&norm(s.contact)>0)||phase_==Phase::divert){
-            const Vec across=s.velocity+up_*-dot(s.velocity,up_);const double v=norm(across),brake=rush(s)*std::sin(lean(s,flat,v>0?across*-1.:cross(north_,up_),30*deg));
+            const Vec across=s.velocity+up_*-dot(s.velocity,up_);const double brake=stopping(s,flat,std::max(set_.count(),1),rush(s));(void)across;
             if(const char* why=into(collides(s,flat,.7*brake,phase_==Phase::divert?std::min(kept_,over):catchHeight(s)+hoverAbove));why&&!escape_){giveUp(s,why);if(phase_==Phase::divert){escape_=true;threat_=why;}}}
         switch(phase_){
         case Phase::orbit: // Where a deorbit burn now would land, each minute (each second within 2000 km of it); nose forward and
@@ -102,19 +103,22 @@ public:
             else{c.torqueOn=true;c.torque={};}break;
         case Phase::divert:{ // Away with all it has while the tower threatens it (escape()); then toward the aim as fast as its lean
             // allows (20°, less where its hull's swing would near the tower), its height held until clear of the ground's works by its
-            // length (or it has left only what coming down takes), then down there braking (a hoverslam at 35% of what it can).
+            // length (however little it has left: dry, it falls on along its way), then down there braking (a hoverslam at 35% of what
+            // it can; its engines lit a second ahead of it, one alone falling: three at their least would hold it up).
             set_.keep(c,s);const double vz=dot(s.velocity,up_),stand=shipLength-cg(s.propellant),h=std::max(over-stand,0.),g=norm(gravity(s.position)),most=rush(s);
             const Vec across=s.velocity+up_*-vz,to=flat+aim_*-1.;c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
             if(escape_){if(set_.count()<set_.working(s,3))set_.use(c,s,set_.working(s,3)); // Every engine it has.
                 const Vec dir=away(s,flat,to);push(c,s,escape(s,flat,dir,most));
                 if(collides(s,flat,1.,over)<0&&gap(s,flat,dir,0)>10&&dot(across,dir)>=0){escape_=false;kept_=std::max(kept_,over);}} // The height it got to held.
-            else{const double usable=s.propellant-residual,second=s.mass*g/raptorExhaust,clear=!overWorks(flat,shipLength)||usable<(h/20+12)*second;
+            else{const bool clear=!overWorks(flat,shipLength);
                 const double braking=.35*(set_.working(s,3)*raptorSea/s.mass-g),stop=vz<-1?(vz*vz-1)/(2*std::max(h,.5)):0.;
                 const double up=clear?(stop>=braking?g+stop:std::max(g+1.5*(-30-vz),0.)):g+.5*(-vz)+.2*(kept_-over);
                 const double d=norm(to);const Vec want=d>0&&!(clear&&h<120)?to*(-std::min(15.,std::sqrt(2*2.5*d))*(clear?std::clamp((h-120)/150,0.,1.):1)/d):Vec{};Vec side=(want+across*-1)*.5+push_*-1.;
-                const double limit=std::tan(lean(s,flat,side,20*deg))*std::max(up,.3*g0);if(norm(side)>limit)side=side*(limit/norm(side));
-                const Vec a=up_*std::max(up,.3*g0)+side;const int n=std::clamp(static_cast<int>(std::ceil(s.mass*norm(a)/(.85*raptorSea))),1,std::max(set_.working(s,3),1));
-                if(n>set_.count())set_.use(c,s,n);push(c,s,a);}
+                const double lift=std::max(up,.3*g0),limit=std::tan(lean(s,flat,side,20*deg))*std::max(lift,.4*set_.count()*raptorSea/s.mass*std::cos(20*deg));
+                if(norm(side)>limit)side=side*(limit/norm(side));
+                const Vec a=up_*lift+side;const int all=std::max(set_.working(s,3),1),n=clear&&(stop>.25*braking||vz<-12)?all:std::clamp(static_cast<int>(std::ceil(s.mass*norm(a)/(.85*raptorSea))),1,all);
+                if(n>set_.count()||(n<set_.count()&&s.mass*norm(a)<.42*set_.count()*raptorSea))set_.use(c,s,n);
+                const double floor=.4*set_.count()*raptorSea/s.mass;push(c,s,up_*(lift*lift+dot(side,side)<floor*floor?std::sqrt(floor*floor-dot(side,side)):lift)+side);} // The lean that gives the side asked on the least its engines give.
             if(h<.5){set_.use(c,s,0);phase_=Phase::down;}
             break;}
         case Phase::down:c.torqueOn=true;c.torque={};if(set_.count())set_.use(c,s,0);break; // Down: engines off.
@@ -131,7 +135,8 @@ private:
     // What getting clear of the ground's works by its length with all it has takes (kg), and whether it has it (as the booster's).
     double escapeNeed(const State& s,Vec flat)const{
         const Vec dir=away(s,flat,flat+aim_*-1.);double d=0;while(d<600&&overWorks(flat+dir*d,shipLength))d+=5;
-        const double g=norm(gravity(s.position)),seconds=std::sqrt(2*d/(g*std::tan(20*deg)))+3;return 1.2*seconds*s.mass*g/std::cos(20*deg)/raptorExhaust;
+        const double g=norm(gravity(s.position)),h=std::max(dot(s.position+site_*-1.,up_)-(shipLength-cg(s.propellant)),0.),vz=dot(s.velocity,up_); // By its Δv, as the booster's.
+        return 1.2*s.mass*(g*(d/15+5)+std::max(-vz,0.)+g*h/30+std::min(30.,std::sqrt(2*g*h)))/raptorExhaust;
     }
     bool escapes(const State& s,Vec flat)const{return s.propellant-residual>escapeNeed(s,flat);}
     // Gives the catch up for good: the arms stay open, the aim out to sea east of the tower; low, away at once, with all it has
@@ -141,7 +146,7 @@ private:
         // Already well clear of the works: down where it is; else out to sea east of the tower, or from west of it inland, north of the tanks.
         aim_=!overWorks(rel+up_*-over,3*shipLength)?rel+up_*-over:east>-22?cross(north_,up_)*1500.:cross(north_,up_)*-400.+north_*300.;
         phase_=Phase::divert;kept_=over;const Vec flat=rel+up_*-over,across=s.velocity+up_*-dot(s.velocity,up_);
-        if(collides(s,flat,.7*rush(s)*std::sin(lean(s,flat,across*-1.,30*deg)),over)>=0){escape_=true;threat_=why;}
+        if(collides(s,flat,.7*stopping(s,flat,std::max(set_.count(),1),rush(s)),over)>=0){escape_=true;threat_=why;}(void)across;
     }
     struct Arrival {double along=0,cross=0,seconds=0;bool down=false;}; // down: it reaches the ground's height (else along, cross: where it gave up).
     // The flaps' drag at their openings now (times |sin α|; their entry trim before any), on the reference area.

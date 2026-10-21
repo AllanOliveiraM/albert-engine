@@ -76,6 +76,8 @@ if(ALBERT_RPC)
     set_tests_properties(starship_mission PROPERTIES TIMEOUT 600)
     add_test(NAME starship_scenarios COMMAND starship_test --scenarios) # Each system failing or lying, and winds.
     set_tests_properties(starship_scenarios PROPERTIES TIMEOUT 1500)
+    add_test(NAME starship_sweep COMMAND starship_test --sweep=full) # The landing bench: never down on the tower or the site's works.
+    set_tests_properties(starship_sweep PROPERTIES TIMEOUT 900)
 endif()
 
 add_executable(time_test time_test.cpp)

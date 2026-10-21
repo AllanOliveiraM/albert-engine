@@ -307,7 +307,7 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | `fail` | O motor falha: apaga e não reacende (exige `engine`) |
 | `stick_gimbal`, `stick_surface` | O cardã do motor, ou a superfície, trava onde está: a posição informada é a real, o comando o que foi dado |
 | `torque_newton_meters` | Torque de atitude nos eixos do corpo: dos propulsores de RCS do estágio, se houver (ciclos alocados, consumo); senão ideal, limitado por eixo |
-| `thruster_duty` | Ciclo de trabalho (0–1) de um propulsor de RCS, até o próximo comando de torque |
+| `thruster_duty` | Ciclo de trabalho (0–1) de um propulsor de RCS, até o próximo comando de torque. Com `min_pulse_seconds` (`ThrusterDefinition`), a válvula só abre ou fecha, em pulsos dessa duração, como num propulsor real: o modulador (PWPF) dá o ciclo pedido na média, jato contínuo em ciclo cheio, e nenhum pulso abaixo de ~5% (a zona morta que evita o vaivém, cada pulso desfazendo o anterior) |
 | `surface_radians` | Deflexão comandada de uma superfície de controle, limitada e alcançada na taxa do atuador |
 | `brake` | Freio das rodas (0–1) |
 | `steer_radians` | Direção de uma roda, limitada ao seu curso |
@@ -338,6 +338,8 @@ que os motores não tiram), `thruster_gas_kilograms` (o gás próprio dos propul
 início do passo, previsto ou acontecido; o acontecido substitui o previsto do mesmo nome). A cena os mostra, com os de todos os
 voos, na linha do tempo dos painéis de transmissão, junto do relógio T± da missão: desde o `clock_zero_utc_unix_seconds` que o
 software de voo informa (o T-0 da sua contagem, que anda numa espera e vira o da decolagem), ou desde o início do voo principal.
+`stop_clock` para o relógio no início do passo (uma contagem cancelada, um aborto na plataforma); ele também para quando o voo
+principal se desfaz (uma batida, o FTS).
 
 **Garras e partida.** Com `CreateFlightRequest.hold_down` as garras seguram o veículo por mais que ele empurre, até um
 `release` (o software de voo solta quando o lançamento está confirmado; sem isso elas soltam sozinhas quando o empuxo vence o
@@ -498,10 +500,14 @@ núcleo.
    travado, cada um com seus comandos por `index`.
 3. **Boostback e descida:** o `BoosterReturn` faz o boostback em 13 motores a 60% (uns 55 s, como nos voos), fechando em 3
    quando o pouso previsto chega a um ponto 300 m mar adentro, a leste da torre. Acima do ar o RCS (que gasta o gás dos
-   tanques, isto é, propelante) segura a atitude com que ele vai entrar no ar, sem virar no apogeu. No ar, as grid fins
-   inclinam o corpo para que a força normal leve o pouso previsto ao ponto de entrada do corredor dos braços (abaixo de
-   30 km). O ganho é a força lateral medida pelo IMU por grau de inclinação. A malha de atitude compensa a rigidez
-   aerodinâmica do próprio corpo.
+   tanques, isto é, propelante) segura a atitude com que ele vai entrar no ar, sem virar no apogeu, e o rolamento com os pinos
+   para os braços. No ar, as grid fins inclinam o corpo para que a força normal leve o pouso previsto ao ponto de entrada do
+   corredor dos braços (abaixo de 30 km). O ganho é a força lateral medida pelo IMU por grau de inclinação. A malha de atitude
+   compensa a rigidez aerodinâmica do próprio corpo. A atitude pedida às fins muda no máximo 3°/s, a partir de onde o RCS a
+   entrega. As fins também controlam o rolamento, o eixo de menor inércia (cerca de 50 vezes menor). Além do limite delas, o
+   rolamento é mantido e a arfagem e a guinada são reduzidas na mesma direção: cortar cada fin sozinha no batente faz o corpo
+   rolar. Na queima de pouso há uma lei só, a do gimbal; as fins dão o que os 15° dele não alcançam e tiram a força do ar de
+   cima dele (duas leis fechando o mesmo erro por inteiro passam da velocidade dos atuadores e entram em ciclo-limite).
 4. **Pouso:** a queima de pouso em 13 motores, planejada a 70% (folga para perder motores), resolve a cada 0,2 s o empuxo
    que chega ao portão (80 m/s) na altura certa e inclina o empuxo para corrigir o ponto previsto. Com o ar denso ela
    inclina o corpo para o lado oposto, porque a força normal vence o empuxo lateral; o sinal e o ganho vêm do que o IMU
@@ -524,11 +530,19 @@ núcleo.
      aceitável; atingi-la, não. Os braços entram no modelo como vigas que giram com o ângulo medido (fechando só quando a
      captura os fecha em volta dele; reabrindo, previstos se afastando). A rota até eles vai pela linha dos braços ou pelo
      setor do V (nunca em diagonal pela ponta de um braço), a base acima deles até estar entre eles.
-   - **Bingo:** quando o propelante chega ao que terminar a captura daqui (pelo Δv que falta) mais o que a fuga custa, ele
-     decide de vez: se está para descer nos braços, desce; senão foge enquanto ainda pode.
+   - **Bingo:** o ponto sem volta da fuga. Sem propelante para terminar a captura daqui (pelo Δv que falta), ele foge se ainda
+     pode, senão segue. Quando o que resta chega ao que a fuga custa (pelo Δv do desvio: atravessar até fora da
+     infraestrutura sustentando o peso, parar a queda que tem, descer de onde está) e 3 s a mais, decide de vez: se está para
+     descer nos braços, desce; senão foge. A fuga freia a queda acima do que está sob a base (o chão, ou o topo da torre ou de
+     um braço ao alcance), e o monitor prevê com o atraso real da virada de atitude (~2 s) e a frenagem que os motores acesos
+     dão onde ele vai estar. No desvio, a altura fica mantida até sair da infraestrutura por um comprimento do veículo,
+     por pouco que reste (seco, ele cai seguindo a velocidade que tem, para longe). Só então desce, com um motor só:
+     três no mínimo o sustentariam. Os motores da frenagem final acendem cerca de 1 s antes dela, e a inclinação
+     considera o empuxo mínimo dos motores acesos, que é maior que o pedido.
    - **A captura:** o que precisa estar sobre os trilhos são os pinos, ~30 m acima do centro de massa. O pairar leva o centro
      de massa ao ponto em que, com as inclinações que ele mantém (contra o vento medido e para passar o empuxo de um motor
-     fora do eixo pelo centro de massa), os pinos ficam sobre a linha. Ele só desce com os pinos a 0,1 m dela, e só é
+     fora do eixo pelo centro de massa), os pinos ficam sobre a linha, e um integral lento da posição tira o erro que sobra
+     (um controle de atitude PD sob o momento do vento deixa o empuxo um pouco aquém do pedido). Ele só desce com os pinos a 0,1 m dela, e só é
      capturado com eles no sulco entre as barras de cada trilho (a 0,15 m; as cristas ficam a 0,2 m, além delas o pino
      escorrega). Os braços só começam a fechar se a deriva prevista durante o fechamento cabe na folga. Na descida ele
      mantém a posição ao longo dos trilhos, e os motores só cortam quando o casco está parado e de pé, sem balanço.
@@ -584,6 +598,14 @@ segurando, voltando à descida se escorregar. `--fail=voo@instante-ou-fase:motor
 O teste `starship_mission` voa tudo e verifica a órbita, as duas capturas, o repouso nos braços, o escudo abaixo do
 limite e que nenhum veículo passa pela torre; e voa de novo com seis motores falhando (três dos 33 na subida, dois do booster no
 pouso, um da nave na saída de órbita, que pousa nos outros dois). `--warp=N` acelera a órbita em tempo real e `--ship-return` voa só a volta da nave, começando em órbita.
+
+**Bancada de pouso.** `starship_test --landing[=falhas]` solta o booster sozinho caindo para a queima de pouso (o estado da
+missão nesse instante, ou outro: `landing()` em [starship_flight.hpp](../examples/starship_flight.hpp)), a guiagem a partir da
+fase de costa, com o sítio como na missão; `ALBERT_WIND=n,l` soma um vento. Uma descida inteira (queima, aproximação, pairar,
+captura e 30 s nos braços) leva ~2 s. `--sweep` varre ventos de 4 e 8 m/s em oito direções, falhas de motor e de sensor e
+pontos de partida deslocados; `--sweep=full` soma ventos de 12 m/s e vento com motor falhando. O teste `starship_sweep` falha
+se alguma descida terminar sobre a torre, os braços ou a infraestrutura de solo (capturas que viram fugas seguras são o
+envelope, não falhas de segurança).
 
 Na Lua o `GENERIC_LUNAR_ASCENT` sobe 50 m e segue pela taxa vertical até 18 km, cortando com
 perilúnio ≥ 15 km e apolúnio ≥ 85 km. Em Marte o `GENERIC_MARS_ASCENT` também é guiado desde a

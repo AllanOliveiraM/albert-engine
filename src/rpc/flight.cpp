@@ -106,7 +106,8 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
             if(n.has_emissivity())x.emissivity=n.emissivity();if(n.has_absorptivity())x.absorptivity=n.absorptivity();x.conductance=n.conductance_watts_per_kelvin();if(n.has_structure_kelvin())x.structure=n.structure_kelvin();
             if(n.has_heating_factor())x.factor=n.heating_factor();if(n.has_start_kelvin())x.start=n.start_kelvin();x.limit=n.limit_kelvin();x.failure=n.failure_kelvin();
             if(!(x.failure>=0&&std::isfinite(x.failure)))throw std::invalid_argument("Invalid failure temperature");st.thermal.push_back(std::move(x));}
-        for(const auto& t:sd.thrusters())st.rcs.push_back({t.name().substr(0,128),get(t.position_meters()),get(t.direction()),t.thrust_newtons(),t.exhaust_velocity_meters_per_second()});
+        for(const auto& t:sd.thrusters()){if(!(t.min_pulse_seconds()>=0&&t.min_pulse_seconds()<=10))throw std::invalid_argument("Thruster min_pulse_seconds must be 0-10");
+            st.rcs.push_back({t.name().substr(0,128),get(t.position_meters()),get(t.direction()),t.thrust_newtons(),t.exhaust_velocity_meters_per_second(),t.min_pulse_seconds()});}
         const auto& a=sd.aerodynamics();auto& ae=st.aero;ae.area=a.reference_area_meters2();ae.length=a.reference_length_meters();ae.span=a.reference_span_meters();
         if(!(ae.area>=0)||!std::isfinite(ae.area)||!finite(ae.length)||!finite(ae.span))throw std::invalid_argument("Invalid aerodynamic references: "+st.name);
         if(ae.length==0)ae.length=1;if(ae.span==0)ae.span=1;
@@ -148,7 +149,7 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
         for(const auto& n:st.thermal){auto* x=d->add_thermal_nodes();x->set_name(n.name);put(n.position,x->mutable_position_meters());put(n.normal,x->mutable_normal());x->set_area_meters2(n.area);
             x->set_heat_capacity_joules_per_kelvin(n.capacity);x->set_emissivity(n.emissivity);x->set_absorptivity(n.absorptivity);x->set_conductance_watts_per_kelvin(n.conductance);
             x->set_structure_kelvin(n.structure);x->set_heating_factor(n.factor);x->set_start_kelvin(n.start);x->set_limit_kelvin(n.limit);x->set_failure_kelvin(n.failure);}
-        for(const auto& t:st.rcs){auto* x=d->add_thrusters();x->set_name(t.name);put(t.position,x->mutable_position_meters());put(t.direction,x->mutable_direction());x->set_thrust_newtons(t.thrust);x->set_exhaust_velocity_meters_per_second(t.exhaust);}
+        for(const auto& t:st.rcs){auto* x=d->add_thrusters();x->set_name(t.name);put(t.position,x->mutable_position_meters());put(t.direction,x->mutable_direction());x->set_thrust_newtons(t.thrust);x->set_exhaust_velocity_meters_per_second(t.exhaust);x->set_min_pulse_seconds(t.pulse);}
     }
 }
 ph::Vehicle preset(const api::Vehicle kind,const std::optional<double> payloadKilograms){
@@ -236,7 +237,7 @@ struct Slot {
     // IMU unit; the redundant IMU units past the first; uplinks for the flight software; commands the operator injects.
     struct Lie {int mode=0;ph::V3 value,offset;};std::array<std::array<Lie,3>,6> lies{};std::optional<ph::Noise> lieNoise;
     std::vector<ph::Imu> units;std::vector<ph::Imu::Reading> unitReadings;std::array<bool,3> unitValid{true,true,true};
-    std::vector<std::string> uplinks;std::vector<api::FlightCommand> injected;
+    std::vector<std::string> uplinks;std::vector<api::FlightCommand> injected;std::mutex inbox; // injected: under inbox alone (the frame loop's operator adds to it, never waiting on a step).
     ph::V3 noise(double sigma){return sigma>0?ph::V3{sigma*lieNoise->gaussian(),sigma*lieNoise->gaussian(),sigma*lieNoise->gaussian()}:ph::V3{};}
     // A lie on a vector reading (rate: as read; delta: its increment over dt, for an IMU), its last output as `held`.
     void lie(Lie& l,ph::V3& rate,ph::V3* delta,ph::V3 heldRate,ph::V3 heldDelta,double dt,bool& valid){
@@ -396,10 +397,10 @@ struct Slot {
         for(std::size_t i=0;i<st.engines.size();++i){const auto& e=flight->engines()[i];const double full=st.engines[i].breathing?1e300:st.engines[i].thrust;
             p->push_back(static_cast<float>(st.engines[i].breathing?(e.on?e.spool:0.):full>0?thrust[i]/full:0.));p->push_back(static_cast<float>(e.pitch));p->push_back(static_cast<float>(e.yaw));}
         for(const auto& x:flight->surfaces())p->push_back(static_cast<float>(x.deflection));
-        for(double d:flight->thrusters())p->push_back(static_cast<float>(d));
+        for(double d:flight->firing())p->push_back(static_cast<float>(d)); // The jets as their valves fire.
         const ph::Sample x=flight->sample();p->push_back(static_cast<float>(x.air.pressure));p->push_back(static_cast<float>(x.heatFlux)); // Pa, W/m² (stagnation).
         p->push_back(static_cast<float>(st.propellant>0?flight->state().propellant/st.propellant:0.)); // The tanks' fill.
-        p->push_back(static_cast<float>(x.mach));
+        p->push_back(static_cast<float>(std::cos(x.alpha)*std::cos(x.beta)<0?-x.mach:x.mach)); // Negative with the air coming from the tail (engines first).
         p->push_back(flight->breakup()==ph::Flight::Breakup::none?-1.f:static_cast<float>(ph::secondsSinceJ2000(flight->state().time-flight->breakupTime()))); // Since breaking up (s).
         return p;
     }
@@ -476,7 +477,7 @@ struct Slot {
     // The flight for the broadcast's panels and timeline (see FlightServices::gauges).
     Gauge gauge()const{
         const ph::Sample x=flight->sample();const auto& st=flight->vehicle().stages[static_cast<std::size_t>(flight->state().stage)];Gauge g;
-        g.id=sceneId;g.label=st.name;g.start=ph::utcFromTt(start);g.zero=zero.value_or(g.start);g.utc=ph::utcFromTt(flight->state().time);g.speed=ph::norm(x.nedVelocity);g.height=x.geodetic.height;
+        g.id=sceneId;g.label=st.name;g.start=ph::utcFromTt(start);g.zero=zero.value_or(g.start);g.stopped=stopped||flight->breakup()!=ph::Flight::Breakup::none;g.stop=stopped?*stopped:ph::utcFromTt(flight->breakupTime());g.utc=ph::utcFromTt(flight->state().time);g.speed=ph::norm(x.nedVelocity);g.height=x.geodetic.height;
         g.propellant=st.propellant>0?flight->state().propellant/st.propellant:0;
         for(std::size_t i=0;i<st.engines.size();++i){const auto& e=flight->engines()[i];const auto& n=st.engines[i];
             g.engines.push_back({static_cast<float>(n.position.y),static_cast<float>(n.position.z),static_cast<float>(std::sqrt(std::max(n.exitArea,.01)/3.14159265358979323846)),
@@ -485,7 +486,7 @@ struct Slot {
         g.milestones=milestones;return g;
     }
     std::vector<Gauge::Milestone> milestones; // The mission's events this flight was given (StepRequest.milestones).
-    std::optional<double> zero; // Its T-0 as the flight software last gave it (StepRequest.clock_zero).
+    std::optional<double> zero,stopped; // Its T-0 as the flight software last gave it (StepRequest.clock_zero); the UTC its clock stopped at (stop_clock).
     void note(const google::protobuf::RepeatedPtrField<api::Milestone>& given,double now){ // A done one replaces the planned one of its name.
         for(const auto& m:given){const std::string n=m.name().substr(0,40);if(n.empty())continue;const double at=m.has_utc_unix_seconds()&&std::isfinite(m.utc_unix_seconds())?m.utc_unix_seconds():now;
             auto it=std::find_if(milestones.begin(),milestones.end(),[&](const Gauge::Milestone& x){return x.name==n;});
@@ -640,7 +641,7 @@ struct Slot {
 struct FlightServices::Impl {
     core::Bridge& bridge;AirSources sources;
     Boards boards; // Before the slots, which use it.
-    std::mutex lock;std::map<std::string,std::shared_ptr<Slot>> slots;
+    std::mutex lock;std::map<std::string,std::shared_ptr<Slot>> slots;std::mutex listed;std::vector<std::string> last; // last: flights() as last read.
     std::mutex defaultsLock;api::PhysicsSettings defaults; // Albert's (the Fisica page), for unset switches.
     static constexpr std::size_t maxFlights=64;            // Each holds threads and a socket.
     Impl(core::Bridge& b,AirSources s):bridge(b),sources(std::move(s)){
@@ -728,7 +729,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     made->steps(stepNs,static_cast<ph::Tt>(std::llround(p.coast*1e9)));
     if(cancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
     stopPacing();std::lock_guard lock(mutex);
-    flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;milestones.clear();zero.reset();this->atmosphere=atmosphere;center=p.body;degree=p.degree;
+    flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;milestones.clear();zero.reset();stopped.reset();this->atmosphere=atmosphere;center=p.body;degree=p.degree;
     physics.set_third_bodies(env.sunMoon);physics.set_relativity(env.relativity);physics.set_atmosphere(env.atmosphere);physics.set_wind(env.wind);physics.set_solar_radiation_pressure(env.solarPressure);
     physics.set_turbulence_meters_per_second(env.turbulence);physics.set_turbulence_seed(env.turbulenceSeed);
     { // The IMU starts with one sample at the pad.
@@ -739,7 +740,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
         units.clear();unitReadings.clear();const unsigned count=std::clamp(r.imu().count(),1u,3u); // The redundant units, seeded apart.
         for(unsigned u=1;u<count;++u){units.emplace_back(imu->model(),r.imu().seed()^(0x9e3779b97f4a7c15ull*u));
             unitReadings.push_back(units.back().measure(dt,x.specificForce,flight->state().rate,x.specificForce*dt,flight->state().rate*dt,x.air.pressure));}
-        lies={};unitValid={true,true,true};lieNoise.emplace(r.imu().seed()^0x6c696573ull);uplinks.clear();injected.clear();
+        lies={};unitValid={true,true,true};lieNoise.emplace(r.imu().seed()^0x6c696573ull);uplinks.clear();{std::lock_guard i(inbox);injected.clear();}
     }
     { // Navigation sensors, from the request (seeded apart from the IMU), measuring once at the pad.
         const auto& q=r.sensors();const std::uint64_t seed=q.seed();gnss.reset();radar.reset();tracker.reset();level.reset();gnssLast=radarLast=trackerLast=gaugeLast=-1e300;
@@ -900,10 +901,14 @@ bool interference(const api::FlightCommand& c,std::vector<Slot::Command>& comman
 }
 void FlightServices::inject(const std::string& id,const api::FlightCommand& c){
     const auto slot=impl_->find(flightName(id));if(!slot)throw std::invalid_argument("No flight "+id);
-    std::lock_guard lock(slot->mutex);if(slot->injected.size()<64)slot->injected.push_back(c);
+    std::lock_guard lock(slot->inbox);if(slot->injected.size()<64)slot->injected.push_back(c);
 }
+// Never waiting (the frame loop asks, and a flight being made holds its lock while it waits on the frame loop): a flight
+// busy counts as there, and while the slots' own lock is held, the list as last read.
 std::vector<std::string> FlightServices::flights()const{
-    std::vector<std::string> out;std::lock_guard l(impl_->lock);for(const auto& [id,slot]:impl_->slots){std::lock_guard g(slot->mutex);if(slot->flight)out.push_back(id);}return out;
+    std::unique_lock l(impl_->lock,std::try_to_lock);if(!l.owns_lock()){std::lock_guard c(impl_->listed);return impl_->last;}
+    std::vector<std::string> out;for(const auto& [id,slot]:impl_->slots){std::unique_lock g(slot->mutex,std::try_to_lock);if(!g.owns_lock()||slot->flight)out.push_back(id);}
+    std::lock_guard c(impl_->listed);impl_->last=out;return out;
 }
 grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRequest* r,api::FlightSample* out){
     std::vector<Slot::Command> commands;std::vector<std::string> uplinks;
@@ -932,15 +937,17 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     {std::lock_guard lock(slot->mutex);
     if(slot->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
-    for(const auto& c:slot->injected){ // What the operator injected since the last step, ahead of the flight program's commands.
+    std::vector<api::FlightCommand> in;{std::lock_guard i(slot->inbox);in.swap(slot->injected);}
+    for(const auto& c:in){ // What the operator injected since the last step, ahead of the flight program's commands.
         std::vector<Slot::Command> mine;if(c.command_case()==api::FlightCommand::kFail){if(c.fail())mine.push_back({wire::fail|c.index()<<16});}else interference(c,mine,uplinks);
         commands.insert(commands.begin(),mine.begin(),mine.end());}
-    slot->injected.clear();for(auto& u:uplinks)slot->uplinks.push_back(std::move(u));
+    for(auto& u:uplinks)slot->uplinks.push_back(std::move(u));
     const int before=slot->log.spawns_size(); // Spawn payloads into the log (a: their index there); dropped again if the step fails.
     for(auto& c:commands)if((c.kind&0xffff)==wire::spawn){*slot->log.add_spawns()=r->commands(static_cast<int>(c.b)).spawn();c.a=slot->log.spawns_size()-1;c.b=0;}
     const double now=slot->flight?ph::utcFromTt(slot->flight->state().time):0.;
     if(auto s=slot->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok()){while(slot->log.spawns_size()>before)slot->log.mutable_spawns()->RemoveLast();return s;}
-    slot->note(r->milestones(),now);if(r->has_clock_zero_utc_unix_seconds()&&std::isfinite(r->clock_zero_utc_unix_seconds()))slot->zero=r->clock_zero_utc_unix_seconds();slot->fill(out);}
+    slot->note(r->milestones(),now);if(r->has_clock_zero_utc_unix_seconds()&&std::isfinite(r->clock_zero_utc_unix_seconds()))slot->zero=r->clock_zero_utc_unix_seconds();
+    if(r->stop_clock()&&!slot->stopped)slot->stopped=now;slot->fill(out);}
     impl_->adopt(*slot);return grpc::Status::OK;
 }
 grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::FlightRequest* q,api::FlightSample* out){
@@ -949,7 +956,8 @@ grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::FlightReq
     std::lock_guard lock(slot->mutex);if(!slot->flight)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};slot->fill(out);return grpc::Status::OK;
 }
 grpc::Status FlightServices::ListFlights(grpc::ServerContext*,const api::Empty*,api::FlightList* out){
-    std::lock_guard l(impl_->lock);for(const auto& [id,slot]:impl_->slots){std::lock_guard g(slot->mutex);if(slot->flight)out->add_flight_ids(id);}return grpc::Status::OK;
+    std::vector<std::pair<std::string,std::shared_ptr<Slot>>> all;{std::lock_guard l(impl_->lock);all.assign(impl_->slots.begin(),impl_->slots.end());} // Not held while each is: the frame loop reads them.
+    for(const auto& [id,slot]:all){std::lock_guard g(slot->mutex);if(slot->flight)out->add_flight_ids(id);}return grpc::Status::OK;
 }
 grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::FlightRequest* q,api::Applied* out){
     std::shared_ptr<Slot> slot;std::string id;try{id=flightName(q->flight_id());slot=impl_->find(id);}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}

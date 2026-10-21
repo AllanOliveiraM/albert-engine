@@ -35,8 +35,9 @@ struct Table3 {
 // normal force).
 struct Surface {std::string name;double limit=0,rate=0;Table3 lift,drag,side,roll,pitch,yaw;V3 position;bool placed=false;V3 normal;bool normalSet=false;};
 // A reaction-control thruster on the stage's propellant: where (as engines), the direction it pushes the vehicle, thrust
-// (N) and exhaust velocity (m/s).
-struct Thruster {std::string name;V3 position,direction{1,0,0};double thrust=0,exhaust=0;};
+// (N) and exhaust velocity (m/s); pulse: its valve opens and shuts whole, each time for this long (s; the duty asked met on
+// average, as a pulse-width modulation does), 0: thrust as smooth as the duty.
+struct Thruster {std::string name;V3 position,direction{1,0,0};double thrust=0,exhaust=0,pulse=0;};
 // One engine: the centre of its nozzle exit (x m aft of the nose, y right, z down) and the direction it pushes the vehicle at
 // zero gimbal (body axes; normalised); vacuum thrust (N), effective exhaust velocity (m/s), nozzle exit area (m²: thrust
 // falls by the ambient pressure on it); deepest throttle; gimbal limit (rad, pitch about body y, yaw about body z) and the
@@ -194,6 +195,7 @@ public:
     struct StructureState {double angle=0,target=0;};
     const std::vector<StructureState>& structures()const{return structures_;} // By Environment::structures (fixed ones at 0).
     const std::vector<double>& thrusters()const{return duty_;} // Duty cycles.
+    std::vector<double> firing()const; // Each thruster's jet now: its valve (1 open, 0 shut) when it pulses, else its duty.
     const std::vector<double>& temperatures()const{return temperatures_;} // Thermal nodes (K), the stage's.
     // A breakup: why (none; the hull struck the ground or a structure; a thermal node past its failure), when and how fast the
     // strike was (m/s). From then on the engines are out and commands do nothing: the pieces fall as the stage did.
@@ -225,7 +227,10 @@ private:
     Turbulence turbulence_;V3 gustNed_,wind_,push_; // The gust over the step, the added wind (NED, m/s), the outside force (NED, N).
     double flowOf(std::size_t i)const; // Engine i's propellant flow (kg/s).
     void allocate(); // Thruster duties for the torque command.
-    Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_;std::vector<WheelState> wheels_;
+    void valves(); // The pulsing thrusters' valves opened or shut for their next pulse where one is due.
+    void shut(); // Every thruster off: duties and valves.
+    double jet(std::size_t i)const{return vehicle_.stages[s_.stage].rcs[i].pulse>0?static_cast<double>(open_[i]):duty_[i];} // Thruster i's thrust share now.
+    Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_,credit_;std::vector<char> open_;std::vector<Tt> until_;std::vector<WheelState> wheels_; // credit_: each valve's on-time owed (s); until_: its pulse's end.
     std::vector<StructureState> structures_;struct Segment {V3 a,b,pivot,spin;};std::vector<Segment> segments_; // Where the structures are now (spin: rad/s, body-fixed).
     Tt step_=0,coast_=0;Increments increments_;
     Breakup broken_=Breakup::none;Tt brokenAt_=0;double brokenSpeed_=0;

@@ -134,7 +134,7 @@ Flight::Flight(Vehicle vehicle,Environment environment,State state):vehicle_(std
         const double p=std::clamp(s_.gimbalPitch,-e.gimbal,e.gimbal),y=std::clamp(s_.gimbalYaw,-e.gimbal,e.gimbal);
         engines_.push_back({s_.burning,false,std::clamp(s_.throttle,e.minThrottle,1.),p,y,p,y});}
     s_.burning=s_.burning&&!engines_.empty();
-    surfaces_.assign(vehicle_.stages[s_.stage].surfaces.size(),SurfaceState{});duty_.assign(vehicle_.stages[s_.stage].rcs.size(),0.);allocate();
+    surfaces_.assign(vehicle_.stages[s_.stage].surfaces.size(),SurfaceState{});duty_.assign(vehicle_.stages[s_.stage].rcs.size(),0.);credit_.assign(duty_.size(),0.);open_.assign(duty_.size(),0);until_.assign(duty_.size(),s_.time);allocate();
     if(!(s_.gas>0))s_.gas=vehicle_.stages[s_.stage].gas; // A fresh stage's thruster gas, full.
     for(const auto& n:vehicle_.stages[s_.stage].thermal)temperatures_.push_back(n.start);
     wheels_.assign(vehicle_.stages[s_.stage].wheels.size(),WheelState{});
@@ -164,7 +164,7 @@ double Flight::massFlow()const{
     const auto& es=vehicle_.stages[s_.stage].engines; // A running jet's flow depends on the air: the full sample's.
     for(std::size_t i=0;i<es.size();++i)if(es[i].breathing&&s_.burning&&engines_[i].on)return sample().massFlow;
     double f=0;for(std::size_t i=0;i<engines_.size();++i)f+=flowOf(i);
-    const auto& rcs=vehicle_.stages[s_.stage].rcs;for(std::size_t i=0;i<rcs.size();++i)f+=duty_[i]*rcs[i].thrust/rcs[i].exhaust;
+    const auto& rcs=vehicle_.stages[s_.stage].rcs;for(std::size_t i=0;i<rcs.size();++i)f+=this->jet(i)*rcs[i].thrust/rcs[i].exhaust;
     return f;
 }
 std::vector<double> Flight::engineThrust()const{
@@ -314,8 +314,8 @@ Flight::Rate Flight::rate(const State& s,Sample* out)const{
     V3 fr,mr; // Thrusters at their duty cycles while propellant lasts; without any, the torque command is ideal.
     const double lim=st.rcs.empty()?vehicle_.torque:0.;
     double gas=0; // The thrusters' own gas when the stage has a supply, else they burn its propellant.
-    if(st.gas>0?s.gas>0:s.propellant>0)for(std::size_t i=0;i<st.rcs.size();++i)if(duty_[i]>0){const Thruster& t=st.rcs[i];const V3 f=t.direction*(duty_[i]*t.thrust);fr+=f;mr+=cross(V3{ms.cg-t.position.x,t.position.y,t.position.z},f);
-        (st.gas>0?gas:flow)+=duty_[i]*t.thrust/t.exhaust;}
+    if(st.gas>0?s.gas>0:s.propellant>0)for(std::size_t i=0;i<st.rcs.size();++i)if(const double u=this->jet(i);u>0){const Thruster& t=st.rcs[i];const V3 f=t.direction*(u*t.thrust);fr+=f;mr+=cross(V3{ms.cg-t.position.x,t.position.y,t.position.z},f);
+        (st.gas>0?gas:flow)+=u*t.thrust/t.exhaust;}
     const V3 fx=push_.x!=0||push_.y!=0||push_.z!=0?bt*(back*(transpose(ned)*push_)):V3{}; // The outside force.
     const V3 force=fa+ft+fs+fc+fr+fx,moment=ma+mt+mc+mr+V3{std::clamp(s.torque.x,-lim,lim),std::clamp(s.torque.y,-lim,lim),std::clamp(s.torque.z,-lim,lim)};
     // d(Iω)/dt with the propellant's inertia loss; the exhaust carries transverse angular
@@ -371,7 +371,7 @@ Tt Flight::advance(Tt dt){
         Tt h=left;bool depleted=false;const double flow=massFlow();
         if(step_>0){
             Tt limit=step_;
-            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&!s_.contact&&push_.x==0&&push_.y==0&&push_.z==0&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0&&std::all_of(duty_.begin(),duty_.end(),[](double d){return d==0;})){ // Ballistic, torque-free, above the atmosphere and the ground.
+            if(coast_>step_&&!s_.burning&&!s_.clamped&&!s_.landed&&!s_.contact&&push_.x==0&&push_.y==0&&push_.z==0&&s_.torque.x==0&&s_.torque.y==0&&s_.torque.z==0&&std::all_of(duty_.begin(),duty_.end(),[](double d){return d==0;})&&std::none_of(open_.begin(),open_.end(),[](char o){return o!=0;})){ // Ballistic, torque-free, above the atmosphere and the ground.
                 const double speed=norm(s_.velocity),spin=norm(s_.rate),c=secondsSinceJ2000(coast_),h=geodetic(env_.planet,env_.rotation.at(s_.time).fixed*s_.position).height;
                 const double r=norm(s_.position),fall=.5*env_.planet.gm/(r*r)*c*c; // Gravity can close the gap as fast as speed.
                 if(h>airTop(env_.center)+speed*c&&!(h-env_.ground<=speed*c+fall+vehicle_.stages[s_.stage].length))
@@ -379,6 +379,7 @@ Tt Flight::advance(Tt dt){
             }
             h=std::min(h,limit);
         }
+        valves();for(std::size_t i=0;i<until_.size();++i)if(vehicle_.stages[s_.stage].rcs[i].pulse>0&&(open_[i]||duty_[i]>0))h=std::min(h,std::max<Tt>(until_[i]-s_.time,1)); // A valve holds through a step.
         if(const Stage& st=vehicle_.stages[s_.stage];(!st.legs.empty()||!st.wheels.empty()||env_.water)&&!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
             // Legs or wheels on or near the ground, or the hull near the water: steps the springs, damping, friction and buoyancy keep stable.
             const Orientation o=env_.rotation.at(s_.time);const Mass ms=mass(st,s_.propellant);double reach=0;
@@ -408,7 +409,7 @@ Tt Flight::advance(Tt dt){
         const Breakup was=broken_;slew(static_cast<double>(h)*1e-9);heat(static_cast<double>(h)*1e-9);integrate(h);left-=h;strike();
         if(broken_!=was)return dt-left; // A breakup ends the call: its instant kept.
         if(!depleted&&s_.burning&&!(s_.propellant>vehicle_.stages[s_.stage].residual))depleted=true; // A jet whose flow rose within the step (its spool) ran dry in it.
-        if(depleted){s_.propellant=std::min(s_.propellant,vehicle_.stages[s_.stage].residual);s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);return dt-left;}
+        if(depleted){s_.propellant=std::min(s_.propellant,vehicle_.stages[s_.stage].residual);s_.burning=false;for(auto& e:engines_)e.on=false;shut();return dt-left;}
         if(!s_.clamped&&!s_.landed&&std::isfinite(env_.ground)){
             const Orientation o=env_.rotation.at(s_.time);const V3 rf=o.fixed*s_.position;Geodetic g=geodetic(env_.planet,rf);
             { // One contact state for events and telemetry: legs and wheels by geometry; water and structures, when near, by their force.
@@ -422,7 +423,7 @@ Tt Flight::advance(Tt dt){
                 if(wet||held)touching=touching||norm(sample().contactForce)>0;
                 if(touching!=s_.contact){s_.contact=touching;return dt-left;} // Touchdown and lift-off end the call, so each transition keeps its instant.
             }
-            if(g.height<env_.ground&&!env_.water){g.height=env_.ground;s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
+            if(g.height<env_.ground&&!env_.water){g.height=env_.ground;s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;shut();padPosition_=fixedPosition(env_.planet,g);padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return dt-left;}
         }
     }
     return dt;
@@ -490,7 +491,7 @@ void Flight::heat(double seconds){ // Explicit in the flow (the step's start), i
         if(nodes[i].failure>0&&temperatures_[i]>nodes[i].failure&&broken_==Breakup::none)breakUp(Breakup::heat,0);}
 }
 void Flight::breakUp(Breakup why,double speed){
-    broken_=why;brokenAt_=s_.time;brokenSpeed_=speed;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.);s_.torque={};
+    broken_=why;brokenAt_=s_.time;brokenSpeed_=speed;s_.burning=false;for(auto& e:engines_)e.on=false;shut();s_.torque={};
 }
 void Flight::strike(){
     if(!(vehicle_.crashSpeed>0)||broken_!=Breakup::none||s_.clamped||s_.landed)return;
@@ -503,7 +504,7 @@ void Flight::strike(){
         const double a=dot(b*V3{1,0,0},up),low=g.height-rh*std::sqrt(std::max(1-a*a,0.)),down=-dot(ground(r),up);
         if(!(low<env_.ground)||!(down>0))continue;
         if(down>vehicle_.crashSpeed){breakUp(Breakup::ground,down);return;}
-        s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;std::fill(duty_.begin(),duty_.end(),0.); // Set down gently: at rest where it touched.
+        s_.landed=true;s_.burning=false;for(auto& e:engines_)e.on=false;shut(); // Set down gently: at rest where it touched.
         padPosition_=o.fixed*s_.position;padAttitude_=quaternion(o.fixed*matrix(s_.attitude));hold(s_);return;}
     const V3 nf=o.fixed*(s_.position+b*V3{ms.cg,0,0}),tf=o.fixed*(s_.position+b*V3{ms.cg-st.length,0,0});
     for(std::size_t i=0;i<segments_.size();++i){const auto& g=segments_[i];double u,v;closest(nf,tf,g.a,g.b,u,v); // Into a structure faster than the hull takes.
@@ -586,7 +587,7 @@ void Flight::separate(){
     const V3 shift=matrix(s_.attitude)*V3{old-next.cgFull,0,0};
     s_.position+=shift;s_.velocity+=cross(matrix(s_.attitude)*s_.rate,shift);
     ++s_.stage;s_.propellant=next.propellant;s_.burning=false;s_.throttle=1;s_.gimbalPitch=s_.gimbalYaw=0;
-    engines_.assign(next.engines.size(),EngineState{});surfaces_.assign(next.surfaces.size(),SurfaceState{});duty_.assign(next.rcs.size(),0.);allocate();s_.gas=next.gas;
+    engines_.assign(next.engines.size(),EngineState{});surfaces_.assign(next.surfaces.size(),SurfaceState{});duty_.assign(next.rcs.size(),0.);credit_.assign(duty_.size(),0.);open_.assign(duty_.size(),0);until_.assign(duty_.size(),s_.time);allocate();s_.gas=next.gas;
     temperatures_.clear();for(const auto& n:next.thermal)temperatures_.push_back(n.start);wheels_.assign(next.wheels.size(),WheelState{});
     if(s_.clamped||s_.landed){padPosition_=env_.rotation.at(s_.time).fixed*s_.position;}
 }
@@ -609,6 +610,18 @@ void Flight::gimbal(double p,double y,int engine){
     double g=0;for(std::size_t i=0;i<es.size();++i){set(i);g=std::max(g,es[i].gimbal);}
     s_.gimbalPitch=std::clamp(p,-g,g);s_.gimbalYaw=std::clamp(y,-g,g);
 }
+// The pulsing thrusters' valves, each driven as a flight computer's pulse modulator (PWPF) drives it: at its pulse's end the
+// on-time it owes, leaking away over ten pulses, grows by its duty times the pulse, and it opens for the next pulse while it
+// owes at least half of one. So the jets give the duty asked on average in whole pulses (all of them, back to back, at full
+// duty), and a demand under 5% never fires: the deadband that keeps pulses from chattering, each undoing the last.
+void Flight::valves(){
+    const auto& rcs=vehicle_.stages[s_.stage].rcs;
+    for(std::size_t i=0;i<rcs.size();++i)if(const double p=rcs[i].pulse;p>0&&s_.time>=until_[i]&&(open_[i]||duty_[i]>0||credit_[i]!=0)){
+        const double since=secondsSinceJ2000(s_.time-until_[i])+p;credit_[i]=credit_[i]*std::exp(-since/(10*p))+duty_[i]*p;
+        if(std::abs(credit_[i])<1e-9)credit_[i]=0;open_[i]=credit_[i]>=p/2;if(open_[i])credit_[i]-=p;until_[i]=s_.time+static_cast<Tt>(p*1e9);}
+}
+void Flight::shut(){std::fill(duty_.begin(),duty_.end(),0.);std::fill(open_.begin(),open_.end(),0);std::fill(credit_.begin(),credit_.end(),0.);}
+std::vector<double> Flight::firing()const{std::vector<double> u(duty_.size());for(std::size_t i=0;i<u.size();++i)u[i]=this->jet(i);return u;}
 void Flight::torque(V3 t){
     if(broken_!=Breakup::none)return; // Nothing left to command.
     if(!std::isfinite(t.x)||!std::isfinite(t.y)||!std::isfinite(t.z))throw std::invalid_argument("Invalid torque");
@@ -623,7 +636,7 @@ std::uint64_t Flight::hash()const{
     for(const auto& e:engines_){const double x[]{e.throttle,e.pitch,e.yaw,e.targetPitch,e.targetYaw};const int b[]{e.on,e.failed,e.silent,e.claims,e.stuck};mix(x,sizeof x);mix(b,sizeof b);}
     for(const auto& x:structures_){const double a[]{x.angle,x.target};mix(a,sizeof a);}
     {const int why=static_cast<int>(broken_);mix(&why,sizeof why);mix(&brokenAt_,sizeof brokenAt_);mix(&brokenSpeed_,sizeof brokenSpeed_);mix(&s_.gas,sizeof s_.gas);}
-    for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);const int k=f.stuck;mix(&k,sizeof k);}for(double u:duty_)mix(&u,8);
+    for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);const int k=f.stuck;mix(&k,sizeof k);}for(double u:duty_)mix(&u,8);for(std::size_t i=0;i<open_.size();++i){mix(&credit_[i],8);mix(&until_[i],sizeof until_[i]);const int o=open_[i];mix(&o,sizeof o);}
     {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z,wind_.x,wind_.y,wind_.z,push_.x,push_.y,push_.z};mix(t,sizeof t);}for(double t:temperatures_)mix(&t,8);for(const auto& w:wheels_){mix(&w.brake,8);mix(&w.steer,8);}
     for(const auto& e:engines_)mix(&e.spool,8);
     return h;

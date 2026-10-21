@@ -200,7 +200,9 @@ message ThermalNodeDefinition { string name=1; Vector3 position_meters=2; Vector
   optional double heating_factor=10; optional double start_kelvin=11; double limit_kelvin=12;
   double failure_kelvin=13; } // Past it the vehicle breaks up (0: never; FlightSample.breakup).
 // A reaction-control thruster on the stage's propellant; with any, torque_newton_meters fires them.
-message ThrusterDefinition { string name=1; Vector3 position_meters=2; Vector3 direction=3; double thrust_newtons=4; double exhaust_velocity_meters_per_second=5; }
+// min_pulse_seconds: its valve opens and shuts whole, for this long each time (the duty asked met on average, by pulse-width
+// modulation, as a real thruster's); 0: its thrust as smooth as the duty. Up to 10 s.
+message ThrusterDefinition { string name=1; Vector3 position_meters=2; Vector3 direction=3; double thrust_newtons=4; double exhaust_velocity_meters_per_second=5; double min_pulse_seconds=6; }
 message Aerodynamics {
   double reference_area_meters2=1; double reference_length_meters=2; double reference_span_meters=3;
   // Lift and pitch against angle of attack, side force and yaw against sideslip, drag against the total angle, roll against α.
@@ -427,8 +429,9 @@ message Spawn { string flight_id=1; VehicleDefinition definition=2; double nose_
 // Up to 600000 ticks. milestones: the mission's events for the broadcast's timeline (up to 64 a flight; a done one replaces
 // the planned one of its name), shown with every flight's.
 // clock_zero: the mission's T-0 (UTC, Unix seconds) for the broadcast's clock, as the flight software counts it (moved on
-// through a hold, the liftoff's once it lifts off); unset: the main flight's start.
-message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; repeated Milestone milestones=4; optional double clock_zero_utc_unix_seconds=5; }
+// through a hold, the liftoff's once it lifts off); unset: the main flight's start. stop_clock: the clock stops at this
+// step's start (a scrub, a pad abort); it stops too once the flight breaks up.
+message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; repeated Milestone milestones=4; optional double clock_zero_utc_unix_seconds=5; bool stop_clock=6; }
 // An event of the mission (up to 40 characters: "MAX-Q", "MECO"...): when it happened (unset: at the step's start) or is
 // planned (UTC, Unix seconds).
 message Milestone { string name=1; optional double utc_unix_seconds=2; bool planned=3; }
