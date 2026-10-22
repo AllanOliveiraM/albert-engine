@@ -2251,7 +2251,11 @@ int albert::runRenderer(int argc, char** argv) {
                     else if constexpr(std::is_same_v<T,albert::core::CreateLayer>)registry.createLayer(std::move(value.layer));
                     else if constexpr(std::is_same_v<T,albert::core::RemoveLayer>)registry.removeLayer(value.id);
                     else if constexpr(std::is_same_v<T,albert::core::LayerVisibility>)registry.layerVisible(value.id,value.enabled);
-                    else if constexpr(std::is_same_v<T,albert::core::Focus>) setFocus(value.id,value.reset);
+                    else if constexpr(std::is_same_v<T,albert::core::Focus>){
+                        // From one vehicle to another beside it (a stage just separated): the same view, eased onto it (no swing to
+                        // its default distance); else as asked.
+                        const bool nearby=!value.reset&&focus.front()!='@'&&!registry.get(focus).builtin&&!registry.get(value.id).builtin&&targetFor(focus).distanceTo(targetFor(value.id))*albert::core::earthRadiusMeters<1e3;
+                        if(nearby){Vector3 offset=camera->position;offset.sub(controls.target);setFocus(value.id,false,offset,offset.length());}else setFocus(value.id,value.reset);}
                     else if constexpr(std::is_same_v<T,albert::core::SetTime>) {if(value.live)simulation.live();
                         else if(value.hold&&value.utcSeconds&&value.rate){simulation.follow(*value.utcSeconds,*value.rate);followed={*value.utcSeconds,SteadyClock::now()};} // A running flight.
                         else if(value.hold&&value.utcSeconds)simulation.stall(*value.utcSeconds);else simulation.choose(value.utcSeconds,value.rate);}
@@ -2535,15 +2539,16 @@ int albert::runRenderer(int argc, char** argv) {
                 camera->position.copy(controls.target).add(offset.normalize().multiplyScalar(zoomDisplayed));
                 camera->lookAt(controls.target);
             }
-            // An external target near a solid surface: keep the eye above the ground under it (the
-            // orbit offset can point below a pad).
+            // An external target near a solid surface: keep the eye above the ground under it, and above the vehicle's foot
+            // while it stands on (or just over) the ground (the orbit offset can point below a pad); in flight, free to look up at it.
             if(!transition.active&&!freeCamera&&focus.front()!='@'&&objects.nodes().contains(focus)&&!registry.get(focus).builtin){
                 const float base=static_cast<float>(registry.get(focus).radiusMeters/albert::core::earthRadiusMeters),margin=static_cast<float>(10./albert::core::earthRadiusMeters);
                 auto keepAbove=[&](Object3D& body,float radius,const albert::Terrain* terrain){
                     body.updateMatrixWorld();Vector3 eye=camera->position,aim=controls.target;body.worldToLocal(eye);body.worldToLocal(aim);
-                    const auto ground=terrain?terrain->ground(eye):std::nullopt; // The drawn relief under the eye, else the reference sphere.
-                    const float floor=std::max(ground?static_cast<float>(*ground):radius,aim.length()-base)+margin;
-                    if(aim.length()>radius*1.05f||eye.length()>=floor)return;
+                    if(aim.length()>radius*1.05f)return;
+                    const auto ground=terrain?terrain->ground(eye):std::nullopt,under=terrain?terrain->ground(aim):std::nullopt; // The drawn relief, else the reference sphere.
+                    const float foot=aim.length()-base,floor=std::max(ground?static_cast<float>(*ground):radius,foot<(under?static_cast<float>(*under):radius)+base?foot:0.f)+margin;
+                    if(eye.length()>=floor)return;
                     eye.multiplyScalar(floor/std::max(eye.length(),1e-12f));body.localToWorld(eye);camera->position.copy(eye);camera->lookAt(controls.target);
                 };
                 keepAbove(*earth,1.f,planets.earthTerrain());keepAbove(*moon,static_cast<float>(1737.4/6378.137),planets.moonTerrain());

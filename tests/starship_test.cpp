@@ -33,7 +33,22 @@ int main(int argc,char** argv){try{
     auto channel=grpc::CreateChannel("127.0.0.1:"+std::to_string(server.port()),grpc::InsecureChannelCredentials());
     require(channel->WaitForConnected(std::chrono::system_clock::now()+std::chrono::seconds(3)),"Server did not start");
     auto flight=albert::v1::FlightService::NewStub(channel);
-    if(argc>1&&std::string(argv[1])=="--home"){albert::example::starship::homecoming(*flight,true);return 0;} // The ship's return alone (development).
+    if(argc>1&&std::string(argv[1]).rfind("--fall",0)==0){ // The ship's way down from its belly flop (the bench): one ("--fall", failures after "=") or a sweep of
+        // where it starts ("--fall-sweep": offsets, headings), each caught, safe (down clear of the works) or unsafe.
+        namespace sx=albert::example::starship;const std::string a=argv[1];
+        if(a.rfind("--fall-sweep",0)!=0){sx::ShipGate g;if(const char* e=std::getenv("ALBERT_GATE"))std::sscanf(e,"%lf,%lf,%lf,%lf",&g.east,&g.north,&g.ve,&g.vn);
+            sx::falling(*flight,g,a.size()>7?sx::faults(a.substr(7)):std::vector<sx::Fault>{});return 0;}
+        struct Case {std::string name;sx::ShipGate g;};std::vector<Case> cases{{"nominal",{}}};
+        for(int k=0;k<8;++k){const double b=k*45*sx::deg,v=std::hypot(198.2,59.8);sx::ShipGate g;g.ve=v*std::sin(b);g.vn=v*std::cos(b);g.east=-2000*std::sin(b);g.north=-2000*std::cos(b); // From 2 km short, heading in from each side.
+            cases.push_back({"from "+std::to_string(k*45)+"°, 2 km short",g});g.east=-4500*std::sin(b);g.north=-4500*std::cos(b);cases.push_back({"from "+std::to_string(k*45)+"°, 4.5 km short",g});}
+        int caught=0,safe=0,lost=0;
+        for(const auto& k:cases){bool ok=false,clear=false;std::string what;
+            try{const auto h=sx::falling(*flight,k.g);ok=h.caught>0&&h.onRails();clear=h.down&&h.clear();what=ok?"caught "+std::to_string(h.along).substr(0,5)+" m along":(clear?"safe: down ":"UNSAFE: down ")+std::to_string(static_cast<int>(h.away))+" m away ("+h.gaveUp+")";}
+            catch(const std::exception& e){what=std::string("UNSAFE: ")+e.what();}
+            caught+=ok;safe+=ok||clear;lost+=!(ok||clear);std::printf("FALL %-26s %s\n",k.name.c_str(),what.c_str());}
+        std::printf("FALL %d caught, %d safe, %d unsafe of %zu\n",caught,safe,lost,cases.size());return lost?1:0;}
+    if(argc>1&&std::string(argv[1]).rfind("--home",0)==0){const std::string a=argv[1]; // The ship's return alone (development); "=t": its propellant (t).
+        albert::example::starship::homecoming(*flight,true,1000,560,{},a.size()>7?std::stod(a.substr(7))*1e3:189e3);return 0;}
     if(argc>1&&std::string(argv[1]).rfind("--scenarios",0)==0){ // Each system failing or lying, and winds: the count must refuse a launch with it, the booster's way back ride it out or end safe.
         // expect: 'c' caught and at rest on the arms; 's' that, or down clear of the ground's works by its length (never on the
         // tower, the pad or the tanks); 'p' the

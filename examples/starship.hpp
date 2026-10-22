@@ -147,9 +147,11 @@ inline void shipLook(api::StageAppearance* a,double at,bool moving){
         // Trapezoids thinning out, their leading edges swept back to a shorter tip, the trailing edges square to the body.
         // The forward pair on the nose's ogive: their hinges along its surface (its radius 3.1 m at their front to 4.5 m at their
         // back: 11° in from the axis), turned 20° about the axis toward the lee (V3's: a V seen from the front), each under a fixed
-        // fairing along its root over the hinges and actuators.
-        {const double x0=4.5,x1=11.5,dr=r(x1)-r(x0),len=std::hypot(x1-x0,dr),lee=20*deg,cy=std::cos(lee),sz=std::sin(lee),rm=(r(x0)+r(x1))/2;
-            const Vec axis{(x1-x0)/len,side*cy*dr/len,-sz*dr/len},out{0,side*cy,-sz},hinge{at+(x0+x1)/2,side*cy*rm,-sz*rm};
+        // fairing along its root over the hinges and actuators. A part's axis is a direction (x forward) where its hinge is a place
+        // (x aft of the nose): forward along the ogive, inward. The hinge line a chord of the ogive raised half its sag (0.2 m proud
+        // at its ends, in at its middle, under the fairing), so a folded flap lies on the nose instead of sinking into it.
+        {const double x0=4.5,x1=11.5,dr=r(x1)-r(x0),len=std::hypot(x1-x0,dr),lee=20*deg,cy=std::cos(lee),sz=std::sin(lee),rm=((r(x0)+r(x1))/2+r((x0+x1)/2))/2;
+            const Vec axis{(x1-x0)/len,-side*cy*dr/len,sz*dr/len},out{0,side*cy,-sz},hinge{at+(x0+x1)/2,side*cy*rm,-sz*rm};
             hinged(a,side<0?"flap forward left":"flap forward right",hinge,axis,out,7,3.4,.35,moving?fwd:0,g,o,steel,false,2.6,2.2,.15);
             hinged(a,"flap fairing",hinge+out*-.2,axis,out,7.4,.55,.75,0,0,0,steel,false,6.4,0,.45);}
         hinged(a,side<0?"flap aft left":"flap aft right",{at+44.5,side*radius,0},{1,0,0},{0,side,0},10,5,.4,moving?aft:0,g,o,steel,false,5.5,2.25,.18);
@@ -176,7 +178,7 @@ inline api::VehicleDefinition stack(){
 }
 inline api::VehicleDefinition shipAlone(){
     api::VehicleDefinition v;v.set_name("Starship-class ship (approximate)");v.set_crash_speed_meters_per_second(5); /* A steel hull: striking anything faster breaks it up. */v.set_diameter_meters(2*radius);
-    auto* s=v.add_stages();cryogens(s,8e3);s->set_name("Starship");mass(s,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s,shipLength,false);aerodynamics(s,shipLength);shipSystems(s);
+    auto* s=v.add_stages();cryogens(s,8e3);s->set_name("Starship");s->set_header_kilograms(shipHeader);s->set_header_meters(shipHeaderAt);mass(s,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s,shipLength,false);aerodynamics(s,shipLength);shipSystems(s);
     shipLook(s->mutable_appearance(),0,true);
     return v;
 }
@@ -515,6 +517,7 @@ protected:
     // loop the room a third gives a moving vehicle; the landing bench's sweep: 8 m/s of wind across caught at 2, not at 3).
     double hoverSplit=2;
     bool holdAlong=false; // Hovering within 3 m of the axis along the arms: held there, only centred across them (the booster's).
+    double slide=8; // The fastest it goes across while hovering (m/s): the ship's from in front of the V into it, slower.
     double corridor=15,towerTop=146,armTop=.25; // towerTop: over its base; armTop: the arms' rails over their height (m).
     // Over the axis, its pins over the arms and still: ready to go down onto them (across the rails within 0.1 m, the pins then
     // in the grooves between each rail's bars, inside their crests 0.2 m out; along them within 4 m: they are 20 m long).
@@ -537,10 +540,11 @@ protected:
         Vec at=flat+push_*(-above/std::max(norm(gravity(s.position)),1.))+(tilt+up_*-dot(tilt,up_))*(above/lever);if(const Vec east=cross(north_,up_);descend||(holdAlong&&std::abs(dot(at,east))<3))at=at+east*-dot(at,east); // holdAlong: within 3 m of the axis along them, held there too: only centred across.
         // And a slow integral of how far it sits off that point (10 s against the position loop's own gain, 0.375 kv²; at most
         // 0.5 m/s² of push): the steady error a lag or an unmodelled push leaves (a PD attitude loop under the wind's moment on the
-        // hull leans the thrust a little short of what is asked). Begun afresh each time it comes over the arms.
+        // hull leans the thrust a little short of what is asked). Begun afresh each time it comes over the arms; gathered only
+        // within two seconds' slide of that point (the ship's hover begins in front of the V, tens of metres out).
         const double kv=std::min(.5,bandwidth(s)/hoverSplit),ki=.375*kv*kv/10;if(clock_-settleAt_>.1)settle_={};settleAt_=clock_;
-        {settle_=settle_+(at+up_*-dot(at,up_))*dt_;const double most=.5/ki;if(norm(settle_)>most)settle_=settle_*(most/norm(settle_));}
-        Vec side=onto(s,approach(at),kv)+push_*-1.+settle_*-ki;
+        if(const Vec off=at+up_*-dot(at,up_);norm(off)<std::max(3.,2*slide)){settle_=settle_+off*dt_;const double most=.5/ki;if(norm(settle_)>most)settle_=settle_*(most/norm(settle_));} // Only within 2 s of it at its slide: not wound up on the way there.
+        Vec side=onto(s,approach(at),kv,slide)+push_*-1.+settle_*-ki;
         const double limit=std::tan(lean(s,flat,side,12*deg))*vertical;if(norm(side)>limit)side=side*(limit/norm(side));
         const Vec thrust=up_*vertical+side;const double want=s.mass*norm(thrust);c.throttle=std::clamp(want/(engines*raptorSea),.4,1.);
         aim(c,s,unit(thrust),offset);roll(c,s,by);return want;
