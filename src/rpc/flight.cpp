@@ -485,7 +485,7 @@ struct Slot {
         g.propellant=st.propellant>0?flight->state().propellant/st.propellant:0;
         for(std::size_t i=0;i<st.engines.size();++i){const auto& e=flight->engines()[i];const auto& n=st.engines[i];
             g.engines.push_back({static_cast<float>(n.position.y),static_cast<float>(n.position.z),static_cast<float>(std::sqrt(std::max(n.exitArea,.01)/3.14159265358979323846)),
-                static_cast<float>(e.throttle),e.on&&flight->state().burning,e.failed});}
+                static_cast<float>(e.throttle),e.on&&flight->state().burning,e.failed,e.silent,e.stuck});}
         for(const auto& f:st.surfaces)g.surfaces.push_back(f.name);
         g.milestones=milestones;return g;
     }
@@ -518,6 +518,7 @@ struct Slot {
     }
     // Spawned flights waiting to be created once the step that separated them is committed (outside this flight's lock).
     std::vector<api::CreateFlightRequest> children;std::vector<bool> overheated; // overheated: thermal nodes reported, this stage.
+    struct EngineFault {int index;bool failed,silent,stuck;};std::vector<std::vector<EngineFault>> childFaults; // By child: its engines' faults, carried from the stage it was (an engine failed on the stack stays failed on the booster).
     // The request of a flight spawned from `f` now: its definition, inertial start at its centre of mass, the propellant left.
     api::CreateFlightRequest child(const ph::Flight& f,const api::Spawn& sp,std::size_t k)const{
         if(sp.flight_id().empty()||flightName(sp.flight_id())==name)throw std::invalid_argument("A spawned flight needs an id of its own");
@@ -542,7 +543,7 @@ struct Slot {
         if(ticks>600000)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 600000 ticks per step"};
         if(commands.size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 commands per step"};
         ph::Flight next=*flight; // Commands apply atomically.
-        std::vector<api::CreateFlightRequest> spawned;struct Lying {int sensor,unit;Lie lie;};std::vector<Lying> lying;
+        std::vector<api::CreateFlightRequest> spawned;std::vector<std::vector<EngineFault>> spawnedFaults;struct Lying {int sensor,unit;Lie lie;};std::vector<Lying> lying;
         try{for(const auto& c:commands){const int e=static_cast<int>(c.kind>>16)-1; // The engine in the high bits: 0 every one.
             const std::uint32_t k=c.kind&0xffff;
             if(e>=0&&k!=wire::ignite&&k!=wire::cutoff&&k!=wire::throttle&&k!=wire::gimbal&&k!=wire::fail&&k!=wire::thruster&&k!=wire::surface&&k!=wire::brake&&k!=wire::steer&&k!=wire::swing
@@ -559,7 +560,9 @@ struct Slot {
             case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;case wire::brake:next.brake(c.a,e);break;case wire::steer:next.steer(c.a,e);break;case wire::swing:next.swing(c.a,e);break;
             case wire::spawn:{if(e>=0||!(c.a>=0&&c.a<static_cast<double>(log.spawns_size())))throw std::invalid_argument("No such spawn");const auto k=static_cast<std::size_t>(c.a);
                 if(next.state().stage+1>=static_cast<int>(next.vehicle().stages.size()))throw std::logic_error("No stage to separate");
-                spawned.push_back(child(next,log.spawns(static_cast<int>(k)),k));next.separate();break;}
+                spawned.push_back(child(next,log.spawns(static_cast<int>(k)),k));
+                {std::vector<EngineFault> fs;for(std::size_t i=0;i<next.engines().size();++i){const auto& x=next.engines()[i];if(x.failed||x.stuck)fs.push_back({static_cast<int>(i),x.failed,x.silent,x.stuck});}spawnedFaults.push_back(std::move(fs));}
+                next.separate();break;}
             default:throw std::invalid_argument("Unknown command");}}}
         catch(const std::invalid_argument& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}catch(const std::logic_error& e){return{grpc::StatusCode::FAILED_PRECONDITION,e.what()};}
         // Integrated on the copy and committed whole: a cancelled call leaves the flight untouched.
@@ -588,7 +591,7 @@ struct Slot {
             for(std::size_t u=0;u<others.size();++u){const auto was=unitReadings[u];unitReadings[u]=others[u].measure(inc.seconds,inc.velocity/inc.seconds,inc.angle/inc.seconds,inc.velocity,inc.angle,p);lieImu(unitReadings[u],was,u+1,inc.seconds);}}
         if(next.state().stage!=flight->state().stage)hot.clear();overheated=std::move(hot);
         *flight=std::move(next);*imu=std::move(sensor);units=std::move(others);tick+=ticks;eventBits|=bits;note(commands,ticks);if(ticks)sense();
-        for(auto& q:spawned)children.push_back(std::move(q));
+        for(auto& q:spawned)children.push_back(std::move(q));for(auto& f:spawnedFaults)childFaults.push_back(std::move(f));
         if(ticks)publish(changed||flight->state().stage!=shown);
         return grpc::Status::OK;
     }
@@ -656,11 +659,13 @@ struct FlightServices::Impl {
     }
     // The flights a step spawned, created from the parent's air, gravity and settings (outside the parent's lock).
     void adopt(Slot& parent){
-        std::vector<api::CreateFlightRequest> kids;std::shared_ptr<const physics::AirModel> air;std::string atmosphere;std::vector<std::string> grib;std::vector<ph::SpaceWeatherDay> days;providers::GravityModel gravity;
-        {std::lock_guard l(parent.mutex);if(parent.children.empty()||!parent.flight)return;kids.swap(parent.children);
+        std::vector<api::CreateFlightRequest> kids;std::vector<std::vector<Slot::EngineFault>> faults;std::shared_ptr<const physics::AirModel> air;std::string atmosphere;std::vector<std::string> grib;std::vector<ph::SpaceWeatherDay> days;providers::GravityModel gravity;
+        {std::lock_guard l(parent.mutex);if(parent.children.empty()||!parent.flight)return;kids.swap(parent.children);faults.swap(parent.childFaults);
             air=parent.flight->environment().air;atmosphere=parent.atmosphere;grib.assign(parent.log.gfs().begin(),parent.log.gfs().end());days=daysOf(parent.log);
             gravity={parent.flight->environment().field,parent.log.gravity()};}
-        for(const auto& q:kids){api::FlightSample ignored;try{const Prepared p=prepare(q,q.utc_unix_seconds());(void)launch(q,p,air,atmosphere,grib,days,gravity,[]{return false;},&ignored);}catch(const std::exception&){}}
+        for(std::size_t j=0;j<kids.size();++j){const auto& q=kids[j];api::FlightSample ignored;try{const Prepared p=prepare(q,q.utc_unix_seconds());(void)launch(q,p,air,atmosphere,grib,days,gravity,[]{return false;},&ignored);
+            if(const auto kid=j<faults.size()&&!faults[j].empty()?find(flightName(q.flight_id())):nullptr){std::lock_guard g(kid->mutex); // Its engines as they were on the stage it was.
+                if(kid->flight)for(const auto& f:faults[j]){if(f.index>=static_cast<int>(kid->flight->engines().size()))continue;if(f.failed)kid->flight->fail(f.index,f.silent);if(f.stuck)kid->flight->stick(f.index);}}}catch(const std::exception&){}}
     }
     std::shared_ptr<Slot> find(const std::string& id){std::lock_guard l(lock);const auto it=slots.find(id);return it==slots.end()?nullptr:it->second;}
     std::shared_ptr<Slot> make(const std::string& id){ // Built before it enters the map: a throwing constructor leaves no entry.
@@ -944,6 +949,7 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     if(slot->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
     std::vector<api::FlightCommand> in;{std::lock_guard i(slot->inbox);in.swap(slot->injected);}
     for(const auto& c:in){ // What the operator injected since the last step, ahead of the flight program's commands.
+        std::fprintf(stderr,"INTERFERENCIA %s t=%.2f %s\n",r->flight_id().c_str(),slot->flight?slot->elapsed():0.,c.ShortDebugString().c_str()); // The operator's every act, for the record (telemetry).
         std::vector<Slot::Command> mine;if(c.command_case()==api::FlightCommand::kFail){if(c.fail())mine.push_back({wire::fail|c.index()<<16});}else interference(c,mine,uplinks);
         commands.insert(commands.begin(),mine.begin(),mine.end());}
     for(auto& u:uplinks)slot->uplinks.push_back(std::move(u));

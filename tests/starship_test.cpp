@@ -36,7 +36,7 @@ int main(int argc,char** argv){try{
     if(argc>1&&std::string(argv[1]).rfind("--fall",0)==0){ // The ship's way down from its belly flop (the bench): one ("--fall", failures after "=") or a sweep of
         // where it starts ("--fall-sweep": offsets, headings), each caught, safe (down clear of the works) or unsafe.
         namespace sx=albert::example::starship;const std::string a=argv[1];
-        if(a.rfind("--fall-sweep",0)!=0){sx::ShipGate g;if(const char* e=std::getenv("ALBERT_GATE"))std::sscanf(e,"%lf,%lf,%lf,%lf",&g.east,&g.north,&g.ve,&g.vn);
+        if(a.rfind("--fall-sweep",0)!=0){sx::ShipGate g;if(const char* e=std::getenv("ALBERT_GATE"))std::sscanf(e,"%lf,%lf,%lf,%lf",&g.east,&g.north,&g.ve,&g.vn);if(const char* l=std::getenv("ALBERT_LOAD"))g.propellant=std::stod(l)*1e3; // Its propellant (t).
             sx::falling(*flight,g,a.size()>7?sx::faults(a.substr(7)):std::vector<sx::Fault>{});return 0;}
         struct Case {std::string name;sx::ShipGate g;};std::vector<Case> cases{{"nominal",{}}};
         for(int k=0;k<8;++k){const double b=k*45*sx::deg,v=std::hypot(198.2,59.8);sx::ShipGate g;g.ve=v*std::sin(b);g.vn=v*std::cos(b);g.east=-2000*std::sin(b);g.north=-2000*std::cos(b); // From 2 km short, heading in from each side.
@@ -47,6 +47,15 @@ int main(int argc,char** argv){try{
             catch(const std::exception& e){what=std::string("UNSAFE: ")+e.what();}
             caught+=ok;safe+=ok||clear;lost+=!(ok||clear);std::printf("FALL %-26s %s\n",k.name.c_str(),what.c_str());}
         std::printf("FALL %d caught, %d safe, %d unsafe of %zu\n",caught,safe,lost,cases.size());return lost?1:0;}
+    if(argc>1&&std::string(argv[1])=="--home-sweep"){ // The ship's return from orbit end to end, from several places in orbit and loads: where its belly
+        // flop begins (from where the landing burn is to hold it) and how it ends; caught, safe (down clear of the works) or unsafe.
+        namespace sx=albert::example::starship;int caught=0,safe=0,lost=0,n=0;
+        for(const double ahead:{540.,550.,560.,570.,580.})for(const double load:{150e3,189e3}){bool ok=false,clear=false;std::string what;double handoff=-1,miss=-1;++n;
+            try{const auto h=sx::homecoming(*flight,true,1000,ahead,{},load);handoff=h.handoff;miss=h.handoffMiss;ok=h.caught>0&&h.onRails()&&h.speed<.1;clear=h.down&&h.clear();
+                what=ok?"caught "+std::to_string(h.along).substr(0,5)+" m along":(clear?"safe: down ":"UNSAFE: down ")+std::to_string(static_cast<int>(h.away))+" m away ("+h.gaveUp+")";}
+            catch(const std::exception& e){what=std::string("UNSAFE: ")+e.what();}
+            caught+=ok;safe+=ok||clear;lost+=!(ok||clear);std::printf("HOME %3.0f° %3.0f t  belly flop from %5.0f m, unsteered miss %5.0f m  %s\n",ahead,load/1e3,handoff,miss,what.c_str());}
+        std::printf("HOME %d caught, %d safe, %d unsafe of %d\n",caught,safe,lost,n);return lost?1:0;}
     if(argc>1&&std::string(argv[1]).rfind("--home",0)==0){const std::string a=argv[1]; // The ship's return alone (development); "=t": its propellant (t).
         albert::example::starship::homecoming(*flight,true,1000,560,{},a.size()>7?std::stod(a.substr(7))*1e3:189e3);return 0;}
     if(argc>1&&std::string(argv[1]).rfind("--scenarios",0)==0){ // Each system failing or lying, and winds: the count must refuse a launch with it, the booster's way back ride it out or end safe.
@@ -109,7 +118,7 @@ int main(int argc,char** argv){try{
         std::printf("booster %.2f m off the axis, ship %.2f m; clearance %.1f and %.1f m\n",f.offAxis,f.ship.offAxis,f.towerClearance,f.ship.towerClearance);return 0;}
     int bad=0;auto check=[&](bool ok,const char* text){if(!ok){std::cerr<<text<<'\n';++bad;}}; // Every check reported, not only the first.
     const auto m=albert::example::starship::mission(*flight,true);
-    check(m.meco>135&&m.meco<165&&m.mecoHeight>60e3&&m.mecoHeight<90e3,"Staging off the public profile (~141-160 s, ~64-75 km)");
+    check(m.meco>128&&m.meco<152&&m.mecoHeight>48e3&&m.mecoHeight<66e3,"Staging off Flights 12-14's (~140 s after liftoff, ~55 km)");
     check(m.perigee>170e3&&m.apoapsis<260e3,"The ship short of its 180 km orbit");
     check(m.caught>m.meco+200&&m.onRails()&&m.speed<.1&&m.propellant>5e3,"The booster not caught and at rest on the arms");
     check(m.ship.deorbit>6e4&&m.ship.deorbit<1.7e5,"The ship's deorbit burn not on the pass over the tower a day on");

@@ -45,8 +45,17 @@ void engineMap(rpc::Server& server,const std::string& id,const rpc::FlightServic
     d->AddCircleFilled(c,size/2,IM_COL32(8,10,14,170),48);int over=-1;
     for(std::size_t i=0;i<g.engines.size();++i){const auto& e=g.engines[i];const ImVec2 q(c.x+e.y*k,c.y-e.z*k);const float r=std::max(e.radius*k,3.f);
         if(hover&&std::hypot(m.x-q.x,m.y-q.y)<=r+1)over=static_cast<int>(i);
-        const ImU32 fill=e.failed?IM_COL32(220,50,50,235):e.on?IM_COL32(255,255,255,static_cast<int>(150+105*std::clamp(e.throttle,0.f,1.f))):IM_COL32(28,30,36,230);
-        d->AddCircleFilled(q,r,fill,20);d->AddCircle(q,r,over==static_cast<int>(i)?IM_COL32(245,180,60,255):IM_COL32(120,126,136,200),20,over==static_cast<int>(i)?2.f:1.f);}
+        // Failed red, failed silently (claiming to be fine) violet, lit white by its throttle, else dark; its gimbal jammed: a thick
+        // amber ring (it may still burn).
+        const ImU32 fill=e.failed?(e.silent?IM_COL32(170,80,230,235):IM_COL32(220,50,50,235)):e.on?IM_COL32(255,255,255,static_cast<int>(150+105*std::clamp(e.throttle,0.f,1.f))):IM_COL32(28,30,36,230);
+        d->AddCircleFilled(q,r,fill,20);
+        if(e.stuck)d->AddCircle(q,r+1.5f,IM_COL32(255,190,40,255),20,2.5f);
+        d->AddCircle(q,r,over==static_cast<int>(i)?IM_COL32(245,180,60,255):IM_COL32(120,126,136,200),20,over==static_cast<int>(i)?2.f:1.f);}
+    { // The key to its colours.
+        const ImVec2 k(p.x,p.y+size+4);const float h=ImGui::GetTextLineHeight(),rr=h*.3f;float x=k.x;
+        auto key=[&](ImU32 c,const char* t,bool ring){const ImVec2 o(x+rr,k.y+h*.5f);if(ring)d->AddCircle(o,rr,c,12,2.f);else d->AddCircleFilled(o,rr,c,12);d->AddText(ImVec2(x+2*rr+3,k.y),IM_COL32(200,204,210,255),t);x+=2*rr+6+ImGui::CalcTextSize(t).x+10;};
+        key(IM_COL32(220,50,50,235),"falha",false);key(IM_COL32(170,80,230,235),"calado",false);key(IM_COL32(255,190,40,255),"gimbal travado",true);
+        ImGui::Dummy(ImVec2(size,h+6));}
     static const char* actions[]{"falha","falha calado (diz que está bem)","gimbal travado"};
     if(over>=0){ImGui::SetTooltip("Motor %d: clique: %s; botão direito: falha calado",over+1,actions[st.click]);
         const bool left=ImGui::IsMouseClicked(ImGuiMouseButton_Left),right=ImGui::IsMouseClicked(ImGuiMouseButton_Right);

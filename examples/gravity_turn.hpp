@@ -6,6 +6,7 @@
 // its commands.
 #include <algorithm>
 #include <cmath>
+#include <vector>
 namespace albert::example {
 struct Vec {double x=0,y=0,z=0;};
 inline Vec operator+(Vec a,Vec b){return{a.x+b.x,a.y+b.y,a.z+b.z};}
@@ -45,6 +46,9 @@ public:
         const double rn=norm(r),energy=dot(v,v)/2-b.mu/rn;if(energy>=0)return 1e300;
         const double a=-b.mu/(2*energy);return 2*a-perigee(r,v,b)-2*b.radius;
     }
+    double kickRate=0; // The pitch kick's rate (rad/s; 0: at once).
+    std::vector<std::pair<double,double>> pitch; // After the kick: the flight path angle (rad) by speed over the ground (m/s), as flown; empty: a gravity turn (no angle of attack).
+    bool insertion=false;double exhaust=3600; // The upper stage onto its target height climbing nought as it reaches circular speed there (explicit guidance), not by the height alone; its engines' exhaust speed (m/s).
     Phase phase()const{return phase_;}
     void upper(const Reading& r){phase_=Phase::upper;h0_=r.height;rise0_=-r.nedVelocity.z;} // Steering from here (an upper stage lit by the client).
     static double perigee(Vec r,Vec v,Body b=earth){ // Above the body's radius (m).
@@ -59,10 +63,16 @@ public:
         case Phase::vertical:
             if(steered_&&r.height-pad_>50){phase_=Phase::upper;h0_=r.height;rise0_=-r.nedVelocity.z;}
             else if(!steered_&&speed>60){phase_=Phase::kick;mark_=r.elapsed;}break;
-        case Phase::kick:
-            target={std::cos(heading_)*std::sin(kick_),std::sin(heading_)*std::sin(kick_),-std::cos(kick_)};
-            if(std::acos(std::clamp(-along.z,-1.,1.))>kick_||r.elapsed-mark_>15)phase_=Phase::turn;break;
-        case Phase::turn:target=along;if(!r.burning&&r.propellant<=0){phase_=Phase::coast;mark_=r.elapsed;}break;
+        case Phase::kick:{ // At once, or eased over at kickRate (rad/s) as the real pitch-overs are.
+            const double k=kickRate>0?std::min(kick_,kickRate*(r.elapsed-mark_)):kick_;
+            target={std::cos(heading_)*std::sin(k),std::sin(heading_)*std::sin(k),-std::cos(k)};
+            if(std::acos(std::clamp(-along.z,-1.,1.))>kick_||r.elapsed-mark_>(kickRate>0?kick_/kickRate+5:15))phase_=Phase::turn;break;}
+        case Phase::turn:target=along;
+            if(!pitch.empty()&&speed>1){ // A flown pitch program: the flight path angle by speed, reached within a few degrees of attack (2° below 25 km: the thick air, max-Q).
+                const double gamma=std::asin(std::clamp(-along.z,-1.,1.)),most=(r.height<25e3?2:4)*.0174533;double want=pitch.back().second;
+                for(std::size_t i=0;i+1<pitch.size();++i)if(speed<=pitch[i+1].first){const auto [v0,g0]=pitch[i];const auto [v1,g1]=pitch[i+1];want=speed<=v0?g0:g0+(g1-g0)*(speed-v0)/(v1-v0);break;}
+                const double g=std::clamp(want,gamma-most,gamma+most),psi=std::hypot(along.x,along.y)>1e-6?std::atan2(along.y,along.x):heading_;target={std::cos(g)*std::cos(psi),std::cos(g)*std::sin(psi),-std::sin(g)};}
+            if(!r.burning&&r.propellant<=0){phase_=Phase::coast;mark_=r.elapsed;}break;
         case Phase::coast:target=along;if(r.elapsed-mark_>2){c.separate=true;phase_=Phase::separated;mark_=r.elapsed;}break;
         case Phase::separated:target=along;if(r.elapsed-mark_>1){c.ignite=true;phase_=Phase::upper;h0_=r.height;rise0_=-r.nedVelocity.z;}break;
         case Phase::upper:{
@@ -70,7 +80,13 @@ public:
             // Wanted climb rate: toward the target altitude over the climb time constant, else
             // ballistic-like from the upper stage's start.
             const double wanted=climb_>0?std::clamp((target_-r.height)/climb_,0.,maxClimb_):h0_<target_?rise0_*std::sqrt(std::clamp((target_-r.height)/(target_-h0_),0.,1.)):0.;
-            const double vertical=body_.mu/(rn*rn)-(v2-rise*rise)/rn+.05*(wanted-rise),thrust=std::max(norm(r.specificForce),1e-3);
+            const double thrust=std::max(norm(r.specificForce),1e-3);double vertical=body_.mu/(rn*rn)-(v2-rise*rise)/rn+.05*(wanted-rise);
+            if(insertion){ // Explicit (PEG-like): the time to go from the speed across still short of circular at the target height, at the
+                // thrust's acceleration now and the exhaust's speed (the rocket equation); the vertical channel by E-guidance onto that
+                // height, climbing nought, at that time.
+                const double vc=std::sqrt(body_.mu/(body_.radius+target_)),dv=std::max(vc-std::sqrt(std::max(v2-rise*rise,0.)),0.),tgo=std::max(exhaust/thrust*(1-std::exp(-dv/exhaust)),5.); // The rocket equation: lighter, it gets there sooner.
+                vertical=body_.mu/(rn*rn)-(v2-rise*rise)/rn+6*(target_-r.height-rise*tgo)/(tgo*tgo)+2*rise/tgo;
+                if(tgo<10&&held_>-2)vertical=held_*thrust;else held_=std::clamp(vertical/thrust,-.3,.9);} // Its last 10 s at the attitude it had (PEG's: no chasing a vanishing time to go).
             const double horizontal=std::hypot(r.nedVelocity.x,r.nedVelocity.y);
             const double s=std::clamp(vertical/thrust,-.3,.9),cp=std::sqrt(1-s*s),psi=horizontal<10?heading_:std::atan2(r.nedVelocity.y,r.nedVelocity.x);
             target={cp*std::cos(psi),cp*std::sin(psi),-s};
@@ -97,6 +113,6 @@ public:
         return c;
     }
 private:
-    Phase phase_=Phase::pad;double heading_,kick_,target_,perigee_,apoapsis_,climb_,maxClimb_,mark_=0,h0_=0,rise0_=0,pad_=0;Body body_;bool steered_,circularize_;
+    Phase phase_=Phase::pad;double held_=-9,heading_,kick_,target_,perigee_,apoapsis_,climb_,maxClimb_,mark_=0,h0_=0,rise0_=0,pad_=0;Body body_;bool steered_,circularize_;
 };
 }

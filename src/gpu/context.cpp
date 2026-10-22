@@ -96,4 +96,6 @@ void Context::present(){
     wgpuTextureViewRelease(view_);wgpuTextureRelease(current_);view_=nullptr;current_=nullptr;
     if(stale_){stale_=false;resize(width_,height_);}
 }
+unsigned Context::imageWidth()const{return current_?wgpuTextureGetWidth(current_):static_cast<unsigned>(width_);}
+unsigned Context::imageHeight()const{return current_?wgpuTextureGetHeight(current_):static_cast<unsigned>(height_);}
 }

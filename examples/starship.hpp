@@ -12,11 +12,14 @@
 // cutoff (13%: the Δv of a boostback from ~1.6 km/s downrange and a landing); the tower's arms (steel rails, shock-absorbed).
 // Not a model of any flight: the timeline is compared with the public profile only.
 #include "albert/v1/engine.pb.h"
+#include "descent.hpp"
 #include "gravity_turn.hpp"
 #include <algorithm>
 #include <bit>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 namespace albert::example::starship {
@@ -27,7 +30,7 @@ constexpr double pinOut=radius+1; // The catch pins' ends off the axis (m): 1 m 
 // The axial drag coefficient engines first, by Mach: a blunt base, near a flat disc's above Mach 2 (~1.6), as the descents'
 // telemetry shows (Flight 3's booster: 1206 m/s at 25 km down to 858 m/s at 10 km).
 constexpr double dragMach[]{0,.8,1.2,2,5},baseDragTable[]{1,1.1,1.5,1.65,1.6};
-constexpr double boosterEmpty=275e3,boosterPropellant=3800e3,shipEmpty=100e3,shipPropellant=1600e3,engineMass=1.72e3,reserve=.15*boosterPropellant;
+constexpr double boosterEmpty=275e3,boosterPropellant=3800e3,shipEmpty=100e3,shipPropellant=1600e3,engineMass=1.72e3,reserve=.1*boosterPropellant;
 // A solid cylinder from `from` to `to` m aft of the nose: mass, its centre, and principal moments about that centre.
 struct Part {double mass,from,to;};
 struct MassProperties {double mass=0,cg=0;double ix=0,iy=0;};
@@ -339,14 +342,14 @@ protected:
     // ahead: the catch arms where their swing has them that many seconds on.
     double gap(const State& s,Vec flat,Vec u,double a,Vec w={},double d=0,double rise=0,int* which=nullptr,double ahead=0)const{
         const Vec east=cross(north_,up_);const double e=dot(flat,east)+dot(w,east)*d,n=dot(flat,north_)+dot(w,north_)*d,over=dot(s.position+site_*-1.,up_)+rise;
-        const double ue=dot(u,east),un=dot(u,north_),nose=cg(s.propellant),base=length_-nose,sa=std::sin(a),ca=std::cos(a);double m=1e9;
         const bool line=std::abs(n)<3&&e>-6&&e<10; // Between the arms where the catch hovers (the open arms 7 m off the hull centred, 4 m at 3 m off).
+        const double ue=dot(u,east),un=dot(u,north_),nose=cg(s.propellant),base=length_-nose,sa=std::sin(a),ca=std::cos(a);double m=1e9;
         for(double x=-base;x<=nose+1e-9;x+=2){const double z=over+x*ca,pe=e+ue*x*sa,pn=n+un*x*sa;
             for(std::size_t i=0;i<columns.size();++i){const auto& c=columns[i];
                 if(z>=c.bottom-radius&&z<=c.top+radius){const double g=std::hypot(pe-c.e,pn-c.n)-c.radius-radius;if(g<m){m=g;if(which)*which=static_cast<int>(i);}}}
-            // The catch arms (the first two) but on their line, or while the catch closes them round it (it has them open again
-            // once it leaves the line: they are then predicted opening, away from it).
-            for(std::size_t i=0;i<arms.size();++i){const auto& r=arms[i];if((i<2&&(line||close_))||z<r.bottom-radius||z>r.top+radius)continue;
+            // The catch arms (the first two) but on their line, in their grip, or while the catch closes them round it (it has them
+            // open again once it leaves the line: they are then predicted opening, away from it).
+            for(std::size_t i=0;i<arms.size();++i){const auto& r=arms[i];if((i<2&&(line||close_||grip_))||z<r.bottom-radius||z>r.top+radius)continue;
                 const double turn=r.rate*ahead,at=r.open==0?r.angle:close_?(r.open>0?std::max(r.angle-turn,0.):std::min(r.angle+turn,0.)):(r.open>0?std::min(r.angle+turn,r.open):std::max(r.angle-turn,r.open));
                 const double de=std::cos(at),dn=std::sin(at),t=std::clamp((pe-r.e)*de+(pn-r.n)*dn,0.,r.length); // The beam's nearest point.
                 const double g=std::hypot(pe-r.e-de*t,pn-r.n-dn*t)-r.radius-radius;if(g<m){m=g;if(which)*which=static_cast<int>(columns.size()+i);}}}
@@ -371,15 +374,16 @@ protected:
     }
     int collides(const State& s,Vec flat,double brake,double floor,double margin=clearance+1,double horizon=12,double lag=2)const{
         if(columns.empty()&&arms.empty())return -1;const double vz=dot(s.velocity,up_),over=dot(s.position+site_*-1.,up_);Vec v=s.velocity+up_*-vz,at;
+        const Vec f=tmul(s.toBody,s.specific),thrust=norm(s.contact)>0||!laggedThrust?Vec{}:f+up_*-dot(f,up_)+push_*-1.; // The thrust's push across now, kept up while the attitude turns (less and less over the lag): laggedThrust.
         for(double t=0;t<=horizon+1e-9;t+=.1){int k=-1;const double d=norm(at),rise=vz<0?std::max(vz*t,std::min(floor-over,0.)):vz*t;
-            if(gap(s,flat,{},0,d>0?at*(1/d):Vec{},d,rise,&k,t)<margin)return k;
+            if(gap(s,flat,{},0,d>0?at*(1/d):Vec{},d,rise,&k,t)<margin){hitAt_=flat+at;hitT_=t;hitRise_=rise;return k;}
             const double speed=norm(v);if(t>lag&&speed<.05&&norm(push_)<brake)break; // Stopped, and held there.
-            const Vec a=push_+(t>=lag&&speed>0?v*(-std::min(brake,speed/.1)/speed):Vec{});at=at+v*.1+a*.005;v=v+a*.1;}
+            const Vec a=push_+(t<lag?thrust*(1-t/lag):Vec{})+(t>=lag&&speed>0?v*(-std::min(brake,speed/.1)/speed):Vec{});at=at+v*.1+a*.005;v=v+a*.1;}
         return -1;
     }
     // Which way to get away (horizontal unit): toward `aim` (from it to the vehicle: flat - aim, as goal() gives it), pushed off
     // the columns within 30 m of the hull, the nearer the harder.
-    Vec away(const State& s,Vec flat,Vec to)const{
+    Vec away(const State& s,Vec flat,Vec to)const{if(grip_)return {}; // In the arms' grip: straight up (escape() with no way across).
         Vec d=norm(to)>0?unit(to*-1.):cross(north_,up_);const Vec east=cross(north_,up_);const double e=dot(flat,east),n=dot(flat,north_);
         for(const auto& c:columns){const Vec off=east*(e-c.e)+north_*(n-c.n);const double r=norm(off)-c.radius-radius;if(r<30&&norm(off)>0)d=d+unit(off)*(2*(1-std::max(r,0.)/30));}
         for(std::size_t i=0;i<arms.size();++i){const auto& r=arms[i];if(i<2&&std::abs(n)<3&&e>-6&&e<10)continue;const double de=std::cos(r.angle),dn=std::sin(r.angle),t=std::clamp((e-r.e)*de+(n-r.n)*dn,0.,r.length);
@@ -560,19 +564,104 @@ protected:
     // descending: going down onto them (a touch then is the pins').
     bool centred(const State& s,Vec flat,bool descending=false)const{flat=pinsAt(s,flat);
         const Vec v=s.velocity+up_*-dot(s.velocity,up_);const double n=dot(flat,north_),e=dot(flat,cross(north_,up_)),vn=dot(v,north_);
-        if(close_)return onRails(flat)&&!(norm(s.contact)>0&&armsClosed&&!inGrooves(flat)&&!descending);
+        if(close_)return grip_||(onRails(flat)&&!(norm(s.contact)>0&&armsClosed&&!inGrooves(flat)&&!descending)); // In their grip: kept shut.
         // Sliding in from the front of their V (as the real catches: the arms swing as it comes in), where it will be once they
         // are shut: across, still on the line; along, braking to rest (half its speed over that time) within the rails' span.
         const double ve=dot(v,cross(north_,up_)),along=e+ve*closing/2;
         // Across, within the rails' room round the hull (0.55 m each side) with half its drift over that time (the loop takes the
         // rest out as they swing): the pins' grooves (0.15 m) matter only going down.
         if(!holdAlong)return std::abs(n)<.3&&std::abs(n+vn*closing)<.3&&std::abs(vn)<.1&&e>-4&&e<8&&norm(v)<3; // The ship: over the axis, still.
-        return std::abs(n)<.5&&std::abs(n+vn*closing/2)<.5&&std::abs(vn)<.3&&along>-4&&along<8&&e<25&&norm(v)<7;
+        return std::abs(n)<.6&&std::abs(n+vn*closing/2)<.6&&std::abs(vn)<.4&&along>-4&&along<8&&e<25&&norm(v)<7; // 0.6 m: inside the rails' room round the hull; the loop across takes the rest out as they swing.
     }
     // The pins over the rails: across them within 0.6 m, along them 5 m west to 9 m east of the axis (a touch there is the
     // pins on them, not an arm on the hull); in the grooves: within 0.15 m across (the bars' crests 0.2 m out).
     bool onRails(Vec flat)const{const double n=std::abs(dot(flat,north_)),e=dot(flat,cross(north_,up_));return n<.6&&e>-5&&e<9;}
     bool inGrooves(Vec flat,double within=.15)const{return std::abs(dot(flat,north_))<within&&onRails(flat);} // within: of the line (the crests 0.2 m out).
+    // In the arms' grip: its pins within 1.2 m of their line over the rails' span, within 4 m over them. There the catch arms
+    // are the catch's own business, not something to get away from: they stay shut round it (a bounce on their shock absorbers
+    // or a slip does not open them), the collision monitor leaves them out, and any getting away is straight up, never across
+    // them. Set each step by grip() (the vehicle's guidance).
+    bool gripped(const State& s,Vec flat)const{const Vec p=pinsAt(s,flat);const double e=dot(p,cross(north_,up_));
+        return std::abs(dot(p,north_))<1.2&&e>-5&&e<9&&dot(s.position+site_*-1.,up_)-catchHeight(s)<4;}
+    void grip(const State& s,Vec flat){grip_=gripped(s,flat);}
+    // The catch flown in one sweep, as the real ones (no hover on the way, no stop in front of the arms): down to settleHeight
+    // over the arms, falling there at settleSpeed with nothing across, its pins over the axis (the observer's push and an
+    // off-axis thrust's lean allowed for, as overArms()), by the burn its planner (PoweredDescent: G-FOLD's convex way) lays out
+    // every 2 s from where it is (tracked in between at 0.4 rad/s: replanned faster, it chases its own lean's lag and swings): within its engines' throttle (on `engines`, down to `fewest`), a 16° lean, a glide
+    // slope up from the arms (tan 0.5: never low far out) and a speed across of at most 2 m/s and 0.1 m/s a metre of height over
+    // the settling (never low and fast), never closing on the tower's face (8 m west of the axis) faster than braking at 1.5 m/s²
+    // stops it (what the collision monitor's lag and braking still save: always a way out), its push across, as the thrust follows it
+    // (lagging 1.8 over the attitude's bandwidth, as measured: the plan leads it), asked to change at most 3 m/s² a second and costing six times the upward (gentle ways across), never down faster
+    // than 2 m/s and 0.35 m/s a metre over the settling (no last plunge for a hard braking to save), never more than 0.5 m and
+    // 0.1 m a metre of height off the arms' line (along it it may slide in late, as the real catches; across it only while
+    // high, the hull clear of the open arms below them), and within 30 m of the settling (the hull among the arms: its lean's
+    // swing near them) at most 1 m off the line and leaning 8°: lined up while high, only small corrections low; its time to there the cheapest among the last plan's and its neighbours'; flown with
+    // what it now asks plus the plan's state's error (0.16/s², 0.7/s); the air's push left to the replanning from where it is
+    // (mostly the crossflow its own lean raises, against it: netted through the observer's lag it fights the lean's reversal and
+    // carries it on toward the tower; the plan's lean 16°, the rest of the 20° room for it); then settling onto the arms, the descent easing linearly with
+    // the height to touchSpeed at the touch, across by E-guidance onto the axis (its T at least what keeps the loop within half
+    // the attitude's bandwidth) with a slow integral of the pins' miss within 2 m (what the attitude's lag leaves). drag: the air's
+    // braking now along the velocity (m/s²). The acceleration asked of the thrust (ECEF, m/s²; within the lean and the hull's swing
+    // clear of the tower), the time to the touch (s), whether it is settling, and how far the plan misses what it must meet (m,
+    // m/s or m/s²: over ~1, no way in).
+    struct Sweep {Vec a;double touch=0,miss=0;bool settling=false;};
+    double settleHeight=6,settleSpeed=2,touchSpeed=.5,handover=25; // handover: over the settling, where the plan hands the last metres to the bandwidth-bound laws (m).
+    // The least time (s) to bring x (m) moving at v (m/s) to rest at nought accelerating at most a (m/s²): bang-bang.
+    static double quickest(double x,double v,double a){const double k=x+v*std::abs(v)/(2*a)>=0?1:-1;return k*v/a+2*std::sqrt(std::max(k*x/a+v*v/(2*a*a),0.));}
+    Sweep sweep(const State& s,Vec flat,double over,Vec offset={},double drag=0,int engines=3,int fewest=1)const{
+        const double g=norm(gravity(s.position)),vz=dot(s.velocity,up_),z=over-catchHeight(s),speed=norm(s.velocity),k=(settleSpeed-touchSpeed)/settleHeight,settling=std::log(settleSpeed/touchSpeed)/k;
+        const Vec east=cross(north_,up_),v=s.velocity+up_*-vz;Sweep w;
+        const double above=cg(s.propellant)-pin_,lever=std::max(length_-cg(s.propellant),1.);const Vec tilt=s.toBody.r1*offset.y+s.toBody.r2*offset.z;
+        const Vec shift=push_*(-above/std::max(g,1.))+(tilt+up_*-dot(tilt,up_))*(above/lever),at=flat+shift; // Where its pins come over the ground, from its centre of mass.
+        const double e=dot(at,east),n=dot(at,north_),ve=dot(v,east),vn=dot(v,north_);
+        if(z>settleHeight+handover&&!terminal_){
+            PoweredDescent::Problem p;p.r0={dot(flat,east),dot(flat,north_),z};p.v0={ve,vn,vz};p.rt={-dot(shift,east),-dot(shift,north_),settleHeight};p.vt={0,0,-settleSpeed};
+            p.g={0,0,-g};p.d={0,0,.5*(speed>0?drag*-vz/speed:0.)};const Vec u=tmul(s.toBody,s.thrustBody)*(1/std::max(s.mass,1.));p.uNow={dot(u,east),dot(u,north_),dot(u,up_)};
+            p.floor=.4*fewest*raptorSea/s.mass;p.ceiling=.9*engines*raptorSea/s.mass;p.lean=std::tan(16*deg);p.slope=.5;p.radius=3;p.climbRate=.1;p.speedFloor=2;p.wall=-8;p.brake=1.5;p.jerk=3;p.across=6;p.lag=1.8/bandwidth(s);p.sinkRate=.35;p.wedge=.1;p.wedgeFloor=.5;p.low=30;p.lowAcross=1;p.lowLean=std::tan(8*deg);
+            const double since=clock_-plannedAt_;
+            if(plan_.u.empty()||since>=2||since<0){ // Its plan laid out again every 2 s (a steady reference, tracked in between): about the last one's time to go (the first: as the braking and the way across take).
+                double T0;if(!plan_.u.empty()&&since>=0&&since<5)T0=plan_.T-since;else{const double dz=z-settleHeight,each=.8*std::tan(20*deg)*g/std::sqrt(2.);
+                    T0=std::max({2*dz/std::max(settleSpeed-vz,1.),1.2*quickest(e,ve,each),1.2*quickest(n,vn,each)+4.5});}
+                std::vector<double> tries;if(plan_.u.empty()||since<0||since>=5)tries={.7*T0,.85*T0,T0,1.2*T0,1.45*T0};else tries={T0,T0+(++turn_%2?1.:-1.)};
+                PoweredDescent::Plan best;for(double T:tries){T=std::max(T,1.5);PoweredDescent::Plan q=planner_.solve(p,T,plan_.u.empty()?nullptr:&plan_,std::max(since,0.));
+                    if(!q.ok&&!plan_.u.empty())q=planner_.solve(p,T); // Afresh when the last plan leads it astray.
+                    if((q.ok&&(!best.ok||q.cost<best.cost))||(!best.ok&&!q.ok&&q.miss<best.miss))best=q;}
+                for(double more:{3.,7.,12.,20.})if(!best.ok){const PoweredDescent::Plan q=planner_.solve(p,std::max(T0,1.5)+more);if(q.ok||q.miss<best.miss)best=q;}
+                if(!best.ok){PoweredDescent::Problem hard=p;hard.climbRate=1;hard.speedFloor=50;hard.brake=0;hard.sinkRate=0;hard.wedge=0;hard.low=0;hard.jerk=0; // Out of what its way in should be: back onto it by the
+                    for(double more:{0.,3.,7.,12.})if(!best.ok){const PoweredDescent::Plan q=planner_.solve(hard,std::max(T0,1.5)+more);if(q.ok)best=q;}}       // physical limits alone (the collision monitor keeps it off the tower).
+                plan_=best;asked_=p;plannedAt_=clock_;
+                if(std::getenv("ALBERT_PLAN")){Vec r1,v1,u1;PoweredDescent::at(p,best,1,r1,v1,u1);std::printf("PLAN %.1f T %.1f ok %d miss %.2f cost %.0f r %.1f %.1f %.1f v %.1f %.1f %.1f u0 %.2f %.2f %.2f now %.2f %.2f %.2f v@1 %.1f %.1f %.1f\n",clock_,best.T,best.ok,best.miss,best.cost,
+                    p.r0.x,p.r0.y,p.r0.z,p.v0.x,p.v0.y,p.v0.z,best.u.empty()?0.:best.u[0].x,best.u.empty()?0.:best.u[0].y,best.u.empty()?0.:best.u[0].z,p.uNow.x,p.uNow.y,p.uNow.z,v1.x,v1.y,v1.z);}}
+            Vec r,pv,pu;PoweredDescent::at(asked_,plan_,clock_-plannedAt_,r,pv,pu);
+            const Vec now{dot(flat,east),dot(flat,north_),z},want=pu+(r+now*-1.)*.16+(pv+Vec{ve,vn,vz}*-1.)*.7; // Tracked at 0.4 rad/s: within what its lean's lag holds.
+            const Vec a=east*want.x+north_*want.y+up_*want.z;w.touch=std::max(plan_.T-(clock_-plannedAt_),0.)+settling;w.miss=plan_.miss;
+            const double lift=std::max(dot(a,up_),.3*g);Vec side=a+up_*-dot(a,up_);const double limit=std::tan(lean(s,flat,side,20*deg))*lift;if(norm(side)>limit)side=side*(limit/norm(side));
+            w.a=up_*lift+side;return w;}
+        // Its last metres (from `handover` over the settling: the hull among the arms): by laws whose gains stay within half the
+        // attitude's bandwidth (a plan laid afresh with seconds to go asks more than a lean lagging ~1.5 s can give: it swings
+        // across): braked at a constant rate to the settling, then settling; across onto the axis by E-guidance, T at least
+        // √6·2/bandwidth and 8 s, and a slow integral of the pins' miss.
+        plan_={};terminal_=true;double up;
+        if(z>settleHeight+.3){const double dz=z-settleHeight,ref=-std::sqrt(settleSpeed*settleSpeed+2*dz);double T; // At least 1 m/s² of braking's way down: it never dawdles.
+            if(vz<ref){up=(vz*vz-settleSpeed*settleSpeed)/(2*dz);T=2*dz/(settleSpeed-vz);}else{up=.5*(ref-vz);T=-ref-settleSpeed;}
+            w.touch=T+settling;}
+        else{ // Settling: slower the further its pins are off the arms' line (down at 15% of it at 0.5 m off); its last metre only once
+            // they are over the grooves and the arms shut round it (begun late, they take their 3.75 s), else held 0.8 m over them.
+            const double off=std::abs(dot(pinsAt(s,flat),north_)),f=std::clamp(1.2-off/.5,.15,1.),ref=z<1.2&&(!armsClosed||off>.12)?.6*(.8-z):-(touchSpeed+k*std::max(z,0.))*f; // Its last metre only over the grooves (±0.12 m) in shut arms: else held 0.8 m over them while the loop across brings it there.
+            up=-k*vz*f+(ref-vz);w.settling=true;w.touch=std::log((touchSpeed+k*std::max(z,0.))/touchSpeed)/k/f;}
+        const double least=std::max(std::sqrt(6.)*hoverSplit/bandwidth(s),8.),te=std::max(w.touch,least),tn=std::max(w.touch-4.5,least); // 8 s: the hover's own loop (0.3 rad/s), what a lean lagging ~1.5 s holds steady.
+        const double kv=std::min(.5,bandwidth(s)/hoverSplit),ki=.375*kv*kv/10;if(clock_-settleAt_>.1)settle_={};settleAt_=clock_;
+        if(const Vec miss=east*e+north_*n;norm(miss)<2){settle_=settle_+miss*dt_;const double most=.5/ki;if(norm(settle_)>most)settle_=settle_*(most/norm(settle_));}
+        Vec side=east*(-6*e/(te*te)-4*ve/te)+north_*(-6*n/(tn*tn)-4*vn/tn)+push_*-1.+settle_*-ki;
+        const double lift=std::max(g+up-(speed>0?drag*-vz/speed:0.),.3*g),limit=std::tan(lean(s,flat,side,20*deg))*lift;if(norm(side)>limit)side=side*(limit/norm(side));
+        w.a=up_*lift+side;return w;
+    }
+    // The arms shut round it as it settles: once it will touch within their closing time (and 2 s more: shut before it gets there), its pins centred
+    // between the rails by then (half its drift across over that time) and over their span along.
+    bool shutting(const State& s,Vec flat,double touch)const{
+        const Vec p=pinsAt(s,flat),v=s.velocity+up_*-dot(s.velocity,up_);const double n=dot(p,north_),e=dot(p,cross(north_,up_)),vn=dot(v,north_);
+        return touch<=closing+2&&std::abs(n)<.4&&std::abs(n+vn*closing/2)<.4&&std::abs(vn)<.3&&e>-4&&e<8;
+    }
     // Where its pins are over the ground (flat: its centre of mass's), the body's lean carrying them off it (they are cg - pin
     // over it along the body: 1° of lean, half a metre): what must be over the rails.
     Vec pinsAt(const State& s,Vec flat)const{const Vec x=bodyX(s),h=x+up_*-dot(x,up_);return flat+h*(cg(s.propellant)-pin_);}
@@ -584,6 +673,13 @@ protected:
         const Vec e=mul(s.toBody,cross(bodyX(s),up_)),w=s.rate,o=by?by->centre():Vec{};const double lever=length_-pin_,gain=pitchInertia(s.propellant)/std::max(s.thrust*lever,1.);
         c.gimbalPitch=std::clamp(gain*(1.44*e.y-2*w.y)-o.z/lever,-15*deg,15*deg);c.gimbalYaw=std::clamp(gain*(1.44*e.z-2*w.z)+o.y/lever,-15*deg,15*deg);c.torque={};roll(c,s,by);
     }
+    bool grip_=false; // In the arms' grip (gripped()).
+public:
+    bool laggedThrust=false; // The collision monitor keeps the thrust's push across now up over its lag (the ship's planned way in: it leads its lean).
+protected:
+    mutable bool terminal_=false; // Its last metres flown by the bandwidth-bound laws (sweep()).
+    mutable Vec hitAt_;mutable double hitT_=0,hitRise_=0; // Where the last collision course was found to run into something, how soon, at what rise (m, s, m).
+    PoweredDescent planner_;mutable PoweredDescent::Plan plan_;mutable PoweredDescent::Problem asked_;mutable double plannedAt_=-1;mutable int turn_=0;
     Vec site_,north_,up_,push_;mutable Vec settle_,unmet_;mutable double settleAt_=-1;double clock_=0,dt_=.02,seenV_=0,arms_,rest_,length_,pin_,propellant_,gp_=0,gy_=0;MassProperties full_,empty_;bool close_=false,in_=false;
 };
 // The booster's way back from staging, at 50 Hz, deciding all the way whether the catch can still be made:
@@ -607,6 +703,7 @@ public:
     const char* escaping()const{return escape_?threat_:nullptr;} // Getting away with all it has: from what (null otherwise).
     Command step(double t,const State& s){
         observe(s,t-seen_,(phase_>=Phase::final&&phase_<=Phase::descend)||phase_==Phase::divert);seen_=t;Command c;c.surfaces={0.,0.,0.};set_.keep(c,s);const Vec rel=s.position+site_*-1; // keep: a lit engine that failed, the next working one in its place.
+        grip(s,rel+up_*-dot(rel,up_));
         const double over=dot(rel,up_),vz=dot(s.velocity,up_);const Vec flat=rel+up_*-over,across=s.velocity+up_*-vz;route(flat);
         if(catch_&&phase_>=Phase::landing&&phase_<=Phase::descend&&set_.balanced(s)<2)giveUp(s,"motores com gimbal insuficientes para manobrar");
         // The arms leave 0.8 m: going for them needs the navigation to a third of that (RTK's centimetres; drifting without it).
@@ -627,9 +724,10 @@ public:
             if(!why&&!stops(s,stand(s),set_.working(s,33),true)&&overWorks(flat,length_))why="queda sobre a infraestrutura de solo";
             if(why&&!escape_&&!(phase_==Phase::descend&&norm(s.contact)>0)){if(catch_)giveUp(s,why);if(phase_==Phase::divert){escape_=true;threat_=why;}}}
         switch(phase_){
-        case Phase::wait:if(t-start_>2){set_.use(c,s,3);c.throttle=.4;phase_=Phase::flip;}hold(c,s,unit(s.velocity));break; // Clear of the ship, then 3 engines.
+        case Phase::wait:if(t-start_>.5){set_.use(c,s,3);c.throttle=.4;phase_=Phase::flip;}hold(c,s,unit(s.velocity));break; // Clear of the ship (half a second), then 3 engines: turning at once, as the real ones after hot staging.
         case Phase::flip:{ // Turn to point the thrust from the predicted landing back to the tower, boostbackPitch from the horizon.
-            if(age_--<=0){aimed_=landing(s);age_=5;}const Vec d=boostbackDirection(aimed_);aim(c,s,d,set_.centre());if(dot(bodyX(s),d)>std::cos(8*deg)){set_.use(c,s,13);c.throttle=boostbackThrottle;phase_=Phase::boostback;back_=d;}break;}
+            if(age_--<=0){aimed_=landing(s);age_=5;}const Vec d=boostbackDirection(aimed_);aim(c,s,d,set_.centre());finsToward(c,s,d,true);if(dot(bodyX(s),d)>std::cos(8*deg)){ // The grid fins thrown over the way it turns (taking what the gimbals cannot).
+                set_.use(c,s,13);c.throttle=boostbackThrottle;phase_=Phase::boostback;back_=d;}break;}
         case Phase::boostback:{ // The prediction every 0.1 s, every step within 10 km of the aim.
             if(age_--<=0||dot(aimed_,back_)>-1e4){aimed_=landing(s);age_=5;}const Vec e=aimed_;aim(c,s,boostbackDirection(e),set_.centre());miss_=norm(e);
             if(set_.wanted()==13&&dot(e,back_)>-5e3)set_.use(c,s,3); // The last few km on 3, to cut finely.
@@ -639,7 +737,11 @@ public:
             if(catch_&&over<divert)aim_=east_*front; // Low enough: the fins carry it from off the coast onto the approach.
             if(age_--<=0){aimed_=landing(s,&seconds_);age_=25;miss_=norm(aimed_);if(over<15e3&&reach(s)>3e3)giveUp(s,"pouso previsto fora do alcance da torre");}
             const Vec e=aimed_;const double seconds=seconds_;const Vec vhat=unit(s.velocity);
-            if(s.q<2e3){hold(c,s,entry(s));pointed_=bodyX(s);} // The fins take it over from where the RCS holds it.
+            if(s.q<2e3){if(!(norm(slewed_)>.5))slewed_=bodyX(s); // Engines first slowly (1.5°/s, the RCS's gentle turn after the boostback), faster only as the
+                // air nears (what is left of the turn by 45 km, 30% to spare, up to 6°/s), held right at the entry attitude within 20 s of
+                // the air; the fins take it over from where it then is.
+                const Vec to=entry(s);const double left=std::acos(std::clamp(dot(slewed_,to),-1.,1.)),soon=std::max((norm(s.position)-norm(site_)-45e3)/std::max(-vz,1.),1.);
+                slewed_=soon>20?turned(slewed_,to,std::clamp(1.3*left/soon,1.5*deg,6*deg)*dt_):to;hold(c,s,slewed_);} // Within 20 s of the air: held right at it.
             else{Vec want=e*(-6/std::max(seconds*seconds,1.));want=want+vhat*-dot(want,vhat);
                 // The push across a radian of tilt: the model's (normalForce q S), then as the IMU measures it (the force across the
                 // flow over the tilt held away from it); the model's to start from.
@@ -688,15 +790,17 @@ public:
             // Upright again by the gate (3 engines turn the body back slowly): the lean's limit down to a quarter in its last seconds.
             const double room=std::clamp((tgo_-1.5)/3,.25,1.),push=slope_*s.mass,lean=std::min(norm(want)*s.mass/std::max(std::abs(push),1e5),(push>0?20*deg:10*deg)*room)*(push>0?1:-1);
             Vec d=norm(want)>0?back*std::cos(lean)+unit(want)*std::sin(lean):back;
-            if(tgo_<3){Vec side=across*-.4;const double v=accel_*std::max(dot(back,up_),.3),limit=std::tan(8*deg)*std::clamp((tgo_-1)/2,0.,1.)*v;
+            // Braking what it will be moving across 1.5 s on (the push its lean gives now carried that long: the body turns back
+            // slowly, so braking what it moves now overshoots into a push the other way, a back out).
+            if(tgo_<3){const Vec f=tmul(s.toBody,s.specific),lead=across+(f+up_*-dot(f,up_))*1.5;Vec side=lead*-.4;const double v=accel_*std::max(dot(back,up_),.3),limit=std::tan(8*deg)*std::clamp((tgo_-1)/2,0.,1.)*v;
                 if(norm(side)>limit)side=side*(limit/norm(side));d=unit(up_*v+side);}
             thrust(c,s,d*accel_);if(s.q>2e3)finsToward(c,s,d,true); // Its last 3 s: upright, the speed across braked, for 3 engines to take over.
             break;}
         case Phase::final:{ // On 3 to the hover point, still falling at 1 m/s there, not below a 27° slope down to it from the
-            // approach (the hull clear of the arms off their line); within 3 m of the axis, on down to the arms themselves, 0.5 m/s
-            // there (no hover: the arms are closing round it as it comes, and it goes straight on down onto them, aligned; else held
-            // over them); across by E-guidance, the braking law in its last seconds; at sea, down to the water.
-            const Vec to=goal(flat);const bool over_=catch_&&norm(flat)<3;const double above=over-(over_?catchHeight(s):top(s))-(catch_?safe(s,flat):0);
+            // approach (the hull clear of the arms off their line); within 3 m of the axis, on down to 1.5 m over the arms at 0.5
+            // m/s (no hover: the arms are closing round it as it comes, and it goes straight on down onto them, aligned in the shut
+            // arms; else held there); across by E-guidance, the braking law in its last seconds; at sea, down to the water.
+            const Vec to=goal(flat);const bool over_=catch_&&norm(flat)<3;const double above=over-(over_?catchHeight(s)+1.5:top(s))-(catch_?safe(s,flat):0);
             if(catch_&&age_--<=0){age_=10;if(!stops(s,catchHeight(s)))giveUp(s,"a queda não para acima dos braços");}
             if(phase_!=Phase::final)break;
             const double up=vertical(s,above,vz,over_?-.5:-1),limit=std::tan(20*deg)*up; // Its lean below: within the hull's swing clear of the tower.
@@ -715,7 +819,7 @@ public:
             else side=onto(s,to,kv,8,20*deg);
             side=side+push_*-1.;{const double most=limit*std::tan(lean(s,flat,side,20*deg))/std::tan(20*deg);if(norm(side)>most)side=side*(most/norm(side));} // The observer's push netted.
             count(c,s,thrust(c,s,up_*up+side),set_.count());close_=catch_&&centred(s,flat); // On the 3 it took over with: none put out on the way in.
-            if(over_&&over-catchHeight(s)<3){if(armsClosed&&aligned(s,flat))phase_=Phase::descend;else if(over-catchHeight(s)<1.5)phase_=Phase::hover;} // On down if aligned in the shut arms; else held (back up over them).
+            if(over_&&over-catchHeight(s)<3){if(armsClosed&&aligned(s,flat))phase_=Phase::descend;else if(above<.3)phase_=Phase::hover;} // On down if aligned in the shut arms; else held there.
             else if(!catch_&&(norm(s.contact)>0||above<.3)){set_.use(c,s,0);phase_=Phase::down;}
             break;}
         case Phase::hover:case Phase::descend: // Over the axis; down at 1 m/s once the arms are round it and it is aligned with them.
@@ -737,12 +841,13 @@ public:
             touch_=-1;count(c,s,overArms(c,s,flat,over,phase_==Phase::descend,std::max(set_.count(),1),set_.centre(),&set_,hurry_?2:1),set_.count()); // None put out over the arms: a cutoff there kicks it across (its thrust's centre jumps); the throttle does it.
             break;
         case Phase::caught: // On the arms, the engines at their least while they take the load, the thrust's line through the pins
-            // until it hangs still (or 15 s: its rocking about the pins is hardly damped once they are off), then off; slipping off
+            // until it hangs still (a second on, or 8 s at most: off within seconds, its swing about the pins damped first), then off; slipping off
             // in the first second, or its pins off the grooves while it can still lift (onto the bars' crests, where they would
             // slide off): back off them and onto them again.
-            if(!off_){if((norm(s.contact)==0&&t-caught_<1)||!inGrooves(pinsAt(s,flat),hurry_?.2:.15)){phase_=Phase::descend;touch_=-1;break;}hang(c,s,&set_);c.throttle=.4;
+            if(norm(s.contact)>0)held_at_=t; // Last seen on them (a bounce on the shock absorbers is not a slip: half a second off them is).
+            if(!off_){if((norm(s.contact)==0&&t-caught_<1&&t-held_at_>.5)||!inGrooves(pinsAt(s,flat),hurry_?.2:.15)){phase_=Phase::descend;touch_=-1;break;}hang(c,s,&set_);c.throttle=.4;
                 if(set_.count()>1&&set_.count()*.4*raptorSea>.85*s.mass*g0)set_.use(c,s,set_.count()-1); // Their least would lift it off the arms.
-                if(t-caught_>2&&(still(s)||t-caught_>15)){set_.use(c,s,0);off_=true;}}
+                if(t-caught_>1&&(still(s)||t-caught_>8)){set_.use(c,s,0);off_=true;}}
             else{c.torqueOn=true;c.torque={};}break;
         case Phase::divert:{ // Away from the tower toward the aim as fast as its lean allows (20°, less where its hull's swing would
             // bring it near the tower), its height held until clear of the ground's works by its length (however little it has left: dry,
@@ -781,18 +886,34 @@ public:
         return c;
     }
     void start(double t){start_=t;}
+    void abort(const State& s){giveUp(s,"aborto pedido pelo operador");} // The operator's ABORT uplink: the catch given up, away to sea (from low, away from the tower at once).
+    // What its way back takes (kg) from a staging now (s: the stack's state; propellant: what the booster would have; engines:
+    // its working gimballed ones): the flip (~10 s on 3 at their least, coasted), the boostback on those at boostbackThrottle
+    // toward where its fall comes down short of the aim (pitched boostbackPitch) until it comes down there (each 0.5 s, its fall
+    // predicted as the coast flies it), then 200 t for the landing (its burn from the gate, the final approach, a margin). A cutoff short of it leaves the catch out of reach:
+    // the stack's main engines cut once what is left comes down to it (or at the planned speed, before).
+    double returnNeed(const State& s,double propellant,int engines)const{
+        const Vec w{0,0,7.292115e-5};Vec r=s.position,v=s.velocity;double m=boosterEmpty+propellant,used=3*.4*raptorSea/raptorExhaust*10;
+        auto step=[&](Vec a,double h){const Vec acc=gravity(r)+cross(w,v)*-2.+cross(w,cross(w,r))*-1.+a;v=v+acc*h;r=r+v*h;};
+        for(int i=0;i<50;++i)step({},.2); // The flip, coasted.
+        const double F=std::max(engines,1)*raptorSea*boostbackThrottle,flow=F/raptorExhaust;Vec first;bool begun=false;
+        for(int i=0;i<300&&used<propellant;++i){State x=s;x.position=r;x.velocity=v;x.mass=m-used;x.propellant=propellant-used;
+            const Vec miss=landing(x);if(!begun){first=miss;begun=true;}if(dot(miss,first)<=0)break; // Back at the aim.
+            step(boostbackDirection(miss)*(F/(m-used)),.5);used+=flow*.5;}
+        return used+200e3;
+    }
     void enter(Phase p){phase_=p;} // Its guidance taken up at a phase (a test starting it there, e.g. falling toward its landing burn).
-    // plan: the landing burn's planned share of its engines' thrust; boostbackThrottle: the boostback's (about 50 s, as flown).
+    // plan: the landing burn's planned share of its engines' thrust; boostbackThrottle: the boostback's (40-50 s, as Flights 9 and 10 flew it).
     // normalForce: the body's normal force coefficient a radian off the flow, engines first, as flights measure it (the IMU
     // across the flow; the tables read near 3.5).
-    static constexpr double gateSpeed=80,plan=.7,residual=20e3,boostbackThrottle=.6,normalForce=.8;
-    double dt=.02,boostbackPitch=-5*deg; // boostbackPitch: above the horizon (negative: below).
+    static constexpr double gateSpeed=80,plan=.7,residual=20e3,boostbackThrottle=.8,normalForce=.8;
+    double dt=.02,boostbackPitch=5*deg; // boostbackPitch: above the horizon (negative: below): up a little, as the flights' (apogee 83-99 km, the landing burn ~4 min after staging).
     // The boostback and the fall aim this far east of the tower (over the sea, away from the tower's side), the landing
     // burn then bringing it onto the arms' axis from there while still high (m); without the catch, onto the sea this far east.
     // divert: the height (m) below which the fins carry it from there onto the approach point.
     // front: the landing burn's point that far east of the axis, in front of the arms' V: the final approach slides in from there
     // as the real catches do (Flight 5's: down outside the tips, then in across them).
-    double offshore=300,sea=1500,divert=30e3,front=40;
+    double offshore=300,sea=1500,divert=30e3,front=70;
 private:
     // Gives the catch up for good: the arms stay open, the aim goes out to sea (from west of the tower, inland away from it, north
     // of the tank farm); from low (the last of the landing burn, over the arms), away from the tower at once.
@@ -934,8 +1055,8 @@ private:
             const Vec a1=acc(r,v),v1=v+a1*(h/2),r1=r+v*(h/2),a2=acc(r1,v1),v2=v+a2*(h/2),r2=r+v1*(h/2),a3=acc(r2,v2),v3=v+a3*h,r3=r+v2*h,a4=acc(r3,v3);
             r=r+(v+v1*2+v2*2+v3)*(h/6);v=v+(a1+a2*2+a3*2+a4)*(h/6);}
     }
-    Phase phase_=Phase::wait;const Vec east_=cross(north_,up_);Vec back_,aimed_,pointed_,offshore_=east_*offshore,sea_=east_*sea,aim_=offshore_;
-    int unsure_=0;bool escape_=false;const char* threat_=nullptr;Vec gated_,gatedV_;double seen_=0,accel_=0,slope_=0,lift_=0,start_=0,miss_=0,seconds_=0,caught_=0,touch_=-1,held_=0,tgo_=10;int age_=0;bool off_=false,catch_=true,hurry_=false;const char* why_=nullptr;
+    Phase phase_=Phase::wait;const Vec east_=cross(north_,up_);Vec back_,aimed_,pointed_,slewed_,offshore_=east_*offshore,sea_=east_*sea,aim_=offshore_;
+    int unsure_=0;bool escape_=false;const char* threat_=nullptr;Vec gated_,gatedV_;double seen_=0,accel_=0,slope_=0,lift_=0,start_=0,miss_=0,seconds_=0,caught_=0,touch_=-1,held_=0,tgo_=10,held_at_=0;int age_=0;bool off_=false,catch_=true,hurry_=false;const char* why_=nullptr;
     // The 13 gimballed engines first (the centre 3, then the middle ring), then the outer ones: the burns' engines, failed ones replaced.
     Engines set_{[]{std::vector<int> v;for(int i=1;i<=33;++i)v.push_back(i);return v;}(),boosterNozzle,13};
 };

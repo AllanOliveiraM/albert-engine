@@ -127,7 +127,12 @@ unsigned long long albert::Display::renderInset(Scene& scene,Camera& camera,unsi
 void albert::Display::ui(){
     auto& d=*impl_;if(!d.encoder)return;
     if(!d.styled){ImGuiStyle& style=ImGui::GetStyle();style=ImGuiStyle();style.FontScaleDpi=d.dpi;style.ScaleAllSizes(d.dpi);d.styled=true;} // As threepp's ImGui context.
-    ImGui_ImplWGPU_NewFrame();ImGui_ImplGlfw_NewFrame();ImGui::NewFrame();if(d.draw)d.draw();ImGui::Render();
+    ImGui_ImplWGPU_NewFrame();ImGui_ImplGlfw_NewFrame();
+    { // Laid out on the image it is drawn on this frame, not the window's new size (a resize reaches the surface a frame on: its
+        // clip rectangles past that image are refused, a crash).
+        ImGuiIO& io=ImGui::GetIO();const float sx=io.DisplayFramebufferScale.x>0?io.DisplayFramebufferScale.x:1.f,sy=io.DisplayFramebufferScale.y>0?io.DisplayFramebufferScale.y:1.f;
+        io.DisplaySize=ImVec2(static_cast<float>(d.context->imageWidth())/sx,static_cast<float>(d.context->imageHeight())/sy);}
+    ImGui::NewFrame();if(d.draw)d.draw();ImGui::Render();
     if(!d.drawnTarget)d.pass(WGPULoadOp_Clear);
     d.pass(WGPULoadOp_Load);
 }

@@ -22,6 +22,8 @@ public:
     [[nodiscard]] bool vsync()const{return vsync_;}
     // The next surface image, or nullptr when it must be reconfigured (resize) or is lost.
     WGPUTextureView acquire();
+    // The size of the image acquire() gave this frame (a resize reaches it a frame on): what a pass on it may draw within.
+    [[nodiscard]] unsigned imageWidth()const;[[nodiscard]] unsigned imageHeight()const;
     void present();
 private:
     WGPUInstance instance_=nullptr;WGPUSurface surface_=nullptr;WGPUAdapter adapter_=nullptr;WGPUDevice device_=nullptr;WGPUQueue queue_=nullptr;

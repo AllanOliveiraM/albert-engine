@@ -16,21 +16,24 @@ class ShipReturn:public TowerApproach {
 public:
     enum class Phase {orbit,orient,deorbit,glide,entry,flip,landing,hover,descend,caught,divert,down};
     ShipReturn(Vec site,double latitude,double longitude,double arms,double rest)
-        :TowerApproach(site,latitude,longitude,arms,rest,shipLength,shipPinAt,combine(ship(true)),combine(ship(false)),shipPropellant){header_=shipHeader;headerAt_=shipHeaderAt;holdAlong=true;slide=3;} // From in front of the arms' V it slides in as the booster does, at 3 m/s at most.
+        :TowerApproach(site,latitude,longitude,arms,rest,shipLength,shipPinAt,combine(ship(true)),combine(ship(false)),shipPropellant){header_=shipHeader;headerAt_=shipHeaderAt;holdAlong=true;slide=3;hoverAbove=4;laggedThrust=true;} // From in front of the arms' V it slides in as the booster does, at 3 m/s at most.
     Phase phase()const{return phase_;}
     double nextStep()const{return next_;} // How far (s) the client may step next: long in orbit, 20 ms otherwise.
     double along()const{return along_;} // The latest predicted landing past the tower (m).
     double beside()const{return cross_;} // And right of it (m).
     double bank()const{return held_;} // Commanded (rad, right positive).
     double bankWanted()const{return bank_;} // What the guidance asks of it.
-    void enter(Phase p){phase_=p;check_=0;held_=0;} // Its guidance taken up at a phase (a test starting it there, e.g. falling toward its flip).
+    void enter(Phase p){phase_=p;check_=0;held_=0;}
+    void abort(const State& s){giveUp(s,"aborto pedido pelo operador");} // The operator's ABORT uplink: the catch given up, away from the tower to sea. // Its guidance taken up at a phase (a test starting it there, e.g. falling toward its flip).
+    double handoff()const{return handoff_;} // How far across the ground from where the landing burn is to hold it its belly flop began (m; -1: not yet).
+    double handoffMiss()const{return miss_;} // And how far from it its flip would have ended then, steered no further (the entry's own miss, m).
     const char* gaveUp()const{return why_;} // Why the catch was given up (null while it is on).
     const char* escaping()const{return escape_?threat_:nullptr;} // Getting away with all it has: from what (null otherwise).
     double dragFactor()const{return drag_;} // The measured over the predicted (drag, lift).
     double liftFactor()const{return lift_;}
     double deorbit=100,crossLimit=150e3; // The burn's Δv (m/s); the farthest a pass may run beside the tower (m).
     Command step(double t,const State& s){
-        observe(s,t-seen_,(phase_>=Phase::landing&&phase_<=Phase::descend)||phase_==Phase::divert);seen_=t;
+        observe(s,t-seen_,(phase_>=Phase::landing&&phase_<=Phase::descend)||phase_==Phase::divert);seen_=t;{const Vec rel=s.position+site_*-1.;grip(s,rel+up_*-dot(rel,up_));}
         Command c;next_=.02;const Vec rel=s.position+site_*-1;const double over=dot(rel,up_),height=norm(s.position)-norm(site_);const Vec flat=rel+up_*-over;route(flat);
         if(catch_&&phase_>=Phase::landing&&phase_<=Phase::descend){const double weight=s.mass*norm(gravity(s.position)),usable=s.propellant-residual,second=weight/raptorExhaust;
             // One sea-level Raptor at its least lifting more than it weighs, it cannot come down onto the arms; short of what
@@ -38,14 +41,16 @@ public:
             if(set_.working(s,3)<1)giveUp(s,"sem motores para a captura");
             else if(phase_!=Phase::landing&&.4*raptorSea>.97*weight)giveUp(s,"leve demais para descer nos braços");
             else if(const double vz=dot(s.velocity,up_),g=norm(gravity(s.position)),left=std::max(over-catchHeight(s),0.),
-                finish=phase_==Phase::landing?1.1*s.mass*(norm(s.velocity)+g*(2*left/std::max(-vz,1.)+17))/raptorExhaust:(left+3)*second; // Its Δv from up high (as the booster's final), or down at 1 m/s and 3 s more.
+                finish=phase_==Phase::landing?1.1*s.mass*(norm(s.velocity)+g*(plan_.u.empty()?2*left/std::max(-vz,1.)+17:plan_.T-(clock_-plannedAt_)+8))/raptorExhaust:(left+3)*second; // Its Δv from up high (its plan's time to go, the settling and 2 s more), or down at 1 m/s and 3 s more.
                 !hurry_&&(usable<finish||usable<escapeNeed(s,flat)+3*second)){ // Short of finishing, or the bingo: as the booster's.
                 if(usable<finish?!escapes(s,flat):phase_==Phase::descend||aligned(s,flat))hurry_=true;
                 else giveUp(s,usable<finish?"propelante insuficiente para terminar a captura":"propelante no limite: captura abandonada enquanto a fuga é possível");}}
         // Never into the tower, never down onto the ground's works (as the booster's).
         if(phase_>=Phase::landing&&phase_<=Phase::descend&&!(phase_==Phase::descend&&norm(s.contact)>0)||phase_==Phase::divert){
             const Vec across=s.velocity+up_*-dot(s.velocity,up_);const double brake=stopping(s,flat,std::max(set_.count(),1),rush(s));(void)across;
-            if(const char* why=into(collides(s,flat,(phase_==Phase::landing?.45:.7)*brake,phase_==Phase::divert?std::min(kept_,over):catchHeight(s)+hoverAbove));why&&!escape_){giveUp(s,why);if(phase_==Phase::divert){escape_=true;threat_=why;}}} // In the burn, braking assumed at less: an escape from its lean and fall gets less than all of it.
+            if(const char* why=into(collides(s,flat,(phase_==Phase::landing?.6:.7)*brake,phase_==Phase::divert?std::min(kept_,over):catchHeight(s)+hoverAbove));why&&!escape_){
+                if(std::getenv("ALBERT_MONITOR")){const Vec east=cross(north_,up_),way=norm(across)>0?across*-1.:east;std::printf("MONITOR %s brake %.2f lean %.1f %.1f e %.1f n %.1f ve %.2f vn %.2f over %.1f lit %d hit at %.1f %.1f in %.1f s rise %.1f\n",why,brake,lean(s,flat,way,30*deg)/deg,lean(s,flat+across*2.,way,30*deg)/deg,dot(flat,east),dot(flat,north_),dot(across,east),dot(across,north_),over,set_.count(),dot(hitAt_,east),dot(hitAt_,north_),hitT_,hitRise_);}
+                giveUp(s,why);if(phase_==Phase::divert){escape_=true;threat_=why;}}} // In the burn, braking assumed at less: an escape from its lean and fall gets less than all of it (the plan's own envelope stops it at 1.5 m/s²).
         switch(phase_){
         case Phase::orbit: // Where a deorbit burn now would land, each minute (each second within 2000 km of it); nose forward and
             // belly to the Earth, by a half-second pulse of the RCS every 30 s, torque-free between them (long steps).
@@ -79,53 +84,57 @@ public:
             // rather than upright, the burn taken up from there as it nears it (no lean left over the wrong way to turn out of).
             const Vec v=s.velocity+up_*-dot(s.velocity,up_);const double lean=std::min(20*deg,std::atan(norm(v)/10));const Vec to=norm(v)>.1?unit(up_*std::cos(lean)+unit(v)*-std::sin(lean)):up_;
             set_.keep(c,s);aim(c,s,to,set_.centre());c.surfaces={45*deg,45*deg,-45*deg,-45*deg};c.throttle=.5;
-            if(dot(bodyX(s),to)>std::cos(25*deg)&&dot(bodyX(s),up_)>std::cos(25*deg)){phase_=Phase::landing; // What the burn cannot bring in front of the arms (at rest) leaning 20° at most: away from the tower.
-                const double above=over-catchHeight(s)-hoverAbove,vz=dot(s.velocity,up_),most=std::tan(20*deg)*((above>1&&vz<0?vz*vz/(2*above):0)+norm(gravity(s.position)));
-                if(norm(flat+front()*-1.)>150||std::max(norm(across(s,flat,false,true)),norm(across(s,flat,true,true)))>1.3*most||closing(s,flat)>safe(s,flat,.6*most))giveUp(s,"pouso previsto fora do alcance da torre");} // Or closing on the tower faster than it could stop short of it.
+            if(dot(bodyX(s),to)>std::cos(25*deg)&&dot(bodyX(s),up_)>std::cos(25*deg)){phase_=Phase::landing; // Out of the sweep's reach (no plan meets its limits,
+                // or more than 250 m from in front of the V: as far as the flip is aimed), or closing on the tower faster than it could stop 5 m past its
+                // axis leaning 20% short of its most: away from the tower.
+                const double above=over-catchHeight(s)-hoverAbove,vz=dot(s.velocity,up_),most=std::tan(20*deg)*((above>1&&vz<0?vz*vz/(2*above):0)+norm(gravity(s.position))),toward=closing(s,flat);
+                if(norm(flat+front()*-1.)>250||sweep(s,flat,over,set_.centre(),0,set_.working(s,3),1).miss>1.5||toward*toward/(2*.8*most)>norm(flat)+5)giveUp(s,"pouso previsto fora do alcance da torre");}
             break;}
-        case Phase::landing:{ // On 3 engines (the fewest that carry it at 85%, of those lit), the observer's push netted: first to the
-            // hover point in front of the arms' V (across by E-guidance, no walk across after it); its last 12 s on their line in
-            // front of the V, sliding in as it comes down (the booster's final approach, the real catches': along the line at what
-            // it can still brake, onto(), at most 8 m/s; across it onto the line, no speed across on arrival, -6 n/T² - 4 v/T over
-            // the time left), not below a 27° slope down to the axis from the approach, the arms closing round it as it comes in;
-            // within 3 m of the axis, on down to the arms themselves at 0.5 m/s (no hover: straight on down onto them if aligned in
-            // the shut arms; else held over them).
-            const double vz=dot(s.velocity,up_),e=dot(flat,cross(north_,up_)),nn=dot(flat,north_);const Vec v=s.velocity+up_*-vz;
-            const bool line=std::abs(nn)<=8&&e>-8&&e<80,in=line&&over-catchHeight(s)<150,axis=line&&norm(flat)<3; // in: on their line in front of the V, low: going in.
-            // Going in: down the 27° slope (tan 0.5) whose apex is the arms themselves (3 m round the axis): no hover point on the way.
-            const double above=in?over-catchHeight(s)-.5*std::max(norm(flat)-3,0.):over-catchHeight(s)-hoverAbove,vf=in?-.5:-1.,T=std::max(2*std::max(above,0.)/std::max(-vz-vf,1.),std::sqrt(6.)*3/bandwidth(s));
-            const double brake=above<0?.5*(std::min(3.,-.3*above)-vz):vz<vf?(vz*vz-vf*vf)/(2*std::max(above,.1)):.5*(vf-vz),up=std::max(brake+norm(gravity(s.position)),0.),limit=std::tan(20*deg)*up;
-            Vec side;
-            if(in){const double kv=std::min(.6,bandwidth(s)/3),vn=dot(v,north_);side=onto(s,flat+north_*-nn,kv,8,20*deg);side=side+north_*(-dot(side,north_)-6*nn/(T*T)-4*vn/T);
-                // The arms shut as it comes in: once where it will be when they are (braking to rest along over that time, its drift
-                // across half gone; its centre of mass, upright by then: where the pins will be, not where its lean now puts them) lies
-                // within the rails' room.
-                const double ve=dot(v,cross(north_,up_)),shut=TowerApproach::closing,along=e+ve*shut/2,off=nn+vn*shut/2;close_=close_||(std::abs(off)<.5&&std::abs(vn)<.5&&along>-4&&along<8&&e<25&&norm(v)<7);}
-            else{side=across(s,flat);if(closing(s,flat)>safe(s,flat,.5*limit))side=v*(-limit/std::max(norm(v),1e-3));} // Never at the tower faster than half its lean stops it short: all of it against its way.
-            side=side+push_*-1.;if(norm(side)>limit)side=side*(limit/norm(side));
-            set_.keep(c,s);const Vec a=up_*up+side;const double want=s.mass*norm(a);
-            if(const int n=std::max(1,static_cast<int>(std::ceil(want/(.85*raptorSea))));n<set_.count())set_.use(c,s,n);
-            c.throttle=std::clamp(want/(std::max(set_.count(),1)*raptorSea),.4,1.);
-            aim(c,s,unit(a),set_.centre());roll(c,s,&set_);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
-            if(axis&&over-catchHeight(s)<3){if(armsClosed&&aligned(s,flat))phase_=Phase::descend;else if(over-catchHeight(s)<1.5)phase_=Phase::hover;} // On down if aligned in the shut arms; else held (back up over them).
-            else if(!in&&(above<2||vz>-1)){phase_=Phase::hover;if(norm(flat+front()*-1.)>30&&!in_)giveUp(s,"pouso previsto fora do alcance da torre");} // Not in front of the V: no walk across to it.
+        case Phase::landing:{ // The catch in one sweep (sweep(): its fall braked to the settling over the arms, along their line
+            // onto the axis and across onto the line on the way, as the booster's: no hover point, no stop in front of the V), on
+            // the fewest of its 3 that carry it at 85% (of those lit; two while their least leaves it falling); settling onto the arms as they
+            // shut round it. Out of reach of the arms (a minute or more to the touch, low outside the V, behind the tower): given up.
+            set_.keep(c,s);const double weight=s.mass*norm(gravity(s.position));const int least=set_.working(s,3)>=2&&2*.4*raptorSea<.97*weight?2:1; // Two while their least leaves it falling: a quicker lean than one alone (off the axis).
+            const Sweep w=sweep(s,flat,over,set_.centre(),0,std::max(set_.count(),1),least);const double want=s.mass*norm(w.a);
+            if(const int n=std::max(least,static_cast<int>(std::ceil(want/(.85*raptorSea))));n<set_.count())set_.use(c,s,n);
+            c.throttle=std::clamp(want/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(w.a),set_.centre());roll(c,s,&set_);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
+            if(std::getenv("ALBERT_ATT")&&std::fmod(t+1e-9,.5)<.02){const Vec east=cross(north_,up_),f=tmul(s.toBody,s.specific);std::printf("ATT %.1f lit %d roll %.1f° rates %.3f %.3f %.3f ask e %.2f n %.2f got e %.2f n %.2f gimbal %.1f %.1f bw %.2f\n",t,set_.count(),rollError(s)/deg,s.rate.x,s.rate.y,s.rate.z,
+                dot(w.a,east),dot(w.a,north_),dot(f,east),dot(f,north_),c.gimbalPitch/deg,c.gimbalYaw/deg,bandwidth(s));}
+            close_=close_?centred(s,flat,true):shutting(s,flat,w.touch);
+            if(w.miss>1.5||w.touch>60||(over-catchHeight(s)<60&&!in_&&std::abs(dot(flat,north_))>4)||dot(flat,cross(north_,up_))<-8)giveUp(s,"pouso previsto fora do alcance da torre");
+            else if(w.settling)phase_=Phase::descend;
             break;}
-        case Phase::hover:case Phase::descend: // Over the tower, then down at 1 m/s until the pins rest on the arms; off the axis or the
-            // arms' line, held again.
+        case Phase::hover:case Phase::descend: // Settling onto the arms at the sweep's end (down as they shut round it); held over
+            // them (the hover) only when not ready by the touch, then down at 1 m/s once they are round it and it is aligned; off
+            // the axis or the arms' line, held again.
+            set_.keep(c,s);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
+            if(phase_==Phase::descend&&norm(s.contact)>0&&inGrooves(pinsAt(s,flat),hurry_?.2:.15)){hang(c,s,&set_);c.throttle=.4;phase_=Phase::caught;caught_=t;break;} // The pins in the arms' grooves (hurrying: inside the crests), not a closing arm on the hull.
+            if(phase_==Phase::descend&&!heldOver_){ // The sweep's settling; not ready a third of a metre over them (its pins off the grooves' line,
+                // its roll off: the arms not yet shut it waits for, a metre over them) or touching off the grooves: held there.
+                const Vec p=pinsAt(s,flat);const Sweep w=sweep(s,flat,over,set_.centre(),0,std::max(set_.count(),1),1);close_=close_?centred(s,flat,true):shutting(s,flat,w.touch);
+                if(norm(s.contact)>0||(over-catchHeight(s)<.3&&(std::abs(dot(p,north_))>(hurry_?.2:.15)||std::abs(rollError(s))>6*deg))){heldOver_=true;phase_=Phase::hover;}
+                else{const double want=s.mass*norm(w.a),weight=s.mass*norm(gravity(s.position));const int n=std::max(set_.count(),1);
+                    // The fewest that carry it at 80%; two going down onto the arms while two work and their least leaves it falling
+                    // (one alone, off the axis, shoves it out of the grooves).
+                    const int least=set_.working(s,3)>=2&&2*.4*raptorSea<.97*weight?2:1;
+                    if(least<n)set_.use(c,s,least); // Down to two (or one, when two at their least would hold it up), none put out after: a cutoff over the arms kicks it across.
+                    c.throttle=std::clamp(want/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(w.a),set_.centre());roll(c,s,&set_);break;}}
             close_=centred(s,flat,phase_==Phase::descend);if(phase_==Phase::hover&&armsClosed&&aligned(s,flat))phase_=Phase::descend;
             if(const Vec p=pinsAt(s,flat);hurry_){if(onRails(p))close_=true;if(armsClosed&&inGrooves(p,.2))phase_=Phase::descend;} // Nothing left to get away on: onto the arms now.
             else if(phase_==Phase::descend&&(norm(s.contact)==0?std::abs(dot(p,north_))>.25||std::abs(dot(p,cross(north_,up_)))>5||std::abs(rollError(s))>6*deg:!inGrooves(p)))phase_=Phase::hover; // (Not hurrying: the branch above.)
-            {set_.keep(c,s);const int n=std::max(set_.count(),1);const double demand=overArms(c,s,flat,over,phase_==Phase::descend,n,set_.centre(),&set_,hurry_?2:1,aloft(s,flat,shipLength-cg(s.propellant)));c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
+            {const int n=std::max(set_.count(),1);const double demand=overArms(c,s,flat,over,phase_==Phase::descend,n,set_.centre(),&set_,hurry_?2:1,aloft(s,flat,shipLength-cg(s.propellant)));
                 // As light as it gets, 2 Raptors at their least lift more than its weight: the fewest that carry it at 80% (of those
-                // lit), one more once short of 95% of what they give; going down onto the arms, two while two work (one alone, off the
-                // axis, shoves it out of the grooves).
-                if(const int k=std::max(phase_==Phase::descend?std::min(2,set_.working(s,3)):1,static_cast<int>(std::ceil(demand/(.8*raptorSea))));k<n)set_.use(c,s,k);else if(n<set_.working(s,3)&&demand>.95*n*raptorSea)set_.use(c,s,n+1);}
-            if(phase_==Phase::descend&&norm(s.contact)>0&&inGrooves(pinsAt(s,flat),hurry_?.2:.15)){c.throttle=.4;phase_=Phase::caught;caught_=t;} // The pins in the arms' grooves (hurrying: inside the crests), not a closing arm on the hull.
+                // lit), one more once short of 95% of what they give; going down onto the arms, two while two work and their least
+                // leaves it falling (one alone, off the axis, shoves it out of the grooves).
+                const int least=phase_==Phase::descend&&set_.working(s,3)>=2&&2*.4*raptorSea<.97*s.mass*norm(gravity(s.position))?2:1;
+                if(const int k=std::max(least,static_cast<int>(std::ceil(demand/(.8*raptorSea))));k<n)set_.use(c,s,k);else if(n<set_.working(s,3)&&demand>.95*n*raptorSea)set_.use(c,s,n+1);}
             break;
         case Phase::caught: // On the arms, the engine at its least while they take the load (one at its least nearly carries it all),
             // the thrust's line through the pins, then off once it hangs still (or 3 s); slipping off in the first second, or its pins
             // off the grooves while lit: back off them and onto them again.
-            if(!off_){if((norm(s.contact)==0&&t-caught_<1)||!inGrooves(pinsAt(s,flat),hurry_?.2:.15)){phase_=Phase::descend;break;}hang(c,s,&set_);c.throttle=.4;
+            if(norm(s.contact)>0)heldAt_=t; // Last seen on them (a bounce on the shock absorbers is not a slip: half a second off them is).
+            if(!off_){if((norm(s.contact)==0&&t-caught_<1&&t-heldAt_>.5)||!inGrooves(pinsAt(s,flat),hurry_?.2:.15)){phase_=Phase::descend;break;}hang(c,s,&set_);c.throttle=.4;
+                if(set_.count()>1&&set_.count()*.4*raptorSea>.85*s.mass*g0)set_.use(c,s,set_.count()-1); // Their least would lift it off the arms.
                 if(t-caught_>.5&&(still(s)||t-caught_>3)){set_.use(c,s,0);off_=true;}}
             else{c.torqueOn=true;c.torque={};}break;
         case Phase::divert:{ // Away with all it has while the tower threatens it (escape()); then toward the aim as fast as its lean
@@ -233,9 +242,11 @@ private:
     // the standard atmosphere, the crossflow lift and drag at the scheduled angle of attack; only the lift's vertical part, cos b,
     // as bank reversals cancel the rest; all of it when `held`, a bank kept to the end): where it ends past the tower along its
     // final track and right of it (m), and how long it takes (s).
-    Arrival arrive(Vec r,Vec v,double m,double b,bool held=false)const{ // held: also the belly flop flown as fall() begins it (square to the flow below 300 m/s: no glide).
-        const Vec w{0,0,7.292115e-5};const double area=pi*radius*radius,re=6378137,j2=1.08263e-3,base=norm(site_);
+    Arrival arrive(Vec r,Vec v,double m,double b,bool held=false)const{ // held: also the belly flop flown as fall() begins it (square to the flow below 300 m/s: no glide),
+        // and the bank rolled there from the one held now at 4°/s, as flown (a reversal takes its time).
+        const Vec w{0,0,7.292115e-5};const double area=pi*radius*radius,re=6378137,j2=1.08263e-3,base=norm(site_),to=b;double t=0;
         auto acc=[&](Vec p,Vec u){
+            const double b=held?held_+std::clamp(to-held_,-4*deg*t,4*deg*t):to;
             const double rn=norm(p),zz=p.z*p.z/(rn*rn),f=1.5*j2*(re/rn)*(re/rn);
             Vec a=Vec{p.x*(1+f*(1-5*zz)),p.y*(1+f*(1-5*zz)),p.z*(1+f*(3-5*zz))}*(-earth.mu/(rn*rn*rn))+cross(w,u)*-2.+cross(w,cross(w,p))*-1.;
             const double h=rn-base,rho=density(h),speed=norm(u);
@@ -243,7 +254,7 @@ private:
                 const double al=held&&speed<=300?90*deg:alpha(speed,h),k=.5*rho*speed*speed*area/m;
                 a=a+uh*(-k*drag_*(dragOf(shipLength,al,speed/sound(h))+flaps_*std::sin(al)))+l*(k*lift_*liftOf(shipLength,al));}
             return a;};
-        double t=0;bool down=false;
+        bool down=false;
         for(int n=0;n<20000;++n){const double h=norm(r)-base;if(h<1e3&&dot(v,r)<0){down=true;break;}const double dt=h>1.2e5?2.:h>3e4?.5:.25;
             const Vec a1=acc(r,v),v1=v+a1*(dt/2),r1=r+v*(dt/2),a2=acc(r1,v1),v2=v+a2*(dt/2),r2=r+v1*(dt/2),a3=acc(r2,v2),v3=v+a3*dt,r3=r+v2*dt,a4=acc(r3,v3);
             r=r+(v+v1*2+v2*2+v3)*(dt/6);v=v+(a1+a2*2+a3*2+a4)*(dt/6);t+=dt;}
@@ -271,24 +282,17 @@ private:
     // The fastest it may close on the tower braking at a m/s² (its lean against its way once turned there: ~2 s on, the body
     // still leaning as it was meanwhile) and stop short of that.
     double safe(const State& s,Vec flat,double a)const{return std::sqrt(2*a*std::max(norm(flat)-keepOut-2*closing(s,flat),0.));}
-    // Where the landing burn ends: in front of the arms' V on their line, 40 m out (as the booster's: tens of metres off it
-    // across leave the hull clear of the arms' tips; from there it slides in).
+    // Where its flip is to end: in front of the arms' V on their line, 40 m out (as the booster's gate: tens of metres off it
+    // across leave the hull clear of the arms' tips); the landing burn's sweep goes on from there straight into the V.
     Vec front()const{return cross(north_,up_)*40.;}
-    // Across onto that point by the end of the landing burn, at rest there (from behind the tower: by the way round it):
-    // E-guidance (6d/T² - 4v/T), T the burn's time left at its braking so far (twice the height to go over the speed down), not
-    // less than keeps the loop within a third of the attitude's bandwidth (√6·3/bandwidth: no last lunge for the hover to inherit).
-    Vec across(const State& s,Vec flat,bool end=false,bool direct=false)const{ // end: what the plan asks at its end (6d/T² + 2v/T the other way), its most
-        // there or now; direct: straight to that point (what it really has to cover), not by the way round the tower.
-        const double above=std::max(dot(s.position+site_*-1.,up_)-catchHeight(s)-hoverAbove,0.),vz=dot(s.velocity,up_),T=std::max(2*above/std::max(-vz,1.),std::sqrt(6.)*3/bandwidth(s));
-        const Vec to=direct||dot(flat,cross(north_,up_))>-8?flat+front()*-1.:approach(flat),v=s.velocity+up_*-dot(s.velocity,up_);return end?to*(6/(T*T))+v*(2/T):to*(-6/(T*T))+v*(-4/T);
-    }
     // The belly flop (subsonic), flown by prediction (as the entry): where it would end its flip (from the point the landing burn
     // is to hold it at, in front of the arms' V, and its speed across the ground then) for a way of the nose (turned there about
     // the vertical at 3°/s) and a tilt held to the flip once the nose is within 30° of that way (reached at 5°/s; none while it
     // turns: turned first, then gliding): its fall flown out with the tables' crossflow lift and
     // drag (the measured factors and the flaps' drag, as the entry's prediction), the lift in the plane of the nose and the flow
     // (a body of revolution's only: ahead of 90° of attack toward the nose, past it toward the tail), the Earth's turning; then
-    // the flip as measured on the bench: its own push along the nose, J = 1.7 n F/m (~41 m/s on 3 at 181 t), over ~6.7 s, 0.52
+    // the flip as measured on the bench: its own push along the nose, J = 8.4 √(n F/m) (~42 m/s on 3, near alike from 120 to 181 t:
+    // lighter, it swings up faster and the thrust pushes for less time), over ~5.6 s, 0.62
     // of it carried through.
     struct Flipped {Vec p,v;};
     Flipped flipped(const State& s,Vec nose,double tilt,Vec way,double want)const{
@@ -301,25 +305,29 @@ private:
             const Vec a=gravity(r)+cross(w,v)*-2.+cross(w,cross(w,r))*-1.+u*(-k*drag_*(dragOf(shipLength,al,speed/sound(h))+flaps_*std::sin(al)))+side*(k*lift_*liftOf(shipLength,al));
             v=v+a*dt;r=r+v*dt;}
         const Vec up=unit(r),vh=v+up*-dot(v,up),rel=r+site_*-1.+front()*-1.,ph=rel+up*-dot(rel,up),nh=unit(nz+up*-dot(nz,up));
-        const double J=1.7*set_.working(s,3)*raptorSea/s.mass,tf=6.7;return{ph+vh*tf+nh*(.52*J*tf),vh+nh*J};
+        const double J=8.4*std::sqrt(set_.working(s,3)*raptorSea/s.mass),tf=5.6;return{ph+vh*tf+nh*(.62*J*tf),vh+nh*J};
     }
-    // How far from that point the flip ends (in 50 m) and how fast across (in 10 m/s), how fast toward the tower (in 5 m/s),
-    // and how far short of 30 m out from its axis on the V's side (in 10 m: over or behind the tower the burn would cross it):
-    // what to keep least (the burn then has little to do, nothing toward or over the tower).
+    // How well the flip's end hands the landing burn its way in: the flip leaves what its own push along the nose does not
+    // cancel (~20 m/s when the fall brings less than its ~40), the least of it (in 20 m/s), best spent coming in: moving
+    // straight at the arms' axis (in 5 m/s across that way, and away from it), from as far out as braking that at 1 m/s² ends
+    // 40 m in front of the V (in 30 m), within 250 m (in 20 m), and not short of 30 m out on the V's side (in 10 m: over or
+    // behind the tower the burn would cross it).
     double flipCost(Vec p,Vec v)const{
-        const Vec axis=p+front();const double closing=norm(axis)>0?std::max(-dot(v,unit(axis)),0.):0.,behind=std::max(30-dot(axis,cross(north_,up_)),0.);
-        return dot(p,p)/2500+dot(v,v)/100+closing*closing/25+behind*behind/100;
+        const Vec axis=p+front(),east=cross(north_,up_);const double d=std::max(norm(axis),1.);const Vec u=axis*(-1/d);const double toward=dot(v,u),across=norm(v+u*-toward);
+        const double stop=toward>0?toward*toward/2:0,behind=std::max(30-dot(axis,east),0.),away=std::min(toward,0.);
+        const double far=std::max(d-250,0.);return (d-stop-40)*(d-stop-40)/900+toward*toward/400+far*far/400+across*across/25+away*away/25+behind*behind/100;
     }
-    // Each second: the nose's way (round about the vertical every 30°, then 10° about the best) and the tilt (every 5°, within
-    // 30°) that end the flip best; between, those held.
+    // Each half second: the nose's way (round about the vertical every 15°, then 5° about the best) and the tilt (every 5°, then
+    // 1.25°, within 30°) that end the flip best, what it was flying among them; between, those held.
     void fall(Command& c,const State& s,double t,double height){
         const Vec up=unit(s.position),u=unit(s.velocity),vh=s.velocity+up*-dot(s.velocity,up);const double dt=std::clamp(t-fell_,0.,.5);
-        if(!falling_){falling_=true;fell_=t;check_=t;tilt_=std::asin(std::clamp(dot(s.toBody.r0,u),-1.,1.));const Vec x=s.toBody.r0+up*-dot(s.toBody.r0,up);nose_=norm(x)>.1?unit(x):unit(vh);way_=nose_;want_=tilt_;}
+        if(!falling_){falling_=true;fell_=t;check_=t;handoff_=norm(site_+front()+s.position*-1.+up*-dot(site_+front()+s.position*-1.,up));tilt_=std::asin(std::clamp(dot(s.toBody.r0,u),-1.,1.));const Vec x=s.toBody.r0+up*-dot(s.toBody.r0,up);nose_=norm(x)>.1?unit(x):unit(vh);way_=nose_;want_=tilt_;miss_=norm(flipped(s,nose_,tilt_,nose_,0).p);}
         fell_=t;calibrate(s);
-        if(t>=check_){check_=t+1;double best=1e300;Vec bw=way_;double bt=want_;
+        if(t>=check_){check_=t+.5;double best=1e300;Vec bw=way_;double bt=want_;
             auto rot=[&](Vec a,double g){return unit(a*std::cos(g)+cross(up,a)*std::sin(g));};
-            for(int k=0;k<12;++k)for(int m=-6;m<=6;++m){const Vec w=rot(nose_,k*30*deg);const auto f=flipped(s,nose_,tilt_,w,m*5*deg);if(const double e=flipCost(f.p,f.v);e<best){best=e;bw=w;bt=m*5*deg;}}
-            for(int k=-2;k<=2;++k)for(int m=-2;m<=2;++m){const Vec w=rot(bw,k*10*deg);const double th=std::clamp(bt+m*2.5*deg,-30*deg,30*deg);const auto f=flipped(s,nose_,tilt_,w,th);if(const double e=flipCost(f.p,f.v);e<best){best=e;bw=w;bt=th;}}
+            for(int k=0;k<24;++k)for(int m=-6;m<=6;++m){const Vec w=rot(nose_,k*15*deg);const auto f=flipped(s,nose_,tilt_,w,m*5*deg);if(const double e=flipCost(f.p,f.v);e<best){best=e;bw=w;bt=m*5*deg;}}
+            {const auto f=flipped(s,nose_,tilt_,way_,want_);if(const double e=flipCost(f.p,f.v);e<best){best=e;bw=way_;bt=want_;}} // What it was flying, against them.
+            for(int k=-3;k<=3;++k)for(int m=-3;m<=3;++m){const Vec w=rot(bw,k*5*deg);const double th=std::clamp(bt+m*1.25*deg,-30*deg,30*deg);const auto f=flipped(s,nose_,tilt_,w,th);if(const double e=flipCost(f.p,f.v);e<best){best=e;bw=w;bt=th;}}
             way_=bw;want_=bt;const auto f=flipped(s,nose_,tilt_,way_,want_);const Vec ahead=norm(vh)>1?unit(vh):nose_;along_=dot(f.p,ahead);cross_=dot(f.p,cross(ahead,up));
             if(std::getenv("ALBERT_FALL")){const Vec east=cross(north_,up_),rel=s.position+site_*-1.+front()*-1.;std::printf("FALL %.0f at %.0f %.0f v %.1f %.1f nose %.0f way %.0f tilt %.1f want %.1f -> p %.0f %.0f v %.1f %.1f cost %.2f\n",t,dot(rel,east),dot(rel,north_),dot(vh,east),dot(vh,north_),
                 std::atan2(dot(nose_,east),dot(nose_,north_))/deg,std::atan2(dot(way_,east),dot(way_,north_))/deg,tilt_/deg,want_/deg,dot(f.p,east),dot(f.p,north_),dot(f.v,east),dot(f.v,north_),best);}}
@@ -348,7 +356,7 @@ private:
         along_=a.along;cross_=a.cross;
     }
     Phase phase_=Phase::orbit;double held_=0,drag_=1,lift_=1,flaps_=1.8,next_=.02,check_=0,pulse_=0,along_=0,cross_=0,bank_=0,v0_=0,caught_=0,seen_=0;int sign_=1;bool off_=false;
-    bool catch_=true,hurry_=false,escape_=false,vented_=false,falling_=false;Vec nose_,way_;double fell_=0,tilt_=0,want_=0;
+    bool catch_=true,hurry_=false,escape_=false,vented_=false,falling_=false,heldOver_=false;double heldAt_=0;Vec nose_,way_;double fell_=0,tilt_=0,want_=0,handoff_=-1,miss_=-1;
 public:
     bool ventOn=false; // Venting the main tanks down to the headers (off: its entry's range prediction is not yet calibrated for so light a ship).
 private:const char* why_=nullptr;const char* threat_=nullptr;Vec aim_;double kept_=0; // kept_: the height a divert holds.
