@@ -18,6 +18,14 @@ void closest(V3 p0,V3 p1,V3 q0,V3 q1,double& s,double& t){
 }
 struct Mass {double m,cg;V3 inertia;};
 Mass mass(const Stage& st,double propellant){
+    // Header tanks: the last `header` kg there, the main tanks dry (a point mass on the axis at headerAt); above it, from that
+    // state to full as the main tanks fill.
+    if(st.header>0&&st.header<st.propellant){
+        auto headed=[&](double p){const double m=st.massEmpty+p,c=(st.massEmpty*st.cgEmpty+p*st.headerAt)/m,de=st.cgEmpty-c,dh=st.headerAt-c,add=st.massEmpty*de*de+p*dh*dh;
+            return Mass{m,c,V3{st.inertiaEmpty.x,st.inertiaEmpty.y+add,st.inertiaEmpty.z+add}};};
+        if(propellant<=st.header)return headed(std::max(propellant,0.));
+        const Mass h=headed(st.header);const double f=std::clamp((propellant-st.header)/(st.propellant-st.header),0.,1.);
+        return{h.m+(st.massFull-h.m)*f,h.cg+(st.cgFull-h.cg)*f,h.inertia+(st.inertiaFull-h.inertia)*f};}
     const double f=st.propellant>0?std::clamp(propellant/st.propellant,0.,1.):0.;
     return{st.massEmpty+(st.massFull-st.massEmpty)*f,st.cgEmpty+(st.cgFull-st.cgEmpty)*f,st.inertiaEmpty+(st.inertiaFull-st.inertiaEmpty)*f};
 }
@@ -357,7 +365,9 @@ void Flight::integrate(Tt h){
     s_.propellant=std::max(0.,s_.propellant+(k1.m+2*k2.m+2*k3.m+k4.m)*w);s_.heatLoad+=(k1.heat+2*k2.heat+2*k3.heat+k4.heat)*w;s_.time=t0+h;
     s_.gas=std::max(0.,s_.gas+(k1.gas+2*k2.gas+2*k3.gas+k4.gas)*w);boil(dt);
 }
-void Flight::boil(double seconds){ // Cryogens boiling off the tanks, vented: a share of what is left a day.
+void Flight::vent(double rate){if(!(rate>=0&&rate<1e6))throw std::invalid_argument("Invalid vent rate");vent_=rate;}
+void Flight::boil(double seconds){ // Cryogens boiling off the tanks, vented: a share of what is left a day; and the main tanks vented as asked.
+    if(const Stage& st=vehicle_.stages[static_cast<std::size_t>(s_.stage)];vent_>0){const double floor=std::max(st.residual,st.header);if(s_.propellant>floor)s_.propellant=std::max(floor,s_.propellant-vent_*seconds);}
     if(const double b=vehicle_.stages[static_cast<std::size_t>(s_.stage)].boiloff;b>0)s_.propellant*=std::exp(-b*seconds/86400);
 }
 Tt Flight::advance(Tt dt){
@@ -625,6 +635,7 @@ void Flight::valves(){
         const double since=secondsSinceJ2000(s_.time-until_[i])+p;credit_[i]=credit_[i]*std::exp(-since/(10*p))+duty_[i]*p;
         if(std::abs(credit_[i])<1e-9)credit_[i]=0;open_[i]=credit_[i]>=p/2;if(open_[i])credit_[i]-=p;until_[i]=s_.time+static_cast<Tt>(p*1e9);}
 }
+double Flight::centreOfMass()const{return mass(vehicle_.stages[s_.stage],s_.propellant).cg;}
 void Flight::shut(){std::fill(duty_.begin(),duty_.end(),0.);std::fill(open_.begin(),open_.end(),0);std::fill(credit_.begin(),credit_.end(),0.);}
 std::vector<double> Flight::firing()const{std::vector<double> u(duty_.size());for(std::size_t i=0;i<u.size();++i)u[i]=this->jet(i);return u;}
 void Flight::torque(V3 t){
@@ -643,7 +654,7 @@ std::uint64_t Flight::hash()const{
     {const int why=static_cast<int>(broken_);mix(&why,sizeof why);mix(&brokenAt_,sizeof brokenAt_);mix(&brokenSpeed_,sizeof brokenSpeed_);mix(&s_.gas,sizeof s_.gas);}
     for(const auto& f:surfaces_){mix(&f.deflection,8);mix(&f.target,8);const int k=f.stuck;mix(&k,sizeof k);}for(double u:duty_)mix(&u,8);for(std::size_t i=0;i<open_.size();++i){mix(&credit_[i],8);mix(&until_[i],sizeof until_[i]);const int o=open_[i];mix(&o,sizeof o);}
     {const V3 g=turbulence_.gust();const double t[]{g.x,g.y,g.z,gustNed_.x,gustNed_.y,gustNed_.z,wind_.x,wind_.y,wind_.z,push_.x,push_.y,push_.z};mix(t,sizeof t);}for(double t:temperatures_)mix(&t,8);for(const auto& w:wheels_){mix(&w.brake,8);mix(&w.steer,8);}
-    for(const auto& e:engines_)mix(&e.spool,8);
+    for(const auto& e:engines_)mix(&e.spool,8);mix(&vent_,8);
     return h;
 }
 }

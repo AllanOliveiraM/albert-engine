@@ -124,16 +124,20 @@ struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32 };
     albert::gpu::define("albert:plume",plume);
     // vehicle.cpp: the shock layer's glow around a vehicle entering the air (a shell offset to its windward side): faint where
     // looked through face-on, brightest at its rim, the core colour face-on; strength from the heating.
-    Program plasma;plasma.attributes=surfaceAttributes;plasma.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32}};
+    Program plasma;plasma.attributes=surfaceAttributes;plasma.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32},{"upwind",Uniform::vec3}};
     plasma.wgsl=std::string(surface)+R"(
-struct Material { core: vec3f, edge: vec3f, strength: f32 };
+struct Material { core: vec3f, edge: vec3f, strength: f32, upwind: vec3f };
 @group(2) @binding(0) var<uniform> material: Material;
+// The shock layer: bright where it faces the air (the bow shock over the windward side, limb-brightened), a faint wake behind,
+// nothing at the sides: no outline of a shell.
 @fragment fn fs_main(v: Surface) -> @location(0) vec4f {
-    let mu = abs(dot(normalize(v.worldNormal), normalize(frame.camera.xyz - v.world)));
-    let rim = pow(1.0 - mu, 2.2);
-    let glow = 0.15 * mu + rim;
-    let colour = mix(material.edge, material.core, mu);
-    return vec4f(linearToSrgb(colour * airFilter(v.world)), glow * material.strength);
+    let n = normalize(v.worldNormal);
+    let facing = dot(n, normalize(material.upwind));
+    let mu = abs(dot(n, normalize(frame.camera.xyz - v.world)));
+    let shock = pow(max(facing, 0.0), 1.6) * (0.35 + 0.65 * (1.0 - mu));
+    let wake = 0.25 * pow(max(-facing, 0.0), 3.0) * (1.0 - mu);
+    let colour = mix(material.edge, material.core, clamp(facing, 0.0, 1.0));
+    return vec4f(linearToSrgb(colour * airFilter(v.world)), (shock + wake) * material.strength);
 }
 )";
     albert::gpu::define("albert:plasma",plasma);

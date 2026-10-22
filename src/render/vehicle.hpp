@@ -6,6 +6,7 @@
 // vehicle has broken up, a fireball, smoke and debris thrown out instead, by the seconds since.
 #include "core/scene.hpp"
 #include "threepp/threepp.hpp"
+#include "threepp/materials/ShaderMaterial.hpp"
 #include <memory>
 #include <vector>
 namespace albert {
@@ -23,7 +24,7 @@ private:
     double length_=1;std::shared_ptr<threepp::Mesh> fire_,smoke_;std::vector<Piece> pieces_; // The breakup's, made when it comes.
     void explode(float seconds);
     struct Frost {std::shared_ptr<threepp::Mesh> mesh;core::LookTank tank;};
-    std::shared_ptr<threepp::Mesh> plasma_,vapour_;std::vector<Frost> frost_;
+    std::shared_ptr<threepp::Mesh> plasma_,vapour_;std::vector<Frost> frost_;std::vector<std::shared_ptr<threepp::ShaderMaterial>> tiles_; // tiles_: the heat shield's, glowing with its heat.
     void shine(float heating,float fill); // The shock layer's glow by the heat flux (W/m²); the tanks' frost by their fill.
 };
 }

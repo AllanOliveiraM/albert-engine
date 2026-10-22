@@ -81,7 +81,8 @@ ph::Vehicle vehicleFrom(const api::VehicleDefinition& d){
         }
         if(sd.engines_size()>64||sd.legs_meters_size()>32||sd.surfaces_size()>32||sd.thrusters_size()>64||sd.thermal_nodes_size()>256||sd.wheels_size()>32||sd.hard_points_meters_size()>32)throw std::invalid_argument("At most 64 engines, 32 legs, 32 surfaces, 64 thrusters, 256 thermal nodes, 32 wheels and 32 hard points a stage");
         ph::Stage st;st.name=sd.name().substr(0,128);st.propellant=sd.propellant_kilograms();st.massFull=sd.mass_full_kilograms();st.massEmpty=sd.mass_empty_kilograms();
-        st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
+        st.cgFull=sd.cg_full_meters();st.cgEmpty=sd.cg_empty_meters();st.header=sd.header_kilograms();st.headerAt=sd.header_meters();
+        if(!(st.header>=0&&std::isfinite(st.header)&&std::isfinite(st.headerAt)))throw std::invalid_argument("Invalid header tanks: "+sd.name());st.inertiaFull=get(sd.inertia_full_kilogram_meters2());st.inertiaEmpty=get(sd.inertia_empty_kilogram_meters2());
         st.length=sd.length_meters();st.reference=sd.aerodynamic_reference_meters();st.noseRadius=sd.has_nose_radius_meters()?sd.nose_radius_meters():1.;
         st.boiloff=sd.boiloff_per_day();st.residual=sd.residual_kilograms();st.gas=sd.has_thruster_gas_kilograms()?sd.thruster_gas_kilograms():0.;
         st.legStiffness=sd.leg_stiffness_newtons_per_meter();st.legDamping=sd.leg_damping_newton_seconds_per_meter();st.friction=sd.has_friction()?sd.friction():.6;
@@ -126,7 +127,7 @@ void put(const ph::Vehicle& v,api::VehicleDefinition* o){
     if(v.crashSpeed>0)o->set_crash_speed_meters_per_second(v.crashSpeed);
     o->set_jet_damping(v.jetDamping);o->set_inertia_rate(v.inertiaRate);
     for(const auto& st:v.stages){auto* d=o->add_stages();
-        d->set_name(st.name);d->set_propellant_kilograms(st.propellant);d->set_mass_full_kilograms(st.massFull);d->set_mass_empty_kilograms(st.massEmpty);d->set_cg_full_meters(st.cgFull);d->set_cg_empty_meters(st.cgEmpty);
+        d->set_name(st.name);d->set_propellant_kilograms(st.propellant);d->set_mass_full_kilograms(st.massFull);d->set_mass_empty_kilograms(st.massEmpty);d->set_cg_full_meters(st.cgFull);d->set_cg_empty_meters(st.cgEmpty);d->set_header_kilograms(st.header);d->set_header_meters(st.headerAt);
         put(st.inertiaFull,d->mutable_inertia_full_kilogram_meters2());put(st.inertiaEmpty,d->mutable_inertia_empty_kilogram_meters2());d->set_length_meters(st.length);
         d->set_aerodynamic_reference_meters(st.reference);d->set_nose_radius_meters(st.noseRadius);d->set_boiloff_per_day(st.boiloff);d->set_residual_kilograms(st.residual);
         if(st.gas>0)d->set_thruster_gas_kilograms(st.gas);for(const auto& l:st.legs)put(l,d->add_legs_meters());
@@ -372,7 +373,7 @@ struct Slot {
     }
     core::Sample scene()const{ // Cylinder axis (local y) along body x, centred on the stack.
         const auto& s=flight->state();const auto& st=flight->vehicle().stages[s.stage];
-        const double f=st.propellant>0?s.propellant/st.propellant:0,cg=st.cgEmpty+(st.cgFull-st.cgEmpty)*f;
+        const double cg=flight->centreOfMass();
         const ph::Q q=s.attitude*ph::Q{std::sqrt(.5),0,0,-std::sqrt(.5)};const ph::PositionVelocity o=origin(s.time);
         const ph::V3 p=o.position+s.position+ph::matrix(s.attitude)*ph::V3{cg-st.length/2,0,0},v=o.velocity+s.velocity;
         core::Sample x{ph::utcFromTt(s.time),{p.x,p.y,p.z},{v.x,v.y,v.z},core::Quaternion{q.x,q.y,q.z,q.w},true};x.parts=parts();return x;
@@ -403,6 +404,7 @@ struct Slot {
         const ph::Sample x=flight->sample();p->push_back(static_cast<float>(x.air.pressure));p->push_back(static_cast<float>(x.heatFlux)); // Pa, W/m² (stagnation).
         p->push_back(static_cast<float>(st.propellant>0?flight->state().propellant/st.propellant:0.)); // The tanks' fill.
         p->push_back(static_cast<float>(std::cos(x.alpha)*std::cos(x.beta)<0?-x.mach:x.mach)); // Negative with the air coming from the tail (engines first).
+        p->push_back(static_cast<float>(x.alpha));p->push_back(static_cast<float>(x.beta)); // The air's way at the body (the shock layer drawn round it).
         p->push_back(flight->breakup()==ph::Flight::Breakup::none?-1.f:static_cast<float>(ph::secondsSinceJ2000(flight->state().time-flight->breakupTime()))); // Since breaking up (s).
         return p;
     }
@@ -551,7 +553,7 @@ struct Slot {
             case wire::fail:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e);break;
             case wire::failSilent:if(e<0)throw std::invalid_argument("Fail needs an engine");next.fail(e,true);break;
             case wire::stickGimbal:next.stick(e);break;case wire::stickSurface:next.stickSurface(e);break;
-            case wire::gust:next.gust({c.a,c.b,c.c});break;case wire::push:next.push({c.a,c.b,c.c});break;case wire::terminate:next.terminate();break;
+            case wire::gust:next.gust({c.a,c.b,c.c});break;case wire::push:next.push({c.a,c.b,c.c});break;case wire::terminate:next.terminate();break;case wire::vent:next.vent(c.a);break;
             case wire::sensor:{const int sensor=e&15,mode=(e>>4)&15,unit=(e>>8)&15;if(e<0||sensor>5||mode>5||unit>2||(unit>0&&sensor>1))throw std::invalid_argument("No such sensor fault");
                 lying.push_back({sensor,unit,Lie{mode,{c.a,c.b,c.c},{}}});break;}
             case wire::thruster:next.thruster(c.a,e);break;case wire::surface:next.surface(c.a,e);break;case wire::brake:next.brake(c.a,e);break;case wire::steer:next.steer(c.a,e);break;case wire::swing:next.swing(c.a,e);break;
@@ -931,6 +933,7 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
         case api::FlightCommand::kBrake:commands.push_back({wire::brake|e,c.brake()});break;
         case api::FlightCommand::kSteerRadians:commands.push_back({wire::steer|e,c.steer_radians()});break;
         case api::FlightCommand::kStructureRadians:commands.push_back({wire::swing|e,c.structure_radians()});break;
+        case api::FlightCommand::kVentKilogramsPerSecond:commands.push_back({wire::vent,c.vent_kilograms_per_second()});break;
         case api::FlightCommand::kSpawn:commands.push_back({wire::spawn|e,-1,static_cast<double>(j)});break; // b: the request's command, for its payload.
         default:if(!interference(c,commands,uplinks))return{grpc::StatusCode::INVALID_ARGUMENT,"Empty command"};
         }

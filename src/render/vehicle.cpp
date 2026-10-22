@@ -39,7 +39,7 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         const float tiles=static_cast<float>(std::clamp(s.tiles,0.,2*3.14159265358979));const bool skirt=!look.engines.empty()&&s.to>=base-.01;
         auto body=[&](float t,float b,float from,float arc,std::shared_ptr<Material> m){auto g=CylinderGeometry::create(t,b,height,48,1,skirt,from,arc);g->translate(0,y,0);root_->add(part(g,m));};
         if(tiles<2*pi)body(top,bottom,tiles/2,2*pi-tiles,assistedMaterial(Color(s.color),.85f,.32f,false,skirt));
-        if(tiles>0)body(top*1.004f,bottom*1.004f,-tiles/2,tiles,assistedMaterial(Color(0x161616),0.f,.85f,false,skirt));
+        if(tiles>0){auto tile=assistedMaterial(Color(0x161616),0.f,.85f,false,skirt);tiles_.push_back(tile);body(top*1.004f,bottom*1.004f,-tiles/2,tiles,tile);}
         if(skirt){auto g=CircleGeometry::create(bottom*.995f,64);g->rotateX(pi/2);g->translate(0,static_cast<float>(half-(base-bay)),0); // The shield, facing aft.
             root_->add(part(g,assistedMaterial(Color(0x26262a),.35f,.6f,false,true)));}
     }
@@ -78,7 +78,7 @@ Vehicle::Vehicle(const core::VehicleLook& look){
     { // The shock layer: an ellipsoid shell, a little longer than the vehicle and wider, set toward its belly (+z).
         const float r=static_cast<float>(look.diameter/2),l=static_cast<float>(look.length);auto g=SphereGeometry::create(1,48,24);
         g->scale(1.55f*r,.6f*l,1.55f*r);g->translate(0,0,.45f*r);auto m=ShaderMaterial::create();m->name="albert:plasma";m->transparent=true;m->depthWrite=false;
-        m->side=Side::Front;m->blending=Blending::Additive;m->uniforms={{"core",Uniform(Vector3(1,.62f,.82f))},{"edge",Uniform(Vector3(1,.32f,.12f))},{"strength",Uniform(0.f)}};
+        m->side=Side::Front;m->blending=Blending::Additive;m->uniforms={{"core",Uniform(Vector3(1,.62f,.82f))},{"edge",Uniform(Vector3(1,.32f,.12f))},{"strength",Uniform(0.f)},{"upwind",Uniform(Vector3(0,0,1))}};
         plasma_=Mesh::create(g,m);plasma_->visible=false;plasma_->renderOrder=11;root_->add(plasma_);}
     { // Frost on the tanks below their liquid: white and matte over the steel (not the tiles: the widest tiles' arc of the body).
         double tiles=0;for(const auto& sct:look.sections)tiles=std::max(tiles,std::clamp(sct.tiles,0.,2*3.14159265358979));const float arc=static_cast<float>(tiles);
@@ -109,15 +109,24 @@ void Vehicle::explode(float t){
 void Vehicle::shine(float heating,float fill){
     const float glow=std::pow(std::clamp((heating-4e4f)/6e5f,0.f,1.f),.8f)*1.3f;plasma_->visible=glow>.003f;
     plasma_->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(glow);
+    { // The tiles at their radiative equilibrium under 60% of the stagnation's flux (ε 0.85), glowing as a black body does: dull red
+      // from ~900 K, orange-yellow by 1900 K (Planck's colour by temperature, its brightness rising steeply with it).
+        const float t=std::pow(std::max(.6f*heating,0.f)/(.85f*5.670e-8f),.25f),h=t/100;
+        const Vector3 c(1.f,std::clamp((99.47f*std::log(std::max(h,1.f))-161.12f)/255.f,0.f,1.f),h<19?0.f:std::clamp((138.52f*std::log(h-10)-305.04f)/255.f,0.f,1.f));
+        const float bright=4*std::pow(std::clamp((t-900)/1000,0.f,1.f),2.f);
+        for(auto& m:tiles_)m->uniforms.at("emissive").setValue(Vector3(c.x*bright,c.y*bright,c.z*bright));}
     const float half=static_cast<float>(length_/2);
     for(auto& f:frost_){const double level=f.tank.full?1.:std::clamp(static_cast<double>(fill),0.,1.),top=f.tank.to-level*(f.tank.to-f.tank.from); // Liquid settles aft.
         f.mesh->visible=level>.005;f.mesh->position.y=static_cast<float>(half-top);f.mesh->scale.y=static_cast<float>(f.tank.to-top);}
 }
 void Vehicle::animate(const std::vector<float>* parts){
-    const std::size_t engines=engines_.size(),need=engines*3+jets_.size()+5;const std::size_t surfaces=parts&&parts->size()>=need?parts->size()-need:0;
+    const std::size_t engines=engines_.size(),need=engines*3+jets_.size()+7;const std::size_t surfaces=parts&&parts->size()>=need?parts->size()-need:0;
     auto at=[&](std::size_t i){return parts&&i<parts->size()?(*parts)[i]:0.f;};
-    if(parts&&parts->size()>=5&&parts->back()>=0){explode(parts->back());return;} // Broken up: its pieces.
-    auto tail=[&](std::size_t k,float fallback){return parts&&parts->size()>=5?(*parts)[parts->size()-5+k]:fallback;}; // Pressure, heat flux, fill, Mach.
+    if(parts&&parts->size()>=7&&parts->back()>=0){explode(parts->back());return;} // Broken up: its pieces.
+    auto tail=[&](std::size_t k,float fallback){return parts&&parts->size()>=7?(*parts)[parts->size()-7+k]:fallback;}; // Pressure, heat flux, fill, Mach, α, β.
+    { // The shock layer's bright side toward the air's way (the body's velocity through it: x along the nose as local y, y as -x, z as z).
+        const float al=tail(4,0),be=tail(5,0);Vector3 up(-std::sin(be),std::cos(al)*std::cos(be),std::sin(al)*std::cos(be));
+        up.transformDirection(*root_->matrixWorld);plasma_->material()->as<ShaderMaterial>()->uniforms.at("upwind").setValue(up);}
     const float pressure=tail(0,101325.f),thin=1-std::clamp(pressure/101325.f,0.f,1.f),heating=tail(1,0),fill=tail(2,0),mach=std::abs(tail(3,0)); // thin: 1 in vacuum.
     shine(heating,fill);
     { // Condensation round the body near Mach 1 in thick air: strongest at 1, gone by 0.88 and 1.2; flaring downstream (toward the

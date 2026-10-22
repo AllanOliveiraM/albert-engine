@@ -56,6 +56,7 @@ struct Wheel {std::string name;V3 position;double stiffness=0,damping=0,rolling=
 struct Stage {
     std::string name;
     double propellant=0,massFull=0,massEmpty=0,cgFull=0,cgEmpty=0,reference=0;
+    double header=0,headerAt=0; // Header tanks (kg) holding the last of the propellant, their centre (m aft of the nose).
     V3 inertiaFull,inertiaEmpty;                      // Principal moments about the CG (kg m²).
     std::vector<Engine> engines;                      // All drawing on the stage's propellant; empty: the one engine below.
     double thrust=0,exhaust=0,exitArea=0;             // Shorthand for one engine on the axis: vacuum N, effective exhaust m/s, exit m²,
@@ -182,6 +183,7 @@ public:
     void gust(V3 ned){wind_=ned;}
     void push(V3 ned){push_=ned;}
     void terminate();
+    void vent(double rate); // Main tanks vented at `rate` kg/s (0: shut) down to the header tanks' load (or the residuals).
     V3 gust()const{return wind_;}
     V3 push()const{return push_;}
     struct WheelState {double brake=0,steer=0;};
@@ -197,6 +199,7 @@ public:
     const std::vector<StructureState>& structures()const{return structures_;} // By Environment::structures (fixed ones at 0).
     const std::vector<double>& thrusters()const{return duty_;} // Duty cycles.
     std::vector<double> firing()const; // Each thruster's jet now: its valve (1 open, 0 shut) when it pulses, else its duty.
+    double centreOfMass()const; // m aft of the nose, as the propellant left places it.
     bool ready(std::size_t engine)const; // Engine `engine` (0-based) could be lit now: working, starts left, off long enough.
     const std::vector<double>& temperatures()const{return temperatures_;} // Thermal nodes (K), the stage's.
     // A breakup: why (none; the hull struck the ground or a structure; a thermal node past its failure), when and how fast the
@@ -234,7 +237,7 @@ private:
     double jet(std::size_t i)const{return vehicle_.stages[s_.stage].rcs[i].pulse>0?static_cast<double>(open_[i]):duty_[i];} // Thruster i's thrust share now.
     Vehicle vehicle_;Environment env_;State s_;std::vector<EngineState> engines_;std::vector<SurfaceState> surfaces_;std::vector<double> duty_,temperatures_,credit_;std::vector<char> open_;std::vector<Tt> until_;std::vector<WheelState> wheels_; // credit_: each valve's on-time owed (s); until_: its pulse's end.
     std::vector<StructureState> structures_;struct Segment {V3 a,b,pivot,spin;};std::vector<Segment> segments_; // Where the structures are now (spin: rad/s, body-fixed).
-    Tt step_=0,coast_=0;Increments increments_;
+    Tt step_=0,coast_=0;Increments increments_;double vent_=0; // vent_: kg/s.
     Breakup broken_=Breakup::none;Tt brokenAt_=0;double brokenSpeed_=0;
     void breakUp(Breakup why,double speed); // Engines out, thrusters off: what is left falls.
     void strike(); // The hull against the ground and the structures, after a step.

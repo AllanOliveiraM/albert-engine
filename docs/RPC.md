@@ -307,6 +307,7 @@ e a mesma sequência de comandos e passos reproduz o mesmo `state_hash`.
 | `fail` | O motor falha: apaga e não reacende (exige `engine`) |
 | `stick_gimbal`, `stick_surface` | O cardã do motor, ou a superfície, trava onde está: a posição informada é a real, o comando o que foi dado |
 | `torque_newton_meters` | Torque de atitude nos eixos do corpo: dos propulsores de RCS do estágio, se houver (ciclos alocados, consumo); senão ideal, limitado por eixo |
+| `vent_kilograms_per_second` | Venta os tanques principais a essa vazão (0: fecha), até a carga dos tanques de cabeçalho (`StageDefinition.header_kilograms`) ou os resíduos |
 | `thruster_duty` | Ciclo de trabalho (0–1) de um propulsor de RCS, até o próximo comando de torque. Com `min_pulse_seconds` (`ThrusterDefinition`), a válvula só abre ou fecha, em pulsos dessa duração, como num propulsor real: o modulador (PWPF) dá o ciclo pedido na média, jato contínuo em ciclo cheio, e nenhum pulso abaixo de ~5% (a zona morta que evita o vaivém, cada pulso desfazendo o anterior) |
 | `surface_radians` | Deflexão comandada de uma superfície de controle, limitada e alcançada na taxa do atuador |
 | `brake` | Freio das rodas (0–1) |
@@ -333,6 +334,13 @@ fazem nada e os pedaços caem até o chão. A cena mostra a bola de fogo, a fuma
 **Propelente como nos tanques.** `StageDefinition.boiloff_per_day` (a fração que evapora por dia), `residual_kilograms` (o
 que os motores não tiram), `thruster_gas_kilograms` (o gás próprio dos propulsores, na amostra
 `thruster_gas_kilograms`) e `EngineDefinition.start_kilograms` (o propelante de cada partida).
+
+**Motores, tanques e peças.** `EngineDefinition.relight_seconds` é o tempo que o motor fica desligado antes de poder religar, e
+`max_starts` o número máximo de partidas no voo; uma ignição para a qual ele não está pronto o deixa apagado, e
+`EngineSample.ready` diz ao software de voo quais podem acender agora. `StageDefinition.header_kilograms` e `header_meters`
+são os tanques de cabeçalho: o último propelante fica neles, à frente, e o centro de massa e a inércia acompanham. As peças
+articuladas (`HingedPart`) podem ser trapézios: `tip_span_meters`, `tip_shift_meters` e `tip_thickness_meters` dão a borda
+externa (mais curta, enflechada, mais fina), como os flaps.
 
 **Marcos da missão.** `StepRequest.milestones` dá ao voo eventos da missão (nome de até 40 caracteres, instante UTC ou o
 início do passo, previsto ou acontecido; o acontecido substitui o previsto do mesmo nome). A cena os mostra, com os de todos os

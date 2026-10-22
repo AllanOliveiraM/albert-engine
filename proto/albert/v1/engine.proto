@@ -248,6 +248,9 @@ message StageDefinition {
   // The propellant as cryogens and plumbing hold it: a share of what is left boiled off a day (vented, always); what the
   // engines cannot draw (residuals: they starve at it); the thrusters' own gas (unset: they burn the propellant).
   double boiloff_per_day=24; double residual_kilograms=25; optional double thruster_gas_kilograms=26;
+  // header_kilograms: header tanks (the landing's propellant) that hold the last of it, their centre header_meters aft of the
+  // nose: once the main tanks are dry what is left sits there (its centre of mass and inertia follow; 0: none).
+  double header_kilograms=27; double header_meters=28;
 }
 // How a stage looks in the scene only (the physics never reads it); positions in metres along the stage as its other parts.
 // Its body: frustums along x (a nose as several), each a colour (0xRRGGBB) and an arc of black tiles centred on +z (radians;
@@ -414,6 +417,7 @@ message FlightCommand {
     // An actuator jammed where it is from now on (its position reads true, its command as given): the engine's gimbal, the
     // surface.
     bool stick_gimbal=22; bool stick_surface=23;
+    double vent_kilograms_per_second=24; // The main tanks vented at that rate (0: shut), down to the header tanks' load or the residuals.
   }
   // ignite, cutoff, throttle, gimbal, fail, fail_silent and stick_gimbal: the engine; thruster_duty: the thruster; surface_radians, stick_surface: the surface; brake, steer: the wheel;
   // structure_radians: the structure. 0 for every one of the stage (the hinged structures), n for its n-th (the order of

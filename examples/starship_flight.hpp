@@ -112,6 +112,7 @@ inline void apply(api::StepRequest& q,const Command& c){ // A guidance command a
     for(int i:c.ignite){auto* k=q.add_commands();k->set_ignite(true);k->set_index(static_cast<unsigned>(i));}
     for(int i:c.cutoff){auto* k=q.add_commands();k->set_cutoff(true);k->set_index(static_cast<unsigned>(i));}
     if(c.throttle>=0)q.add_commands()->set_throttle(c.throttle);
+    if(c.vent>=0)q.add_commands()->set_vent_kilograms_per_second(c.vent);
     auto* g=q.add_commands()->mutable_gimbal();g->set_pitch_radians(c.gimbalPitch);g->set_yaw_radians(c.gimbalYaw);
     for(const auto& e:c.gimbals){auto* k=q.add_commands();k->set_index(static_cast<unsigned>(e.engine));k->mutable_gimbal()->set_pitch_radians(e.pitch);k->mutable_gimbal()->set_yaw_radians(e.yaw);}
     for(std::size_t i=0;i<c.surfaces.size();++i){auto* k=q.add_commands();k->set_surface_radians(c.surfaces[i]);k->set_index(static_cast<unsigned>(i+1));}
@@ -242,7 +243,9 @@ inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pac
             std::printf("Nave capturada aos %.1f s; 30 s depois, nos braços: %.2f m do eixo da torre, %.3f m/s, %.0f t de propelante; ladrilho mais quente %.0f K, %d alertas de calor.\n",
                 out.caught,out.offAxis,out.speed,out.propellant/1e3,out.maxTile,out.overheats);return out;}
         if(now>4*86400)throw std::runtime_error("A nave não voltou em 4 dias");
-        const auto p=back.phase();pace(ship.elapsed_seconds(),p==ShipReturn::Phase::orbit?warp:p==ShipReturn::Phase::glide&&ship.geodetic().height_meters()>140e3?std::min(warp,60.):p==ShipReturn::Phase::orient?5:1);
+        // The way down quickened up to a little before the flip (the glide and the entry down to 3 km), real time from there.
+        const auto p=back.phase();const double h=ship.geodetic().height_meters();
+        pace(ship.elapsed_seconds(),p==ShipReturn::Phase::orbit?warp:p==ShipReturn::Phase::glide?std::min(warp,60.):p==ShipReturn::Phase::entry&&h>3e3?20:p==ShipReturn::Phase::orient?5:1);
     }
 }
 // The flight from Starbase:

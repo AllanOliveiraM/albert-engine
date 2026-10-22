@@ -16,7 +16,7 @@ class ShipReturn:public TowerApproach {
 public:
     enum class Phase {orbit,orient,deorbit,glide,entry,flip,landing,hover,descend,caught,divert,down};
     ShipReturn(Vec site,double latitude,double longitude,double arms,double rest)
-        :TowerApproach(site,latitude,longitude,arms,rest,shipLength,shipPinAt,combine(ship(true)),combine(ship(false)),shipPropellant){}
+        :TowerApproach(site,latitude,longitude,arms,rest,shipLength,shipPinAt,combine(ship(true)),combine(ship(false)),shipPropellant){header_=shipHeader;headerAt_=shipHeaderAt;}
     Phase phase()const{return phase_;}
     double nextStep()const{return next_;} // How far (s) the client may step next: long in orbit, 20 ms otherwise.
     double along()const{return along_;} // The latest predicted landing past the tower (m).
@@ -59,20 +59,22 @@ public:
             // 2000 km: a burn barely begun can come down a lap or more later, as far short).
             aim(c,s,unit(inertial(s)*-1));{const Arrival a=arrive(s.position,s.velocity,s.mass,50*deg);along_=a.along;cross_=a.cross;
                 burn_.keep(c,s);if((a.down&&a.along<=0&&a.along>-2e6)||v0_-norm(inertial(s))>=2*deorbit){burn_.use(c,s,0);phase_=Phase::glide;}}break;
-        case Phase::glide: // Torque-free down to 140 km, then belly-first at the entry attitude on the RCS.
+        case Phase::glide: // Torque-free down to 140 km, then belly-first at the entry attitude on the RCS; the main tanks vented
+            // meanwhile down to the header tanks' load (what the landing takes, forward: the centre of mass the flaps are trimmed for).
+            if(!vented_&&ventOn){c.vent=500;vented_=true;}
             if(height>140e3){c.torqueOn=true;c.torque={};next_=std::min(10.,(height-140e3)/std::max(-dot(s.velocity,unit(s.position)),1.));}
             else attitude(c,s,alpha(norm(s.velocity),height),0);
             if(height<100e3){phase_=Phase::entry;sign_=cross_>0?-1:1;check_=t;held_=0;}
             break;
         case Phase::entry:{ // Bank by a predictor: |σ| for the range, its side toward the tower within a corridor.
             const double speed=norm(s.velocity);double al=alpha(speed,height);
-            if(speed>300){if(t>=check_){check_=t+1;guide(s);}}else al=glide(s,height);
+            if(speed<=300)al=glide(s,height);if(t>=check_){check_=t+1;guide(s);} // Guided all the way down to the flip, the belly flop too.
             held_+=std::clamp(bank_-held_,-4*deg*.02,4*deg*.02);attitude(c,s,al,held_); // The bank at most 4°/s.
             if(speed<150&&height<flipHeight(s)){phase_=Phase::flip;set_.use(c,s,3);c.throttle=.5;} // On its height alone: falling belly-first is never the way down.
             break;}
         case Phase::flip: // Nose up onto the engines: the forward flaps open, the aft ones folded, the gimbals.
             set_.keep(c,s);aim(c,s,up_,set_.centre());c.surfaces={45*deg,45*deg,-45*deg,-45*deg};c.throttle=.5;
-            if(dot(bodyX(s),up_)>std::cos(25*deg)){phase_=Phase::landing;if(range(s)>3e3)giveUp(s,"pouso previsto fora do alcance da torre");} // Too far for the burn to bring it in.
+            if(dot(bodyX(s),up_)>std::cos(25*deg)){phase_=Phase::landing;if(range(s)>1e3)giveUp(s,"pouso previsto fora do alcance da torre");} // Farther than a short way across brings it in: away from the tower (its belly flop not yet steered to tens of metres).
             break;
         case Phase::landing:{ // To rest at the hover point on 3 engines (the fewest that carry it at 85%, of those lit), across onto the
             // axis, the observer's push netted.
@@ -248,9 +250,15 @@ private:
     void guide(const State& s){
         calibrate(s);
         // The bank's side: away from where the landing falls beside the tower, kept until that passes a corridor narrowing with
-        // the range; within 15 km, toward the tower; short of it even unbanked, gently toward it.
-        const double distance=range(s),corridor=3e3+.03*distance;Arrival a=arrive(s.position,s.velocity,s.mass,0);
-        if(distance<15e3)sign_=heading(s)>0?1:-1;else if(sign_*a.cross>corridor)sign_=-sign_;
+        // the range (to 300 m); within 15 km, the bank (every 10°, then 2°) that brings where it comes down nearest the tower
+        // both ways (the belly flop's body lift turned across: the real ship's way onto the tower, not a walk across on its
+        // engines after the flip); short of it even unbanked, gently toward it.
+        const double distance=range(s),corridor=300+.03*distance;Arrival a=arrive(s.position,s.velocity,s.mass,0);
+        if(distance<15e3){auto miss=[&](double b){const Arrival q=arrive(s.position,s.velocity,s.mass,b);return q.along*q.along+q.cross*q.cross;};
+            double best=1e300,b=0;for(int i=-12;i<=12;++i)if(const double m=miss(i*10*deg);m<best){best=m;b=i*10*deg;}
+            for(int i=-4;i<=4;++i)if(const double m=miss(b+i*2*deg);m<best){best=m;b+=i*2*deg;i=-5;} // Refined about the best.
+            bank_=b;a=arrive(s.position,s.velocity,s.mass,b);along_=a.along;cross_=a.cross;return;}
+        if(sign_*a.cross>corridor)sign_=-sign_;
         if(a.along<=0)bank_=std::clamp(2*heading(s),-30*deg,30*deg); // Short even with all the lift up: turned toward the tower (the shortest way left).
         else{double lo=0,hi=120*deg;a=arrive(s.position,s.velocity,s.mass,sign_*hi);
             if(a.along>=0)bank_=sign_*hi;
@@ -258,7 +266,10 @@ private:
         along_=a.along;cross_=a.cross;
     }
     Phase phase_=Phase::orbit;double held_=0,drag_=1,lift_=1,flaps_=1.8,next_=.02,check_=0,pulse_=0,along_=0,cross_=0,bank_=0,v0_=0,caught_=0,seen_=0;int sign_=1;bool off_=false;
-    bool catch_=true,hurry_=false,escape_=false;const char* why_=nullptr;const char* threat_=nullptr;Vec aim_;double kept_=0; // kept_: the height a divert holds.
+    bool catch_=true,hurry_=false,escape_=false,vented_=false;
+public:
+    bool ventOn=false; // Venting the main tanks down to the headers (off: its entry's range prediction is not yet calibrated for so light a ship).
+private:const char* why_=nullptr;const char* threat_=nullptr;Vec aim_;double kept_=0; // kept_: the height a divert holds.
     // The landing's engines: the sea-level Raptors; the deorbit burn's: those, then the vacuum ones (in vacuum either will do).
     Engines set_{{1,2,3},shipNozzle,3},burn_{{1,2,3,4,5,6},shipNozzle};
 };

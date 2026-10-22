@@ -94,15 +94,23 @@ inline void mass(api::StageDefinition* st,const MassProperties& full,const MassP
 // areas, 10 kN thrusters, 25 mm tiles (1700 K) and 4 mm steel (1100 K).
 struct Flap {const char* name;double x,y,area;};
 constexpr Flap flaps[]{{"flap forward left",8,-radius,25},{"flap forward right",8,radius,25},{"flap aft left",46,-radius,50},{"flap aft right",46,radius,50}};
-constexpr double flapCn=1.2,shipPinAt=12,rcsPulse=.1; // rcsPulse: each RCS valve's shortest opening (s): its jets fire in whole pulses.
+// shipHeader: the ship's header tanks (the landing's propellant: LOX in the nose, methane in the LOX tank), their centre
+// shipHeaderAt m aft of its nose.
+constexpr double flapCn=1.2,shipPinAt=12,rcsPulse=.1,shipHeader=50e3,shipHeaderAt=20; // rcsPulse: each RCS valve's shortest opening (s): its jets fire in whole pulses.
 inline void shipSystems(api::StageDefinition* s){
     const double area=pi*radius*radius;s->set_thruster_gas_kilograms(6e3); // Its RCS on the tanks' gas (an estimate).
-    for(const auto& f:flaps){auto* x=s->add_surfaces();x->set_name(f.name);x->set_limit_radians(45*deg);x->set_rate_radians_per_second(30*deg);put(x->mutable_position_meters(),f.x,f.y,0);
+    for(const auto& f:flaps){auto* x=s->add_surfaces();x->set_name(f.name);x->set_limit_radians(45*deg);x->set_rate_radians_per_second(20*deg);put(x->mutable_position_meters(),f.x,f.y,0); // 20°/s: an estimate for actuators this size.
         auto* t=x->mutable_drag();t->add_mach(0);for(int a=-180;a<=180;a+=15)t->add_angle_degrees(a);for(int d=-45;d<=45;d+=15)t->add_deflection_degrees(d);
         for(int a=-180;a<=180;a+=15)for(int d=-45;d<=45;d+=15)t->add_values(flapCn*f.area/area*std::sin((45+d)*deg)*std::abs(std::sin(a*deg)));}
-    for(const double x:{4.,46.})for(const double side:{-1.,1.})for(const double push:{-1.,1.}){
-        auto* a=s->add_thrusters();a->set_name("rcs y");put(a->mutable_position_meters(),x,side*radius,0);put(a->mutable_direction(),0,0,push);a->set_thrust_newtons(1e4);a->set_exhaust_velocity_meters_per_second(700);a->set_min_pulse_seconds(rcsPulse);
-        auto* b=s->add_thrusters();b->set_name("rcs z");put(b->mutable_position_meters(),x,0,side*radius);put(b->mutable_direction(),0,push,0);b->set_thrust_newtons(1e4);b->set_exhaust_velocity_meters_per_second(700);b->set_min_pulse_seconds(rcsPulse);}
+    // The RCS in two groups, by the forward flaps and by the aft ones, never on the heat shield (+z): on each side jets along
+    // ±z (pitch, and roll in opposed pairs) and one inward (yaw); on the steel side (-z) jets along ±y (yaw, roll) and one
+    // toward the shield (pitch: down in the belly flop).
+    for(const double x:{9.,44.}){const double r=x<11?radius*.93:radius;
+        for(const double side:{-1.,1.}){
+            for(const double push:{-1.,1.}){auto* a=s->add_thrusters();a->set_name("rcs side");put(a->mutable_position_meters(),x,side*r,0);put(a->mutable_direction(),0,0,push);a->set_thrust_newtons(1e4);a->set_exhaust_velocity_meters_per_second(700);a->set_min_pulse_seconds(rcsPulse);}
+            auto* b=s->add_thrusters();b->set_name("rcs side in");put(b->mutable_position_meters(),x,side*r,0);put(b->mutable_direction(),0,-side,0);b->set_thrust_newtons(1e4);b->set_exhaust_velocity_meters_per_second(700);b->set_min_pulse_seconds(rcsPulse);
+            auto* c=s->add_thrusters();c->set_name("rcs lee");put(c->mutable_position_meters(),x,0,-r);put(c->mutable_direction(),0,side,0);c->set_thrust_newtons(1e4);c->set_exhaust_velocity_meters_per_second(700);c->set_min_pulse_seconds(rcsPulse);}
+        auto* d=s->add_thrusters();d->set_name("rcs lee in");put(d->mutable_position_meters(),x,0,-r);put(d->mutable_direction(),0,0,1);d->set_thrust_newtons(1e4);d->set_exhaust_velocity_meters_per_second(700);d->set_min_pulse_seconds(rcsPulse);}
     for(int i=0;i<6;++i){auto* n=s->add_thermal_nodes();n->set_name("tile "+std::to_string(i+1));put(n->mutable_position_meters(),4+8*i,0,radius);put(n->mutable_normal(),0,0,1);
         n->set_area_meters2(1);n->set_heat_capacity_joules_per_kelvin(6e3);n->set_emissivity(.85);n->set_absorptivity(.85);n->set_conductance_watts_per_kelvin(1);n->set_limit_kelvin(1700);
         n->set_failure_kelvin(1950);} // Silica tiles past ~1950 K: the steel under them goes, and the ship with it.
@@ -137,7 +145,13 @@ inline void shipLook(api::StageAppearance* a,double at,bool moving){
     for(const double side:{-1.,1.}){ // Forward flaps on the nose, aft ones by the engines; the left one turns the other way.
         const unsigned fwd=side<0?1:2,aft=side<0?3:4;const double g=moving?side:0,o=moving?-side*45*deg:0.; // Still: straight out (deflection +45°, square to the hull); folded: up to -z.
         // Trapezoids thinning out, their leading edges swept back to a shorter tip, the trailing edges square to the body.
-        hinged(a,side<0?"flap forward left":"flap forward right",{at+8,side*r(8),0},{1,0,0},{0,side,0},7,3.4,.35,moving?fwd:0,g,o,steel,false,2.6,2.2,.15);
+        // The forward pair on the nose's ogive: their hinges along its surface (its radius 3.1 m at their front to 4.5 m at their
+        // back: 11° in from the axis), turned 20° about the axis toward the lee (V3's: a V seen from the front), each under a fixed
+        // fairing along its root over the hinges and actuators.
+        {const double x0=4.5,x1=11.5,dr=r(x1)-r(x0),len=std::hypot(x1-x0,dr),lee=20*deg,cy=std::cos(lee),sz=std::sin(lee),rm=(r(x0)+r(x1))/2;
+            const Vec axis{(x1-x0)/len,side*cy*dr/len,-sz*dr/len},out{0,side*cy,-sz},hinge{at+(x0+x1)/2,side*cy*rm,-sz*rm};
+            hinged(a,side<0?"flap forward left":"flap forward right",hinge,axis,out,7,3.4,.35,moving?fwd:0,g,o,steel,false,2.6,2.2,.15);
+            hinged(a,"flap fairing",hinge+out*-.2,axis,out,7.4,.55,.75,0,0,0,steel,false,6.4,0,.45);}
         hinged(a,side<0?"flap aft left":"flap aft right",{at+44.5,side*radius,0},{1,0,0},{0,side,0},10,5,.4,moving?aft:0,g,o,steel,false,5.5,2.25,.18);
         hinged(a,"pin",{at+shipPinAt,side*radius,0},{0,side,0},{1,0,0},pinOut-radius,1,1,0,0,0,vents);
         hinged(a,"chine",{at+27.5,side*radius,0},{1,0,0},{0,side,0},33,.5,.25,0,0,0,steel);} // Along its sides, tiles to steel.
@@ -157,7 +171,7 @@ inline api::VehicleDefinition stack(){
     auto parts=[](bool boosterFull){auto p=ship(true);for(auto x:booster(boosterFull)){x.from+=shipLength;x.to+=shipLength;p.push_back(x);}return p;};
     auto* s0=v.add_stages();cryogens(s0,20e3);s0->set_name("Super Heavy");mass(s0,combine(parts(true)),combine(parts(false)),boosterPropellant,shipLength+boosterLength);
     raptors(s0,shipLength+boosterLength,true);aerodynamics(s0,shipLength+boosterLength);shipLook(s0->mutable_appearance(),0,false);boosterLook(s0->mutable_appearance(),shipLength,false);
-    auto* s1=v.add_stages();cryogens(s1,8e3);s1->set_name("Starship");mass(s1,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s1,shipLength,false);aerodynamics(s1,shipLength);shipSystems(s1);shipLook(s1->mutable_appearance(),0,true);
+    auto* s1=v.add_stages();cryogens(s1,8e3);s1->set_name("Starship");s1->set_header_kilograms(shipHeader);s1->set_header_meters(shipHeaderAt);mass(s1,combine(ship(true)),combine(ship(false)),shipPropellant,shipLength);raptors(s1,shipLength,false);aerodynamics(s1,shipLength);shipSystems(s1);shipLook(s1->mutable_appearance(),0,true);
     return v;
 }
 inline api::VehicleDefinition shipAlone(){
@@ -203,7 +217,7 @@ inline Mat bodyToNed(double w,double x,double y,double z){ // Rows of the body-t
 struct State {Vec position,velocity,rate,contact,specific,thrustBody;Mat toBody;double mass=0,propellant=0,thrust=0,height=0,q=0,navSigma=0;std::vector<double> surfaces;std::vector<bool> failed;};
 // surfaces: deflections (rad) by surface, in the stage's order; none sent when empty.
 // gimbals: engines given their own deflection (rad) past the common one, after it (a roll by differential gimbal).
-struct Command {std::vector<int> ignite,cutoff;double throttle=-1,gimbalPitch=0,gimbalYaw=0;std::vector<double> surfaces;Vec torque;bool torqueOn=false;
+struct Command {std::vector<int> ignite,cutoff;double throttle=-1,gimbalPitch=0,gimbalYaw=0,vent=-1;std::vector<double> surfaces;Vec torque;bool torqueOn=false; // vent: kg/s (negative: unchanged).
     struct Gimbal {int engine;double pitch,yaw;};std::vector<Gimbal> gimbals;};
 // Where an engine's nozzle sits off the axis (body y, z; m), by its number (1-based), as raptors() lays them out.
 inline Vec boosterNozzle(int i){const double r=i<=3?.75:i<=13?2.2:3.9,a=(i<=3?(i-1)*120.:i<=13?(i-4)*36.:(i-14)*18+9.)*deg;return{0,r*std::cos(a),r*std::sin(a)};}
@@ -408,9 +422,18 @@ protected:
         return up_*up+side*(std::min(want,up*std::tan(a))/want);
     }
     double share(double p)const{return std::clamp(p/propellant_,0.,1.);}
-    double cg(double p)const{return empty_.cg+(full_.cg-empty_.cg)*share(p);}
-    double pitchInertia(double p)const{return empty_.iy+(full_.iy-empty_.iy)*share(p);}
-    double rollInertia(double p)const{return empty_.ix+(full_.ix-empty_.ix)*share(p);}
+    // Its mass properties with p kg left, as the physics places it: header tanks (header_ kg at headerAt_) hold the last of it.
+    MassProperties massAt(double p)const{
+        auto blend=[](const MassProperties& a,const MassProperties& b,double f){return MassProperties{a.mass+(b.mass-a.mass)*f,a.cg+(b.cg-a.cg)*f,a.ix+(b.ix-a.ix)*f,a.iy+(b.iy-a.iy)*f};};
+        if(header_>0&&header_<propellant_){
+            auto headed=[&](double q){const double m=empty_.mass+q,c=(empty_.mass*empty_.cg+q*headerAt_)/m,de=empty_.cg-c,dh=headerAt_-c;return MassProperties{m,c,empty_.ix,empty_.iy+empty_.mass*de*de+q*dh*dh};};
+            return p<=header_?headed(std::max(p,0.)):blend(headed(header_),full_,std::clamp((p-header_)/(propellant_-header_),0.,1.));}
+        return blend(empty_,full_,share(p));
+    }
+    double cg(double p)const{return massAt(p).cg;}
+    double pitchInertia(double p)const{return massAt(p).iy;}
+    double rollInertia(double p)const{return massAt(p).ix;}
+    double header_=0,headerAt_=0; // Header tanks (kg) and their centre (m aft of the nose).
     static Vec bodyX(const State& s){return s.toBody.r0;}
     static Vec gravity(Vec r){return r*(-earth.mu/std::pow(norm(r),3));}
     // Thrust along d (ECEF) by the gimbal, the gain from the thrust's lever on the inertia (natural frequency: bandwidth()); offset:
@@ -496,7 +519,8 @@ protected:
     // Over the axis, its pins over the arms and still: ready to go down onto them (across the rails within 0.1 m, the pins then
     // in the grooves between each rail's bars, inside their crests 0.2 m out; along them within 4 m: they are 20 m long).
     bool aligned(const State& s,Vec flat)const{flat=pinsAt(s,flat);
-        return std::abs(dot(flat,north_))<.1&&std::abs(dot(flat,cross(north_,up_)))<4&&norm(s.velocity+up_*-dot(s.velocity,up_))<.2&&std::abs(rollError(s))<3*deg&&std::abs(s.rate.x)<.02;
+        const double within=holdAlong?.15:.1,drift=holdAlong?.3:.2; // The booster: within the grooves' 0.15 m, down at once, no waiting over them.
+        return std::abs(dot(flat,north_))<within&&std::abs(dot(flat,cross(north_,up_)))<4&&norm(s.velocity+up_*-dot(s.velocity,up_))<drift&&std::abs(rollError(s))<3*deg&&std::abs(s.rate.x)<.02;
     }
     // On `engines` engines: the hover hoverAbove over the catch height, or the descent at `rate` m/s, over the axis and aligned; the
     // thrust it asks for (N).
@@ -533,7 +557,13 @@ protected:
     bool centred(const State& s,Vec flat,bool descending=false)const{flat=pinsAt(s,flat);
         const Vec v=s.velocity+up_*-dot(s.velocity,up_);const double n=dot(flat,north_),e=dot(flat,cross(north_,up_)),vn=dot(v,north_);
         if(close_)return onRails(flat)&&!(norm(s.contact)>0&&armsClosed&&!inGrooves(flat)&&!descending);
-        return std::abs(n)<.3&&std::abs(n+vn*closing)<.3&&std::abs(vn)<.1&&e>-4&&e<8&&norm(v)<3;
+        // Sliding in from the front of their V (as the real catches: the arms swing as it comes in), where it will be once they
+        // are shut: across, still on the line; along, braking to rest (half its speed over that time) within the rails' span.
+        const double ve=dot(v,cross(north_,up_)),along=e+ve*closing/2;
+        // Across, within the rails' room round the hull (0.55 m each side) with half its drift over that time (the loop takes the
+        // rest out as they swing): the pins' grooves (0.15 m) matter only going down.
+        if(!holdAlong)return std::abs(n)<.3&&std::abs(n+vn*closing)<.3&&std::abs(vn)<.1&&e>-4&&e<8&&norm(v)<3; // The ship: over the axis, still.
+        return std::abs(n)<.5&&std::abs(n+vn*closing/2)<.5&&std::abs(vn)<.3&&along>-4&&along<8&&e<25&&norm(v)<7;
     }
     // The pins over the rails: across them within 0.6 m, along them 5 m west to 9 m east of the axis (a touch there is the
     // pins on them, not an arm on the hull); in the grooves: within 0.15 m across (the bars' crests 0.2 m out).
