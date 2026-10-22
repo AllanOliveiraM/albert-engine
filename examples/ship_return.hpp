@@ -83,17 +83,32 @@ public:
                 const double above=over-catchHeight(s)-hoverAbove,vz=dot(s.velocity,up_),most=std::tan(20*deg)*((above>1&&vz<0?vz*vz/(2*above):0)+norm(gravity(s.position)));
                 if(norm(flat+front()*-1.)>150||std::max(norm(across(s,flat,false,true)),norm(across(s,flat,true,true)))>1.3*most||closing(s,flat)>safe(s,flat,.6*most))giveUp(s,"pouso previsto fora do alcance da torre");} // Or closing on the tower faster than it could stop short of it.
             break;}
-        case Phase::landing:{ // To rest at the hover point on 3 engines (the fewest that carry it at 85%, of those lit), across onto the
-            // axis by then (no walk across after it), the observer's push netted.
-            const double above=over-catchHeight(s)-hoverAbove,vz=dot(s.velocity,up_),brake=above>1&&vz<0?vz*vz/(2*above):0,up=brake+norm(gravity(s.position));
-            Vec side=across(s,flat)+push_*-1.;const double limit=std::tan(20*deg)*up;
-            if(const Vec v=s.velocity+up_*-vz;closing(s,flat)>safe(s,flat,.5*limit))side=v*(-limit/std::max(norm(v),1e-3)); // Never at the tower faster than half its lean stops it short: all of it against its way.
-            if(norm(side)>limit)side=side*(limit/norm(side));
+        case Phase::landing:{ // On 3 engines (the fewest that carry it at 85%, of those lit), the observer's push netted: first to the
+            // hover point in front of the arms' V (across by E-guidance, no walk across after it); its last 12 s on their line in
+            // front of the V, sliding in as it comes down (the booster's final approach, the real catches': along the line at what
+            // it can still brake, onto(), at most 8 m/s; across it onto the line, no speed across on arrival, -6 n/T² - 4 v/T over
+            // the time left), not below a 27° slope down to the axis from the approach, the arms closing round it as it comes in;
+            // within 3 m of the axis, on down to the arms themselves at 0.5 m/s (no hover: straight on down onto them if aligned in
+            // the shut arms; else held over them).
+            const double vz=dot(s.velocity,up_),e=dot(flat,cross(north_,up_)),nn=dot(flat,north_);const Vec v=s.velocity+up_*-vz;
+            const bool line=std::abs(nn)<=8&&e>-8&&e<80,in=line&&over-catchHeight(s)<150,axis=line&&norm(flat)<3; // in: on their line in front of the V, low: going in.
+            // Going in: down the 27° slope (tan 0.5) whose apex is the arms themselves (3 m round the axis): no hover point on the way.
+            const double above=in?over-catchHeight(s)-.5*std::max(norm(flat)-3,0.):over-catchHeight(s)-hoverAbove,vf=in?-.5:-1.,T=std::max(2*std::max(above,0.)/std::max(-vz-vf,1.),std::sqrt(6.)*3/bandwidth(s));
+            const double brake=above<0?.5*(std::min(3.,-.3*above)-vz):vz<vf?(vz*vz-vf*vf)/(2*std::max(above,.1)):.5*(vf-vz),up=std::max(brake+norm(gravity(s.position)),0.),limit=std::tan(20*deg)*up;
+            Vec side;
+            if(in){const double kv=std::min(.6,bandwidth(s)/3),vn=dot(v,north_);side=onto(s,flat+north_*-nn,kv,8,20*deg);side=side+north_*(-dot(side,north_)-6*nn/(T*T)-4*vn/T);
+                // The arms shut as it comes in: once where it will be when they are (braking to rest along over that time, its drift
+                // across half gone; its centre of mass, upright by then: where the pins will be, not where its lean now puts them) lies
+                // within the rails' room.
+                const double ve=dot(v,cross(north_,up_)),shut=TowerApproach::closing,along=e+ve*shut/2,off=nn+vn*shut/2;close_=close_||(std::abs(off)<.5&&std::abs(vn)<.5&&along>-4&&along<8&&e<25&&norm(v)<7);}
+            else{side=across(s,flat);if(closing(s,flat)>safe(s,flat,.5*limit))side=v*(-limit/std::max(norm(v),1e-3));} // Never at the tower faster than half its lean stops it short: all of it against its way.
+            side=side+push_*-1.;if(norm(side)>limit)side=side*(limit/norm(side));
             set_.keep(c,s);const Vec a=up_*up+side;const double want=s.mass*norm(a);
             if(const int n=std::max(1,static_cast<int>(std::ceil(want/(.85*raptorSea))));n<set_.count())set_.use(c,s,n);
             c.throttle=std::clamp(want/(std::max(set_.count(),1)*raptorSea),.4,1.);
             aim(c,s,unit(a),set_.centre());roll(c,s,&set_);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
-            if(above<2||vz>-1){phase_=Phase::hover;if(norm(flat+front()*-1.)>30&&!in_)giveUp(s,"pouso previsto fora do alcance da torre");} // Not in front of the V: no walk across to it.
+            if(axis&&over-catchHeight(s)<3){if(armsClosed&&aligned(s,flat))phase_=Phase::descend;else if(over-catchHeight(s)<1.5)phase_=Phase::hover;} // On down if aligned in the shut arms; else held (back up over them).
+            else if(!in&&(above<2||vz>-1)){phase_=Phase::hover;if(norm(flat+front()*-1.)>30&&!in_)giveUp(s,"pouso previsto fora do alcance da torre");} // Not in front of the V: no walk across to it.
             break;}
         case Phase::hover:case Phase::descend: // Over the tower, then down at 1 m/s until the pins rest on the arms; off the axis or the
             // arms' line, held again.
@@ -218,14 +233,14 @@ private:
     // the standard atmosphere, the crossflow lift and drag at the scheduled angle of attack; only the lift's vertical part, cos b,
     // as bank reversals cancel the rest; all of it when `held`, a bank kept to the end): where it ends past the tower along its
     // final track and right of it (m), and how long it takes (s).
-    Arrival arrive(Vec r,Vec v,double m,double b,bool held=false)const{
+    Arrival arrive(Vec r,Vec v,double m,double b,bool held=false)const{ // held: also the belly flop flown as fall() begins it (square to the flow below 300 m/s: no glide).
         const Vec w{0,0,7.292115e-5};const double area=pi*radius*radius,re=6378137,j2=1.08263e-3,base=norm(site_);
         auto acc=[&](Vec p,Vec u){
             const double rn=norm(p),zz=p.z*p.z/(rn*rn),f=1.5*j2*(re/rn)*(re/rn);
             Vec a=Vec{p.x*(1+f*(1-5*zz)),p.y*(1+f*(1-5*zz)),p.z*(1+f*(3-5*zz))}*(-earth.mu/(rn*rn*rn))+cross(w,u)*-2.+cross(w,cross(w,p))*-1.;
             const double h=rn-base,rho=density(h),speed=norm(u);
             if(rho>0&&speed>0){const Vec uh=u*(1/speed),up=p*(1/rn),l0=unit(up+uh*-dot(up,uh)),l=l0*std::cos(b)+(held?cross(uh,l0)*std::sin(b):Vec{});
-                const double al=alpha(speed,h),k=.5*rho*speed*speed*area/m;
+                const double al=held&&speed<=300?90*deg:alpha(speed,h),k=.5*rho*speed*speed*area/m;
                 a=a+uh*(-k*drag_*(dragOf(shipLength,al,speed/sound(h))+flaps_*std::sin(al)))+l*(k*lift_*liftOf(shipLength,al));}
             return a;};
         double t=0;bool down=false;

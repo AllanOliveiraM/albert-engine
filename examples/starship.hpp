@@ -693,12 +693,13 @@ public:
             thrust(c,s,d*accel_);if(s.q>2e3)finsToward(c,s,d,true); // Its last 3 s: upright, the speed across braked, for 3 engines to take over.
             break;}
         case Phase::final:{ // On 3 to the hover point, still falling at 1 m/s there, not below a 27° slope down to it from the
-            // approach (the hull clear of the arms off their line); across by E-guidance, the braking law in its last seconds; at
-            // sea, down to the water.
-            const Vec to=goal(flat);const double above=over-top(s)-(catch_?safe(s,flat):0);
+            // approach (the hull clear of the arms off their line); within 3 m of the axis, on down to the arms themselves, 0.5 m/s
+            // there (no hover: the arms are closing round it as it comes, and it goes straight on down onto them, aligned; else held
+            // over them); across by E-guidance, the braking law in its last seconds; at sea, down to the water.
+            const Vec to=goal(flat);const bool over_=catch_&&norm(flat)<3;const double above=over-(over_?catchHeight(s):top(s))-(catch_?safe(s,flat):0);
             if(catch_&&age_--<=0){age_=10;if(!stops(s,catchHeight(s)))giveUp(s,"a queda não para acima dos braços");}
             if(phase_!=Phase::final)break;
-            const double up=vertical(s,above,vz,-1),limit=std::tan(20*deg)*up; // Its lean below: within the hull's swing clear of the tower.
+            const double up=vertical(s,above,vz,over_?-.5:-1),limit=std::tan(20*deg)*up; // Its lean below: within the hull's swing clear of the tower.
             // Across onto the goal at the speed it can still brake to rest there (braking.(): a third of what leaning against its way
             // gives, within the hull's swing clear of the tower, its velocity loop's lag allowed for), at most 8 m/s and kv/2 of the
             // distance a second, that speed's error at kv, a third of the attitude's bandwidth. Well below the height that clears
@@ -714,7 +715,7 @@ public:
             else side=onto(s,to,kv,8,20*deg);
             side=side+push_*-1.;{const double most=limit*std::tan(lean(s,flat,side,20*deg))/std::tan(20*deg);if(norm(side)>most)side=side*(most/norm(side));} // The observer's push netted.
             count(c,s,thrust(c,s,up_*up+side),set_.count());close_=catch_&&centred(s,flat); // On the 3 it took over with: none put out on the way in.
-            if(catch_&&above<1&&norm(flat)<3)phase_=Phase::hover;
+            if(over_&&over-catchHeight(s)<3){if(armsClosed&&aligned(s,flat))phase_=Phase::descend;else if(over-catchHeight(s)<1.5)phase_=Phase::hover;} // On down if aligned in the shut arms; else held (back up over them).
             else if(!catch_&&(norm(s.contact)>0||above<.3)){set_.use(c,s,0);phase_=Phase::down;}
             break;}
         case Phase::hover:case Phase::descend: // Over the axis; down at 1 m/s once the arms are round it and it is aligned with them.
