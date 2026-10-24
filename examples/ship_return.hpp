@@ -16,7 +16,7 @@ class ShipReturn:public TowerApproach {
 public:
     enum class Phase {orbit,orient,deorbit,glide,entry,flip,landing,hover,descend,caught,divert,down};
     ShipReturn(Vec site,double latitude,double longitude,double arms,double rest)
-        :TowerApproach(site,latitude,longitude,arms,rest,shipLength,shipPinAt,combine(ship(true)),combine(ship(false)),shipPropellant){header_=shipHeader;headerAt_=shipHeaderAt;holdAlong=true;slide=3;hoverAbove=4;laggedThrust=true;} // From in front of the arms' V it slides in as the booster does, at 3 m/s at most.
+        :TowerApproach(site,latitude,longitude,arms,rest,shipLength,shipPinAt,combine(ship(true)),combine(ship(false)),shipPropellant){header_=shipHeader;headerAt_=shipHeaderAt;holdAlong=true;slide=3;hoverAbove=4;laggedThrust=true;fineAim=true;} // From in front of the arms' V it slides in as the booster does, at 3 m/s at most.
     Phase phase()const{return phase_;}
     double nextStep()const{return next_;} // How far (s) the client may step next: long in orbit, 20 ms otherwise.
     double along()const{return along_;} // The latest predicted landing past the tower (m).
@@ -100,9 +100,9 @@ public:
             set_.keep(c,s);const double weight=s.mass*norm(gravity(s.position));const int least=set_.working(s,3)>=2&&2*.4*raptorSea<.97*weight?2:1; // Two while their least leaves it falling: a quicker lean than one alone (off the axis).
             const Sweep w=sweep(s,flat,over,set_.centre(),0,std::max(set_.count(),1),least);const double want=s.mass*norm(w.a);
             if(const int n=std::max(least,static_cast<int>(std::ceil(want/(.85*raptorSea))));n<set_.count())set_.use(c,s,n);
-            c.throttle=std::clamp(want/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(w.a),set_.centre());roll(c,s,&set_);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
+            c.throttle=std::clamp(want/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(w.a),set_.centre(),true);roll(c,s,&set_);c.surfaces={-45*deg,-45*deg,-45*deg,-45*deg};
             if(std::getenv("ALBERT_ATT")&&std::fmod(t+1e-9,.5)<.02){const Vec east=cross(north_,up_),f=tmul(s.toBody,s.specific);std::printf("ATT %.1f lit %d roll %.1f° rates %.3f %.3f %.3f ask e %.2f n %.2f got e %.2f n %.2f gimbal %.1f %.1f bw %.2f\n",t,set_.count(),rollError(s)/deg,s.rate.x,s.rate.y,s.rate.z,
-                dot(w.a,east),dot(w.a,north_),dot(f,east),dot(f,north_),c.gimbalPitch/deg,c.gimbalYaw/deg,bandwidth(s));}
+                dot(w.a,east),dot(w.a,north_),dot(f,east),dot(f,north_),c.gimbalPitch/deg,c.gimbalYaw/deg,bandwidth(s,-1,true));}
             close_=close_?centred(s,flat,true):shutting(s,flat,w.touch);
             if(w.miss>1.5||w.touch>60||(over-catchHeight(s)<60&&!in_&&std::abs(dot(flat,north_))>4)||dot(flat,cross(north_,up_))<-8)giveUp(s,"pouso previsto fora do alcance da torre");
             else if(w.settling)phase_=Phase::descend;
@@ -121,7 +121,7 @@ public:
                     // (one alone, off the axis, shoves it out of the grooves).
                     const int least=set_.working(s,3)>=2&&2*.4*raptorSea<.97*weight?2:1;
                     if(least<n)set_.use(c,s,least); // Down to two (or one, when two at their least would hold it up), none put out after: a cutoff over the arms kicks it across.
-                    c.throttle=std::clamp(want/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(w.a),set_.centre());roll(c,s,&set_);break;}}
+                    c.throttle=std::clamp(want/(std::max(set_.count(),1)*raptorSea),.4,1.);aim(c,s,unit(w.a),set_.centre(),true);roll(c,s,&set_);break;}}
             close_=centred(s,flat,phase_==Phase::descend);if(phase_==Phase::hover&&settled()&&aligned(s,flat))phase_=Phase::descend;
             if(const Vec p=pinsAt(s,flat);hurry_){if(onRails(p))close_=true;if(settled()&&inGrooves(p,.2))phase_=Phase::descend;} // Nothing left to get away on: onto the arms now.
             else if(phase_==Phase::descend&&(norm(s.contact)==0?std::abs(dot(p,north_))>.25||std::abs(dot(p,cross(north_,up_)))>5||std::abs(rollError(s))>6*deg:!inGrooves(p,.18)))phase_=Phase::hover; // (Not hurrying: the branch above.)
