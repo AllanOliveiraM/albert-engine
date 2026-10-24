@@ -33,13 +33,30 @@ public:
     // lag: the time constant (s) the thrust's acceleration follows what is asked with (the attitude turning the engines onto it):
     // each step's a_m = (1 - β) a_{m-1} + β u_m from a_{-1} = uNow, β = 1 - e^{-dt/lag} (0: none, a_m = u_m). Asked with that
     // in view, the plan leads its own lag instead of chasing it (a plan laid afresh each half second without it overcorrects).
+    // mid, midAcross: below `mid` m over the target (its hull's foot coming down to what it lands in), at most midAcross off the
+    // line along x (m): inside the opening it lands through, higher free (taken as the low steps are).
+    // funnelAcross, funnelSpeed: a start outside the bounds across (the low steps) or on speed (by height, toward the
+    // wall) is not refused: each bound starts where it is and closes at funnelAcross m/s, funnelSpeed m/s² (what it can do),
+    // so the plan always exists and brings it inside them (lined up while still high) instead of dropping them.
     // low, lowAcross, lowLean: below `low` m over the target (the hull among what it lands in), at most lowAcross off the line
     // along x (m) and leaning at most lowLean (its tangent): only small corrections there. Not convex as such: each step's
     // height taken from the plan it starts from (the last one; else a straight descent), as successive convexification does.
-    struct Problem {Vec r0,v0,rt,vt,g{0,0,-9.80665},d,uNow;double lag=0,hold=4,floor=0,ceiling=30,lean=.364,slope=.5,radius=3,climbRate=.3,speedFloor=3,wall=-8,brake=0,jerk=0,across=1,sinkRate=0,wedge=0,wedgeFloor=.5,low=0,lowAcross=1,lowLean=.1;};
-    struct Plan {std::vector<Vec> u;double T=0,miss=1e300,cost=1e300;bool ok=false;Problem asked;}; // miss: the worst breach of the target or a limit (m, m/s, m/s²); asked: what it was laid out for.
-    // The plan for a time T (s); warm: a plan to start from (its acceleration resampled onto these steps).
+    struct Problem {Vec r0,v0,rt,vt,g{0,0,-9.80665},d,uNow;double lag=0,hold=4,floor=0,ceiling=30,lean=.364,slope=.5,radius=3,climbRate=.3,speedFloor=3,wall=-8,brake=0,jerk=0,across=1,sinkRate=0,wedge=0,wedgeFloor=.5,low=0,lowAcross=1,lowLean=.1,mid=0,midAcross=5,funnelAcross=8,funnelSpeed=2;};
+    struct Plan {std::vector<Vec> u;double T=0,miss=1e300,cost=1e300;bool ok=false;Problem asked;char worst=0;}; // miss: the worst breach of the target or a limit (m, m/s, m/s²); asked: what it was laid out for.
+    // The plan for a time T (s); warm: a plan to start from (its acceleration resampled onto these steps). The low and middle
+    // steps' heights are taken from that plan first, then from its own solution, solved again (up to 3 times) until they agree
+    // (successive convexification: a step newly brought low gets the low step's bounds).
     Plan solve(const Problem& p,double T,const Plan* warm=nullptr,double elapsed=0)const{
+        std::array<double,N> heights;const double dt=T/N;
+        for(int k=0;k<N;++k){double z=p.r0.z+(p.rt.z-p.r0.z)*(k+1.)/N;if(warm&&!warm->u.empty()){Vec r,v,u;at(warm->asked,*warm,elapsed+(k+1)*dt,r,v,u);z=r.z;}heights[static_cast<std::size_t>(k)]=z;}
+        Plan out=solveAt(p,T,warm,elapsed,heights);
+        auto zone=[&](double z){const double h=z-p.rt.z;return h<p.low?2:h<p.mid?1:0;};
+        for(int pass=0;pass<2&&!out.u.empty()&&(p.low>0||p.mid>0);++pass){bool changed=false;
+            for(int k=0;k<N;++k){Vec r,v,u;at(p,out,(k+1)*dt,r,v,u);auto& z=heights[static_cast<std::size_t>(k)];if(zone(r.z)>zone(z)){z=r.z;changed=true;}}
+            if(!changed)break;out=solveAt(p,T,&out,0,heights);}
+        return out;
+    }
+    Plan solveAt(const Problem& p,double T,const Plan* warm,double elapsed,const std::array<double,N>& heights)const{
         const double dt=T/N;Plan out;out.T=T;out.asked=p;
         // The state at node k is affine in the asked accelerations: r_k = R_k + Σ_{j<k} PC_kj u_j, v_k = W_k + Σ_{j<k} VC_kj u_j, the
         // steps' own a_m = c_m uNow + Σ_{j≤m} L_mj u_j through the lag (c_m = (1-β)^{m+1}, L_mj = β (1-β)^{m-j}).
@@ -48,39 +65,47 @@ public:
         for(int k=1;k<=N;++k)for(int m=0;m<k;++m){const double cp=dt*dt*(k-m-.5),cv=dt;pc0[k]+=cp*std::pow(1-beta,m+1);vc0[k]+=cv*std::pow(1-beta,m+1);
             for(int j=0;j<=m;++j){const double l=beta*std::pow(1-beta,m-j);PC[k][j]+=cp*l;VC[k][j]+=cv*l;}}
         auto R=[&](int k){const double t=k*dt;return p.r0+p.v0*t+G*(t*t/2)+p.uNow*pc0[k];};auto W=[&](int k){return p.v0+G*(k*dt)+p.uNow*vc0[k];};
-        rows_.clear();blocks_.clear();
+        rows_.clear();blocks_.clear();auto push=[&](Block b,char w){b.what=w;blocks_.push_back(b);};
+        const double y0=std::abs(p.r0.y-p.rt.y),h0=std::max(p.r0.z-p.rt.z,0.),vh0=std::hypot(p.v0.x,p.v0.y);
+        auto overAcross=[&](int k,double bound0){return std::max(y0-bound0-p.funnelAcross*k*dt,0.);}; // How far the start is outside a bound across, less what it closes by step k.
+        const double overSpeed0=std::max(vh0-p.speedFloor-p.climbRate*h0,0.);
+        // The wedge as its cone through the start when the start is outside it (its way to a stop when moving off the line, at
+        // 3 m/s², counted): off the line in proportion to the height left, which the plan can always keep to (it may wait high).
+        const double off=(p.v0.y*(p.r0.y-p.rt.y)>0?p.v0.y*p.v0.y/6:0.),wedge=std::max(p.wedge,(y0+off-p.wedgeFloor)/std::max(h0,1.));
         const double sp=2/(T*T),sv=1/T; // Row scales: positions and speeds into accelerations.
         auto row=[&](double b){rows_.push_back({});rows_.back().b=b;return &rows_.back();};
         auto posRow=[&](int k,int c,double scale,double b){Row* r=row(b);for(int j=0;j<k;++j)r->a[3*j+c]=-scale*PC[k][j];return r;}; // b - A x = scale (R_k + Σ…)[c] when b = scale R_k[c]
         auto velRow=[&](int k,int c,double scale,double b){Row* r=row(b);for(int j=0;j<k;++j)r->a[3*j+c]=-scale*VC[k][j];return r;};
         auto comp=[](Vec v,int c){return c==0?v.x:c==1?v.y:v.z;};
         // The target (zero cone): r_N = rt, v_N = vt.
-        {const std::size_t s0=rows_.size();for(int c=0;c<3;++c){Row* r=posRow(N,c,sp,0);for(double& x:r->a)x=-x;r->b=sp*(comp(p.rt,c)-comp(R(N),c));}blocks_.push_back({Zero,s0,3,sp});}
-        {const std::size_t s0=rows_.size();for(int c=0;c<3;++c){Row* r=velRow(N,c,sv,0);for(double& x:r->a)x=-x;r->b=sv*(comp(p.vt,c)-comp(W(N),c));}blocks_.push_back({Zero,s0,3,sv});}
+        {const std::size_t s0=rows_.size();for(int c=0;c<3;++c){Row* r=posRow(N,c,sp,0);for(double& x:r->a)x=-x;r->b=sp*(comp(p.rt,c)-comp(R(N),c));}push({Zero,s0,3,sp},'T');}
+        {const std::size_t s0=rows_.size();for(int c=0;c<3;++c){Row* r=velRow(N,c,sv,0);for(double& x:r->a)x=-x;r->b=sv*(comp(p.vt,c)-comp(W(N),c));}push({Zero,s0,3,sv},'V');}
         for(int k=0;k<N;++k){ // The thrust: upward at least its floor; within the lean; within its ceiling.
-            {const std::size_t s0=rows_.size();Row* r=row(-p.floor);r->a[3*k+2]=-1;blocks_.push_back({Nonneg,s0,1,1});}
-            {const std::size_t s0=rows_.size();Row* r=row(0);r->a[3*k+2]=-p.lean;r=row(0);r->a[3*k]=-1;r=row(0);r->a[3*k+1]=-1;blocks_.push_back({Cone,s0,3,1});}
-            {const std::size_t s0=rows_.size();row(p.ceiling);for(int c=0;c<3;++c){Row* r=row(0);r->a[3*k+c]=-1;}blocks_.push_back({Cone,s0,4,1});}}
+            {const std::size_t s0=rows_.size();Row* r=row(-p.floor);r->a[3*k+2]=-1;push({Nonneg,s0,1,1},'F');}
+            {const std::size_t s0=rows_.size();Row* r=row(0);r->a[3*k+2]=-p.lean;r=row(0);r->a[3*k]=-1;r=row(0);r->a[3*k+1]=-1;push({Cone,s0,3,1},'L');}
+            {const std::size_t s0=rows_.size();row(p.ceiling);for(int c=0;c<3;++c){Row* r=row(0);r->a[3*k+c]=-1;}push({Cone,s0,4,1},'C');}}
         if(p.jerk>0)for(int k=0;k+1<N;++k){const std::size_t s0=rows_.size();row(p.jerk*dt); // The push across changing no faster than the attitude swings it.
-            for(int c=0;c<2;++c){Row* r=row(0);r->a[3*(k+1)+c]=-1;r->a[3*k+c]=1;}blocks_.push_back({Cone,s0,3,1});}
-        if(p.low>0){ // Low steps, as the plan it starts from has them (its state at each step's time; else a straight descent).
-            for(int k=0;k<N;++k){double z=p.r0.z+(p.rt.z-p.r0.z)*(k+1.)/N;
-                if(warm&&!warm->u.empty()){Vec r,v,u;at(warm->asked,*warm,elapsed+(k+1)*dt,r,v,u);z=r.z;}
+            for(int c=0;c<2;++c){Row* r=row(0);r->a[3*(k+1)+c]=-1;r->a[3*k+c]=1;}push({Cone,s0,3,1},'J');}
+        if(p.low>0||p.mid>0){ // Low and middle steps, as the plan it starts from has them (its state at each step's time; else a straight descent).
+            for(int k=0;k<N;++k){const double z=heights[static_cast<std::size_t>(k)];
+                if(z-p.rt.z<p.mid&&z-p.rt.z>=p.low&&k+1<N)for(const double side:{1.,-1.}){const double bound=p.midAcross+overAcross(k+1,p.midAcross);const std::size_t s0=rows_.size();Row* r=posRow(k+1,1,sp,0);
+                    for(double& x:r->a)x*=-side;r->b=sp*(bound-side*(R(k+1).y-p.rt.y));push({Nonneg,s0,1,sp},'M');}
                 if(z-p.rt.z>=p.low)continue;
-                {const std::size_t s0=rows_.size();Row* r=row(0);r->a[3*k+2]=-p.lowLean;r=row(0);r->a[3*k]=-1;r=row(0);r->a[3*k+1]=-1;blocks_.push_back({Cone,s0,3,1});}
-                if(k+1<N)for(const double side:{1.,-1.}){const std::size_t s0=rows_.size();Row* r=posRow(k+1,1,sp,sp*(p.lowAcross-side*(R(k+1).y-p.rt.y)));
-                    for(double& x:r->a)x*=-side;r->b=sp*(p.lowAcross-side*(R(k+1).y-p.rt.y));blocks_.push_back({Nonneg,s0,1,sp});}}}
+                {const std::size_t s0=rows_.size();Row* r=row(0);r->a[3*k+2]=-p.lowLean;r=row(0);r->a[3*k]=-1;r=row(0);r->a[3*k+1]=-1;push({Cone,s0,3,1},'l');}
+                if(k+1<N)for(const double side:{1.,-1.}){const double bound=p.lowAcross+overAcross(k+1,p.lowAcross);const std::size_t s0=rows_.size();Row* r=posRow(k+1,1,sp,0);
+                    for(double& x:r->a)x*=-side;r->b=sp*(bound-side*(R(k+1).y-p.rt.y));push({Nonneg,s0,1,sp},'A');}}}
         for(int k=1;k<N;++k){ // The glide slope and the speed across by height at each node between.
             const Vec rk=R(k),wk=W(k);const double apex=p.rt.z-p.radius*p.slope;
-            {const std::size_t s0=rows_.size();posRow(k,2,sp/p.slope,sp*(rk.z-apex)/p.slope);posRow(k,0,sp,sp*(rk.x-p.rt.x));posRow(k,1,sp,sp*(rk.y-p.rt.y));blocks_.push_back({Cone,s0,3,sp});}
-            {const std::size_t s0=rows_.size();posRow(k,2,sv*p.climbRate,sv*(p.climbRate*(rk.z-p.rt.z)+p.speedFloor));velRow(k,0,sv,sv*wk.x);velRow(k,1,sv,sv*wk.y);blocks_.push_back({Cone,s0,3,sv});}
-            if(p.wedge>0)for(const double side:{1.,-1.}){const std::size_t s0=rows_.size();Row* r=posRow(k,2,sp*p.wedge,sp*(p.wedgeFloor+p.wedge*(rk.z-p.rt.z)-side*(rk.y-p.rt.y))); // wedgeFloor + wedge (z - rt.z) ∓ (y - rt.y) ≥ 0.
-                for(int j=0;j<k;++j)r->a[3*j+1]+=side*sp*PC[k][j];blocks_.push_back({Nonneg,s0,1,sp});}
+            {const std::size_t s0=rows_.size();posRow(k,2,sp/p.slope,sp*(rk.z-apex)/p.slope);posRow(k,0,sp,sp*(rk.x-p.rt.x));posRow(k,1,sp,sp*(rk.y-p.rt.y));push({Cone,s0,3,sp},'S');}
+            {const double extra=std::max(overSpeed0-p.funnelSpeed*k*dt,0.);const std::size_t s0=rows_.size();posRow(k,2,sv*p.climbRate,sv*(p.climbRate*(rk.z-p.rt.z)+p.speedFloor+extra));velRow(k,0,sv,sv*wk.x);velRow(k,1,sv,sv*wk.y);push({Cone,s0,3,sv},'H');}
+            if(p.wedge>0)for(const double side:{1.,-1.}){const std::size_t s0=rows_.size();Row* r=posRow(k,2,sp*wedge,sp*(p.wedgeFloor+wedge*(rk.z-p.rt.z)-side*(rk.y-p.rt.y))); // wedgeFloor + wedge (z - rt.z) ∓ (y - rt.y) ≥ 0.
+                for(int j=0;j<k;++j)r->a[3*j+1]+=side*sp*PC[k][j];push({Nonneg,s0,1,sp},'W');}
             if(p.sinkRate>0){const std::size_t s0=rows_.size();Row* r=velRow(k,2,sv,sv*(wk.z-p.vt.z+p.sinkRate*(rk.z-p.rt.z))); // v_z ≥ vt.z - sinkRate (z - rt.z).
-                for(int j=0;j<k;++j)r->a[3*j+2]+=-sv*p.sinkRate*PC[k][j];blocks_.push_back({Nonneg,s0,1,sv});}
+                for(int j=0;j<k;++j)r->a[3*j+2]+=-sv*p.sinkRate*PC[k][j];push({Nonneg,s0,1,sv},'D');}
             if(p.brake>0){constexpr double at[]{0,10,40,100,250}; // -v_x ≤ g_i + s_i (x - wall - at_i) on each chord of g(x) = √(2 brake x).
+                const double x0=std::max(p.r0.x-p.wall,0.),over0=std::max(-p.v0.x-std::sqrt(2*p.brake*x0),0.),extra=std::max(over0-p.funnelSpeed*k*dt,0.);
                 for(int i=0;i<4;++i){const double g0=std::sqrt(2*p.brake*at[i]),g1=std::sqrt(2*p.brake*at[i+1]),sl=(g1-g0)/(at[i+1]-at[i]);const std::size_t s0=rows_.size();
-                    Row* r=velRow(k,0,sv,sv*(wk.x+g0+sl*(rk.x-p.wall-at[i])));for(int j=0;j<k;++j)r->a[3*j]+=-sv*sl*PC[k][j];blocks_.push_back({Nonneg,s0,1,sv});}}}
+                    Row* r=velRow(k,0,sv,sv*(wk.x+g0+extra+sl*(rk.x-p.wall-at[i])));for(int j=0;j<k;++j)r->a[3*j]+=-sv*sl*PC[k][j];push({Nonneg,s0,1,sv},'B');}}}
         for(auto& bl:blocks_){double most=0; // Each block's rows to a unit norm at most (the cones care only for directions): ADMM's steps alike in every row.
             for(std::size_t i=bl.start;i<bl.start+bl.size;++i){double n=0;for(double x:rows_[i].a)n+=x*x;most=std::max(most,std::sqrt(n));}
             if(most>0){for(std::size_t i=bl.start;i<bl.start+bl.size;++i){for(double& x:rows_[i].a)x/=most;rows_[i].b/=most;}bl.scale/=most;}}
@@ -113,12 +138,12 @@ public:
                 const double f=std::sqrt((rp/std::max(ap,1e-9))/std::max(rd/std::max(ad,1e-9),1e-12));
                 if(f>5||f<.2){const double k=std::clamp(f,1e-3,1e3);for(double& v:rr)v*=k;if(!factor())return out;}}}
         // How far the plan is from meeting it all (in the rows' own units, back to m, m/s, m/s²).
-        mulA(x,ax);double miss=0;
+        mulA(x,ax);double miss=0;char worst=0;
         for(const auto& b:blocks_){std::vector<double> t(b.size);for(std::size_t i=0;i<b.size;++i)t[i]=rows_[b.start+i].b-ax[b.start+i];
             double breach=0;if(b.kind==Zero)for(double v:t)breach=std::max(breach,std::abs(v));else if(b.kind==Nonneg)breach=std::max(-t[0],0.);
             else{double n=0;for(std::size_t i=1;i<b.size;++i)n+=t[i]*t[i];breach=std::max(std::sqrt(n)-t[0],0.);}
-            miss=std::max(miss,breach/b.scale);}
-        out.miss=miss;out.u.resize(N);for(int k=0;k<N;++k)out.u[static_cast<std::size_t>(k)]={x[3*k],x[3*k+1],x[3*k+2]};
+            if(breach/b.scale>miss){miss=breach/b.scale;worst=b.what;}}
+        out.miss=miss;out.worst=worst;out.u.resize(N);for(int k=0;k<N;++k)out.u[static_cast<std::size_t>(k)]={x[3*k],x[3*k+1],x[3*k+2]};
         double cost=0;for(int i=0;i<V;++i){double s=0;for(int j=0;j<V;++j)s+=P[i*V+j]*x[j];cost+=.5*x[i]*s+q[i]*x[i];}out.cost=cost;out.ok=miss<.3;
         return out;
     }
@@ -131,7 +156,7 @@ public:
 private:
     enum Kind {Zero,Nonneg,Cone};
     struct Row {std::array<double,V> a{};double b=0;};
-    struct Block {Kind kind;std::size_t start,size;double scale;}; // scale: the rows' units over m, m/s or m/s².
+    struct Block {Kind kind;std::size_t start,size;double scale;char what=0;}; // scale: the rows' units over m, m/s or m/s²; what: which limit (for the traces).
     mutable std::vector<Row> rows_;mutable std::vector<Block> blocks_;
     // z onto b - K, block by block (K's projection of b - z).
     void project(std::vector<double>& z)const{
