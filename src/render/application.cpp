@@ -573,7 +573,7 @@ public:
         progress.stage("Preparando simulacao", 0);
         // Planned on the render thread: the simulated instant when the load starts.
         const auto moment = albert::time::simulation().read();
-        pending_ = std::async(std::launch::async, [this, reloadAssets, bootstrap, moment] {
+        pending_ = std::async(std::launch::async, [this, reloadAssets, bootstrap, moment] {albert::backgroundPriority();
             LoadedData result;
             if (reloadAssets) {
                 if (assets_) waitForEssential(*assets_, progress);
@@ -2231,7 +2231,7 @@ int albert::runRenderer(int argc, char** argv) {
                 auto playback=quickRefresh?QUICK_PLAYBACK:FULL_PLAYBACK;playback.seconds+=refreshSeconds;
                 pending = std::async(
                     std::launch::async,
-                    [&, utc=simulatedUtc, rate=moment.rate, playback, epoch=ephemerisRequestEpoch] {
+                    [&, utc=simulatedUtc, rate=moment.rate, playback, epoch=ephemerisRequestEpoch] {albert::backgroundPriority();
                         struct Loading {std::atomic_bool& flag;~Loading(){flag=false;}} loading{positionsLoading};
                         return loadEphemerides(utc, rate, playback, &refreshProgress, 0, false, [&refreshEpoch, epoch]{return refreshEpoch.load()!=epoch;});
                     }
@@ -2278,7 +2278,7 @@ int albert::runRenderer(int argc, char** argv) {
 
                 pendingOrbits = std::async(
                     std::launch::async,
-                    [&, center=simulatedUtc, epoch=orbitRequestEpoch] { return loadOrbits(center, &orbitProgress, 0, false, [&refreshEpoch, epoch]{return refreshEpoch.load()!=epoch;}, [&positionsLoading]{return positionsLoading.load();}); }
+                    [&, center=simulatedUtc, epoch=orbitRequestEpoch] {albert::backgroundPriority();return loadOrbits(center, &orbitProgress, 0, false, [&refreshEpoch, epoch]{return refreshEpoch.load()!=epoch;}, [&positionsLoading]{return positionsLoading.load();}); }
                 );
             }
 

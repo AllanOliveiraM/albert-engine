@@ -1,4 +1,5 @@
 #include "regional.hpp"
+#include "platform.hpp"
 #include <array>
 #include "physics/earth.hpp"
 #include "providers/terrain.hpp"
@@ -40,7 +41,7 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
     progress.cancelled=false;
     const auto region=*desired_;const auto body=body_;const int level=level_;
     working_=region;workingBody_=body;
-    pending_=std::async(std::launch::async,[this,region,body,level] {
+    pending_=std::async(std::launch::async,[this,region,body,level] {backgroundPriority();
         RegionalImages result;result.region=region;result.body=body;result.level=level;
         try {
             const auto pack=visualAssetPack();

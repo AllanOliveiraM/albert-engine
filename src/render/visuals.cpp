@@ -466,7 +466,7 @@ void albert::PlanetVisuals::updateImageDetail(const Vector3& camera, bool enable
     for(int i=0;i<3;++i) if(imageWanted_[i] && (!imageDetail_[i]||(i==1&&sunStale_)) && !imageFailed_[i]) {
         imageFailed_[i]=true;
         detailProgress.cancelled=false;
-        pendingImage_=std::async(std::launch::async,[this,i] {
+        pendingImage_=std::async(std::launch::async,[this,i] {backgroundPriority();
             DetailedImage result{i,std::nullopt,{}};
             try {
                 detailProgress.stage("Lendo detalhes do Sol",0);

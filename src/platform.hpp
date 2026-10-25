@@ -12,6 +12,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__linux__)
+#include <sys/resource.h>
+#include <unistd.h>
 #endif
 
 namespace albert {
@@ -24,6 +27,16 @@ inline std::filesystem::path executableDirectory() {
     return std::filesystem::path(std::wstring(buffer.data(), length)).parent_path();
 #else
     return std::filesystem::read_symlink("/proc/self/exe").parent_path();
+#endif
+}
+
+// The calling thread behind the frame and the flights (a loader's: the terrain, the imagery, the clouds, the data): a
+// lower priority, so a busy loader never slows the render or the flight software beside it.
+inline void backgroundPriority() {
+#ifdef _WIN32
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#elif defined(__linux__)
+    setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), 10);
 #endif
 }
 

@@ -59,7 +59,7 @@ fs::path albert::AssetDownloads::destination() const{
     throw std::runtime_error("Nenhuma pasta gravavel para os dados visuais");
 }
 
-void albert::AssetDownloads::run(){
+void albert::AssetDownloads::run(){backgroundPriority();
     // Containers on disk join the library without a new download once their
     // SHA-256 is known good; a size match alone is not enough.
     for(size_t i=0;i<items_.size();++i)

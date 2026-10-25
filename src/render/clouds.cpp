@@ -210,7 +210,7 @@ void albert::CloudSync::refresh(bool clearCache) {
     progress.cancelled = false;
     const bool tryCache = !cacheChecked_ && !clearCache;
     cacheChecked_ = true;
-    pending_ = std::async(std::launch::async, [this, clearCache, tryCache] {
+    pending_ = std::async(std::launch::async, [this, clearCache, tryCache] {backgroundPriority();
         CloudUpdate fallback;
         if (clearCache) {
             fs::remove_all(cache_/"detail");
@@ -318,7 +318,7 @@ std::optional<albert::CloudDetail> albert::CloudSync::pollDetail() {
     const auto dates = date;
     working_=region;detailChanged_=now;
     detailProgress_.cancelled = false;
-    detailPending_ = std::async(std::launch::async, [this,region,dates] {
+    detailPending_ = std::async(std::launch::async, [this,region,dates] {backgroundPriority();
         CloudDetail result; result.region = region;
         try {
             std::array<std::string,6> data;

@@ -1,4 +1,5 @@
 #include "terrain.hpp"
+#include "platform.hpp"
 #include "threepp/core/BufferGeometry.hpp"
 #include "threepp/objects/Mesh.hpp"
 #include "threepp/math/Sphere.hpp"
@@ -105,7 +106,7 @@ struct Terrain::Impl {
             for(int r=0;r<3;++r)m[12+r]=static_cast<float>(f.at[r]+l[r]*c.x+l[3+r]*c.y+l[6+r]*c.z);m[15]=1;
             n->mesh->matrixWorldNeedsUpdate=true;}
     }
-    void run(){
+    void run(){albert::backgroundPriority();
         for(;;){
             Key key;
             {std::unique_lock l(lock);wake.wait(l,[this]{return stop||!queue.empty();});if(stop)return;
