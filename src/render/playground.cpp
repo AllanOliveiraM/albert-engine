@@ -67,6 +67,7 @@ void drawPlayground(rpc::Server& server,ImVec2 display,float margin){
     const auto ids=server.flights();if(ids.empty())return;
     State& st=state();st.flight=std::clamp(st.flight,0,static_cast<int>(ids.size())-1);const std::string id=ids[static_cast<std::size_t>(st.flight)];
     ImGui::SetNextWindowPos(ImVec2(display.x-margin,display.y*.18f),ImGuiCond_FirstUseEver,ImVec2(1,0));ImGui::SetNextWindowSize(ImVec2(360,0),ImGuiCond_FirstUseEver);ImGui::SetNextWindowBgAlpha(.8f);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0,0),ImVec2(1e9f,std::max(display.y*.82f-230.f*std::clamp(display.x/1600.f,.7f,1.4f),200.f))); // Above the broadcast's panels (its lower 210 px band): open, it covered the ship's.
     if(!ImGui::Begin("Interferência",nullptr,ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoFocusOnAppearing)){ImGui::End();return;}
     auto send=[&](const api::FlightCommand& c,const std::string& what){try{server.inject(id,c);if(!what.empty()){st.notice=what;st.noticeAt=Clock::now();}}catch(const std::exception& x){st.notice=x.what();st.noticeAt=Clock::now();}};
     // The flight.

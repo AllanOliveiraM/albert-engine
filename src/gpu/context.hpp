@@ -1,5 +1,6 @@
 #pragma once
 #include <webgpu/webgpu.h>
+#include <functional>
 #include <string>
 struct GLFWwindow;
 namespace albert::gpu {
@@ -24,11 +25,13 @@ public:
     WGPUTextureView acquire();
     // The size of the image acquire() gave this frame (a resize reaches it a frame on): what a pass on it may draw within.
     [[nodiscard]] unsigned imageWidth()const;[[nodiscard]] unsigned imageHeight()const;
+    void capturePng(const std::string& path); // After submission, before present; throws on readback or write failure.
+    static void beforePresent(std::function<void(Context&)> work); // One-shot work on this thread's next surface, after submission.
     void present();
 private:
     WGPUInstance instance_=nullptr;WGPUSurface surface_=nullptr;WGPUAdapter adapter_=nullptr;WGPUDevice device_=nullptr;WGPUQueue queue_=nullptr;
     WGPUTextureFormat format_=WGPUTextureFormat_BGRA8Unorm;WGPUTexture current_=nullptr;WGPUTextureView view_=nullptr;std::string adapterName_;bool software_=false;
-    int width_=0,height_=0;bool vsync_=true,stale_=false;WGPUPresentMode unsynced_=WGPUPresentMode_Fifo;
+    int width_=0,height_=0;bool vsync_=true,stale_=false,copySrc_=false;WGPUPresentMode unsynced_=WGPUPresentMode_Fifo;
 };
 std::string text(WGPUStringView s);
 unsigned errors(); // Uncaptured WebGPU errors so far (validation bugs).

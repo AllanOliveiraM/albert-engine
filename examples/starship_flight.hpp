@@ -49,17 +49,17 @@ inline void addStarbase(api::CreateFlightRequest& create){
     part("pad",Shape::BOX,{-25,-30,-4},{170,170,4},concrete);
     part("tower",Shape::TRUSS,{towerX,0,69},{2*half,2*half,146},lattice);
     part("tower crown",Shape::BOX,{towerX,0,143},{2*half+1,2*half+1,3},dark);
-    part("lightning mast",Shape::CYLINDER,{towerX,0,152},{.6,.6,15},dark);
-    part("carriage",Shape::BOX,{towerX,0,armHeight-armRadius-depth/2},{2*half+3,2*half+3,depth+3},dark);
+    part("lightning mast",Shape::CYLINDER,{towerX,0,151.98},{.6,.6,15},dark); // Sink the base into the crown to separate faces.
+    part("carriage",Shape::BOX,{towerX,0,armHeight-armRadius-depth/2},{2*half+3.04,2*half+3,depth+3},dark); // Overlap the arm roots to separate end faces.
     for(const double side:{-1.,1.}){const double y=side*(pinOut+.8);const double from=armPivot,to=13;const unsigned on=side>0?3:1; // The catch arms, under their rails.
-        part("catch arm",Shape::TRUSS,{(from+to)/2,y,armHeight-armRadius-depth/2},{beam,depth,to-from},lattice,90,90);create.mutable_scenery(create.scenery_size()-1)->set_structure(on);
+        part("catch arm",Shape::TRUSS,{(from+to)/2,y,armHeight-armRadius-(depth+.33)/2},{beam-.1,depth-.33,to-from},lattice,90,90);create.mutable_scenery(create.scenery_size()-1)->set_structure(on); // Recess below the deck; keep the bottom fixed.
         part("arm deck",Shape::BOX,{(from+to)/2,y,armHeight-armRadius-.15},{to-from,beam,.3},dark);create.mutable_scenery(create.scenery_size()-1)->set_structure(on);}
     part("ship arm",Shape::TRUSS,{towerX+half+5,half+5,78},{2.6,2.6,13},lattice,45,90);
     part("mount",Shape::CYLINDER,{0,0,-1.5},{17,17,3},concrete,0,0,9.6);
     for(int i=0;i<20;++i){const double a=i*18*deg; // The hold-down clamps on the ring's lip.
-        part("clamp",Shape::BOX,{5.1*std::sin(a),5.1*std::cos(a),.25},{.8,1.2,.5},dark,i*18.);}
-    for(int i=0;i<8;++i)part("tank",Shape::CYLINDER,{-100.+12*(i%4),-62.-13*(i/4),13},{9,9,30},i%2?white:tankSteel); // Upright: oxygen, methane, nitrogen.
-    for(int i=0;i<4;++i)part("tank",Shape::CYLINDER,{-95.+12*i,-100,1},{4,4,24},white,0,90);  // Lying, north-south.
+        part("clamp",Shape::BOX,{5.1*std::sin(a),5.1*std::cos(a),.23},{.8,1.2,.5},dark,i*18.);} // Sink into the ring to separate faces.
+    for(int i=0;i<8;++i)part("tank",Shape::CYLINDER,{-100.+12*(i%4),-62.-13*(i/4),12.98},{9,9,30},i%2?white:tankSteel); // Sink upright bases into the pad to separate faces.
+    for(int i=0;i<4;++i)part("tank",Shape::CYLINDER,{-95.+12*i,-100,-.02},{4,4,24},white,0,90);  // Sink lying tanks into the pad to seat them.
     {const Vec a{-60,-60,-1},b{0,-9,-1};const Vec d=b+a*-1.;part("propellant line",Shape::CYLINDER,(a+b)*.5,{1.2,1.2,norm(d)},tankSteel,std::atan2(d.x,d.y)/deg,90);}
 }
 // What a vehicle coming back must never strike or come down on, as its computer knows the site (TowerApproach's columns and
@@ -168,6 +168,7 @@ inline const char* broken(const api::FlightSample& s){
 }
 // A mission event for the broadcast's timeline: done now (the step's start), or planned at a UTC instant.
 inline void mark(api::StepRequest& q,const char* name,double plannedUtc=-1){auto* m=q.add_milestones();m->set_name(name);if(plannedUtc>=0){m->set_utc_unix_seconds(plannedUtc);m->set_planned(true);}}
+inline void decide(api::StepRequest& q,const std::string& what,const std::string& why){auto* d=q.mutable_decision();d->set_what(what);d->set_why(why);}
 // A failure to inject: on "stack" (before staging), "booster" or "ship", at its mission time (s from T-0: negative while counting) or as its guidance enters a
 // phase (BoosterReturn's or ShipReturn's, by name). Written "flight@time:what" or "flight@phase:what", several joined by
 // commas; what:
@@ -213,7 +214,7 @@ inline void inject(std::vector<Fault>& faults,const char* flight,double t,const 
     for(auto& f:faults)if(!f.done&&f.flight==flight&&((f.timed&&t>=f.at)||(!f.timed&&phase&&f.phase==phase))){
         *q.add_commands()=faultCommand(f.what);f.done=true;std::printf("%9.1f s  FALHA: %s (%s, %s)\n",t,f.what.c_str(),flight,f.timed?"no instante":phase);}
 }
-inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pacer& pace,double warp,Navigator nav,std::vector<Fault> faults={},double zero=0,ShipReturn::Phase from=ShipReturn::Phase::orbit,std::FILE* csv=nullptr){ // zero: T-0 on its flight's clock; from: the phase its guidance takes up.
+inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pacer& pace,double warp,Navigator nav,std::vector<Fault> faults={},double zero=0,ShipReturn::Phase from=ShipReturn::Phase::orbit,std::FILE* csv=nullptr,std::pair<std::string,std::string> pending={}){ // zero: T-0 on its flight's clock; from: the phase its guidance takes up.
     ShipReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());siteWorks(back);if(from!=ShipReturn::Phase::orbit)back.enter(from);Home out;double report=0,caughtAt=-1,traced=0,low=0;const bool trace=std::getenv("ALBERT_TRACE")!=nullptr,entryTrace=trace&&std::string(std::getenv("ALBERT_TRACE"))=="entry";
     const char* names[]{"em órbita","orientação retrógrada","queima de saída de órbita","planeio até o ar","reentrada","giro","queima de pouso","pairando","descendo","capturada","desvio","no chão"};auto last=back.phase();
     bool open=false,fleeing=false; // The arms: opened for the way down past them, closed over the hover.
@@ -222,13 +223,14 @@ inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pac
     for(;;){
         const double t=(ship.elapsed_seconds()-zero);if(csv&&t>=csvAt){csvAt=std::floor(t)+1;profile(csv,t,"ship",ship,names[static_cast<int>(back.phase())]);}back.armsClosed=armsClosed(ship);armAngles(back,ship);const Command c=back.step(t,nav.state(ship));out.handoff=back.handoff();out.handoffMiss=back.handoffMiss();
         api::StepRequest q;q.set_ticks(static_cast<unsigned>(std::clamp(std::llround(back.nextStep()*1000),1LL,600000LL)));apply(q,c);
+        if(!pending.first.empty()){decide(q,pending.first,pending.second);pending={};}
         {static const char* phases[]{"orbit","orient","deorbit","glide","entry","flip","landing","hover","descend","caught","divert","down"};inject(faults,"ship",t,phases[static_cast<int>(back.phase())],q);}
         for(const auto& m:marks)mark(q,m.c_str());marks.clear();
         {const bool shut=back.closeArms()||back.phase()==ShipReturn::Phase::caught; // As its guidance asks (shutting round it as it settles: shutting()).
             if(shut==open){arms(q,!shut);open=!shut;}}
         call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,q,&ship);});nav.update(ship);
-        for(const auto& u:ship.uplinks())if(u=="ABORT"&&!back.gaveUp()){back.abort(nav.state(ship));std::printf("%9.1f s  nave: ABORTAR recebido\n",ship.elapsed_seconds()-zero);}
-        for(const auto& w:nav.reports)std::printf("%9.1f s  nave: FDIR: %s\n",(ship.elapsed_seconds()-zero),w.c_str());nav.reports.clear();
+        for(const auto& u:ship.uplinks())if(u=="ABORT"&&!back.gaveUp()){back.abort(nav.state(ship));std::printf("%9.1f s  nave: ABORTAR recebido\n",ship.elapsed_seconds()-zero);pending={"ABORTAR recebido","ABORT"};}
+        for(const auto& w:nav.reports){std::printf("%9.1f s  nave: FDIR: %s\n",(ship.elapsed_seconds()-zero),w.c_str());pending={"FDIR",w};}nav.reports.clear();
         if(entryTrace&&back.phase()==ShipReturn::Phase::entry&&t>=low){low=t+2;const State x=state(ship);const Vec vb=mul(x.toBody,x.velocity);const double v=norm(vb); // ALBERT_TRACE=entry: its attitude in the air.
             const auto [ea,no]=aside(ship);const auto& vv=ship.velocity_ned_meters_per_second();std::printf("ENTRY %.0f e %.0f n %.0f ve %.1f vn %.1f h %.1f km v %.0f q %.0f alpha %.1f beta %.1f bank %.0f/%.0f rate %.2f %.2f %.2f flaps %.0f %.0f %.0f %.0f torque %.2g %.2g %.2g gas %.0f\n",t,ea,no,vv.y(),vv.x(),x.height/1e3,v,x.q,std::atan2(vb.z,vb.x)/deg,std::asin(vb.y/std::max(v,1.))/deg,
                 back.bank()/deg,back.bankWanted()/deg,x.rate.x/deg,x.rate.y/deg,x.rate.z/deg,x.surfaces.size()>3?x.surfaces[0]/deg:0,x.surfaces.size()>3?x.surfaces[1]/deg:0,x.surfaces.size()>3?x.surfaces[2]/deg:0,x.surfaces.size()>3?x.surfaces[3]/deg:0,c.torque.x,c.torque.y,c.torque.z,ship.thruster_gas_kilograms());}
@@ -250,13 +252,15 @@ inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pac
             static const char* events[]{nullptr,nullptr,"SAÍDA DE ÓRBITA",nullptr,"REENTRADA","GIRO","QUEIMA DE POUSO DA NAVE",nullptr,nullptr,"CAPTURA DA NAVE","NAVE ABORTA A CAPTURA",nullptr};
             if(const char* e=events[static_cast<int>(last)])marks.push_back(e);
             std::printf("%9.1f s  nave: %s (h %.2f km, v %.0f m/s, %.0f t de propelante, pouso previsto %.1f km além e %.1f km à direita da torre)\n",now,names[static_cast<int>(last)],
-                ship.geodetic().height_meters()/1e3,speedOf(ship),ship.propellant_kilograms()/1e3,back.along()/1e3,back.beside()/1e3);}
+                ship.geodetic().height_meters()/1e3,speedOf(ship),ship.propellant_kilograms()/1e3,back.along()/1e3,back.beside()/1e3);
+            char why[512];std::snprintf(why,sizeof why,"h %.2f km, v %.0f m/s, %.0f t de propelante, pouso previsto %.1f km além e %.1f km à direita da torre",
+                ship.geodetic().height_meters()/1e3,speedOf(ship),ship.propellant_kilograms()/1e3,back.along()/1e3,back.beside()/1e3);pending={names[static_cast<int>(last)],why};}
         const double now=(ship.elapsed_seconds()-zero);
         if(now>=report){const bool orbiting=last==ShipReturn::Phase::orbit;report=orbiting?std::floor(now/3600)*3600+3600:std::floor(now/30)*30+30;
             std::printf("%9.1f s  nave: h %7.1f km  v %5.0f m/s  q %6.0f Pa  inclinação lateral %4.0f°  pouso previsto %.1f km além, %.1f à direita  ladrilho mais quente %4.0f K gás %.0f kg\n",now,
                 ship.geodetic().height_meters()/1e3,speedOf(ship),ship.dynamic_pressure_pascals(),back.bank()/deg,back.along()/1e3,back.beside()/1e3,out.maxTile,ship.thruster_gas_kilograms());}
-        if(const char* why=back.escaping();why&&!fleeing){fleeing=true;marks.push_back("NAVE EM FUGA");std::printf("%9.1f s  nave: FUGA com todos os recursos (%s)\n",now,why);}else if(!back.escaping())fleeing=false;
-        if(back.gaveUp()&&out.gaveUp.empty()){out.gaveUp=back.gaveUp();std::printf("%9.1f s  nave: captura cancelada (%s); para longe da torre\n",now,back.gaveUp());}
+        if(const char* why=back.escaping();why&&!fleeing){fleeing=true;marks.push_back("NAVE EM FUGA");std::printf("%9.1f s  nave: FUGA com todos os recursos (%s)\n",now,why);pending={"fuga com todos os recursos",why};}else if(!back.escaping())fleeing=false;
+        if(back.gaveUp()&&out.gaveUp.empty()){out.gaveUp=back.gaveUp();std::printf("%9.1f s  nave: captura cancelada (%s); para longe da torre\n",now,back.gaveUp());pending={"captura cancelada",back.gaveUp()};}
         if(back.gaveUp()&&(back.phase()==ShipReturn::Phase::down||ship.landed()||broken(ship))){ // Down away from the tower (or broken up there): its flight over.
             out.down=true;out.away=offAxis(ship,back.up());std::tie(out.downEast,out.downNorth)=aside(ship);std::printf("%9.1f s  nave: no chão a %.0f m da torre, %.1f m/s%s\n",now,out.away,speedOf(ship),broken(ship)?" (desfeita)":"");
             if(const char* why=broken(ship);why&&!out.clear())throw std::runtime_error(std::string("A nave se desfez sobre a infraestrutura: ")+why); // Never on the tower or the works, given up or not.
@@ -300,6 +304,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
     BoosterReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());siteWorks(back);GravityTurn ascent(heading*deg,kickAngle);ascent.kickRate=.6*deg;ascent.pitch=flownPitch();ascent.insertion=true; // A small kick: lofted, so the booster's way back stays short.
     double thrust=stackThrottle,need=0,needAt=0;bool flapsOut=false,spawned=false,orbit=false,bucket=false,coasting=false,shut=false,mirror=false,peaked=false,fleeing=false;double report=0,maxQ=0,maxQAt=0,spawnAt=0,caughtAt=0,lostAt=-1;
     std::vector<std::string> marks,found; // Events seen since the last step, for the timeline; the FDIR's findings, for the count.
+    std::pair<std::string,std::string> pending,bpending; // Stack/ship and booster decisions belong to their own next requests.
     const bool trace=std::getenv("ALBERT_TRACE")!=nullptr,attitude=trace&&std::string(std::getenv("ALBERT_TRACE")).rfind("attitude",0)==0,fine=attitude&&std::string(std::getenv("ALBERT_TRACE"))=="attitude-fine";double traced=0,turned=0;bool entered=false;
     Countdown count(create.definition(),ship,{{"MAX-Q",62},{"MECO",143},{"SEPARAÇÃO A QUENTE",146},{"BOOSTBACK",152},{"QUEIMA DE POUSO DO BOOSTER",396},{"CAPTURA DO BOOSTER",418},
         {"SECO",505}}); // As Flights 12-14 (V3, 2026) flew them, by their webcast telemetry and SpaceX's timelines (build/voos-reais).
@@ -312,13 +317,14 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
     for(;;){
         const double t=clock();
         api::StepRequest step;step.set_ticks(20);inject(faults,spawned?"ship":"stack",t,nullptr,step);
+        if(!pending.first.empty()){decide(step,pending.first,pending.second);pending={};}
         if(count.phase()!=Countdown::Phase::launched){ // On the pad: the count, until the clamps let go.
             count.step(ship,nav,found,step);found.clear();
             call([&](grpc::ClientContext& c){return flight.Step(&c,step,&ship);});nav.update(ship);
-            for(const auto& w:nav.reports){std::printf("%7.2f s  pilha: FDIR: %s\n",clock(),w.c_str());out.fdir.push_back("pilha: "+w);found.push_back(w);}nav.reports.clear();
+            for(const auto& w:nav.reports){std::printf("%7.2f s  pilha: FDIR: %s\n",clock(),w.c_str());out.fdir.push_back("pilha: "+w);found.push_back(w);pending={"FDIR",w};}nav.reports.clear();
             if(const char* why=broken(ship))throw std::runtime_error(std::string("A pilha se desfez na plataforma: ")+why);
             if(count.phase()==Countdown::Phase::scrubbed){ // Safed: 3 s for the engines to wind down, the stack on its clamps.
-                for(int i=0;i<150;++i){api::StepRequest idle;idle.set_ticks(20);call([&](grpc::ClientContext& c){return flight.Step(&c,idle,&ship);});pace(ship.elapsed_seconds(),1);}
+                for(int i=0;i<150;++i){api::StepRequest idle;idle.set_ticks(20);if(!pending.first.empty()){decide(idle,pending.first,pending.second);pending={};}call([&](grpc::ClientContext& c){return flight.Step(&c,idle,&ship);});pace(ship.elapsed_seconds(),1);}
                 const bool lit=std::any_of(ship.engines().begin(),ship.engines().end(),[](const api::EngineSample& e){return e.on();});
                 out.scrubbed=count.why();out.padSafe=ship.clamped()&&!broken(ship)&&!lit;
                 std::printf("Lançamento cancelado (%s); a pilha %s.\n",count.why().c_str(),out.padSafe?"inteira, presa à plataforma e com os motores apagados":"NÃO ficou segura");return out;}
@@ -328,6 +334,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
             const State x=nav.state(ship);int working=0;for(int i=0;i<13&&i<static_cast<int>(x.failed.size());++i)working+=!x.failed[static_cast<std::size_t>(i)];need=1.05*back.returnNeed(x,x.propellant,working);}
         if(!spawned&&ship.stage()==0&&!ship.clamped()&&(nav.state(ship).propellant<=std::max(reserve,need)||(clock()>30&&speedOf(ship)>=mecoSpeed))){ // At the flights' cutoff speed, or down to what the booster's way back takes (its own prediction, 5% kept; never under the reserve), as its gauges read it. // MECO and hot staging: the booster becomes its own flight.
             api::StepRequest stage;stage.add_commands()->set_cutoff(true);auto* sp=stage.add_commands()->mutable_spawn();sp->set_flight_id("booster");*sp->mutable_definition()=superHeavy();
+            if(step.has_decision()){decide(stage,step.decision().what(),step.decision().why());step.clear_decision();}
             const Vec stack=vec(ship.position_ecef_meters());sp->set_nose_offset_meters(shipLength);call([&](grpc::ClientContext& c){return flight.Step(&c,stage,&ship);});
             {api::FlightRequest q;q.set_flight_id("booster");call([&](grpc::ClientContext& c){return flight.GetFlight(&c,q,&boost);});}
             // Each computer from the stack's estimate, moved from the stack's centre of mass to its own (the design's geometry).
@@ -335,6 +342,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
             bnav.design(superHeavy()); // Its engines' and thrusters' flows (its RCS on the tanks).
             nav.update(ship);nav.position=nav.position+vec(ship.position_ecef_meters())+stack*-1.; // The ship's computer onto its own centre of mass.
             std::printf("%7.2f s  MECO e separação a quente: h %.1f km, v %.0f m/s; booster com %.0f t\n",t,ship.geodetic().height_meters()/1e3,speedOf(ship),boost.propellant_kilograms()/1e3);
+            {char why[256];std::snprintf(why,sizeof why,"h %.1f km, v %.0f m/s; booster com %.0f t",ship.geodetic().height_meters()/1e3,speedOf(ship),boost.propellant_kilograms()/1e3);decide(step,"MECO e separação a quente",why);}
             spawned=true;spawnAt=t;if(onSpawn)onSpawn();mark(step,"MECO");mark(step,"SEPARAÇÃO A QUENTE");out.meco=t;out.mecoHeight=ship.geodetic().height_meters();back.start(boost.elapsed_seconds());step.add_commands()->set_ignite(true);ascent.upper(nav.reading(ship));
         }
         if(!spawned){ // Off the pad at the flights' thrust (V3's ~1.45 g at liftoff, Flights 12-14's telemetry), then held to 2.5 g
@@ -349,38 +357,43 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
             auto* g=step.add_commands()->mutable_gimbal();g->set_pitch_radians(c.gimbalPitch);g->set_yaw_radians(c.gimbalYaw); // The Raptors steer the stack.
             if(spawned&&!flapsOut&&ship.surfaces_size()>=4){flapsOut=true;for(unsigned i=1;i<=4;++i){auto* k=step.add_commands();k->set_surface_radians(45*deg);k->set_index(i);}} // The ship's flaps held straight out, as on the stack.
             if(ascent.phase()==GravityTurn::Phase::orbit){orbit=true;out.seco=t;marks.push_back("SECO");out.perigee=GravityTurn::perigee(vec(ship.position_meters()),vec(ship.velocity_meters_per_second()));
-                out.apoapsis=GravityTurn::apoapsis(vec(ship.position_meters()),vec(ship.velocity_meters_per_second()));std::printf("%7.2f s  SECO: perigeu %.0f km, apogeu %.0f km, girando a %.2f°/s\n",t,out.perigee/1e3,out.apoapsis/1e3,norm(vec(ship.angular_rate_radians_per_second()))/deg);}}
+                out.apoapsis=GravityTurn::apoapsis(vec(ship.position_meters()),vec(ship.velocity_meters_per_second()));std::printf("%7.2f s  SECO: perigeu %.0f km, apogeu %.0f km, girando a %.2f°/s\n",t,out.perigee/1e3,out.apoapsis/1e3,norm(vec(ship.angular_rate_radians_per_second()))/deg);
+                char why[256];std::snprintf(why,sizeof why,"perigeu %.0f km, apogeu %.0f km, girando a %.2f°/s",out.perigee/1e3,out.apoapsis/1e3,norm(vec(ship.angular_rate_radians_per_second()))/deg);decide(step,"SECO",why);}}
         call([&](grpc::ClientContext& c){return flight.Step(&c,step,&ship);});nav.update(ship);
-        for(const auto& w:nav.reports){std::printf("%7.2f s  %s: FDIR: %s\n",clock(),spawned?"nave":"pilha",w.c_str());out.fdir.push_back(std::string(spawned?"nave: ":"pilha: ")+w);}nav.reports.clear();
+        for(const auto& w:nav.reports){std::printf("%7.2f s  %s: FDIR: %s\n",clock(),spawned?"nave":"pilha",w.c_str());out.fdir.push_back(std::string(spawned?"nave: ":"pilha: ")+w);pending={"FDIR",w};}nav.reports.clear();
         if(const char* why=broken(ship))throw std::runtime_error(std::string(spawned?"A nave se desfez: ":"A pilha se desfez: ")+why);
         if(ship.dynamic_pressure_pascals()>maxQ){maxQ=ship.dynamic_pressure_pascals();maxQAt=clock();}
         else if(!peaked&&maxQ>1e4&&ship.dynamic_pressure_pascals()<.97*maxQ){peaked=true;marks.push_back("MAX-Q");}
         if(spawned&&lostAt>=0){if(!out.boosterLost&&!out.boosterDown){ // Broken up: what is left falls, uncommanded, until it lies on the ground, then its flight ends.
-            api::StepRequest b;b.set_flight_id("booster");b.set_ticks(20);call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,b,&boost);});
+            api::StepRequest b;b.set_flight_id("booster");b.set_ticks(20);if(!bpending.first.empty()){decide(b,bpending.first,bpending.second);bpending={};}call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,b,&boost);});
             if(boost.landed()&&!out.boosterLost){api::FlightRequest q;q.set_flight_id("booster");api::Applied a;call([&](grpc::ClientContext& c){return flight.EndFlight(&c,q,&a);});out.boosterLost=true;}}
         }
         else if(spawned){ // Caught, it stays a flight: resting on the arms.
             back.armsClosed=armsClosed(boost);armAngles(back,boost);const Command c=back.step(boost.elapsed_seconds(),bnav.state(boost));api::StepRequest b;b.set_flight_id("booster");b.set_ticks(20);apply(b,c); // The booster's own clock: 0 at its spawn.
+            if(!bpending.first.empty()){decide(b,bpending.first,bpending.second);bpending={};}
             inject(faults,"booster",spawnAt+boost.elapsed_seconds(),names[static_cast<int>(back.phase())],b);
             if(back.closeArms()!=shut){shut=back.closeArms();arms(b,!shut);mirror=true;} // As its guidance asks; the site shows the ship's flight's arms: those too.
             if(const char* why=back.escaping();why&&!fleeing){fleeing=true;marks.push_back("BOOSTER EM FUGA");const auto [east,north]=aside(boost);
-                std::printf("%7.2f s  booster: FUGA com todos os recursos (%s; h %.0f m, %.0f m a leste e %.0f m ao norte da torre)\n",spawnAt+boost.elapsed_seconds(),why,boost.geodetic().height_meters()-towerGround,east,north);}
+                std::printf("%7.2f s  booster: FUGA com todos os recursos (%s; h %.0f m, %.0f m a leste e %.0f m ao norte da torre)\n",spawnAt+boost.elapsed_seconds(),why,boost.geodetic().height_meters()-towerGround,east,north);
+                char reason[1024];std::snprintf(reason,sizeof reason,"%s; h %.0f m, %.0f m a leste e %.0f m ao norte da torre",why,boost.geodetic().height_meters()-towerGround,east,north);decide(b,"fuga com todos os recursos",reason);}
             else if(!back.escaping())fleeing=false;
             if(back.gaveUp()&&out.gaveUp.empty()){out.gaveUp=back.gaveUp();marks.push_back("BOOSTER ABORTA A CAPTURA");const auto [east,north]=aside(boost);
                 std::printf("%7.2f s  booster: captura cancelada (%s); desviando para longe da torre (h %.2f km, %.0f m a leste e %.0f m ao norte da torre)\n",spawnAt+boost.elapsed_seconds(),
-                    back.gaveUp(),boost.geodetic().height_meters()/1e3,east,north);}
+                    back.gaveUp(),boost.geodetic().height_meters()/1e3,east,north);decide(b,"captura cancelada",back.gaveUp());}
             try{call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,b,&boost);});}
             catch(const std::exception& e){ // A command refused (an engine with nothing to burn): the step without them.
                 std::printf("%7.2f s  booster: comando recusado (%s); segue sem ele\n",spawnAt+boost.elapsed_seconds(),e.what());
-                api::StepRequest bare;bare.set_flight_id("booster");bare.set_ticks(20);call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,bare,&boost);});}
-            bnav.update(boost);for(const auto& w:bnav.reports){std::printf("%7.2f s  booster: FDIR: %s\n",spawnAt+boost.elapsed_seconds(),w.c_str());out.fdir.push_back("booster: "+w);}bnav.reports.clear();
-            for(const auto& u:boost.uplinks())if(u=="ABORT"&&!back.gaveUp()){back.abort(bnav.state(boost));std::printf("%7.2f s  booster: ABORTAR recebido\n",spawnAt+boost.elapsed_seconds());}
+                api::StepRequest bare;bare.set_flight_id("booster");bare.set_ticks(20);decide(bare,"comando recusado",e.what());call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,bare,&boost);});}
+            bnav.update(boost);for(const auto& w:bnav.reports){std::printf("%7.2f s  booster: FDIR: %s\n",spawnAt+boost.elapsed_seconds(),w.c_str());out.fdir.push_back("booster: "+w);bpending={"FDIR",w};}bnav.reports.clear();
+            for(const auto& u:boost.uplinks())if(u=="ABORT"&&!back.gaveUp()){back.abort(bnav.state(boost));std::printf("%7.2f s  booster: ABORTAR recebido\n",spawnAt+boost.elapsed_seconds());bpending={"ABORTAR recebido","ABORT"};}
             if(back.phase()!=last){last=back.phase();if(last==BoosterReturn::Phase::caught)caughtAt=spawnAt+boost.elapsed_seconds();
                 if(last==BoosterReturn::Phase::boostback)marks.push_back("BOOSTBACK");else if(last==BoosterReturn::Phase::landing)marks.push_back("QUEIMA DE POUSO DO BOOSTER");
                 else if(last==BoosterReturn::Phase::caught)marks.push_back("CAPTURA DO BOOSTER");
                 const auto [east,north]=aside(boost);
                 std::printf("%7.2f s  booster: %s (h %.2f km, v %.0f m/s, %.0f t de propelante, %.0f m a leste e %.0f m ao norte da torre, pouso previsto a %.0f m do ponto sobre o mar)\n",
-                    spawnAt+boost.elapsed_seconds(),labels[static_cast<int>(last)],boost.geodetic().height_meters()/1e3,speedOf(boost),boost.propellant_kilograms()/1e3,east,north,back.predicted());}
+                    spawnAt+boost.elapsed_seconds(),labels[static_cast<int>(last)],boost.geodetic().height_meters()/1e3,speedOf(boost),boost.propellant_kilograms()/1e3,east,north,back.predicted());
+                char why[512];std::snprintf(why,sizeof why,"h %.2f km, v %.0f m/s, %.0f t de propelante, %.0f m a leste e %.0f m ao norte da torre, pouso previsto a %.0f m do ponto sobre o mar",
+                    boost.geodetic().height_meters()/1e3,speedOf(boost),boost.propellant_kilograms()/1e3,east,north,back.predicted());bpending={labels[static_cast<int>(last)],why};}
             out.towerClearance=std::min(out.towerClearance,clearance(boost,boosterLength));
             if(trace&&!entered&&back.phase()==BoosterReturn::Phase::coast&&boost.geodetic().height_meters()<50e3){entered=true;const auto [e,n]=aside(boost);const auto& v=boost.velocity_ned_meters_per_second(); // ALBERT_TRACE: the landing bench's start (Gate).
                 std::printf("GATE east %.1f north %.1f height %.1f vn %.2f ve %.2f vd %.2f propellant %.0f\n",e,n,boost.geodetic().height_meters()-towerGround,v.x(),v.y(),v.z(),boost.propellant_kilograms());}
@@ -406,7 +419,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
         if(clock()>=report){report=std::floor(clock()/30)*30+30;
             std::printf("%7.2f s  nave: h %6.1f km  v %6.0f m/s  q %6.0f Pa  %7.0f t%s\n",clock(),ship.geodetic().height_meters()/1e3,std::hypot(ship.velocity_meters_per_second().x(),ship.velocity_meters_per_second().y(),ship.velocity_meters_per_second().z()),
                 ship.dynamic_pressure_pascals(),ship.mass_kilograms()/1e3,spawned?(std::string("; booster h ")+std::to_string(static_cast<int>(boost.geodetic().height_meters()))+" m").c_str():"");}
-        if(orbit&&(out.boosterLost||out.boosterDown)){std::printf(out.boosterDown?"Booster no mar; a nave segue.\n":"Booster perdido; a nave segue.\n");if(orbitOnly)return out;out.ship=flyHome(flight,ship,pace,warp,nav,faults,count.zero(),ShipReturn::Phase::orbit,csv.get());return out;}
+        if(orbit&&(out.boosterLost||out.boosterDown)){std::printf(out.boosterDown?"Booster no mar; a nave segue.\n":"Booster perdido; a nave segue.\n");if(orbitOnly)return out;out.ship=flyHome(flight,ship,pace,warp,nav,faults,count.zero(),ShipReturn::Phase::orbit,csv.get(),pending);return out;}
         if(orbit&&back.phase()==BoosterReturn::Phase::caught&&t-caughtAt>=30){ // 30 s on the arms.
             out.maxQ=maxQ;out.maxQAt=maxQAt;out.caught=caughtAt;out.offAxis=offAxis(boost,back.up());std::tie(out.along,out.across)=aside(boost);out.speed=speedOf(boost);out.propellant=boost.propellant_kilograms();
             std::printf("Booster: a menor folga da torre, abaixo do topo dela, %.1f m.\n",out.towerClearance);
@@ -414,7 +427,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
                 t-caughtAt,out.offAxis,out.speed,out.propellant/1e3);
             if(orbitOnly)return out;
             {api::FlightRequest q;q.set_flight_id("booster");api::Applied a;call([&](grpc::ClientContext& c){return flight.EndFlight(&c,q,&a);});} // Taken off the arms.
-            out.ship=flyHome(flight,ship,pace,warp,nav,faults,count.zero(),ShipReturn::Phase::orbit,csv.get());return out;}
+            out.ship=flyHome(flight,ship,pace,warp,nav,faults,count.zero(),ShipReturn::Phase::orbit,csv.get(),pending);return out;}
         if(clock()>1500)throw std::runtime_error("Missão não concluída em 25 minutos");
         // Time sped up 10x from 10 s after staging (its flip and the hot staging seen) through the booster's boostback and
         // coast, until it comes back down through 40 km (its way down, the grid fins and the landing in real time).
@@ -442,12 +455,14 @@ inline Mission landing(api::FlightService::Stub& flight,const Gate& g,std::vecto
     BoosterReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());siteWorks(back);back.enter(BoosterReturn::Phase::coast);
     static const char* names[]{"wait","flip","boostback","coast","landing","final","hover","descend","caught","divert","down"};
     bool shut=false;double caughtAt=-1;auto last=back.phase();
+    std::pair<std::string,std::string> pending;
     for(;;){const double t=boost.elapsed_seconds();
         back.armsClosed=armsClosed(boost);armAngles(back,boost);const Command c=back.step(t,nav.state(boost));api::StepRequest b;b.set_ticks(20);apply(b,c);
+        if(!pending.first.empty()){decide(b,pending.first,pending.second);pending={};}
         inject(faults,"booster",t,names[static_cast<int>(back.phase())],b);if(back.closeArms()!=shut){shut=back.closeArms();arms(b,!shut);}
         try{call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,b,&boost);});}
-        catch(const std::exception&){api::StepRequest bare;bare.set_ticks(20);call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,bare,&boost);});} // A command refused: on without it.
-        nav.update(boost);for(const auto& r:nav.reports){out.fdir.push_back("booster: "+r);if(!quiet)std::printf("%7.2f s  FDIR: %s\n",t,r.c_str());}nav.reports.clear();
+        catch(const std::exception&){api::StepRequest bare;bare.set_ticks(20);if(b.has_decision())decide(bare,b.decision().what(),b.decision().why());call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,bare,&boost);});} // A command refused: on without it.
+        nav.update(boost);for(const auto& r:nav.reports){out.fdir.push_back("booster: "+r);if(!quiet){std::printf("%7.2f s  FDIR: %s\n",t,r.c_str());pending={"FDIR",r};}}nav.reports.clear();
         if(!quiet&&std::getenv("ALBERT_TRACE")&&std::fmod(t+1e-9,.5)<.02){const auto [e,n]=aside(boost);const State x=state(boost);const Vec u=back.up(),east{-std::sin(towerLongitude*deg),std::cos(towerLongitude*deg),0},h=x.velocity+u*-dot(x.velocity,u);int lit=0;
             for(const auto& en:boost.engines())lit+=en.on();std::printf("TRACE %.1f %s e %.1f n %.1f h %.1f ve %.2f vn %.2f vz %.2f lit %d prop %.0f arms %.1f push %.2f tilt %.1f\n",t,names[static_cast<int>(back.phase())],e,n,
                 boost.geodetic().height_meters()-towerGround,dot(h,east),dot(h,cross(u,east)),dot(x.velocity,u),lit,boost.propellant_kilograms()/1e3,boost.structure_radians_size()?boost.structure_radians(0)/deg:0.,norm(back.disturbance()),
@@ -457,7 +472,9 @@ inline Mission landing(api::FlightService::Stub& flight,const Gate& g,std::vecto
                 boost.geodetic().height_meters()-towerGround,std::hypot(across,v.z()),across,v.z(),std::atan2(across,v.z())/deg,boost.dynamic_pressure_pascals()/1e3,std::hypot(f.x(),f.y(),f.z()));}
         out.towerClearance=std::min(out.towerClearance,clearance(boost,boosterLength));if(back.gaveUp()&&out.gaveUp.empty())out.gaveUp=back.gaveUp();
         if(back.phase()!=last){last=back.phase();if(last==BoosterReturn::Phase::caught)caughtAt=t;
-            if(!quiet){const auto [e,n]=aside(boost);std::printf("%7.2f s  %s (h %.0f m, %.0f m a leste, %.0f m ao norte, %.0f t)\n",t,names[static_cast<int>(last)],boost.geodetic().height_meters()-towerGround,e,n,boost.propellant_kilograms()/1e3);}}
+            if(!quiet){const auto [e,n]=aside(boost);std::printf("%7.2f s  %s (h %.0f m, %.0f m a leste, %.0f m ao norte, %.0f t)\n",t,names[static_cast<int>(last)],boost.geodetic().height_meters()-towerGround,e,n,boost.propellant_kilograms()/1e3);
+                static const char* labels[]{"espera","giro","boostback","costa","queima de pouso","aproximação final","pairando","descendo","capturado","desvio","no chão"};
+                char why[256];std::snprintf(why,sizeof why,"h %.0f m, %.0f m a leste, %.0f m ao norte, %.0f t",boost.geodetic().height_meters()-towerGround,e,n,boost.propellant_kilograms()/1e3);pending={labels[static_cast<int>(last)],why};}}
         if(broken(boost)){out.boosterLost=true;out.boosterAway=offAxis(boost,back.up());std::tie(out.downEast,out.downNorth)=aside(boost);return out;}
         if(back.gaveUp()&&(back.phase()==BoosterReturn::Phase::down||boost.landed())){out.boosterDown=true;out.boosterAway=offAxis(boost,back.up());std::tie(out.downEast,out.downNorth)=aside(boost);return out;}
         if(boost.landed()||boost.geodetic().height_meters()<towerGround){out.boosterLost=true;out.boosterAway=offAxis(boost,back.up());std::tie(out.downEast,out.downNorth)=aside(boost);return out;} // Down without giving up: on the site.

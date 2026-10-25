@@ -119,7 +119,10 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
   Copernicus WorldDEM-30.
 - NASA Global Imagery Browse Services (GIBS) / NASA-USGS WELD (Web-Enabled Landsat Data):
   composição anual Landsat de 2000 a ~31 m (`Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual`),
-  baixada em uso para o detalhe dos sítios de lançamento, https://gibs.earthdata.nasa.gov.
+  baixada em uso para o detalhe dos sítios de lançamento fora dos EUA continentais, https://gibs.earthdata.nasa.gov.
+- USDA Farm Service Agency NAIP (National Agriculture Imagery Program), pelo serviço de imagens do USGS The National Map:
+  fotografia aérea de ~0,6–1 m, domínio público, baixada em uso para o detalhe dos sítios de lançamento nos EUA continentais,
+  https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer.
 - NASA GIBS: paleta pública de fração de nuvens MODIS, convertida para JSON,
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml.
 - Planetas e luas (créditos e limites por corpo em `assets/planetary-sources.json`,

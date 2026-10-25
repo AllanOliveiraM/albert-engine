@@ -487,9 +487,10 @@ struct Slot {
             g.engines.push_back({static_cast<float>(n.position.y),static_cast<float>(n.position.z),static_cast<float>(std::sqrt(std::max(n.exitArea,.01)/3.14159265358979323846)),
                 static_cast<float>(e.throttle),e.on&&flight->state().burning,e.failed,e.silent,e.stuck});}
         for(const auto& f:st.surfaces)g.surfaces.push_back(f.name);
-        g.milestones=milestones;return g;
+        g.milestones=milestones;g.decision=decision;g.why=why;g.decided=decided;return g;
     }
     std::vector<Gauge::Milestone> milestones; // The mission's events this flight was given (StepRequest.milestones).
+    std::string decision,why;double decided=-1; // The latest decision it was given (StepRequest.decision) and when (UTC).
     std::optional<double> zero,stopped; // Its T-0 as the flight software last gave it (StepRequest.clock_zero); the UTC its clock stopped at (stop_clock).
     void note(const google::protobuf::RepeatedPtrField<api::Milestone>& given,double now){ // A done one replaces the planned one of its name.
         for(const auto& m:given){const std::string n=m.name().substr(0,40);if(n.empty())continue;const double at=m.has_utc_unix_seconds()&&std::isfinite(m.utc_unix_seconds())?m.utc_unix_seconds():now;
@@ -957,7 +958,8 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     for(auto& c:commands)if((c.kind&0xffff)==wire::spawn){*slot->log.add_spawns()=r->commands(static_cast<int>(c.b)).spawn();c.a=slot->log.spawns_size()-1;c.b=0;}
     const double now=slot->flight?ph::utcFromTt(slot->flight->state().time):0.;
     if(auto s=slot->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok()){while(slot->log.spawns_size()>before)slot->log.mutable_spawns()->RemoveLast();return s;}
-    slot->note(r->milestones(),now);if(r->has_clock_zero_utc_unix_seconds()&&std::isfinite(r->clock_zero_utc_unix_seconds()))slot->zero=r->clock_zero_utc_unix_seconds();
+    slot->note(r->milestones(),now);if(r->has_decision()&&!r->decision().what().empty()){slot->decision=r->decision().what().substr(0,120);slot->why=r->decision().why().substr(0,120);slot->decided=now;}
+    if(r->has_clock_zero_utc_unix_seconds()&&std::isfinite(r->clock_zero_utc_unix_seconds()))slot->zero=r->clock_zero_utc_unix_seconds();
     if(r->stop_clock()&&!slot->stopped)slot->stopped=now;slot->fill(out);}
     impl_->adopt(*slot);return grpc::Status::OK;
 }

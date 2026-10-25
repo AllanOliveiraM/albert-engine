@@ -59,7 +59,9 @@ public:
     void retryDetails() { imageFailed_.fill(false); detailError.clear(); }
     void replaceAssets(DecodedAssets assets);
     // camera: its view limits the terrain's refinement (none: refined all around).
-    void update(const threepp::Vector3& solarDirection, const threepp::Vector3& cameraPosition, const VisualSettings& settings, float seconds, threepp::Camera* camera=nullptr);
+    // earth: the Earth's place in double precision (its terrain placed from it); moonAt: the Moon's position (SceneObjects::exact()).
+    void update(const threepp::Vector3& solarDirection, const threepp::Vector3& cameraPosition, const VisualSettings& settings, float seconds, threepp::Camera* camera=nullptr,
+                const TerrainFrame* earth=nullptr,const std::array<double,3>* moonAt=nullptr);
     void updateBorderMaterial(threepp::ShaderMaterial& material, const threepp::Vector3& cameraPosition);
     void setCloudImage(threepp::Image image);
     void setCloudDetail(threepp::Image image, const GeoRegion& region);
@@ -75,6 +77,7 @@ public:
     [[nodiscard]] const Terrain* moonTerrain() const { return moonTerrain_.get(); }
 
     std::shared_ptr<threepp::Mesh> earth, moon, sun;
+    threepp::Scene* scene_=nullptr; // Where the terrain's nodes hang (placed in double precision, not as the bodies' children).
 
 private:
     TextureUploads uploads_;

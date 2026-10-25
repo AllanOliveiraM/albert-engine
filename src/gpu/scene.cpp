@@ -131,7 +131,11 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
         var roughness = material.params.x * select(1.0, roughTexel.g, material.more.y > 0.5);
         if (material.more.y > 1.5 && frame.weather.z > 0.0 && frame.air.w > 0.0) { // Water ("albert:water" maps, texels under 0.5): Cox-Munk slopes for the surface wind,
             // less what the wind waves near the camera resolve (their normal), and their foam.
-            let water = 1.0 - smoothstep(0.35, 0.5, roughTexel.g); var variance = 0.003 + 0.00512 * frame.weather.z;
+            // Water by the map's colour, at the sea's level: a mud flat or a lagoon's shore the colour calls water, a metre or more over
+            // the mean sea under the waves' anchor (the Earth's curve counted), stays still and matte (the waves ran over the ground there).
+            let up = cross(frame.oceanEast.xyz, frame.oceanNorth.xyz); let rel = (v.world - frame.ocean.xyz) * frame.oceanEast.w; let level = rel - up * dot(rel, up);
+            let above = dot(rel, up) + dot(level, level) / 12742000.0;
+            let water = (1.0 - smoothstep(0.35, 0.5, roughTexel.g)) * select(1.0, 1.0 - smoothstep(1.0, 3.0, above), frame.ocean.w > 0.0); var variance = 0.003 + 0.00512 * frame.weather.z;
             let footprint = max(length(dpdx(v.world)), length(dpdy(v.world))) * frame.oceanEast.w; // Metres per pixel.
             let sea = seaAt(v.world, footprint);
             if (sea.resolved > 0.0 && water > 0.0) {

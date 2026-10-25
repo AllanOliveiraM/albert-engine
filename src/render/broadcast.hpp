@@ -12,5 +12,7 @@ struct BroadcastVehicle {
     struct Engine {float y=0,z=0,radius=0,throttle=0;bool on=false,failed=false;};std::vector<Engine> engines; // Nozzles off the axis (body y, z; m).
 };
 struct BroadcastEvent {std::string name;double time=0;bool planned=false;}; // time: the mission's seconds (T+).
-void drawBroadcast(const std::vector<BroadcastVehicle>& vehicles,double missionTime,const std::vector<BroadcastEvent>& events);
+// The latest decision a vehicle's flight software took and why, for the top-left corner (time: the mission's seconds; none: empty what).
+struct BroadcastDecision {std::string vehicle,what,why;double time=0;};
+void drawBroadcast(const std::vector<BroadcastVehicle>& vehicles,double missionTime,const std::vector<BroadcastEvent>& events,const BroadcastDecision& decision={});
 }

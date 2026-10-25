@@ -31,7 +31,8 @@ public:
     // y and z in metres; lit, its throttle; failed) and the mission's events it was given (StepRequest.milestones).
     struct Gauge {std::string id,label;double start=0,zero=0,utc=0,speed=0,height=0,propellant=0,stop=0;bool stopped=false; // zero: the mission's T-0 (StepRequest.clock_zero; else start); stop: the UTC its clock stopped at, when stopped (stop_clock, a breakup).
         struct Engine {float y=0,z=0,radius=0,throttle=0;bool on=false,failed=false,silent=false,stuck=false;};std::vector<Engine> engines;std::vector<std::string> surfaces; // The stage's, by name (silent: failed but claiming to be fine; stuck: its gimbal jammed).
-        struct Milestone {std::string name;double utc=0;bool planned=false;};std::vector<Milestone> milestones;};
+        struct Milestone {std::string name;double utc=0;bool planned=false;};std::vector<Milestone> milestones;
+        std::string decision,why;double decided=-1;}; // The latest decision its flight software sent (StepRequest.decision) and when (UTC; -1: none).
     std::vector<Gauge> gauges()const;
     void physicsDefaults(const ::albert::v1::PhysicsSettings& defaults); // For flights that leave switches unset (the Física menu).
     // The operator's interference (the app's panel): a command (an engine's failure, a gust, a force, a sensor's fault, the

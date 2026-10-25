@@ -105,23 +105,89 @@ void earthLayers(){
 }
 )";
     albert::gpu::define("albert:corona",corona);
-    // vehicle.cpp: a rocket plume's glow on its cone (uv.y 1 at the nozzle, 0 at the tail), brightest down its axis and near
-    // the nozzle, fading to the edges and the tail, with bright shock diamonds near the nozzle in thick air; colours in linear
-    // light, strength its brightness, filtered by the air.
-    Program plume;plume.attributes=surfaceAttributes;plume.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32},{"diamonds",Uniform::f32}};
-    plume.wgsl=std::string(surface)+R"(
-struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32 };
+    // vehicle.cpp: one density contribution per ray through an open cone, or a soft nozzle disc to fill the axial opening.
+    Program plume;plume.attributes=surfaceAttributes;plume.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32},{"diamonds",Uniform::f32},
+        {"time",Uniform::f32},{"radii",Uniform::vec2},{"falloff",Uniform::f32},{"rarefied",Uniform::f32},{"disc",Uniform::f32},{"metres",Uniform::f32}};
+    plume.wgsl=R"(
+struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32, time: f32, radii: vec2f, falloff: f32, rarefied: f32, disc: f32, metres: f32 };
 @group(2) @binding(0) var<uniform> material: Material;
+struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @location(1) local: vec3f, @location(2) localNormal: vec3f, @location(3) worldNormal: vec3f, @location(4) world: vec3f };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f) -> Surface {
+    let radius = mix(material.radii.x, material.radii.y, clamp(-position.y, 0.0, 1.0));
+    let local = select(vec3f(position.x * radius, position.y, position.z * radius), position, material.disc > 0.5);
+    var o: Surface; let world = object.model * vec4f(local, 1.0);
+    o.uv = uv; o.local = local; o.localNormal = normal; o.world = world.xyz;
+    o.worldNormal = normalize(mat3x3f(object.model[0].xyz, object.model[1].xyz, object.model[2].xyz) * normal);
+    o.clip = frame.projection * frame.view * world;
+    return o;
+}
 @fragment fn fs_main(v: Surface) -> @location(0) vec4f {
-    let mu = abs(dot(normalize(v.worldNormal), normalize(frame.camera.xyz - v.world)));
-    let along = clamp(v.uv.y, 0.0, 1.0);
-    let bands = pow(0.5 + 0.5 * cos(along * 37.7), 6.0) * smoothstep(0.45, 0.85, along); // Shock diamonds near the nozzle (diamonds: 0-1).
-    let glow = pow(mu, 1.6) * smoothstep(0.0, 0.7, along) * (0.35 + 0.65 * along) * (1.0 + 1.4 * material.diamonds * bands);
-    let colour = mix(material.edge, material.core, mu * along);
-    return vec4f(linearToSrgb(colour * airFilter(v.world)), glow * material.strength);
+    if (material.disc > 0.5) {
+        let radial = length(v.uv * 2.0 - 1.0);
+        let soft = 1.0 - smoothstep(0.15, 1.0, radial);
+        let flicker = 0.97 + 0.03 * sin(material.time * 37.0 + radial * 9.0);
+        let colour = mix(material.edge, material.core * 1.5, soft);
+        let alpha = soft * flicker * material.strength;
+        return vec4f(linearToSrgb(colour * airFilter(v.world)) * alpha, alpha);
+    }
+    let x = object.model[0].xyz; let y = object.model[1].xyz; let z = object.model[2].xyz;
+    var delta = frame.camera.xyz - v.world;
+    let eye = v.local + vec3f(dot(delta, x) / dot(x, x), dot(delta, y) / dot(y, y), dot(delta, z) / dot(z, z));
+    if (frame.projection[3][3] > 0.5) { delta = transpose(mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz)) * vec3f(0, 0, 1); }
+    let view = normalize(vec3f(dot(delta, x) / dot(x, x), dot(delta, y) / dot(y, y), dot(delta, z) / dot(z, z)));
+    let slope = material.radii.y - material.radii.x;
+    let radius = material.radii.x - slope * v.local.y;
+    let front = dot(vec3f(v.local.x, slope * radius, v.local.z), view) >= 0.0;
+    let cap = select(-1.0, 0.0, view.y > 0.0);
+    let capDistance = (cap - v.local.y) / select(-max(abs(view.y), 0.00001), max(abs(view.y), 0.00001), view.y >= 0.0);
+    let capPoint = v.local + view * capDistance;
+    let capRadius = select(material.radii.y, material.radii.x, view.y > 0.0);
+    let open = abs(view.y) > 0.00001 && capDistance >= 0.0 && dot(capPoint.xz, capPoint.xz) <= capRadius * capRadius;
+    let eyeRadius = material.radii.x - slope * eye.y;
+    let inside = eye.y <= 0.0 && eye.y >= -1.0 && dot(eye.xz, eye.xz) < eyeRadius * eyeRadius;
+    if (!front && !open && !inside) { discard; } // A back face contributes only when the nearer boundary is an open end.
+    let inward = select(view, -view, front);
+    let a = dot(inward.xz, inward.xz) - slope * slope * inward.y * inward.y;
+    let b = dot(v.local.xz, inward.xz) + slope * radius * inward.y;
+    let sideDistance = select(100000.0, max(0.0, -2.0 * b / max(a, 0.00001)), a > 0.00001);
+    let end = select(-1.0, 0.0, inward.y > 0.0);
+    let endDistance = abs(end - v.local.y) / max(abs(inward.y), 0.00001);
+    let path = min(sideDistance, endDistance);
+    let metres = length(x * inward.x + y * inward.y + z * inward.z) / length(x);
+    let column = min(5.0, path * metres / (2.0 * material.radii.x)); // Bound axial brightness while fading tangential chords to zero.
+    let down = clamp(-v.local.y, 0.0, 1.0);
+    let distance = down * material.metres; // Keep diamonds within the first twenty metres despite the growing envelope.
+    let wave = sin(v.uv.x * 18.84956 + down * 47.0 - material.time * 11.0);
+    let flicker = 0.94 + 0.04 * wave + 0.02 * sin(down * 91.0 - material.time * 29.0);
+    let phase = distance * 1.9635 + 0.06 * wave;
+    let bands = pow(0.5 + 0.5 * cos(phase), 8.0) * exp(-distance * 0.09) * (1.0 - smoothstep(15.0, 24.0, distance));
+    let density = exp(-down * (material.falloff + 1.3 * material.rarefied)) * (1.0 - smoothstep(0.65, 1.0, down));
+    let alpha = 1.0 - exp(-column * density * flicker * material.strength * (1.0 + 2.2 * material.diamonds * bands));
+    let colour = mix(material.edge, material.core, clamp(exp(-distance * 0.25) + 0.3 * material.diamonds * bands, 0.0, 1.0));
+    return vec4f(linearToSrgb(colour * airFilter(v.world)) * alpha, alpha * mix(1.0, 0.04, material.rarefied)); // Thin gas emits with little absorption.
 }
 )";
     albert::gpu::define("albert:plume",plume);
+    // vehicle.cpp: axial heat bands on the existing metal bell avoid another shell and draw call per engine.
+    Program bell;bell.attributes=surfaceAttributes;bell.uniforms={{"diffuse",Uniform::vec3},{"opacity",Uniform::f32},{"emissive",Uniform::vec3},{"roughness",Uniform::f32},{"metalness",Uniform::f32},
+        {"auxiliaryStrength",Uniform::f32},{"auxiliarySolarDirection",Uniform::vec3},{"doubleSided",Uniform::f32},{"burn",Uniform::vec3},{"lip",Uniform::vec3},{"bellLength",Uniform::f32}};
+    bell.wgsl=std::string(surface)+R"(
+struct Material { diffuse: vec3f, opacity: f32, emissive: vec3f, roughness: f32, metalness: f32, auxiliaryStrength: f32, auxiliarySolarDirection: vec3f, doubleSided: f32, burn: vec3f, lip: vec3f, bellLength: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+@fragment fn fs_main(v: Surface, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+    let face = select(-1.0, 1.0, front);
+    let n = normalize(object.normalView * v.localNormal) * face;
+    let worldNormal = normalize(object.normalWorld * v.localNormal);
+    let position = (frame.view * vec4f(v.world, 1.0)).xyz;
+    let along = clamp(-v.local.y / material.bellLength, 0.0, 1.0);
+    let heat = mix(material.burn, material.lip, smoothstep(0.87, 0.99, along)) * smoothstep(0.35, 0.78, along);
+    let air = airLight(v.world, worldNormal);
+    var colour = standardLight(material.diffuse, material.roughness, material.metalness, n, n, position, air.sky * frame.sunColor.rgb, shadowFactor(v.world, worldNormal) * air.sun) + material.emissive + heat;
+    colour += material.diffuse * material.auxiliaryStrength * (1.0 - smoothstep(-0.10, 0.0, dot(n, normalize(material.auxiliarySolarDirection))));
+    return vec4f(finish(airApply(v.world, colour)), material.opacity);
+}
+)";
+    albert::gpu::define("albert:bell",bell);
     // vehicle.cpp: the shock layer's glow around a vehicle entering the air (a shell offset to its windward side): faint where
     // looked through face-on, brightest at its rim, the core colour face-on; strength from the heating.
     Program plasma;plasma.attributes=surfaceAttributes;plasma.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32},{"upwind",Uniform::vec3}};

@@ -10,6 +10,7 @@ using namespace threepp;
 threepp::Vector3 albert::renderPosition(core::Vector p,core::Vector origin){
     p=p-origin;return {static_cast<float>(p.x/core::earthRadiusMeters),static_cast<float>(p.z/core::earthRadiusMeters),static_cast<float>(-p.y/core::earthRadiusMeters)};
 }
+std::array<double,3> albert::renderPositionExact(core::Vector p,core::Vector origin){p=p-origin;return {p.x/core::earthRadiusMeters,p.z/core::earthRadiusMeters,-p.y/core::earthRadiusMeters};}
 albert::SceneObjects::~SceneObjects(){for(auto& [id,model]:models_){(void)id;for(auto& g:model.geometry)g->dispose();for(auto& m:model.materials)m->dispose();}}
 void albert::SceneObjects::bind(const core::ObjectId& id,std::shared_ptr<Mesh> mesh,std::shared_ptr<const BVH> picker){nodes_.emplace(id,std::move(mesh));if(picker)pickers_[id]=std::move(picker);}
 std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Scene& registry,Raycaster& ray) const {
@@ -88,7 +89,7 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             }
         }
         const auto& mesh=nodes_.at(id);const auto state=registry.evaluate(id,now).state;
-        mesh->position.copy(renderPosition(state.positionMeters,origin));
+        mesh->position.copy(renderPosition(state.positionMeters,origin));exact_[id]=renderPositionExact(state.positionMeters,origin);
         if(!o.builtin){
             const auto q=state.attitude.value_or(core::Quaternion{});
             Quaternion basis;basis.setFromAxisAngle(Vector3(1,0,0),-std::numbers::pi_v<float>/2.f);

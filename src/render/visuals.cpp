@@ -142,7 +142,7 @@ albert::DecodedAssets albert::loadVisualAssets(const std::filesystem::path& dire
     return result;
 }
 
-albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets) {
+albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets):scene_(&scene) {
     for(auto& fill:surfaceFillTextures_) {
         fill=texture(Image(std::vector<unsigned char>(128*64*4,0),128,64),ColorSpace::NoColorSpace);
         fill->channel=1;
@@ -266,11 +266,11 @@ void albert::PlanetVisuals::replaceAssets(DecodedAssets assets) {
     earthTerrain_.reset();
     albert::TerrainBody body;body.radius=6378137.;body.flattening=6356.752314245/6378.137;body.maxLevel=12;body.heights=albert::earthTerrainHeights(textures_[5]->image());
     body.generation=[]{return albert::providers::copernicusDem().generation();};
-    earthTerrain_=std::make_unique<albert::Terrain>(*earth,earthTerrainMaterial_,body);
+    earthTerrain_=std::make_unique<albert::Terrain>(*earth,earthTerrainMaterial_,body,scene_);
     moonTerrain_.reset();
     albert::TerrainBody lunar;lunar.radius=1737400.;lunar.scale=1737.4/6378.137;lunar.maxLevel=8;lunar.relief=11e3;lunar.heights=albert::moonTerrainHeights(moonHeightTexture_->image());
     lunar.generation=[]{return albert::providers::planetaryRelief().generation();};
-    moonTerrain_=std::make_unique<albert::Terrain>(*moon,moonTerrainMaterial_,lunar);
+    moonTerrain_=std::make_unique<albert::Terrain>(*moon,moonTerrainMaterial_,lunar,scene_);
     if(!demFetcher_.joinable())demFetcher_=std::jthread([this](std::stop_token stop) { // Copernicus pieces the terrain noted, one at a time.
         while(!stop.stop_requested())try {
             if(!albert::providers::copernicusDem().fetchMissing(demProgress_)&&!albert::providers::planetaryRelief().fetchMissing(demProgress_))std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -479,7 +479,8 @@ void albert::PlanetVisuals::updateImageDetail(const Vector3& camera, bool enable
     }
 }
 
-void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3& cameraPosition, const VisualSettings& settings, float seconds, Camera* camera) {
+void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3& cameraPosition, const VisualSettings& settings, float seconds, Camera* camera,
+                                   const TerrainFrame* earthFrame,const std::array<double,3>* moonAt) {
     cloudDetailBlend_=animateValue(cloudDetailBlend_,1.f,seconds);
     for(auto* mat:{cloudMaterial_.get(),nightMaterial_.get()}) mat->uniforms.at("detailBlend").setValue(cloudDetailBlend_);
     if(cloudDetailBlend_==1.f && previousCloudDetail_) {
@@ -530,9 +531,9 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     auto frustumIn=[&](Object3D& body){std::optional<Frustum> f; // The camera's frustum in a body's frame.
         if(camera){Matrix4 m;m.multiplyMatrices(camera->projectionMatrix,camera->matrixWorldInverse);m.multiply(*body.matrixWorld);f.emplace();f->setFromProjectionMatrix(m);}return f;};
     const auto view=frustumIn(*earth);
-    if(earthTerrain_)earthTerrain_->detail(settings.quality?earthTerrainDetail_:nullptr,terrainBounds_[0]); // The region's imagery on its nodes.
+    if(earthTerrain_)earthTerrain_->detail(earthTerrainDetail_,terrainBounds_[0]); // The region's imagery on its nodes (at every quality: a texture, not a rendering cost).
     if(moonTerrain_)moonTerrain_->detail(settings.quality?moonTerrainDetail_:nullptr,terrainBounds_[1]);
-    const bool terrainCovers=earthTerrain_&&settings.terrain&&localCamera.length()<3.f&&earthTerrain_->update(localCamera,view?&*view:nullptr);
+    const bool terrainCovers=earthTerrain_&&settings.terrain&&localCamera.length()<3.f&&earthTerrain_->update(localCamera,view?&*view:nullptr,true,earthFrame);
     if(earthTerrain_&&!terrainCovers) earthTerrain_->hide();
     earthMaterial_->visible=!terrainCovers;
     if(terrainCovers&&earthDetail_) earthDetail_->visible=false; // The terrain has the relief, and the region's imagery on its nodes.
@@ -540,7 +541,8 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
      if(t.map!=e.map||t.lightMap!=e.lightMap){t.map=e.map;t.lightMap=e.lightMap;t.needsUpdate();}
      t.lightMapIntensity=e.lightMapIntensity;}
     moon->updateMatrixWorld();Vector3 moonCamera=cameraPosition;moon->worldToLocal(moonCamera);const auto moonView=frustumIn(*moon);
-    const bool moonCovers=moonTerrain_&&settings.terrain&&moonCamera.length()<3.f*static_cast<float>(1737.4/6378.137)&&moonTerrain_->update(moonCamera,moonView?&*moonView:nullptr);
+    const bool moonCovers=moonTerrain_&&settings.terrain&&moonCamera.length()<3.f*static_cast<float>(1737.4/6378.137)&&moonTerrain_->update(moonCamera,moonView?&*moonView:nullptr,true,[&]()->const TerrainFrame*{static TerrainFrame f;if(!moonAt)return nullptr;const auto& e=moon->matrixWorld->elements; // Its turn as the float matrix has it (~0.1 m on its radius).
+        f.at=*moonAt;for(int c=0;c<3;++c)for(int r=0;r<3;++r)f.linear[3*c+r]=e[4*c+r];return &f;}());
     if(moonTerrain_&&!moonCovers) moonTerrain_->hide();
     moonMaterial_->visible=!moonCovers;
     if(moonCovers&&moonDetail_) moonDetail_->visible=false;

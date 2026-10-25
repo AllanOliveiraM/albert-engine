@@ -1,4 +1,5 @@
 
+#include "physics/earth.hpp"
 #include "threepp/threepp.hpp"
 #include "threepp/objects/LineSegments.hpp"
 #include "threepp/objects/Points.hpp"
@@ -31,6 +32,7 @@
 #include "playground.hpp"
 #endif
 #include "display.hpp"
+#include "gpu/context.hpp"
 #include "layers.hpp"
 #include "asset_pack.hpp"
 #include "asset_downloads.hpp"
@@ -1067,6 +1069,7 @@ int albert::runRenderer(int argc, char** argv) {
         OrbitControls controls{*camera, graphics.events()};
         // The second view (picture-in-picture): the other flight beside the one followed, from the same side, at its framing.
         auto insetCamera=PerspectiveCamera::create(60,16.f/9.f,.01f,100000.f);std::string insetId;unsigned long long insetTexture=0;unsigned insetFrames=0;
+        bool insetEngines=false;std::string insetTestId;std::chrono::steady_clock::time_point insetTestUntil{};
 
         controls.enableDamping = true;
         controls.dampingFactor = CAMERA_EASING;
@@ -1298,6 +1301,7 @@ int albert::runRenderer(int argc, char** argv) {
         // A chosen event waits for positions at its date before flying there.
         struct PendingEvent {const SimulationEvent* event;std::uint64_t generation;};
         std::optional<PendingEvent> pendingEvent;
+        std::vector<fs::path> pendingCaptures;
         std::optional<albert::core::FlightTelemetry> flightTelemetry; // From the gRPC flight API.
         auto flightTelemetryAt=std::chrono::steady_clock::now(); // Its latest sample (the sea's wind ignores a stale one).
         bool menuOpen = false;
@@ -1316,7 +1320,7 @@ int albert::runRenderer(int argc, char** argv) {
         camera->position.copy(initialSun).multiplyScalar(1.8f).add(tangent.multiplyScalar(3.f));
         camera->lookAt(controls.target);
         int appliedQuality = -1;
-        Focus lastRegionalFocus=focus;bool lastDetailQuality=visualSettings.quality;
+        Focus lastRegionalFocus=focus;bool lastDetailQuality=visualSettings.quality;std::optional<albert::GeoRegion> siteRegion; // The launch site's imagery box, kept while its vehicle stays in it.
         std::uint64_t assetGeneration=albert::visualAssetGeneration();albert::DetailRefresh detailRefresh;
         float assetIndicatorAlpha=0.f,assetCompleteAge=0.f;
 
@@ -1691,7 +1695,10 @@ int albert::runRenderer(int argc, char** argv) {
                 else ImGui::SetNextWindowPos(ImVec2(margin,display.y-margin),ImGuiCond_Always,ImVec2(0,1));ImGui::SetNextWindowBgAlpha(.55f);
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(6,6));
                 ImGui::Begin("Segunda vista",nullptr,flags|ImGuiWindowFlags_NoScrollbar);protectPanel();
-                ImGui::TextUnformatted(registry.get(insetId).name.c_str());
+                if(insetEngines){const float size=11*std::clamp(display.x/1600.f,.7f,1.4f);const auto at=ImGui::GetCursorScreenPos();auto* draw=ImGui::GetWindowDrawList();
+                    draw->AddText(ImGui::GetFont(),size,ImVec2(at.x+1,at.y+1),IM_COL32(0,0,0,140),"TESTE DE VETORAÇÃO DOS MOTORES");
+                    draw->AddText(ImGui::GetFont(),size,at,IM_COL32(170,178,188,220),"TESTE DE VETORAÇÃO DOS MOTORES");ImGui::Dummy(ImVec2(width,size));}
+                else ImGui::TextUnformatted(registry.get(insetId).name.c_str());
                 if(ImGui::ImageButton("##segunda",ImTextureRef(static_cast<ImTextureID>(insetTexture)),ImVec2(width,width*9/16)))setFocus(insetId);
                 if(ImGui::IsItemHovered())ImGui::SetTooltip("Seguir este voo");
                 ImGui::End();ImGui::PopStyleVar();
@@ -1759,7 +1766,9 @@ int albert::runRenderer(int argc, char** argv) {
                     events.push_back({m.name,m.utc-start,m.planned});
                 std::sort(vehicles.begin(),vehicles.end(),[](const auto& a,const auto& b){return a.engines.size()>b.engines.size();});
                 if(vehicles.size()>2)vehicles.resize(2);if(vehicles.size()==2)vehicles[1].right=true;else vehicles[0].right=vehicles[0].engines.size()<=6;
-                albert::drawBroadcast(vehicles,shown-start,events);
+                albert::BroadcastDecision decision; // The newest of every flight's latest decision.
+                for(const auto& g:gauges)if(g.decided>=0&&!g.decision.empty()&&(decision.what.empty()||g.decided-start>decision.time))decision={g.label,g.decision,g.why,g.decided-start};
+                albert::drawBroadcast(vehicles,shown-start,events,decision);
             }
             if(rpc&&preferences.playground&&menuProgress<=0.f)drawPlayground(*rpc,display,margin); // Live interference on the flights.
 #else
@@ -1913,7 +1922,9 @@ int albert::runRenderer(int argc, char** argv) {
             if(!ImGui::GetIO().WantCaptureMouse && !transition.active&&!covered(ImGui::GetMousePos(),ImGui::GetMousePos())){
                 const auto mouse=ImGui::GetMousePos();Raycaster ray;ray.setFromCamera(Vector2(mouse.x/display.x*2.f-1.f,1.f-mouse.y/display.y*2.f),*camera);
                 ray.nearPlane=camera->nearPlane;ray.farPlane=camera->farPlane;
-                if(const auto picked=objects.pick(registry,ray)){
+                // During a mission (its flights on the broadcast) only its vehicles answer a click: a stray one on the Moon or a planet
+                // took the camera off the flight.
+                if(const auto picked=objects.pick(registry,ray);picked&&(!broadcasting||*picked=="flight"||picked->rfind("flight.",0)==0)){
                     ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
                     if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(*picked,*picked==focus);
                 }
@@ -2256,6 +2267,9 @@ int albert::runRenderer(int argc, char** argv) {
                         // its default distance); else as asked.
                         const bool nearby=!value.reset&&focus.front()!='@'&&!registry.get(focus).builtin&&!registry.get(value.id).builtin&&targetFor(focus).distanceTo(targetFor(value.id))*albert::core::earthRadiusMeters<1e3;
                         if(nearby){Vector3 offset=camera->position;offset.sub(controls.target);setFocus(value.id,false,offset,offset.length());}else setFocus(value.id,value.reset);}
+                    else if constexpr(std::is_same_v<T,albert::core::Capture>){
+                        const char* directory=std::getenv("ALBERT_CAPTURE_DIR");const fs::path path=directory?fs::path(directory):fs::current_path()/"captures";
+                        fs::create_directories(path);pendingCaptures.push_back(path/value.fileName);}
                     else if constexpr(std::is_same_v<T,albert::core::SetTime>) {if(value.live)simulation.live();
                         else if(value.hold&&value.utcSeconds&&value.rate){simulation.follow(*value.utcSeconds,*value.rate);followed={*value.utcSeconds,SteadyClock::now()};} // A running flight.
                         else if(value.hold&&value.utcSeconds)simulation.stall(*value.utcSeconds);else simulation.choose(value.utcSeconds,value.rate);}
@@ -2352,7 +2366,10 @@ int albert::runRenderer(int argc, char** argv) {
 
             // Provider failure holds built-ins; independent objects and camera still advance.
             albert::core::updateLocalSystem(registry,simulatedUtc,tdb,tabulatedComets);
-            const bool eyeOrigin=transition.active||freeCamera; // Flying, the floating origin follows the eye.
+            // The floating origin follows the eye, flying or orbiting a focus (the orbit's follow then moves the camera with it): about a
+            // body's centre, a unit off, every part near the camera was ~0.4 m off its float place, and the parts of the tower, the
+            // vehicles and the ground's nodes shimmered and fought.
+            const bool eyeOrigin=true;
             const auto nextOriginId=eyeOrigin?Focus("@flight"):targetId(focus);
             // During flight the floating origin follows the eye, preserving the
             // departure body's detail instead of rebasing immediately to a planet AU away.
@@ -2708,7 +2725,11 @@ int albert::runRenderer(int argc, char** argv) {
             }
             Vector3 solarDirection = sunPosition;solarDirection.sub(earthPosition);
             auto shownSettings=visualSettings;shownSettings.clouds=visualSettings.clouds&&cloudsCurrent;
-            planets.update(solarDirection.normalize(), camera->position, shownSettings, dt, camera.get());
+            albert::TerrainFrame earthFrame; // The globe's place in double precision: its turn from the celestial-to-terrestrial matrix, as earthOrientation() maps it (x, z, -y), its flattening on y.
+            if(const auto* at=objects.exact("earth")){earthFrame.at=*at;const double flat=6356.752314245/6378.137;
+                auto turned=[&](double a,double b,double c){const double x=c2t[0][0]*a+c2t[1][0]*b+c2t[2][0]*c,y=c2t[0][1]*a+c2t[1][1]*b+c2t[2][1]*c,z=c2t[0][2]*a+c2t[1][2]*b+c2t[2][2]*c;return std::array<double,3>{x,z,-y};};
+                const auto x=turned(1,0,0),y=turned(0,0,1),z=turned(0,-1,0);earthFrame.linear={x[0],x[1],x[2],y[0]*flat,y[1]*flat,y[2]*flat,z[0],z[1],z[2]};}
+            planets.update(solarDirection.normalize(), camera->position, shownSettings, dt, camera.get(),objects.exact("earth")?&earthFrame:nullptr,objects.exact("moon"));
             Vector3 earthCamera = camera->position;
             earth->worldToLocal(earthCamera);
             planets.updateImageDetail(camera->position, visualSettings.quality);
@@ -2732,14 +2753,19 @@ int albert::runRenderer(int argc, char** argv) {
             if((focus!=lastRegionalFocus&&(solids.contains(focus)||solids.contains(lastRegionalFocus)))||(lastDetailQuality!=static_cast<bool>(visualSettings.quality)&&solids.contains(focus)))regional.retry();
             lastRegionalFocus=focus;lastDetailQuality=visualSettings.quality;
             Vector3 focusSurface; // An external object near the ground: launch-site detail around its ground point.
-            const bool nearGround=visualSettings.quality&&objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"
+            const bool nearGround=objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"
                 &&(focusSurface=objects.nodes().at(focus)->position,earth->worldToLocal(focusSurface),focusSurface.length()<1.01f)&&earthCamera.length()<1.05f;
+            if(!nearGround)siteRegion.reset();
             if(nearGround){
                 const double latitude=albert::geodeticLatitude(std::asin(std::clamp(focusSurface.y/focusSurface.length(),-1.f,1.f)))*180./PI;
                 const double lon=albert::longitude(std::atan2(focusSurface.z,-focusSurface.x)*180./PI-180.);
                 constexpr double cell=.0439453125,half=.0439453125; // ~10 km box on a 0.044° lattice: 30 m relief.
-                const double south=std::floor(latitude/cell)*cell-half,west=std::floor(lon/cell)*cell-half;
-                regional.request(albert::GeoRegion{west,south,west+2*half+cell,south+2*half+cell});
+                // The site's box kept while what is in focus stays in its middle half, and once it is 3 km up (a climbing vehicle leaves
+                // it for good): moved on each cell crossed, it was loaded again eight times in a climb, the ground blinking at each swap.
+                const double up=(focusSurface.length()-(1-std::pow(std::sin(latitude*PI/180),2)/298.257223563))*6378137.;
+                const auto inner=[&](const albert::GeoRegion& r){const double w=r.east-r.west,h=r.north-r.south;return lon>r.west+w/4&&lon<r.east-w/4&&latitude>r.south+h/4&&latitude<r.north-h/4;};
+                if(!siteRegion||(up<3000&&!inner(*siteRegion))){const double south=std::floor(latitude/cell)*cell-half,west=std::floor(lon/cell)*cell-half;siteRegion=albert::GeoRegion{west,south,west+2*half+cell,south+2*half+cell};}
+                regional.request(*siteRegion);
             } else if(visualSettings.quality && focus==targets::Earth && earthCamera.length()<2.2f) {
                 const double latitude=albert::geodeticLatitude(std::asin(std::clamp(earthCamera.y/earthCamera.length(),-1.f,1.f)))*180./PI;
                 const double lon=albert::longitude(std::atan2(earthCamera.z,-earthCamera.x)*180./PI-180.);
@@ -2817,7 +2843,7 @@ int albert::runRenderer(int argc, char** argv) {
                 const ph::Geodetic here=ph::geodetic(ph::earth,eye);const bool on=preferences.oceanWaves&&here.height<30e3&&here.height>-100;
                 if(on){
                     if(!seaOrigin||ph::norm(eye-seaOrigin->position)>200e3){const double sl=std::sin(here.latitude),cl=std::cos(here.latitude),so=std::sin(here.longitude),co=std::cos(here.longitude);
-                        seaOrigin=SeaFrame{ph::fixedPosition(ph::earth,{here.latitude,here.longitude,0}),{-so,co,0},{-sl*co,-sl*so,cl}};}
+                        seaOrigin=SeaFrame{ph::fixedPosition(ph::earth,{here.latitude,here.longitude,ph::geoidHeight(here.latitude,here.longitude)}),{-so,co,0},{-sl*co,-sl*so,cl}};} // On the mean sea (the geoid): the shader keeps the waves to what lies at its level.
                     const auto& o=*seaOrigin;const ph::V3 d=eye-o.position;
                     const ph::V3 anchor=o.position+o.east*(512*std::round(ph::dot(d,o.east)/512))+o.north*(512*std::round(ph::dot(d,o.north)/512));
                     auto toWorld=[&](ph::V3 a){const ph::V3 g=ph::transpose(fixed)*a;return Vector3(static_cast<float>(g.x),static_cast<float>(g.z),static_cast<float>(-g.y));}; // ECEF → world axes.
@@ -2887,12 +2913,30 @@ int albert::runRenderer(int argc, char** argv) {
             }
 #endif
             const bool insetFrame=(++insetFrames&1)==0;if(insetFrame)insetTexture=0; // The second view every other frame: half its cost.
-            insetId.clear();
-            if(auto flightId=[](const std::string& id){return id=="flight"||id.rfind("flight.",0)==0;};preferences.inset&&flightId(focus)&&!transition.active&&!freeCamera){
-                for(const auto& [id,node]:objects.nodes())if(id!=focus&&flightId(id)&&node->visible){insetId=id;break;}
+            const bool wasInsetEngines=insetEngines;insetEngines=false;insetId.clear();
+            if(auto flightId=[](const std::string& id){return id=="flight"||id.rfind("flight.",0)==0;};flightId(focus)){
+                if(insetTestId!=focus){insetTestId=focus;insetTestUntil={};}
+                const auto focused=objects.nodes().find(focus);const auto& look=registry.get(focus).look;
+                if(focused!=objects.nodes().end()&&look&&!look->engines.empty()&&flightTelemetry&&flightTelemetry->active&&flightTelemetry->clamped&&!flightTelemetry->burning
+                    &&albert::Vehicle::gimballing(*focused->second,*look)>.5f*static_cast<float>(PI/180))insetTestUntil=steadyNow+std::chrono::seconds(3);
+                insetEngines=focused!=objects.nodes().end()&&look&&!look->engines.empty()&&steadyNow<insetTestUntil;
+                if(insetEngines)insetId=focus;
+                else if(preferences.inset&&!transition.active&&!freeCamera)for(const auto& [id,node]:objects.nodes())if(id!=focus&&flightId(id)&&node->visible){insetId=id;break;}
                 if(!insetId.empty()){
                     const auto& io=ImGui::GetIO();const float scale=io.DisplayFramebufferScale.x>0?io.DisplayFramebufferScale.x:1.f;
                     const unsigned w=static_cast<unsigned>(std::max(io.DisplaySize.x*.28f*scale,160.f)),h=w*9/16;
+                    if(insetEngines){ // Beside the bells, above the pad and mount, with the vehicle upright in the view.
+                        const auto& node=*focused->second;float lowest=1e9f,reach=.1f;Vector3 target;std::size_t i=0;
+                        for(const auto& pivot:node.children){if(pivot->children.empty())continue;const auto bell=pivot->children.front()->material();if(!bell||bell->name!="albert:bell")continue;
+                            if(i>=look->engines.size())break;const float r=static_cast<float>(look->engines[i++].exitRadius),length=(r>1?2.6f:2.2f)*r;
+                            Vector3 exit(0,-length,0),along(0,1,0);exit.applyQuaternion(pivot->quaternion).add(pivot->position);along.applyQuaternion(pivot->quaternion);
+                            lowest=std::min(lowest,exit.y-r*std::sqrt(std::max(0.f,1-along.y*along.y)));reach=std::max(reach,std::hypot(exit.x,exit.z)+r);target.add(exit);}
+                        const float distance=std::clamp(reach*2.6f,10.f,14.f),floor=-static_cast<float>(look->length)*.5f+.5f;target.multiplyScalar(1.f/static_cast<float>(std::max<std::size_t>(i,1)));
+                        Vector3 eye(distance*std::cos(.52f),std::max(lowest-.35f,floor),distance*std::sin(.52f)),up(0,1,0); // The base clearance takes precedence over looking up into a low bell.
+                        target.multiplyScalar(node.scale.x).applyQuaternion(node.quaternion).add(node.position);eye.multiplyScalar(node.scale.x).applyQuaternion(node.quaternion).add(node.position);up.applyQuaternion(node.quaternion);
+                        insetCamera->position.copy(eye);insetCamera->up.copy(up);insetCamera->lookAt(target);
+                        insetCamera->fov=2*std::atan2(std::max(reach*1.15f*static_cast<float>(h)/static_cast<float>(w),2.f),distance)*static_cast<float>(180/PI);insetCamera->nearPlane=std::clamp(distance*node.scale.x*.02f,1e-9f,100.f);
+                    }else{
                     // Its own camera, the main one's moves aside: three-quarters off the vehicle's side (its local x turned 30° toward
                     // local z, rolling with it), the horizon level (up: away from the Earth's centre; along the vehicle when looking straight down).
                     const auto& node=*objects.nodes().at(insetId);const Vector3 target=node.position;Vector3 axis(0,1,0);axis.applyQuaternion(node.quaternion);
@@ -2901,13 +2945,21 @@ int albert::runRenderer(int argc, char** argv) {
                     Vector3 up=target;if(const auto earthNode=objects.nodes().find("earth");earthNode!=objects.nodes().end())up.sub(earthNode->second->position);up.normalize();
                     if(std::abs(up.dot(Vector3(side).normalize()))>.98f)up.copy(axis);
                     insetCamera->position.copy(target).add(side);insetCamera->up.copy(up);insetCamera->lookAt(target);
-                    insetCamera->fov=camera->fov;insetCamera->aspect=static_cast<float>(w)/static_cast<float>(h);insetCamera->nearPlane=std::clamp(distance*.02f,1e-9f,100.f);
+                    insetCamera->fov=camera->fov;insetCamera->nearPlane=std::clamp(distance*.02f,1e-9f,100.f);
+                    }
+                    insetCamera->aspect=static_cast<float>(w)/static_cast<float>(h);
                     insetCamera->updateProjectionMatrix();insetCamera->updateMatrixWorld();
-                    if(insetFrame)insetTexture=graphics.renderInset(*scene,*insetCamera,w,h);
+                    if(insetFrame||insetEngines!=wasInsetEngines)insetTexture=graphics.renderInset(*scene,*insetCamera,w,h);
                 }
-            }
+            }else{insetTestId.clear();insetTestUntil={};}
             graphics.render(*scene, *camera);
             graphics.ui();
+            // Display submits the scene and ImGui together; read back only once both have reached the queue.
+            if(!pendingCaptures.empty())albert::gpu::Context::beforePresent([&](albert::gpu::Context& gpu){
+                auto paths=std::move(pendingCaptures);pendingCaptures.clear();
+                for(const auto& path:paths)try{gpu.capturePng(path.string());std::cout<<"Captura: "<<path.string()<<std::endl;}
+                    catch(const std::exception& e){std::cerr<<"Capture failed: "<<e.what()<<std::endl;}
+            });
 #ifdef ALBERT_HAS_RPC
             if(rpcPort && !rpc && introductionElapsed>=introductionDuration) {
                 rpc=std::make_unique<albert::rpc::Server>(commands,*rpcPort,&catalog);applyPhysics();

@@ -133,6 +133,12 @@ public:
         }catch(const std::exception& e){return {grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     }
     grpc::Status Focus(grpc::ServerContext* c,const api::FocusRequest* r,api::Applied* out) override{return apply(c,core::Focus{r->id(),r->reset_zoom()},out);}
+    grpc::Status Capture(grpc::ServerContext* c,const api::CaptureRequest* r,api::Applied* out) override{
+        const auto& name=r->file_name();
+        if(name.empty()||name.size()>80||!name.ends_with(".png")||!std::all_of(name.begin(),name.end(),[](unsigned char c){return (c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='.'||c=='_'||c=='-';}))
+            return {grpc::StatusCode::INVALID_ARGUMENT,"Expected a bare .png file name of at most 80 ASCII letters, digits, '.', '_' or '-'"};
+        return apply(c,core::Capture{name},out);
+    }
     grpc::Status Orbit(grpc::ServerContext* c,const api::OrbitRequest* r,api::Applied* out) override{return apply(c,core::Orbit{r->azimuth_radians(),r->elevation_radians(),r->has_distance_scale()?r->distance_scale():1.},out);}
     grpc::Status GetCamera(grpc::ServerContext*,const api::Empty*,api::Camera* out) override{auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};camera(s->camera,out);return grpc::Status::OK;}
     static void catalogJob(const catalog::Job& job,api::CatalogJob* out){

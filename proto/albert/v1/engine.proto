@@ -61,6 +61,8 @@ message SetTimeRequest { optional double utc_unix_seconds=1; optional double rat
 // utc_unix_seconds is the simulated instant of the object states (see ClockStatus.simulation).
 message Scene { uint64 revision=1; double utc_unix_seconds=2; repeated Object objects=3; Camera camera=4; ClockStatus clock=5; }
 message FocusRequest { string id=1; bool reset_zoom=2; }
+// A bare file name ending in .png (letters, digits, '.', '_', '-'; at most 80 characters).
+message CaptureRequest { string file_name=1; }
 message OrbitRequest { double azimuth_radians=1; double elevation_radians=2; optional double distance_scale=3; }
 message StreamSummary { uint64 applied_batches=1; uint64 revision=2; }
 message Capabilities { repeated ReferenceFrame frames=1; uint32 max_objects=2; uint32 max_samples_per_batch=3; repeated Geometry.Shape shapes=4; bool catalog_available=5; uint32 max_model_bytes=6; uint32 max_layers=7; uint32 max_layer_input_points=8; }
@@ -80,6 +82,8 @@ service CameraService {
   // Tracking keeps manual orbit and zoom available. Reserved context IDs:
   // @earth-moon, @inner-system and @system. Removing an external target focuses Earth.
   rpc Focus(FocusRequest) returns (Applied);
+  // The next frame after it is applied is saved as PNG under the capture directory.
+  rpc Capture(CaptureRequest) returns (Applied);
   rpc Orbit(OrbitRequest) returns (Applied);
   rpc GetCamera(Empty) returns (Camera);
 }
@@ -440,8 +444,12 @@ message Spawn { string flight_id=1; VehicleDefinition definition=2; double nose_
 // the planned one of its name), shown with every flight's.
 // clock_zero: the mission's T-0 (UTC, Unix seconds) for the broadcast's clock, as the flight software counts it (moved on
 // through a hold, the liftoff's once it lifts off); unset: the main flight's start. stop_clock: the clock stops at this
-// step's start (a scrub, a pad abort); it stops too once the flight breaks up.
-message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; repeated Milestone milestones=4; optional double clock_zero_utc_unix_seconds=5; bool stop_clock=6; }
+// step's start (a scrub, a pad abort); it stops too once the flight breaks up. decision: the latest decision its flight
+// software took, at this step's start, for the broadcast's corner (the newest of every flight's shown).
+message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; repeated Milestone milestones=4; optional double clock_zero_utc_unix_seconds=5; bool stop_clock=6; optional Decision decision=7; }
+// What a flight software decided and why (up to 120 characters each): "captura cancelada", "propelante insuficiente para
+// terminar a captura".
+message Decision { string what=1; string why=2; }
 // An event of the mission (up to 40 characters: "MAX-Q", "MECO"...): when it happened (unset: at the step's start) or is
 // planned (UTC, Unix seconds).
 message Milestone { string name=1; optional double utc_unix_seconds=2; bool planned=3; }

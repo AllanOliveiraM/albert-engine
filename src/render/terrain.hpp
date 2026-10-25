@@ -4,6 +4,7 @@
 #include "threepp/math/Vector3.hpp"
 #include "threepp/math/Vector4.hpp"
 #include "threepp/math/Frustum.hpp"
+#include <array>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -32,17 +33,23 @@ TerrainHeights marsTerrainHeights(const threepp::Image& global);  // MOLA MEGDR 
 // worker and drawn with the body's material as children of its mesh, refined by distance to the
 // camera (CDLOD-style ranges); a parent stays until its four children are built, which then morph
 // from its surface to their own. Positions are
-// radial in the mesh's local frame, as the globe's relief: scale × (1 + h / radius) × the direction.
+// radial in the mesh's local frame, as the globe's relief: scale × (1 + h / radius) × the direction. With a root, the nodes
+// hang there instead, each placed from the parent's orientation and its position in double precision (update's `at`): as the
+// parent's children their float positions, about one unit out, put each ~0.4 m off its neighbours and the ground's works.
+// A body's place in the root's frame in double precision: its position and its linear map (rotation and scale; columns of 3).
+// As floats, a turning body's matrix rounds differently from frame to frame: ~0.4 m on a node one Earth radius out.
+struct TerrainFrame {std::array<double,3> at{};std::array<double,9> linear{1,0,0,0,1,0,0,0,1};};
 class Terrain {
 public:
     static constexpr int posts=65; // Per node side (64 quads).
-    Terrain(threepp::Object3D& parent,std::shared_ptr<threepp::Material> material,TerrainBody body);
+    Terrain(threepp::Object3D& parent,std::shared_ptr<threepp::Material> material,TerrainBody body,threepp::Object3D* root=nullptr);
     ~Terrain();
     Terrain(const Terrain&)=delete;Terrain& operator=(const Terrain&)=delete;
     // Selects the nodes for a camera in the parent's local frame (and, with culling, its view
     // frustum there), queues missing ones and adopts built ones; true once the whole body is covered
     // (the coarse faces exist). Without culling every node is refined by distance only.
-    bool update(const threepp::Vector3& camera,const threepp::Frustum* frustum=nullptr,bool culling=true);
+    // frame: the parent's place in the root's frame, in double precision (else its float matrix).
+    bool update(const threepp::Vector3& camera,const threepp::Frustum* frustum=nullptr,bool culling=true,const TerrainFrame* frame=nullptr);
     void hide(); // No node drawn (until the next update).
     [[nodiscard]] std::size_t drawn()const;   // Nodes selected by the last update.
     [[nodiscard]] std::size_t pending()const; // Nodes queued or building.

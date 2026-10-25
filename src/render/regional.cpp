@@ -51,20 +51,24 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
             result.textureOnly=pack->hasPayload("v1/"+body+"/shape.bin");
             progress.stage("Lendo detalhes incluidos",0);
             bool site=false;
-            if(body=="earth"&&region.east-region.west<=2.)try{ // Launch-site detail: 31 m Landsat composite, Copernicus 30 m relief over the EGM2008 geoid.
-                progress.stage("Baixando imagem Landsat (NASA GIBS)",0);
-                const auto jpeg=fetchWms([](const GeoRegion& r,unsigned w,unsigned h){std::ostringstream u;u<<std::setprecision(12)<<"https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0"
+            if(body=="earth"&&region.east-region.west<=2.)try{ // Launch-site detail: aerial imagery over the contiguous United States (USDA NAIP via the
+                // USGS, public domain, ~1 m, recent), else the 31 m Landsat composite (of 2000: no Starbase in it); Copernicus 30 m relief over the EGM2008 geoid.
+                const bool naip=region.south>24.&&region.north<50.&&region.west>-125.&&region.east<-66.;
+                progress.stage(naip?"Baixando imagem aérea NAIP (USGS)":"Baixando imagem Landsat (NASA GIBS)",0);
+                const auto jpeg=naip?fetchWms([](const GeoRegion& r,unsigned w,unsigned h){std::ostringstream u;u<<std::setprecision(12)<<"https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage?bbox="
+                        <<r.west<<","<<r.south<<","<<r.east<<","<<r.north<<"&bboxSR=4326&imageSR=4326&size="<<w<<","<<h<<"&format=jpg&f=image";return u.str();},region,2048,2048,progress)
+                    :fetchWms([](const GeoRegion& r,unsigned w,unsigned h){std::ostringstream u;u<<std::setprecision(12)<<"https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0"
                     "&LAYERS=Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual&CRS=EPSG:4326&BBOX="<<r.south<<","<<r.west<<","<<r.north<<","<<r.east<<"&WIDTH="<<w<<"&HEIGHT="<<h<<"&FORMAT=image/jpeg&TIME=2000-12-01";return u.str();},region,2048,2048,progress);
                 int w=0,h=0;std::unique_ptr<stbi_uc,decltype(&stbi_image_free)> rgba(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(jpeg.data()),static_cast<int>(jpeg.size()),&w,&h,nullptr,4),stbi_image_free);
-                if(!rgba)throw std::runtime_error("Unreadable Landsat image");
-                Image landsat(std::vector<unsigned char>(rgba.get(),rgba.get()+static_cast<std::size_t>(w)*h*4),static_cast<unsigned>(w),static_cast<unsigned>(h));
-                // Landsat's corrected reflectance is darker than the global map: brought to its tone there (the seam showed).
-                if(pack->contains(body+"-day"))matchTone(landsat,pack->image(body+"-day",region,128,progress));
+                if(!rgba)throw std::runtime_error("Unreadable site image");
+                Image photo(std::vector<unsigned char>(rgba.get(),rgba.get()+static_cast<std::size_t>(w)*h*4),static_cast<unsigned>(w),static_cast<unsigned>(h));
+                // Brought to the global map's tone there (Landsat's corrected reflectance is darker; the seam showed).
+                if(pack->contains(body+"-day"))matchTone(photo,pack->image(body+"-day",region,128,progress));
                 progress.stage("Baixando relevo Copernicus",0);constexpr unsigned posts=385;
                 const auto heights=providers::copernicusDem().heights(region.west,region.south,region.east,region.north,posts,posts,progress);
                 const float geoid=static_cast<float>(physics::geoidHeight((region.south+region.north)*std::numbers::pi/360.,(region.west+region.east)*std::numbers::pi/360.));
                 std::vector<float> relief(static_cast<std::size_t>(posts)*posts*4,1.f);for(std::size_t i=0;i<heights.size();++i)relief[4*i]=heights[i]+geoid; // Ellipsoidal.
-                result.day=std::move(landsat);
+                result.day=std::move(photo);
                 result.height=Image(std::move(relief),posts,posts);result.lift=.5f;result.segments=posts-1;site=true;
             }catch(const std::exception& e){if(progress.cancelled)throw;std::cerr<<"Terreno do sitio indisponivel: "<<e.what()<<std::endl;}
             if(!site)result.day=pack->image(body+"-day",region,4096,progress);

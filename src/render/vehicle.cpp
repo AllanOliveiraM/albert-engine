@@ -7,6 +7,10 @@ using namespace threepp;
 namespace albert {
 namespace {
 constexpr float pi=3.14159265358979f;
+Vector3 blackBody(float t){ // The same radiative colour and brightness for tiles, bells and the aft shield.
+    const float h=t/100,bright=4*std::pow(std::clamp((t-900)/1000,0.f,1.f),2.f);
+    return Vector3(1.f,std::clamp((99.47f*std::log(std::max(h,1.f))-161.12f)/255.f,0.f,1.f),h<19?0.f:std::clamp((138.52f*std::log(h-10)-305.04f)/255.f,0.f,1.f)).multiplyScalar(bright);
+}
 // The flight API's body axes (x forward, y right, z down) as the node's local ones (y along the nose, x along body -y).
 Vector3 axisOf(core::Vector v){return {static_cast<float>(-v.y),static_cast<float>(v.x),static_cast<float>(v.z)};}
 std::shared_ptr<Mesh> part(std::shared_ptr<BufferGeometry> g,std::shared_ptr<Material> m){auto x=Mesh::create(std::move(g),std::move(m));x->castShadow=x->receiveShadow=true;return x;}
@@ -20,9 +24,10 @@ std::shared_ptr<BufferGeometry> plate(float w,float t,float span,float tip,float
         if(a.dot(f)<0)std::swap(q[1],q[3]);for(int i:{q[0],q[1],q[2],q[0],q[2],q[3]})p.insert(p.end(),{c[i].x,c[i].y,c[i].z});}
     auto g=BufferGeometry::create();g->setAttribute("position",FloatBufferAttribute::create(std::move(p),3));g->computeVertexNormals();return g;
 }
-std::shared_ptr<ShaderMaterial> plumeMaterial(){ // webgpu_programs "albert:plume": soft, added to what is behind.
-    auto m=ShaderMaterial::create();m->name="albert:plume";m->transparent=true;m->depthWrite=false;m->side=Side::Front;m->blending=Blending::Additive;
-    m->uniforms={{"core",Uniform(Vector3(1,.75f,.4f))},{"edge",Uniform(Vector3(1,.35f,.08f))},{"strength",Uniform(0.f)},{"diamonds",Uniform(0.f)}};return m;
+std::shared_ptr<ShaderMaterial> plumeMaterial(){ // Dense exhaust hides the background; rarefied gas mostly adds light.
+    auto m=ShaderMaterial::create();m->name="albert:plume";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::OneMinusSrcAlpha;
+    m->uniforms={{"core",Uniform(Vector3(.78f,.86f,1))},{"edge",Uniform(Vector3(1,.28f,.19f))},{"strength",Uniform(0.f)},{"diamonds",Uniform(0.f)},
+        {"time",Uniform(0.f)},{"radii",Uniform(Vector2(1,1))},{"falloff",Uniform(3.f)},{"rarefied",Uniform(0.f)},{"disc",Uniform(0.f)},{"metres",Uniform(1.f)}};return m;
 }
 std::shared_ptr<MeshBasicMaterial> glow(std::uint32_t colour,float opacity){ // A jet: unlit, added to what is behind.
     auto m=MeshBasicMaterial::create();m->color=Color(colour);m->transparent=true;m->opacity=opacity;m->blending=Blending::Additive;m->depthWrite=false;m->side=Side::Double;return m;
@@ -38,10 +43,10 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         const float top=static_cast<float>(s.radiusFrom),bottom=static_cast<float>(s.radiusTo),height=static_cast<float>(s.to-s.from),y=static_cast<float>(half-(s.from+s.to)/2);
         const float tiles=static_cast<float>(std::clamp(s.tiles,0.,2*3.14159265358979));const bool skirt=!look.engines.empty()&&s.to>=base-.01;
         auto body=[&](float t,float b,float from,float arc,std::shared_ptr<Material> m){auto g=CylinderGeometry::create(t,b,height,48,1,skirt,from,arc);g->translate(0,y,0);root_->add(part(g,m));};
-        if(tiles<2*pi)body(top,bottom,tiles/2,2*pi-tiles,assistedMaterial(Color(s.color),.85f,.32f,false,skirt));
+        if(tiles<2*pi){auto m=assistedMaterial(Color(s.color),.85f,.32f,false,skirt);if(skirt)aft_.push_back(m);body(top,bottom,tiles/2,2*pi-tiles,m);}
         if(tiles>0){auto tile=assistedMaterial(Color(0x161616),0.f,.85f,false,skirt);tiles_.push_back(tile);body(top*1.004f,bottom*1.004f,-tiles/2,tiles,tile);}
         if(skirt){auto g=CircleGeometry::create(bottom*.995f,64);g->rotateX(pi/2);g->translate(0,static_cast<float>(half-(base-bay)),0); // The shield, facing aft.
-            root_->add(part(g,assistedMaterial(Color(0x26262a),.35f,.6f,false,true)));}
+            auto m=assistedMaterial(Color(0x26262a),.35f,.6f,false,true);aft_.push_back(m);root_->add(part(g,m));}
     }
     for(const auto& p:look.parts){ // A plate out from its hinge line; a grid fin's as a lattice of bars.
         Part x;x.pivot=Object3D::create();x.pivot->position.copy(point(p.hinge));x.axis=axisOf(p.axis).normalize();x.gain=p.gain;x.offset=p.offset;x.surface=p.surface;
@@ -62,13 +67,15 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         // gently (√ of the way), dark metal outside and in; a vacuum bell's extension glows when it burns (radiatively cooled).
         std::vector<Vector2> contour;const float throat=r*(vacuum?.12f:.18f);
         for(int i=0;i<=24;++i){const float t=static_cast<float>(i)/24;contour.emplace_back(throat+(r-throat)*std::sqrt(t),-length*t);}
-        auto bell=LatheGeometry::create(contour,40);x.pivot->add(part(bell,assistedMaterial(Color(vacuum?0x4a443e:0x3a3530),.75f,.45f,false,true)));
+        auto bell=LatheGeometry::create(contour,40);x.bell=assistedMaterial(Color(vacuum?0x4a443e:0x3a3530),.75f,.45f,false,true);x.bell->name="albert:bell";
+        x.bell->uniforms.emplace("burn",Uniform(Vector3()));x.bell->uniforms.emplace("lip",Uniform(Vector3()));x.bell->uniforms.emplace("bellLength",Uniform(length));x.pivot->add(part(bell,x.bell));
         if(vacuum>0){auto glowing=LatheGeometry::create(contour,40);auto m=glow(0xff7a2a,0.f);x.hot=Mesh::create(glowing,m);x.hot->scale.setScalar(1.01f);x.hot->visible=false;x.hot->renderOrder=9;x.pivot->add(x.hot);}
-        // Two plumes of fixed shape per unit length, scaled evenly (the shader's normals stay true): narrow in thick air, a wide fan
-        // in vacuum, each a core and a sheath; their strengths cross over with the pressure.
-        for(const auto [top,bottom]:{std::pair{.02f,.04f},{.035f,.08f},{.04f,.32f},{.07f,.55f}}){
-            auto g=CylinderGeometry::create(top,bottom,1,24,1,true);g->translate(0,-.5f,0);auto plume=Mesh::create(g,plumeMaterial());plume->position.y=-length;plume->visible=false;
-            plume->renderOrder=10;x.pivot->add(plume);x.plume.push_back(plume);}
+        // Two shells suffice: a long envelope and a short core; the shader widens only their downstream ends.
+        for(std::size_t k=0;k<x.plume.size();++k){
+            auto g=CylinderGeometry::create(1,1,1,24,1,true);g->translate(0,-.5f,0);auto plume=Mesh::create(g,plumeMaterial());plume->position.y=-length;plume->visible=false;
+            plume->frustumCulled=false;plume->renderOrder=10+static_cast<int>(k);x.pivot->add(plume);x.plume[k]=plume;} // The shader's spread exceeds the cylinder's bounds.
+        auto exit=CircleGeometry::create(r*.98f,32);exit->rotateX(pi/2);auto m=plumeMaterial();m->side=Side::Front;m->uniforms.at("disc").setValue(1.f);
+        x.exit=Mesh::create(exit,m);x.exit->position.y=-length-.008f*r;x.exit->visible=false;x.exit->renderOrder=12;x.pivot->add(x.exit); // The open cone alone cannot fill an axial view.
         root_->add(x.pivot);engines_.push_back(std::move(x));
     }
     { // Condensation at Mach 1: a white collar flaring aft from where the nose meets the body (a fifth of the way down).
@@ -89,6 +96,13 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         Jet j;auto g=CylinderGeometry::create(.15f,.9f,3.5f,16,1,true);g->translate(0,-1.75f,0);j.mesh=Mesh::create(g,glow(0xdfe8ff,.5f));j.mesh->visible=false;j.mesh->renderOrder=10;
         j.mesh->position.copy(point(t.position));j.mesh->quaternion.setFromUnitVectors(Vector3(0,1,0),axisOf(t.direction).normalize());root_->add(j.mesh);jets_.push_back(std::move(j));
     }
+}
+float Vehicle::gimballing(const Object3D& node,const core::VehicleLook& look){
+    float angle=0;std::size_t i=0;
+    for(const auto& pivot:node.children){if(pivot->children.empty())continue;const auto bell=pivot->children.front()->material();if(!bell||bell->name!="albert:bell")continue;
+        if(i>=look.engines.size())break;Vector3 along(0,1,0);along.applyQuaternion(pivot->quaternion);
+        angle=std::max(angle,along.angleTo(axisOf(look.engines[i++].direction).normalize()));}
+    return angle;
 }
 void Vehicle::explode(float t){
     if(!fire_){ // The first moment: the vehicle gone, a fireball, its smoke and pieces of it thrown out.
@@ -111,15 +125,15 @@ void Vehicle::shine(float heating,float fill){
     plasma_->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(glow);
     { // The tiles at their radiative equilibrium under 60% of the stagnation's flux (ε 0.85), glowing as a black body does: dull red
       // from ~900 K, orange-yellow by 1900 K (Planck's colour by temperature, its brightness rising steeply with it).
-        const float t=std::pow(std::max(.6f*heating,0.f)/(.85f*5.670e-8f),.25f),h=t/100;
-        const Vector3 c(1.f,std::clamp((99.47f*std::log(std::max(h,1.f))-161.12f)/255.f,0.f,1.f),h<19?0.f:std::clamp((138.52f*std::log(h-10)-305.04f)/255.f,0.f,1.f));
-        const float bright=4*std::pow(std::clamp((t-900)/1000,0.f,1.f),2.f);
-        for(auto& m:tiles_)m->uniforms.at("emissive").setValue(Vector3(c.x*bright,c.y*bright,c.z*bright));}
+        const float t=std::pow(std::max(.6f*heating,0.f)/(.85f*5.670e-8f),.25f);const Vector3 c=blackBody(t);
+        for(auto& m:tiles_)m->uniforms.at("emissive").setValue(c);
+        aftGlow_=blackBody(.8f*t).multiplyScalar(.12f);for(auto& m:aft_)m->uniforms.at("emissive").setValue(aftGlow_);} // The sheltered aft metal runs cooler than the tiles.
     const float half=static_cast<float>(length_/2);
     for(auto& f:frost_){const double level=f.tank.full?1.:std::clamp(static_cast<double>(fill),0.,1.),top=f.tank.to-level*(f.tank.to-f.tank.from); // Liquid settles aft.
         f.mesh->visible=level>.005;f.mesh->position.y=static_cast<float>(half-top);f.mesh->scale.y=static_cast<float>(f.tank.to-top);}
 }
 void Vehicle::animate(const std::vector<float>* parts){
+    const auto now=std::chrono::steady_clock::now();const float dt=static_cast<float>(std::chrono::duration<double>(now-updated_).count());updated_=now;time_+=dt;const float time=static_cast<float>(std::fmod(time_,4096.));
     const std::size_t engines=engines_.size(),need=engines*3+jets_.size()+7;const std::size_t surfaces=parts&&parts->size()>=need?parts->size()-need:0;
     auto at=[&](std::size_t i){return parts&&i<parts->size()?(*parts)[i]:0.f;};
     if(parts&&parts->size()>=7&&parts->back()>=0){explode(parts->back());return;} // Broken up: its pieces.
@@ -127,7 +141,7 @@ void Vehicle::animate(const std::vector<float>* parts){
     { // The shock layer's bright side toward the air's way (the body's velocity through it: x along the nose as local y, y as -x, z as z).
         const float al=tail(4,0),be=tail(5,0);Vector3 up(-std::sin(be),std::cos(al)*std::cos(be),std::sin(al)*std::cos(be));
         up.transformDirection(*root_->matrixWorld);plasma_->material()->as<ShaderMaterial>()->uniforms.at("upwind").setValue(up);}
-    const float pressure=tail(0,101325.f),thin=1-std::clamp(pressure/101325.f,0.f,1.f),heating=tail(1,0),fill=tail(2,0),mach=std::abs(tail(3,0)); // thin: 1 in vacuum.
+    const float pressure=tail(0,101325.f),ambient=std::clamp(pressure,0.f,101325.f),thin=1-ambient/101325.f,air=std::sqrt(ambient/101325.f),expansion=std::log(101375.f/(ambient+50.f))/std::log(2027.5f),heating=tail(1,0),fill=tail(2,0),mach=std::abs(tail(3,0)); // Log pressure keeps expansion gradual from liftoff through MECO to vacuum.
     shine(heating,fill);
     { // Condensation round the body near Mach 1 in thick air: strongest at 1, gone by 0.88 and 1.2; flaring downstream (toward the
       // nose when it flies engines first).
@@ -140,14 +154,19 @@ void Vehicle::animate(const std::vector<float>* parts){
         auto& e=engines_[i];const float share=at(3*i),pitch=at(3*i+1),yaw=at(3*i+2);const auto& d=e.direction;
         const double cy=std::cos(yaw),sy=std::sin(yaw),cp=std::cos(pitch),sp=std::sin(pitch);const core::Vector yawed{d.x*cy+d.y*sy,-d.x*sy+d.y*cy,d.z};
         e.pivot->quaternion.setFromUnitVectors(Vector3(0,1,0),axisOf({yawed.x*cp-yawed.z*sp,yawed.y,yawed.x*sp+yawed.z*cp}).normalize());
-        // The plume: longer with the thrust, wider and fainter as the air thins (in vacuum it fans out).
-        const bool on=share>.01f;const float r=static_cast<float>(e.radius),length=r*(30+40*thin)*std::sqrt(std::max(share,0.f)),t=thin;
-        if(e.hot){e.hot->visible=on;e.hot->material()->as<MeshBasicMaterial>()->opacity=.35f*std::clamp(share,0.f,1.f);} // The vacuum bell glowing.
-        for(std::size_t k=0;k<e.plume.size();++k){auto& p=*e.plume[k];const bool vacuum=k>=2,core=k%2==0;
-            const float strength=(core?2.6f:1.1f)*(vacuum?.35f*t:1-t)*crowd*std::clamp(share*1.5f,0.f,1.f);p.visible=on&&strength>.003f;p.scale.setScalar(length);
-            auto& u=p.material()->as<ShaderMaterial>()->uniforms;u.at("strength").setValue(strength); // Warm in thick air, a faint blue in vacuum.
-            u.at("core").setValue(vacuum?Vector3(.45f,.55f,1):Vector3(1,.75f,.4f));u.at("edge").setValue(vacuum?Vector3(.25f,.3f,.9f):Vector3(1,.35f,.08f));
-            u.at("diamonds").setValue(vacuum?0.f:diamonds);}
+        const float throttle=std::clamp(share,0.f,1.f),r=static_cast<float>(e.radius),flow=std::sqrt(throttle);const bool on=throttle>.01f;
+        e.heat+=(on?flow-e.heat:-e.heat)*(1-std::exp(-dt/(on?8.f:45.f))); // Thermal inertia leaves a red lip for roughly 30-60 seconds after a long burn.
+        auto& bell=e.bell->uniforms;bell.at("burn").setValue(blackBody(300+1000*e.heat));bell.at("lip").setValue(blackBody(300+1350*e.heat));bell.at("emissive").setValue(aftGlow_);
+        if(e.hot){e.hot->visible=e.heat>.4f;e.hot->material()->as<MeshBasicMaterial>()->opacity=.35f*std::max(0.f,(e.heat-.4f)/.6f);} // Keep the radiatively cooled vacuum extension warm between burns.
+        e.exit->visible=on;auto& exit=e.exit->material()->as<ShaderMaterial>()->uniforms;exit.at("strength").setValue(.95f*throttle);exit.at("time").setValue(time+static_cast<float>(i)*1.73f);
+        for(std::size_t k=0;k<e.plume.size();++k){auto& p=*e.plume[k];const bool core=k==1;
+            const float strength=(core?1.7f*(.2f+.8f*air)*std::sqrt(crowd):(1.5f*air+.045f+.09f*(1-expansion))*crowd)*throttle;p.visible=on;
+            const float metres=r*flow*(core?34.f+16.f*expansion:160.f+700.f*expansion); // Raptor: ~90 m visible at sea level, hundreds of metres near MECO.
+            p.scale.set(r*flow,metres,r*flow);
+            auto& u=p.material()->as<ShaderMaterial>()->uniforms;u.at("strength").setValue(strength);u.at("time").setValue(time+static_cast<float>(i)*1.73f);
+            u.at("radii").setValue(Vector2(core?1.f:1.04f,core?1.35f+3.f*expansion:3.f+100.f*expansion*expansion));u.at("metres").setValue(metres);
+            u.at("core").setValue(core?Vector3(.78f,.86f,1):Vector3(1-.4f*expansion,.82f-.12f*expansion,.32f+.68f*expansion));u.at("edge").setValue(core?Vector3(.44f,.55f,1):Vector3(1-.55f*expansion,.28f+.22f*expansion,.04f+.96f*expansion));
+            u.at("diamonds").setValue(diamonds);u.at("falloff").setValue(core?3.8f:1.2f);u.at("rarefied").setValue(expansion);}
     }
     for(auto& p:parts_){const float d=p.surface>0&&p.surface<=surfaces?at(engines*3+p.surface-1):0.f;
         Quaternion turn;turn.setFromAxisAngle(p.axis,static_cast<float>(p.gain*d+p.offset));p.pivot->quaternion.copy(turn).multiply(p.base);}
