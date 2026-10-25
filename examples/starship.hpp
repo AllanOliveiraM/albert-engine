@@ -648,7 +648,7 @@ protected:
     // clear of the tower), the time to the touch (s), whether it is settling, and how far the plan misses what it must meet (m,
     // m/s or m/s²: over ~1, no way in).
     struct Sweep {Vec a;double touch=0,miss=0;bool settling=false;};
-    double settleHeight=6,settleSpeed=2,touchSpeed=.5,handover=25; // handover: over the settling, where the plan hands the last metres to the bandwidth-bound laws (m).
+    double settleHeight=6,settleSpeed=3,touchSpeed=.5,handover=25; // handover: over the settling, where the plan hands the last metres to the bandwidth-bound laws (m).
     // The least time (s) to bring x (m) moving at v (m/s) to rest at nought accelerating at most a (m/s²): bang-bang.
     static double quickest(double x,double v,double a){const double k=x+v*std::abs(v)/(2*a)>=0?1:-1;return k*v/a+2*std::sqrt(std::max(k*x/a+v*v/(2*a*a),0.));}
     Sweep sweep(const State& s,Vec flat,double over,Vec offset={},double drag=0,int engines=3,int fewest=1)const{
@@ -660,7 +660,7 @@ protected:
         if(z>settleHeight+handover&&!terminal_){
             PoweredDescent::Problem p;p.r0={dot(flat,east),dot(flat,north_),z};p.v0={ve,vn,vz};p.rt={-dot(shift,east),-dot(shift,north_),settleHeight};p.vt={0,0,-settleSpeed};
             p.g={0,0,-g};p.d={0,0,.5*(speed>0?drag*-vz/speed:0.)};const Vec u=tmul(s.toBody,s.thrustBody)*(1/std::max(s.mass,1.));p.uNow={dot(u,east),dot(u,north_),dot(u,up_)};
-            p.floor=.4*fewest*raptorSea/s.mass;p.ceiling=.9*engines*raptorSea/s.mass;p.lean=std::tan(16*deg);p.slope=.5;p.radius=3;p.climbRate=.1;p.speedFloor=2;p.wall=-8;p.brake=1.5;p.jerk=3;p.across=6;p.lag=1.8/bandwidth(s,-1,fineAim);p.sinkRate=.35;p.wedge=.1;p.wedgeFloor=.5;p.low=30;p.lowAcross=1;p.lowLean=std::tan(8*deg);p.mid=length_-cg(s.propellant)+20;p.midAcross=5;
+            p.floor=.4*fewest*raptorSea/s.mass;p.ceiling=.9*engines*raptorSea/s.mass;p.lean=std::tan(16*deg);p.slope=.5;p.radius=3;p.climbRate=.1;p.speedFloor=2;p.wall=-8;p.brake=1.5;p.jerk=3;p.across=6;p.lag=1.8/bandwidth(s,-1,fineAim);p.sinkRate=.5;p.wedge=.1;p.wedgeFloor=.5;p.low=30;p.lowAcross=1;p.lowLean=std::tan(8*deg);p.mid=length_-cg(s.propellant)+20;p.midAcross=5;
             const double since=clock_-plannedAt_;
             // Its last 8 s on the plan it has (laid afresh with seconds to go, the plans jumped: a longer time, the push across the other
             // way, which a quick lean followed into 30° by the arms).

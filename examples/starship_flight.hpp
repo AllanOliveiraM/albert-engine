@@ -319,7 +319,7 @@ struct Pacer {
 };
 // along, across: where it rests on the arms, along their rails (east) and across them (north) from the tower's axis (m).
 // down: the catch given up (gaveUp: why), the ship down at sea or on the ground `away` m from the tower's axis.
-struct Home {double deorbit=0,entry=0,maxTile=0,caught=0,offAxis=0,along=0,across=0,speed=0,propellant=0,towerClearance=1e9,away=0,downEast=0,downNorth=0,handoff=-1,handoffMiss=-1;int overheats=0;bool down=false;std::string gaveUp; // towerClearance: see clearance().
+struct Home {double deorbit=0,entry=0,flip=0,maxTile=0,caught=0,offAxis=0,along=0,across=0,speed=0,propellant=0,towerClearance=1e9,away=0,downEast=0,downNorth=0,handoff=-1,handoffMiss=-1;int overheats=0;bool down=false;std::string gaveUp; // towerClearance: see clearance().
     bool clear()const{return downEast<-110-shipLength||downEast>60+shipLength||downNorth<-115-shipLength||downNorth>55+shipLength;} // Down clear of the ground's works by its length (as Mission's).
     bool onRails()const{return std::abs(across)<.2&&along>-5&&along<9;}}; // The pins in the rails' grooves (TowerApproach::inGrooves, the crests 0.2 m out).
 // The ship home from orbit to a catch, then 30 s on the arms; warp: the orbit's time compression in real time. Throws on a
@@ -416,7 +416,7 @@ inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pac
         for(const auto& n:ship.thermal_nodes())out.maxTile=std::max(out.maxTile,n.temperature_kelvin());
         out.towerClearance=std::min(out.towerClearance,clearance(ship,shipLength));
         if(back.phase()!=last){last=back.phase();const double now=(ship.elapsed_seconds()-zero);
-            if(last==ShipReturn::Phase::deorbit)out.deorbit=now;else if(last==ShipReturn::Phase::entry)out.entry=now;else if(last==ShipReturn::Phase::caught)caughtAt=out.caught=now;
+            if(last==ShipReturn::Phase::deorbit)out.deorbit=now;else if(last==ShipReturn::Phase::entry)out.entry=now;else if(last==ShipReturn::Phase::flip)out.flip=now;else if(last==ShipReturn::Phase::caught)caughtAt=out.caught=now;
             static const char* events[]{nullptr,nullptr,"SAÍDA DE ÓRBITA",nullptr,"REENTRADA","GIRO","QUEIMA DE POUSO DA NAVE",nullptr,nullptr,"CAPTURA DA NAVE","NAVE ABORTA A CAPTURA",nullptr};
             if(const char* e=events[static_cast<int>(last)])marks.push_back(e);
             std::printf("%9.1f s  nave: %s (h %.2f km, v %.0f m/s, %.0f t de propelante, pouso previsto %.1f km além e %.1f km à direita da torre)\n",now,names[static_cast<int>(last)],

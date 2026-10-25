@@ -45,7 +45,7 @@ int main(int argc,char** argv){try{
             cases.push_back({"from "+std::to_string(k*45)+"°, 2 km short",g});g.east=-4500*std::sin(b);g.north=-4500*std::cos(b);cases.push_back({"from "+std::to_string(k*45)+"°, 4.5 km short",g});}
         int caught=0,safe=0,lost=0;
         for(const auto& k:cases){bool ok=false,clear=false;std::string what;
-            try{const auto h=sx::falling(*flight,k.g);ok=h.caught>0&&h.onRails();clear=h.down&&h.clear();what=ok?"caught "+std::to_string(h.along).substr(0,5)+" m along":(clear?"safe: down ":"UNSAFE: down ")+std::to_string(static_cast<int>(h.away))+" m away ("+h.gaveUp+")";}
+            try{const auto h=sx::falling(*flight,k.g);ok=h.caught>0&&h.onRails();clear=h.down&&h.clear();what=ok?"caught "+std::to_string(h.along).substr(0,5)+" m along, "+std::to_string(static_cast<int>(h.caught-h.flip))+" s from ignition":(clear?"safe: down ":"UNSAFE: down ")+std::to_string(static_cast<int>(h.away))+" m away ("+h.gaveUp+")";}
             catch(const std::exception& e){what=std::string("UNSAFE: ")+e.what();}
             caught+=ok;safe+=ok||clear;lost+=!(ok||clear);std::printf("FALL %-26s %s\n",k.name.c_str(),what.c_str());}
         std::printf("FALL %d caught, %d safe, %d unsafe of %zu\n",caught,safe,lost,cases.size());return lost?1:0;}
@@ -54,7 +54,7 @@ int main(int argc,char** argv){try{
         namespace sx=albert::example::starship;int caught=0,safe=0,lost=0,n=0;
         for(const double ahead:{540.,550.,560.,570.,580.})for(const double load:{150e3,189e3}){bool ok=false,clear=false;std::string what;double handoff=-1,miss=-1;++n;
             try{const auto h=sx::homecoming(*flight,true,1000,ahead,{},load);handoff=h.handoff;miss=h.handoffMiss;ok=h.caught>0&&h.onRails()&&h.speed<sway;clear=h.down&&h.clear();
-                what=ok?"caught "+std::to_string(h.along).substr(0,5)+" m along":(clear?"safe: down ":"UNSAFE: down ")+std::to_string(static_cast<int>(h.away))+" m away ("+h.gaveUp+")";}
+                what=ok?"caught "+std::to_string(h.along).substr(0,5)+" m along, "+std::to_string(static_cast<int>(h.caught-h.flip))+" s from ignition":(clear?"safe: down ":"UNSAFE: down ")+std::to_string(static_cast<int>(h.away))+" m away ("+h.gaveUp+")";}
             catch(const std::exception& e){what=std::string("UNSAFE: ")+e.what();}
             caught+=ok;safe+=ok||clear;lost+=!(ok||clear);std::printf("HOME %3.0f° %3.0f t  belly flop from %5.0f m, unsteered miss %5.0f m  %s\n",ahead,load/1e3,handoff,miss,what.c_str());}
         std::printf("HOME %d caught, %d safe, %d unsafe of %d\n",caught,safe,lost,n);return lost?1:0;}
