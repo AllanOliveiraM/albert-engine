@@ -66,8 +66,9 @@ void engineMap(rpc::Server& server,const std::string& id,const rpc::FlightServic
 void drawPlayground(rpc::Server& server,ImVec2 display,float margin){
     const auto ids=server.flights();if(ids.empty())return;
     State& st=state();st.flight=std::clamp(st.flight,0,static_cast<int>(ids.size())-1);const std::string id=ids[static_cast<std::size_t>(st.flight)];
-    ImGui::SetNextWindowPos(ImVec2(display.x-margin,display.y*.18f),ImGuiCond_FirstUseEver,ImVec2(1,0));ImGui::SetNextWindowSize(ImVec2(360,0),ImGuiCond_FirstUseEver);ImGui::SetNextWindowBgAlpha(.8f);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(0,0),ImVec2(1e9f,std::max(display.y*.82f-230.f*std::clamp(display.x/1600.f,.7f,1.4f),200.f))); // Above the broadcast's panels (its lower 210 px band): open, it covered the ship's.
+    const float above=std::max(display.y*.82f-230.f*std::clamp(display.x/1600.f,.7f,1.4f),200.f); // Opens above the broadcast's panels (its lower band: open, it covered the ship's).
+    ImGui::SetNextWindowPos(ImVec2(display.x-margin,display.y*.18f),ImGuiCond_FirstUseEver,ImVec2(1,0));ImGui::SetNextWindowSize(ImVec2(360,above),ImGuiCond_FirstUseEver);ImGui::SetNextWindowBgAlpha(.8f);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(240,160),ImVec2(display.x-2*margin,display.y-2*margin)); // Then as large as the user drags it.
     if(!ImGui::Begin("Interferência",nullptr,ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoFocusOnAppearing)){ImGui::End();return;}
     auto send=[&](const api::FlightCommand& c,const std::string& what){try{server.inject(id,c);if(!what.empty()){st.notice=what;st.noticeAt=Clock::now();}}catch(const std::exception& x){st.notice=x.what();st.noticeAt=Clock::now();}};
     // The flight.
@@ -115,6 +116,8 @@ void drawPlayground(rpc::Server& server,ImVec2 display,float margin){
         if(ImGui::IsItemHovered())ImGui::SetTooltip("Retoma do ponto de espera: T-40 s após espera tardia ou RECICLAR; nos demais casos, de onde parou.");
         if(ImGui::Button("RECICLAR (T-40)",ImVec2(-1,0))){api::FlightCommand c;c.set_uplink("RECYCLE");send(c,"Reciclo para T-40 pedido");}
         if(ImGui::IsItemHovered())ImGui::SetTooltip("Segura em T-40 s e reconecta o QD da nave; RETOMAR (GO) continua dali. Na ignição, aborta na plataforma; após decolar ou cancelar, ignora.");
+        if(ImGui::Button("PULAR REENTRADA",ImVec2(-1,0))){api::FlightCommand c;c.set_uplink("SKIP_ENTRY");send(c,"Reentrada acelerada pedida");}
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("No planeio até o ar ou na reentrada da nave: acelera o tempo (até 60x, o voo é o mesmo) até a queda de barriga, que segue em tempo real. Fora delas, ignora.");
         ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.75f,.45f,.08f,1));
         if(ImGui::Button("ABORTAR",ImVec2(-1,0))){api::FlightCommand c;c.set_uplink("ABORT");send(c,"Aborto enviado ao voo");}ImGui::PopStyleColor();
         if(ImGui::IsItemHovered())ImGui::SetTooltip("O software de voo toma a saída mais segura para a sua fase (na contagem, cancela; na ignição, aborta na plataforma).");

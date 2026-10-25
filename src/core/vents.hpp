@@ -14,10 +14,13 @@ inline double ventFlow(std::uint64_t vent,double utc){
     auto smooth=[](double x){x=std::clamp(x,0.,1.);return x*x*(3-2*x);};
     const double t=utc/32;const auto slow=static_cast<std::int64_t>(std::floor(t));const double blend=smooth(t-std::floor(t));
     const double drift=(1-blend)*random(slow,0x632be59bd9b4e019ull)+blend*random(slow+1,0x632be59bd9b4e019ull);
-    const double base=(vent&farmVent)?.2+.2*drift:.4+.4*drift;
-    const auto bucket=static_cast<std::int64_t>(std::floor(utc/40));const double age=utc-40*static_cast<double>(bucket)-2-12*random(bucket,0xa0761d6478bd642full);
-    const double duration=6+5*random(bucket,0xe7037ed1a0b428dbull),burst=smooth(age/1.5)*smooth((duration-age)/2);
-    return base+(1-base)*burst*(.75+.25*random(bucket,0x8ebc6af09c88c6e3ull)); // Broad releases, 28–52 s apart, over a drifting plume.
+    const double base=(vent&farmVent)?.2+.2*drift:.2+.3*drift; // A low drifting plume the releases stand out of (at .4-.8 they were heard as one steady sound).
+    // A farm vent releases about every 3 minutes (with ~40 of them, one now and then from somewhere in the farm; every 40 s had ~8 at
+    // once: a steady roar), the stack's every 28-52 s.
+    const double period=(vent&farmVent)?180:40;const auto bucket=static_cast<std::int64_t>(std::floor(utc/period));
+    const double age=utc-period*static_cast<double>(bucket)-2-(period-28)*random(bucket,0xa0761d6478bd642full);
+    const double duration=6+5*random(bucket,0xe7037ed1a0b428dbull),burst=smooth(age/.3)*smooth((duration-age)/2); // A valve opening: ~0.3 s up, ~2 s down.
+    return base+(1-base)*burst*(.75+.25*random(bucket,0x8ebc6af09c88c6e3ull)); // Broad releases over a drifting plume.
 }
 inline double ventFlow(std::uint64_t vent,double utc,bool closed){return closed?0:ventFlow(vent,utc);}
 inline bool stackVentsClosed(double countSeconds,bool scrub){return !scrub&&countSeconds>=-40;}

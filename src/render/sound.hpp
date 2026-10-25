@@ -22,6 +22,7 @@ public:
     void hear(const physics::acoustics::Spectrum& levels,bool audible,float pan,double seconds,float crackle=0);
     void hear(const std::array<Voice,voices>& sources,double seconds); // Heard sources retain their own spectrum and side.
     void boom(double overpressure,double duration,float pan,std::uint64_t voice=0); // Pa, s; source id keeps its boom on its voice.
+    void transient(const physics::acoustics::Heard& heard,bool ignition,float pan,std::uint64_t voice=0,double age=0); // An arrived engine pop or tail; seconds already heard.
     // Interleaved float frames at `rate`: the device's callback, and offline for tests.
     void render(float* out,unsigned frames,unsigned channels);
     bool playing()const; // A device is open.

@@ -18,6 +18,7 @@ public:
     ShipReturn(Vec site,double latitude,double longitude,double arms,double rest)
         :TowerApproach(site,latitude,longitude,arms,rest,shipLength,shipPinAt,combine(ship(true)),combine(ship(false)),shipPropellant){header_=shipHeader;headerAt_=shipHeaderAt;holdAlong=true;slide=3;hoverAbove=4;laggedThrust=true;fineAim=true;} // From in front of the arms' V it slides in as the booster does, at 3 m/s at most.
     Phase phase()const{return phase_;}
+    bool falling()const{return falling_;} // Its belly flop begun (the entry's fall under 300 m/s).
     double nextStep()const{return next_;} // How far (s) the client may step next: long in orbit, 20 ms otherwise.
     double along()const{return along_;} // The latest predicted landing past the tower (m).
     double beside()const{return cross_;} // And right of it (m).
@@ -137,8 +138,8 @@ public:
             // the thrust's line through the pins, then off once it hangs still (or 3 s); slipping off in the first second, or its pins
             // off the grooves while lit: back off them and onto them again.
             if(norm(s.contact)>0)heldAt_=t; // Last seen on them (a bounce on the shock absorbers is not a slip: half a second off them is).
-            if(!off_){if((norm(s.contact)==0&&t-caught_<1&&t-heldAt_>.5)||!inGrooves(pinsAt(s,flat),hurry_?.2:.18)){phase_=Phase::descend;break;}hang(c,s,&set_);c.throttle=.4;
-                if(t-caught_>.5&&(still(s)||t-caught_>3)){set_.use(c,s,0);off_=true;}}
+            if(!off_){if((norm(s.contact)==0&&t-heldAt_>.5)||!inGrooves(pinsAt(s,flat),hurry_?.2:.18)){phase_=Phase::descend;break;}hang(c,s,&set_);c.throttle=.4; // Off them while lit, whenever: down onto them again.
+                if(t-caught_>.5&&t-heldAt_<.1&&(still(s)||t-caught_>3)){set_.use(c,s,0);off_=true;}} // Out only while they bear it.
             else if(norm(s.contact)==0&&t-heldAt_>.3){off_=false;set_.use(c,s,std::max(set_.working(s,3),1));c.throttle=1;heldOver_=true;phase_=Phase::hover;} // Slipping off them with its engines out: lit again at once, back up over them.
             else{c.torqueOn=true;c.torque={};}break;
         case Phase::divert:{ // Away with all it has while the tower threatens it (escape()); then toward the aim as fast as its lean
@@ -295,9 +296,8 @@ private:
     // turns: turned first, then gliding): its fall flown out with the tables' crossflow lift and
     // drag (the measured factors and the flaps' drag, as the entry's prediction), the lift in the plane of the nose and the flow
     // (a body of revolution's only: ahead of 90° of attack toward the nose, past it toward the tail), the Earth's turning; then
-    // the flip as measured on the bench: its own push along the nose, J = 8.4 √(n F/m) (~42 m/s on 3, near alike from 120 to 181 t:
-    // lighter, it swings up faster and the thrust pushes for less time), over ~5.6 s, 0.62
-    // of it carried through.
+    // the flip as measured on the fall bench (its 17 flips, 2026-10-25): its own push along the nose (±5°), J = 9.1 √(n F/m) (~49 m/s
+    // on 3 at 281 t, ±6%), over ~6.3 s, 0.58 of it carried through.
     struct Flipped {Vec p,v;};
     Flipped flipped(const State& s,Vec nose,double tilt,Vec way,double want)const{
         const double base=norm(site_),dt=.5;Vec r=s.position,v=s.velocity,nz=nose;double th=tilt;State x=s;
@@ -307,7 +307,7 @@ private:
             th+=std::clamp((dot(nz,way)>std::cos(30*deg)?want:0.)-th,-5*deg*dt,5*deg*dt); // Turned first, then tilted.
             v=v+fallAcc(r,v,nz,th,s.mass)*dt;r=r+v*dt;}
         const Vec up=unit(r),vh=v+up*-dot(v,up),rel=r+site_*-1.+front()*-1.,ph=rel+up*-dot(rel,up),nh=unit(nz+up*-dot(nz,up));
-        const double J=8.4*std::sqrt(set_.working(s,3)*raptorSea/s.mass),tf=5.6;return{ph+vh*tf+nh*(.62*J*tf),vh+nh*J};
+        const double J=9.1*std::sqrt(set_.working(s,3)*raptorSea/s.mass),tf=6.3;return{ph+vh*tf+nh*(.58*J*tf),vh+nh*J};
     }
     // The belly flop's acceleration as predicted at r, v, its nose's way nz (horizontal) tilted th toward the flow (mass m).
     Vec fallAcc(Vec r,Vec v,Vec nz,double th,double m)const{

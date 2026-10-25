@@ -60,6 +60,7 @@ public:
     void replaceAssets(DecodedAssets assets);
     // camera: its view limits the terrain's refinement (none: refined all around).
     // earth: the Earth's place in double precision (its terrain placed from it); moonAt: the Moon's position (SceneObjects::exact()).
+    void cullToView(bool on){cullToView_=on;} // The terrain cut to the main camera's view (off while another view draws the scene).
     void update(const threepp::Vector3& solarDirection, const threepp::Vector3& cameraPosition, const VisualSettings& settings, float seconds, threepp::Camera* camera=nullptr,
                 const TerrainFrame* earth=nullptr,const std::array<double,3>* moonAt=nullptr);
     void updateBorderMaterial(threepp::ShaderMaterial& material, const threepp::Vector3& cameraPosition);
@@ -93,7 +94,8 @@ private:
     std::unique_ptr<Terrain> earthTerrain_, moonTerrain_; // Replace the globe meshes near the Earth and the Moon (their children).
     std::shared_ptr<threepp::MeshPhongMaterial> moonTerrainMaterial_;
     // The regional imagery on the terrain's nodes (the patches' materials without bump: the relief is geometry).
-    std::shared_ptr<threepp::MeshStandardMaterial> earthTerrainDetail_;std::shared_ptr<threepp::MeshPhongMaterial> moonTerrainDetail_;
+    std::shared_ptr<threepp::MeshStandardMaterial> earthTerrainDetail_;
+    bool cullToView_=true;std::shared_ptr<threepp::MeshPhongMaterial> moonTerrainDetail_;
     std::array<std::optional<threepp::Vector4>,2> terrainBounds_; // Earth, Moon: the region in texture coordinates.
     DownloadProgress demProgress_;std::jthread demFetcher_; // Downloads the Copernicus pieces the terrain noted.
     std::shared_ptr<threepp::MeshPhongMaterial> moonMaterial_;

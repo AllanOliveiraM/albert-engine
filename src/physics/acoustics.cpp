@@ -78,7 +78,7 @@ Spectrum ground(double height,double grazing,double c){
 Spectrum padLevels(const PadNoise& p,double shift){
     const double v=std::max(p.ventSpeed,0.),w=std::max(p.waterSpeed,0.);
     // Small, estimated jet/hydraulic efficiencies keep pad noise below the engine roar.
-    const auto vent=flowLevels(.001*.5*std::max(p.ventFlow,0.)*v*v,v,p.ventDiameter,shift);
+    const auto vent=flowLevels(1e-4*.5*std::max(p.ventFlow,0.)*v*v,v,p.ventDiameter,shift); // A near-sonic jet radiates ~1e-4 of its power (Lighthill's M^5; 1e-3 is a rocket's): vents at 100 m were heard at ~100 dB.
     const auto water=flowLevels(.0001*.5*std::max(p.waterFlow,0.)*w*w,w,p.waterScale,shift);Spectrum l;
     for(int b=0;b<bands;++b){const auto k=static_cast<std::size_t>(b);const double s=std::pow(10.,vent[k]/10)+std::pow(10.,water[k]/10);l[k]=s>0?10*std::log10(s):-1e9;}
     return l;

@@ -75,6 +75,8 @@ struct albert::Sound::Impl {
     const double rmsStep=-std::expm1(-1/(.03*rate)),compressAttack=-std::expm1(-1/(.015*rate)),compressRelease=-std::expm1(-1/(.25*rate)),limitRelease=-std::expm1(-1/(.004*rate)); // 4 ms: crackle's 800 shocks a second held the gain down over 80 ms (the whole roar ~2 dB lower, its crackle flattened).
     double rmsPower=0,compressGain=1,limitGain=1;
     struct Boom {float amplitude=0,length=0,pan=0;std::size_t age=0;std::uint64_t voice=0;};std::array<Boom,8> pending{},booms{};std::atomic<unsigned> written{0},read{0};
+    struct Transient {double age=0,length=0,amplitude=0,pole=0,filtered=0,frequency=0;float pan=0;bool ignition=false;std::uint64_t voice=0;Random random;};
+    std::array<Transient,128> incoming{},transients{};std::atomic<unsigned> sent{0},taken{0};std::uint64_t transientSeed=0x632be59bd9b4e019ull;
     Impl(){for(unsigned i=1;i<voices;++i){auto& v=synth[i];v.random.s^=0x632be59bd9b4e019ull*i;v.lowRandom.s^=0xa0761d6478bd642full*i;v.shockRandom.s^=0xe7037ed1a0b428dbull*i;}} // Independent phases keep coincident bands from cancelling.
 };
 albert::Sound::Sound(bool device):impl_(std::make_unique<Impl>()){
@@ -93,6 +95,20 @@ void albert::Sound::boom(double overpressure,double duration,float pan,std::uint
     auto& d=*impl_;const unsigned n=d.written.load(std::memory_order_relaxed);if(n-d.read.load(std::memory_order_acquire)>=d.pending.size())return; // The ring full: dropped.
     d.pending[n%d.pending.size()]={static_cast<float>(overpressure*.1774*std::pow(10.,-d.adaptation/20)),static_cast<float>(std::clamp(duration,.01,2.)*rate),std::clamp(pan,-1.f,1.f),0,voice};
     d.written.store(n+1,std::memory_order_release); // 95 dB SPL (1.12 Pa rms) at -14 dBFS: 0.1774 a pascal.
+}
+void albert::Sound::transient(const ac::Heard& heard,bool ignition,float pan,std::uint64_t voice,double age){
+    if(!heard.audible)return;
+    auto& d=*impl_;const unsigned n=d.sent.load(std::memory_order_relaxed);
+    if(n-d.taken.load(std::memory_order_acquire)>=d.incoming.size())return;
+    double power=0,weighted=0;for(int b=0;b<ac::bands;++b){const double p=std::pow(10.,(heard.levels[static_cast<std::size_t>(b)]-d.adaptation-109)/10);
+        power+=p;weighted+=p*ac::bandCentre(b)*ac::bandCentre(b);}
+    if(power<1e-18)return;
+    const double doppler=std::clamp(heard.doppler,.25,4.),length=(ignition?.09:.18)/doppler;
+    if(age>=length)return;
+    auto& t=d.incoming[n%d.incoming.size()];t=Impl::Transient{};t.age=std::max(0.,age)*rate;t.length=length*rate;t.amplitude=std::sqrt(power)*(ignition?2.4:1.5);
+    const double cutoff=std::clamp(3*std::sqrt(weighted/power),60.,ignition?12000.:1800.);
+    t.pole=std::exp(-2*pi*cutoff/rate);t.frequency=(ignition?95:45)*doppler;t.pan=std::clamp(pan,-1.f,1.f);t.ignition=ignition;t.voice=voice;
+    t.random.s=(d.transientSeed+=0x9e3779b97f4a7c15ull)^voice;d.sent.store(n+1,std::memory_order_release);
 }
 void albert::Sound::hear(const ac::Spectrum& levels,bool audible,float pan,double seconds,float crackle){
     std::array<Voice,voices> sources{};sources[0]={1,levels,audible,pan,crackle};hear(sources,seconds);
@@ -136,6 +152,8 @@ void albert::Sound::render(float* out,unsigned frames,unsigned channels){
         const unsigned starts=s.starts.load(std::memory_order_acquire);if(starts!=s.started){s.shock+=3*b.scale;s.started=starts;}}
     for(unsigned k=d.read.load(std::memory_order_relaxed);k!=d.written.load(std::memory_order_acquire);d.read.store(++k,std::memory_order_release)) // New booms into a free place.
         for(auto& b:d.booms)if(b.length<=0){b=d.pending[k%d.pending.size()];break;}
+    for(unsigned k=d.taken.load(std::memory_order_relaxed);k!=d.sent.load(std::memory_order_acquire);d.taken.store(++k,std::memory_order_release))
+        for(auto& t:d.transients)if(t.length<=0){t=d.incoming[k%d.incoming.size()];break;}
     auto gains=[](float pan,float& l,float& r){const float a=(pan+1)*static_cast<float>(pi/4);l=std::cos(a)*1.4142135f;r=std::sin(a)*1.4142135f;}; // Equal power, unity in the centre.
     for(unsigned i=0;i<frames;++i){
         double mixLeft=0,mixRight=0,mixMono=0;
@@ -155,6 +173,14 @@ void albert::Sound::render(float* out,unsigned frames,unsigned channels){
             const float t=static_cast<float>(b.age++),rise=.002f*rate,v=t<rise?b.amplitude*(t/rise)*(1-2*t/b.length):t<=b.length?b.amplitude*(1-2*t/b.length):b.amplitude*-(1-(t-b.length)/rise);
             if(b.voice)for(const auto& s:d.synth)if(s.seen==b.voice){b.pan=s.pan;break;}
             float l,r;gains(b.pan,l,r);boomLeft+=v*l;boomRight+=v*r;if(t>=b.length+rise)b.length=0;}
+        for(auto& t:d.transients)if(t.length>0){ // A pressure pop with a noisy tail; a lower, softer whoosh when the feed closes.
+            const double age=t.age++/rate,x=age/(t.length/rate),envelope=std::min(1.,age/(t.ignition?.0005:.004))*std::exp(-6*x)*(1-x);
+            const double noise=(t.random.next()-.5)*3.4641016151377546;t.filtered=t.pole*t.filtered+(1-t.pole)*noise;
+            const double rms=std::sqrt((1-t.pole)/(1+t.pole));
+            const double wave=.65*t.filtered/std::max(rms,.01)+.35*std::sin(2*pi*t.frequency*age);
+            const float v=static_cast<float>(t.amplitude*envelope*wave);
+            if(t.voice)for(const auto& s:d.synth)if(s.seen==t.voice){t.pan=s.pan;break;}
+            float l,r;gains(t.pan,l,r);boomLeft+=v*l;boomRight+=v*r;if(t.age>=t.length)t.length=0;}
         const double l=(mixLeft+boomLeft)*volume,r=(mixRight+boomRight)*volume,m=(mixMono+.5*(boomLeft+boomRight))*volume;
         d.rmsPower+=((channels==1?m*m:.5*(l*l+r*r))-d.rmsPower)*d.rmsStep; // Average power keeps panning from driving the compressor.
         const double over=10*std::log10(std::max(d.rmsPower,1e-20))+10; // Over -10 dBFS only: the calibrated 95 dB at -14 dBFS passes untouched.

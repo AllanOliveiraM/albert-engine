@@ -18,9 +18,9 @@ public:
 private:
     struct Hinge {std::shared_ptr<threepp::Object3D> pivot;threepp::Vector3 axis;};
     struct Vent {threepp::Vector3 centre,ahead,across,up;float width,height;std::size_t structure;float pending=1;std::uint64_t id=0;};
-    struct Puff {std::shared_ptr<threepp::Mesh> mesh;threepp::Vector3 origin,velocity,drift;float age=0,life=0,width=0,height=0,strength=0,seed=0;unsigned kind=0;};
+    struct Puff {std::shared_ptr<threepp::Mesh> mesh;threepp::Vector3 origin,velocity,drift;float age=0,life=0,width=0,height=0,strength=0,seed=0,ground=0;unsigned kind=0;};
     std::shared_ptr<threepp::Mesh> root_;std::vector<Hinge> hinges_; // By structure; no pivot when fixed.
-    std::vector<Vent> vents_,tankVents_,sprays_,pools_;std::array<Puff,80> steam_;std::array<Puff,24> spray_,boiloff_;std::uint32_t seed_=0x73a91b5du,tankSeed_=0xd19bc273u;std::size_t tankCursor_=0,sprayCursor_=0,poolCursor_=0;float sprayPending_=0,mistPending_=0;
+    std::vector<Vent> vents_,tankVents_,sprays_,pools_;std::array<Puff,160> steam_;std::array<Puff,72> spray_;std::array<Puff,24> boiloff_;std::uint32_t seed_=0x73a91b5du,tankSeed_=0xd19bc273u;std::size_t tankCursor_=0,sprayCursor_=0,poolCursor_=0,deckCursor_=0,runoffCursor_=0;float sprayPending_=0,mistPending_=0,deckPending_=1,runoffPending_=0;
     double ventUtc_=0;bool ventTimed_=false;
 };
 }

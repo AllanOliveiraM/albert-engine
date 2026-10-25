@@ -441,7 +441,8 @@ struct Slot {
     void publish(bool force){
         const auto now=std::chrono::steady_clock::now();
         if(!force&&now-published<std::chrono::milliseconds(33))return;
-        if(!force&&bridge.waiting()>core::Bridge::capacity/2)return; // The frame loop behind (a window out of view): room for what must apply.
+        if(!force&&bridge.waiting()>core::Bridge::capacity/2){static const bool log=std::getenv("ALBERT_PACE_LOG")!=nullptr;if(log)std::fprintf(stderr,"PACE publish skipped: bridge %zu waiting\n",static_cast<std::size_t>(bridge.waiting()));return;} // The frame loop behind (a window out of view): room for what must apply.
+        {static const bool log=std::getenv("ALBERT_PACE_LOG")!=nullptr;if(log&&published.time_since_epoch().count()&&now-published>std::chrono::milliseconds(200))std::fprintf(stderr,"PACE publish gap %.0f ms\n",std::chrono::duration<double,std::milli>(now-published).count());}
         published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
         boards.sounds.put(sceneId,center==ph::Center::earth?std::make_shared<const Sound>(heardSound()):nullptr); // Read by the frame loop without the flight's lock.
         publishPadSounds();
@@ -489,10 +490,13 @@ struct Slot {
         const double height=padVents.empty()?0:std::max_element(padVents.begin(),padVents.end(),[](const auto& a,const auto& b){return a.height<b.height;})->height;
         stack.emission.position=flight->sample().fixedPosition+axis*(flight->centreOfMass()-flight->vehicle().stages[st.stage].length/2+height);
         const bool closed=zero&&core::stackVentsClosed(countState=="HOLD"?countTime:pad.utc-*zero,countState=="SCRUB"||stopped.has_value());
-        if(fuelled)for(std::size_t i=0;i<padVents.size();++i)stack.emission.pad.ventFlow+=30*padVents[i].gain*core::ventFlow(i,pad.utc,closed);
+        // Flow by the sixth power of the shared envelope: the steady venting a faint hiss (~76 dB at 100 m), its bursts ~10 dB over it (~85 dB),
+        // ~8 kg/s a vent at a burst's peak (a steady ~100 dB had the loudness adaptation hold every quieter sound, the jets too, down).
+        double release=0;if(fuelled)for(std::size_t i=0;i<padVents.size();++i){const double f=std::pow(core::ventFlow(i,pad.utc,closed),6.);stack.emission.pad.ventFlow+=8*padVents[i].gain*f;release=std::max(release,f);}
+        stack.emission.pad.ventSpeed=150+190*release; // A release near sonic (its hiss brighter, a jet's), the plume's drift slower.
         boards.sounds.put(siteId+"/stack-vents",std::make_shared<const Sound>(std::move(stack))); // Keep silent samples so previously emitted sound can finish travelling.
         if(farmAt){Sound farm=pad;farm.id+="/farm";farm.emission.position=*farmAt;farm.emission.pad={};
-            for(auto id:farmVents)farm.emission.pad.ventFlow+=8*core::ventFlow(id,pad.utc);
+            for(auto id:farmVents)farm.emission.pad.ventFlow+=3*std::pow(core::ventFlow(id,pad.utc),6.); // Its bursts ~70 dB from 300 m, the wisps silent.
             boards.sounds.put(siteId+"/farm",std::make_shared<const Sound>(std::move(farm)));}
         else boards.sounds.put(siteId+"/farm",nullptr);
     }
@@ -503,9 +507,9 @@ struct Slot {
         Sound s;s.id=siteId;s.utc=ph::utcFromTt(flight->state().time);s.planet=flight->environment().planet;s.air=flight->environment().air;auto& e=s.emission;
         e.time=s.utc;e.position=*padAt;e.velocity={};e.plume={0,0,1};const auto& st=flight->state();
         if(!st.clamped&&!released)released=s.utc;const double after=released?s.utc-*released:0;
-        if(st.clamped&&st.propellant>0&&st.stage==0){e.pad.ventFlow=2;e.pad.ventSpeed=100;} // Plumbing stays quiet beside the actual outlets.
+        if(st.clamped&&st.propellant>0&&st.stage==0){e.pad.ventFlow=1;e.pad.ventSpeed=80;} // Plumbing stays quiet beside the actual outlets.
         if(st.clamped&&st.propellant>0&&!stopped&&zero&&s.utc>=*zero-9&&s.utc<*zero-7&&std::any_of(flight->environment().structures.begin(),flight->environment().structures.end(),[](const auto& x){return x.name=="ship quick disconnect";})){
-            e.pad.ventFlow+=300;e.pad.ventSpeed=350;} // Depressurise for two count seconds before the SQD swings (T-9 to T-7); preserve boil-off.
+            e.pad.ventFlow+=120;e.pad.ventSpeed=350;} // Depressurise for two count seconds before the SQD swings (T-9 to T-7); preserve boil-off.
         const bool lit=st.burning||released;e.pad.waterFlow=lit?41e3*std::clamp(1-(after-15)/10,0.,1.):zero&&s.utc>=*zero-17?16e3:0;
         return s;
     }
@@ -990,7 +994,8 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     }
     std::shared_ptr<Slot> slot;try{slot=impl_->find(flightName(r->flight_id()));}catch(const std::exception& e){return{grpc::StatusCode::INVALID_ARGUMENT,e.what()};}
     if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
-    {std::lock_guard lock(slot->mutex);
+    static const bool paceLog=std::getenv("ALBERT_PACE_LOG")!=nullptr;const auto asked=std::chrono::steady_clock::now();std::chrono::steady_clock::time_point locked,ran;
+    {std::lock_guard lock(slot->mutex);locked=std::chrono::steady_clock::now();
     if(slot->pacing)return{grpc::StatusCode::FAILED_PRECONDITION,"Real-time mode is running"};
     std::vector<api::FlightCommand> in;{std::lock_guard i(slot->inbox);in.swap(slot->injected);}
     for(const auto& c:in){ // What the operator injected since the last step, ahead of the flight program's commands.
@@ -1002,6 +1007,7 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     for(auto& c:commands)if((c.kind&0xffff)==wire::spawn){*slot->log.add_spawns()=r->commands(static_cast<int>(c.b)).spawn();c.a=slot->log.spawns_size()-1;c.b=0;}
     const double now=slot->flight?ph::utcFromTt(slot->flight->state().time):0.;
     if(auto s=slot->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok()){while(slot->log.spawns_size()>before)slot->log.mutable_spawns()->RemoveLast();return s;}
+    ran=std::chrono::steady_clock::now();
     if(r->has_decision()&&!r->decision().what().empty()){slot->decision=r->decision().what().substr(0,120);slot->why=r->decision().why().substr(0,120);slot->decided=now;}
     if(r->has_clock_zero_utc_unix_seconds()&&std::isfinite(r->clock_zero_utc_unix_seconds())){
         if(slot->countState=="HOLD")for(auto& m:slot->milestones)m.utc+=r->clock_zero_utc_unix_seconds()-slot->zero.value_or(ph::utcFromTt(slot->start)); // Every event keeps its T through a hold (the past ones slid left: the timeline seemed to run on).
@@ -1015,7 +1021,9 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     if(r->stop_clock()&&!slot->stopped)slot->stopped=now;
     slot->publishPadSounds(); // Valve state must include this request's count and scrub, after its ticks commit.
     slot->boards.gauges.put(slot->sceneId,std::make_shared<const Gauge>(slot->gauge())); // Publish this request's clock after its ticks commit.
-    slot->fill(out);}
+    slot->fill(out);
+    if(paceLog){const auto done=std::chrono::steady_clock::now();auto ms=[](auto d){return std::chrono::duration<double,std::milli>(d).count();};
+        if(ms(done-asked)>100)std::fprintf(stderr,"PACE step %s %.0f ms: lock %.0f, run %.0f (%u ticks), after %.0f, at t=%.1f\n",r->flight_id().c_str(),ms(done-asked),ms(locked-asked),ms(ran-locked),r->ticks(),ms(done-ran),slot->elapsed());}}
     impl_->adopt(*slot);return grpc::Status::OK;
 }
 grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::FlightRequest* q,api::FlightSample* out){

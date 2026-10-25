@@ -5,6 +5,7 @@
 // sample's parts (core::Sample::parts): also the shock layer's glow by the heating and the tanks' frost by their fill; once the
 // vehicle has broken up, a fireball, smoke and debris thrown out instead, by the seconds since.
 #include "core/scene.hpp"
+#include "engine_cycle.hpp"
 #include "threepp/threepp.hpp"
 #include "threepp/materials/ShaderMaterial.hpp"
 #include <array>
@@ -17,19 +18,26 @@ public:
     explicit Vehicle(const core::VehicleLook& look);
     const std::shared_ptr<threepp::Mesh>& node()const{return root_;}
     static float gimballing(const threepp::Object3D& node,const core::VehicleLook& look); // Read the animated bells through the scene node.
-    void animate(const std::vector<float>* parts);
+    void animate(const std::vector<float>* parts,double utc,core::Vector position={},core::Vector velocity={});
     void impinge(float metres,float glow);
     void venting(float strength,double utc,bool closed=false); // Simulated UTC keeps boil-off on the acoustic schedule.
     double length()const{return length_;}
     float thrust()const{return thrust_;} // The share of its full thrust burning, at the last animate().
+    struct EngineSound {std::uint64_t serial=0;double utc=0;float radius=0;bool ignition=false;};
+    const std::array<EngineSound,256>& engineSounds()const{return engineSounds_;}
+    std::uint64_t soundSerial()const{return soundSerial_;}
+    std::size_t engineCount()const{return engines_.size();}
 private:
-    struct Engine {std::shared_ptr<threepp::Object3D> pivot;std::array<std::shared_ptr<threepp::Mesh>,2> plume;core::Vector direction;double radius=.5;float heat=0;std::shared_ptr<threepp::Mesh> hot,exit;std::shared_ptr<threepp::ShaderMaterial> bell;};
+    struct Gas {std::shared_ptr<threepp::Mesh> mesh;core::Vector origin,velocity,flow;threepp::Quaternion attitude;double born=-1e30;float life=0,radius=0,speed=0,air=0;unsigned kind=0;bool pending=false;};
+    struct Engine {std::shared_ptr<threepp::Object3D> pivot,detached;std::array<std::shared_ptr<threepp::Mesh>,2> plume,remnant;core::Vector direction;double radius=.5,releasedUtc=-1e30;float heat=0,exitY=0,remnantLife=0,remnantWidth=0;std::shared_ptr<threepp::Mesh> hot,exit,torch;std::shared_ptr<threepp::ShaderMaterial> bell;
+        EngineCycle cycle;core::Vector released,velocity,inherited,flow;threepp::Quaternion attitude;std::array<float,2> remnantStrength{};std::array<Gas,6> gas;};
     struct Part {std::shared_ptr<threepp::Object3D> pivot;threepp::Quaternion base;threepp::Vector3 axis;double gain=1,offset=0;unsigned surface=0;};
     struct Jet {std::shared_ptr<threepp::Mesh> mesh;};
     struct Piece {std::shared_ptr<threepp::Mesh> mesh;threepp::Vector3 velocity,spin;};
     std::shared_ptr<threepp::Mesh> root_;std::vector<Engine> engines_;std::vector<Part> parts_;std::vector<Jet> jets_;
     double length_=1;std::shared_ptr<threepp::Mesh> fire_,smoke_;std::vector<Piece> pieces_; // The breakup's, made when it comes.
     float obstruction_=0,impingement_=0,thrust_=0;
+    std::array<EngineSound,256> engineSounds_{};std::uint64_t soundSerial_=0;
     std::chrono::steady_clock::time_point updated_=std::chrono::steady_clock::now();double time_=0; // Wall time keeps flicker and cooling independent of the frame rate.
     threepp::Vector3 aftGlow_;std::vector<std::shared_ptr<threepp::ShaderMaterial>> aft_;
     void explode(float seconds);

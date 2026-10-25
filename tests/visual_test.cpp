@@ -35,6 +35,33 @@ namespace {
 void require(bool condition,const char* message) {
     if(!condition) throw std::runtime_error(message);
 }
+void engineTransitions(){
+    albert::EngineCycle a,b;a.step(0,0);b.step(0,0);a.step(.1f,1);require(a.ignition&&a.torching(),"Main stage did not start with the first flow");
+    b.step(.1f,1.2);a.step(.6f,1.3);b.step(.3f,1.3);require(a.burning()>0&&!a.torching()&&b.torching(),"Engine torches lost their stagger");a.step(.6f,1.3);require(!a.ignition,"Paused ignition repeated its pop");
+    a.step(1,2);require(a.rich()==0&&a.burning()==1,"Engine did not settle after startup");a.step(0,2.1);require(a.shutdown&&a.cutoff==1,"Engine cutoff lost the flowing plume");
+    a.step(0,2.1);require(!a.shutdown,"Paused cutoff repeated its thump");a.step(.1f,2.2);a.step(0,2.3);require(a.shutdown,"A short burn lost its shutdown");
+    a.step(1,1);require(a.reset&&!a.ignition&&a.main,"Rewind invented an ignition on an established burn");
+    albert::core::VehicleLook look;look.length=4;look.diameter=2;look.engines.push_back({{4,0,0},{1,0,0},.5});albert::Vehicle vehicle(look);
+    std::vector<float> parts(10);parts[3]=101325;parts.back()=-1;const auto& node=vehicle.node();
+    auto* torch=node->getObjectByName("engine torch");auto* detached=node->getObjectByName("released exhaust");Object3D* pivot=nullptr;
+    for(const auto& p:node->children)if(!p->children.empty()&&p->children.front()->material()&&p->children.front()->material()->name=="albert:bell")pivot=p;
+    require(torch&&detached&&pivot,"Engine effect pool missing");
+    auto* plume=pivot->children[1]->as<Mesh>();auto& u=plume->material()->as<ShaderMaterial>()->uniforms;
+    vehicle.animate(&parts,0);parts[0]=.1f;vehicle.animate(&parts,.05);require(torch->visible&&!plume->visible,"Main plume preceded its first flow");
+    parts[0]=.5f;vehicle.animate(&parts,.08);require(plume->visible&&torch->visible&&u.at("flash").value<float>()>0&&u.at("diamonds").value<float>()==0,"Low-pressure ignition flash or diamond gate");
+    parts[0]=1;vehicle.animate(&parts,1);require(u.at("diamonds").value<float>()>.99f&&u.at("flash").value<float>()==0,"Steady plume did not settle");
+    const auto serial=vehicle.soundSerial();parts[0]=0;vehicle.animate(&parts,1.1);require(!plume->visible&&detached->visible&&vehicle.soundSerial()==serial+1,"Shutdown erased its plume or missed its sound");
+    node->quaternion.setFromAxisAngle(Vector3(0,0,1),1.5707963f);vehicle.animate(&parts,1.2,{10,0,0});Vector3 released=detached->position;
+    released.applyQuaternion(node->quaternion).add(Vector3(10,0,0));require(std::abs(released.x)<.001f&&released.y<-2,"Released plume followed the moving or turning vehicle");
+    vehicle.animate(&parts,1.51,{100,0,0});require(!detached->visible,"Sea-level plume failed to collapse");
+    unsigned white=0;bool atBell=false;for(const auto& p:node->children)if(p->name=="engine puff"&&p->visible){++white;atBell|=p->position.length()<10;require(p->material()->as<ShaderMaterial>()->uniforms.at("flame").value<float>()==0,"Orange tail outlived cutoff");}
+    require(white>0&&atBell,"Shutdown purge did not follow its emitting bell");vehicle.animate(&parts,3.2);for(const auto& p:node->children)if(p->name=="engine puff")require(!p->visible,"Purge did not dissipate");
+    vehicle.animate(&parts,.1);require(vehicle.soundSerial()==0&&!detached->visible,"Rewind retained engine sound events or released gas");
+    albert::Vehicle abort(look);parts[0]=1;abort.animate(&parts,0);parts[0]=0;abort.animate(&parts,.1);parts[0]=.1f;abort.animate(&parts,.2);parts[0]=0;abort.animate(&parts,.25);abort.animate(&parts,.7);
+    require(!abort.node()->getObjectByName("released exhaust")->visible&&abort.soundSerial()==3,"A short relight lost its pop or thump, or its plume outlived the collapse");
+    albert::Vehicle space(look);parts[0]=1;parts[3]=0;space.animate(&parts,0);parts[0]=0;space.animate(&parts,.1);space.animate(&parts,.3);
+    require(!space.node()->getObjectByName("released exhaust")->visible,"Vacuum cutoff lasted as long as sea level");
+}
 void controls() {
     const albert::VisualSettings settings;
     require(albert::flightEase(-1)==0 && albert::flightEase(2)==1,"Flight endpoints unclamped");
@@ -224,6 +251,16 @@ struct GpuTarget final:Target {
     }
 };
 void graphics(Target& renderer) {
+    { // A handful of offscreen frames compiles and exercises the transient shaders without a flight or a warm GPU.
+        auto world=Scene::create();world->background=Color(0x000000);world->add(AmbientLight::create(Color(0xffffff),.2f));
+        albert::core::VehicleLook look;look.length=4;look.diameter=2;look.engines.push_back({{4,0,0},{1,0,0},.5});albert::Vehicle vehicle(look);world->add(vehicle.node());
+        auto view=OrthographicCamera::create(-6,6,6,-6,.01f,100);view->position.set(12,-5,12);view->lookAt(Vector3(0,-4,0));
+        std::vector<float> parts(10);parts[3]=101325;parts.back()=-1;vehicle.animate(&parts,0);parts[0]=.1f;vehicle.animate(&parts,.05);
+        renderer.render(*world,*view);parts[0]=.8f;vehicle.animate(&parts,.32);renderer.render(*world,*view);
+        auto lit=renderer.readRGBPixels();require(std::count_if(lit.begin(),lit.end(),[](auto v){return v>30;})>40,"Ignition plume shader did not render");
+        parts[0]=0;vehicle.animate(&parts,.5);renderer.render(*world,*view);vehicle.animate(&parts,.9);renderer.render(*world,*view);
+        const auto purge=renderer.readRGBPixels();require(std::count_if(purge.begin(),purge.end(),[](auto v){return v>30;})>40,"Purge shader did not render");
+    }
     auto scene=Scene::create();scene->background=Color(0x000000);
     auto camera=OrthographicCamera::create(-.6f,.6f,.6f,-.6f,.01f,300.f);
     camera->position.set(0,0,1.5f);camera->lookAt(Vector3());
@@ -619,6 +656,16 @@ void soundLevels(){
     float peak=0;std::size_t at=0;for(std::size_t i=0;i<n.size();i+=2)if(n[i]>peak){peak=n[i];at=i/2;}
     std::cout<<"sound: a 1 Pa boom peaks at "<<peak<<" after "<<at<<" samples, "<<n[2*3600]<<" at 75 ms\n";
     require(std::abs(peak-std::tanh(.1774f))<.01&&at<=120&&n[2*3600]<-.05f,"Sound: boom");
+    // Short transients have their own pool: the stopped engine need not keep a roar alive to finish its whoosh.
+    ac::Heard arrived;arrived.audible=true;arrived.levels.fill(-1e9);arrived.levels[29]=75; // Below the output limiter, so a 20 dB propagation loss stays measurable.
+    auto transient=[&](bool ignition,double doppler,double loss){albert::Sound t(false);auto h=arrived;h.doppler=doppler;for(auto& l:h.levels)l-=loss;
+        t.transient(h,ignition,1,3);std::vector<float> out(12000*2);t.render(out.data(),12000,2);return out;};
+    auto energy=[](const auto& out,unsigned from,unsigned to){double p=0;for(unsigned i=from;i<to;++i)p+=out[2*i+1]*out[2*i+1];return p;};
+    const auto pop=transient(true,1,0),far=transient(true,1,20),fast=transient(true,2,0),tail=transient(false,1,0);
+    require(energy(pop,0,4000)>1e-3&&rms(pop,0,0)<-100&&energy(pop,4800,12000)<1e-15,"Sound: ignition transient timing or pan");
+    require(std::abs(10*std::log10(energy(pop,0,4000)/energy(far,0,4000))-20)<1,"Sound: transient distance level lost");
+    require(energy(fast,2400,12000)<1e-15&&energy(pop,2400,4000)>1e-10,"Sound: transient Doppler duration");
+    require(energy(tail,4800,7500)>1e-10&&energy(tail,9000,12000)<1e-15,"Sound: cutoff whoosh length");
 }
 // Dark adaptation at the Moon: none down to quarter phase; the night side seen from the Earth's direction (sun-Moon-camera
 // 180°, full Earth 60.27 radii away) is lit by earthshine alone, ~760 times fainter than the quarter (Allen's law at 90°).
@@ -630,7 +677,7 @@ void lunarAdaptationLevels(){
 }
 int main(int argc,char** argv) {
     try {
-        controls();orbitPaths();lunarAdaptationLevels();soundLevels();
+        controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();
         if(argc>1){
             std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';return 77;}
             if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";graphics(*gpu);require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}

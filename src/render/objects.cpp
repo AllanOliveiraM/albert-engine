@@ -97,7 +97,7 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             Quaternion basis;basis.setFromAxisAngle(Vector3(1,0,0),-std::numbers::pi_v<float>/2.f);
             basis.multiply(Quaternion(static_cast<float>(q.x),static_cast<float>(q.y),static_cast<float>(q.z),static_cast<float>(q.w)));
             mesh->quaternion.copy(basis);mesh->visible=o.visible;
-            if(const auto v=vehicles_.find(id);v!=vehicles_.end())v->second->animate(state.parts.get());
+            if(const auto v=vehicles_.find(id);v!=vehicles_.end())v->second->animate(state.parts.get(),now,state.positionMeters,state.velocityMetersPerSecond);
             if(const auto v=sites_.find(id);v!=sites_.end())v->second->animate(state.parts.get());
         }
     }
@@ -117,7 +117,7 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
         if(v!=vehicles_.end()&&nodes_.at(v->first)->visible){const auto& p=exact_.at(v->first);const auto& o=exact_.at(id);Vector3 up(0,0,1),aft(0,-1,0);up.applyQuaternion(nodes_.at(id)->quaternion);aft.applyQuaternion(nodes_.at(v->first)->quaternion);
             const double m=core::earthRadiusMeters,dx=p[0]-o[0],dy=p[1]-o[1],dz=p[2]-o[2],h=(dx*up.x+dy*up.y+dz*up.z)*m+v->second->length()/2*aft.dot(up);
             if(std::sqrt(dx*dx+dy*dy+dz*dz)*m<2e3){thrust=v->second->thrust();above=static_cast<float>(h);vents[v->first]=std::clamp(1-(above-20)/150,0.f,1.f);}} // Over its pad only (in orbit, beyond the Earth's limb, the height along the pad's up went negative: it vented and steamed there).
-        const auto water=deluge_.find(id);site->exhaust(thrust,above,seconds,water!=deluge_.end()?water->second:0.f);site->venting(now);}
+        const auto water=deluge_.find(id);site->exhaust(delugeEffects_?thrust:0.f,above,seconds,delugeEffects_&&water!=deluge_.end()?water->second:0.f);site->venting(now);}
     // The stack's vents shut for tank pressurisation from T-40 s to liftoff (a hold keeps its count time), open again after a scrub.
     for(auto& [id,v]:vehicles_){const auto it=vents.find(id);const auto c=count_.find(id);const bool closed=c!=count_.end()&&c->second.first>=-40&&!c->second.second;
         v->venting(it!=vents.end()?it->second:0.f,now,closed);}

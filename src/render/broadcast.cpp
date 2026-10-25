@@ -97,8 +97,9 @@ void drawBroadcast(const std::vector<BroadcastVehicle>& vehicles,double missionT
     notice=std::clamp(notice+(accelerated?1.f:-1.f)*ImGui::GetIO().DeltaTime/.4f,0.f,1.f); // Wall time keeps the fade steady while the mission clock races.
     if(notice>0){
         const float fade=notice*notice*(3-2*notice),wrap=std::min(600*k,std::max(1.f,size.x-96*k));
-        const std::string title="Tempo acelerado  "+std::to_string(std::llround(noticePace))+"×",why=decision.what.rfind("planeio",0)==0?"Depois da queima de saída de órbita, a nave cai em direção ao ar, sem motores. O tempo corre mais rápido até a reentrada; a reentrada e o pouso acontecem em tempo real."
-            :noticeHeight>100000?"A nave está em órbita: uma volta leva cerca de 90 minutos. O tempo corre mais rápido até a manobra de saída de órbita, mostrada em tempo real.":"A nave desce da órbita até o ar. A reentrada e o pouso acontecem em tempo real.";
+        const std::string title="Tempo acelerado  "+std::to_string(std::llround(noticePace))+"×",why=decision.what.rfind("reentrada acelerada",0)==0?"Reentrada acelerada a pedido: o voo é o mesmo, só mais rápido, até a queda de barriga, mostrada em tempo real, como o pouso."
+            :decision.what.rfind("planeio",0)==0?"Depois da queima de saída de órbita, a nave cai em direção ao ar, sem motores. O tempo corre mais rápido até a reentrada; a reentrada e o pouso acontecem em tempo real."
+            :noticeHeight>100000&&missionTime>900?"A nave está em órbita: uma volta leva cerca de 90 minutos. O tempo corre mais rápido até a manobra de saída de órbita, mostrada em tempo real.":"O tempo corre mais rápido até perto do próximo pouso, que acontece em tempo real.";
         std::vector<std::string> lines;const char* p=why.c_str(),*end=p+why.size();
         while(p<end){const char* stop=f->CalcWordWrapPosition(15*k,p,end,wrap);if(stop==p){stop=p+1;while(stop<end&&(static_cast<unsigned char>(*stop)&0xc0)==0x80)++stop;}
             lines.emplace_back(p,stop);p=stop;while(p<end&&(*p==' '||*p=='\t'))++p;}

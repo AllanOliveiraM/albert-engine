@@ -12,7 +12,7 @@
 // --starship: a Starship-class flight from Starbase, the ship to orbit and the booster back to a catch on the tower's arms
 // (starship_flight.hpp), and a day later the ship home to the same arms; --follow-booster keeps the camera on the booster from
 // staging; --pad: the stack on the mount at Starbase, the camera going around it; --warp=N: the orbit's time compression in
-// real time (default 1000); --ship-return: the ship's way home alone, from orbit; --fail: engine failures to inject
+// real time (default 1000); --landings[=N]: every phase but the booster's and the ship's landings N times faster (30); --ship-return: the ship's way home alone, from orbit; --fail: engine failures to inject
 // (flight@time-or-phase:engine, starship_flight.hpp).
 // Camera commands to a running Albert, in order, then out (for pictures while another client flies): --focus=ID,
 // --orbit=AZIMUTH,ELEVATION[,DISTANCE_SCALE] (degrees), --shot=NAME.png (the next frame saved under its capture directory).
@@ -66,8 +66,8 @@ int apollo11(api::FlightService::Stub& flight,bool fast){
     return 0;
 }
 int main(int argc,char** argv){try{
-    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth",exported,definition,failures;bool fast=false,binary=false,apollo=false,starship=false,follow=false,homeOnly=false,pad=false;std::vector<std::string> camera;double utc=0,warp=1000;bool chosen=false;
-    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a=="--apollo11")apollo=true;else if(a=="--starship")starship=true;else if(a=="--follow-booster")follow=true;else if(a=="--ship-return")homeOnly=true;else if(a=="--pad")pad=true;else if(a.rfind("--fail=",0)==0)failures=a.substr(7);else if(a.rfind("--warp=",0)==0)warp=std::stod(a.substr(7));else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
+    std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth",exported,definition,failures;double hurry=1;bool fast=false,binary=false,apollo=false,starship=false,follow=false,homeOnly=false,pad=false;std::vector<std::string> camera;double utc=0,warp=1000;bool chosen=false;
+    for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a=="--apollo11")apollo=true;else if(a=="--starship")starship=true;else if(a=="--follow-booster")follow=true;else if(a=="--ship-return")homeOnly=true;else if(a=="--pad")pad=true;else if(a.rfind("--fail=",0)==0)failures=a.substr(7);else if(a.rfind("--warp=",0)==0)warp=std::stod(a.substr(7));else if(a.rfind("--landings",0)==0)hurry=a.size()>11?std::stod(a.substr(11)):30;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
         else if(a.rfind("--focus=",0)==0||a.rfind("--orbit=",0)==0||a.rfind("--shot=",0)==0)camera.push_back(a);
         else if(a.rfind("--body=",0)==0)world=a.substr(7);else if(a.rfind("--export-vehicle=",0)==0)exported=a.substr(17);else if(a.rfind("--definition=",0)==0)definition=a.substr(13);else address=a;}
     if(world!="earth"&&world!="moon"&&world!="mars")throw std::invalid_argument("--body: earth, moon or mars");
@@ -86,7 +86,7 @@ int main(int argc,char** argv){try{
     if(homeOnly){ex::starship::homecoming(*flight,fast,warp,560,ex::starship::faults(failures));return 0;}
     if(pad){auto camera=api::CameraService::NewStub(channel);ex::starship::onPad(*flight,*camera);return 0;}
     if(starship){auto camera=api::CameraService::NewStub(channel); // --follow-booster: the camera on the booster from staging.
-        ex::starship::mission(*flight,fast,warp,false,follow?std::function<void()>([&]{api::FocusRequest f;f.set_id("flight.booster");api::Applied a;ex::call([&](grpc::ClientContext& c){return camera->Focus(&c,f,&a);});}):std::function<void()>(),ex::starship::faults(failures),chosen?utc:0.);return 0;}
+        ex::starship::mission(*flight,fast,warp,false,follow?std::function<void()>([&]{api::FocusRequest f;f.set_id("flight.booster");api::Applied a;ex::call([&](grpc::ClientContext& c){return camera->Focus(&c,f,&a);});}):std::function<void()>(),ex::starship::faults(failures),chosen?utc:0.,hurry);return 0;}
     if(!exported.empty()){ // A preset as JSON, to edit and fly with --definition.
         const std::map<std::string,api::Vehicle> presets{{"launcher",api::GENERIC_LAUNCHER},{"saturn-v",api::SATURN_V},{"lander",api::GENERIC_LANDER},{"lunar-ascent",api::GENERIC_LUNAR_ASCENT},{"mars-ascent",api::GENERIC_MARS_ASCENT}};
         const auto kind=presets.find(exported);if(kind==presets.end())throw std::invalid_argument("--export-vehicle: launcher, saturn-v, lander, lunar-ascent or mars-ascent");

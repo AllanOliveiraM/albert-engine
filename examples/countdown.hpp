@@ -66,7 +66,7 @@ public:
         if(!fdir.empty()){stop(q,"FDIR: "+fdir.front(),T);return;}
         if(phase_!=Phase::igniting&&dt>0){collect(s,dt); // Until ignition (its shaking past what the tests allow), held or counting.
             if(std::floor(now)!=second_){second_=std::floor(now);roll();
-                if(!checked_&&full()){if(const std::string bad=selfTest(s,nav);!bad.empty()){stop(q,bad,T);return;}checked_=true;}}} // Keep passed checks through a recycle.
+                if(full()){if(const std::string bad=selfTest(s,nav);!bad.empty()){stop(q,bad,T);return;}checked_=true;}}} // Every second up to ignition (a fault after the first pass, or the GO at T-40, stops it too); passed checks kept through a recycle.
         if(phase_==Phase::holding){q.set_count_state("HOLD");if(now-held_>window_)stop(q,"janela de lançamento encerrada em espera",T);return;}
         if(T>=-40&&!go_){if(!checked_){waiting_=true;zero_=now+40;q.set_clock_zero_utc_unix_seconds(utc+40);q.set_count_state("HOLD");return;} // Wait at T-40 for a full window.
             waiting_=false;go_=true;mark(q,"GO PARA LANÇAMENTO");say(T,"autotestes em ordem (IMUs, alinhamento, GNSS/RTK, medidor, motores): GO para lançamento");}
@@ -120,6 +120,7 @@ private:
             x.frozenV=x.frozenV||x.sameV>=5;x.frozenA=x.frozenA||x.sameA>=5;x.lastDv=dv;x.lastDa=da;x.now.dv=x.now.dv+dv;x.now.da=x.now.da+da;x.now.seconds+=dt;}
         if(const auto& g=s.propellant_gauge();g.valid()&&g.elapsed_seconds()>gaugeAt_){gaugeAt_=g.elapsed_seconds();gaugeNow_.first+=g.propellant_kilograms();++gaugeNow_.second;}
         else if(s.has_propellant_gauge()&&!g.valid())gaugeDead_=true;
+        if(const auto& g=s.gnss();s.has_gnss()&&g.elapsed_seconds()>gnssAt_){gnssAt_=g.elapsed_seconds();if(g.valid())fixAt_=gnssAt_;if(g.rtk()){rtkAt_=gnssAt_;rtkFix_=vec(g.position_ecef_meters());}} // Its fixes as they come (RTK drops an epoch now and then).
     }
     void roll(){ // A second done: into the window, the oldest out.
         for(Unit& x:units_){x.past.push_back(x.now);x.now={};if(x.past.size()>span)x.past.pop_front();}
@@ -149,9 +150,9 @@ private:
             if(const double tilt=std::acos(std::clamp(dot(fe,u)/norm(fe),-1.,1.));tilt>.03*deg)return "alinhamento: nível "+number(tilt/deg)+"° fora da gravidade medida";
             const Vec h1=re+u*-dot(re,u),h2=w+u*-dot(w,u);
             if(const double head=std::acos(std::clamp(dot(h1,h2)/(norm(h1)*norm(h2)),-1.,1.));head>.5*deg)return "alinhamento: rumo "+number(head/deg)+"° fora da rotação da Terra";}
-        const auto& g=s.gnss();
-        if(!g.valid())return "GNSS sem posição";if(!g.rtk())return "GNSS sem RTK no pad";
-        if(const double e=norm(vec(g.position_ecef_meters())+nav.position*-1.);e>.3||nav.refused()>refused_)return "GNSS fora da posição levantada do pad ("+number(e)+" m)";
+        const double now=s.elapsed_seconds(); // A fix lost for 3 s, RTK for 5 (a dropped epoch is the receiver's normal).
+        if(now-fixAt_>3)return "GNSS sem posição";if(now-rtkAt_>5)return "GNSS sem RTK no pad";
+        if(const double e=norm(rtkFix_+nav.position*-1.);e>.3||nav.refused()>refused_)return "GNSS fora da posição levantada do pad ("+number(e)+" m)";
         const std::size_t st=static_cast<std::size_t>(s.stage());
         if(s.has_propellant_gauge()&&st<nav.load.size()){const double load=nav.load[st];double sum=0;int n=0;for(const auto& [k,m]:gauges_){sum+=k;n+=m;}
             if(gaugeDead_||n==0)return "medidor de propelante sem leitura";
@@ -167,7 +168,7 @@ private:
                 return "gimbal do motor "+std::to_string(i+1)+" não seguiu o comando ("+number(g.pitch_radians()/deg)+"°, "+number(g.yaw_radians()/deg)+"° para "+number(pitch_/deg)+"°, "+number(yaw_/deg)+"°)";}
         return {};
     }
-    double from_,window_,zero_,last_,held_=0,pitch_=0,yaw_=0,gaugeAt_=-1,second_=0,shipQdConnected_=0;int segment_=-1,refused_=0;
+    double from_,window_,zero_,last_,held_=0,pitch_=0,yaw_=0,gaugeAt_=-1,second_=0,shipQdConnected_=0,gnssAt_=-1e9,fixAt_=-1e9,rtkAt_=-1e9;Vec rtkFix_;int segment_=-1,refused_=0;
     bool started_=false,checked_=false,waiting_=false,go_=false,swept_=false,deluge_=false,gaugeDead_=false,vented_=false,disconnected_=false;Phase phase_=Phase::counting;std::string why_;unsigned shipQd_=0,boosterQd_=0;
     std::vector<Event> events_;std::vector<Unit> units_;std::pair<double,int> gaugeNow_{};std::deque<std::pair<double,int>> gauges_;
     std::vector<double> vac_,area_,lit_;std::vector<int> gimballed_;std::vector<std::vector<int>> rings_;

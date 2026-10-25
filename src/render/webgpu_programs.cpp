@@ -107,9 +107,9 @@ void earthLayers(){
     albert::gpu::define("albert:corona",corona);
     // vehicle.cpp: one density contribution per ray through an open cone, or a soft nozzle disc to fill the axial opening.
     Program plume;plume.attributes=surfaceAttributes;plume.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32},{"diamonds",Uniform::f32},
-        {"time",Uniform::f32},{"radii",Uniform::vec2},{"falloff",Uniform::f32},{"rarefied",Uniform::f32},{"disc",Uniform::f32},{"metres",Uniform::f32},{"vacuum",Uniform::f32},{"impingement",Uniform::f32}};
+        {"time",Uniform::f32},{"radii",Uniform::vec2},{"falloff",Uniform::f32},{"rarefied",Uniform::f32},{"disc",Uniform::f32},{"metres",Uniform::f32},{"vacuum",Uniform::f32},{"impingement",Uniform::f32},{"flash",Uniform::f32}};
     plume.wgsl=R"(
-struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32, time: f32, radii: vec2f, falloff: f32, rarefied: f32, disc: f32, metres: f32, vacuum: f32, impingement: f32 };
+struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32, time: f32, radii: vec2f, falloff: f32, rarefied: f32, disc: f32, metres: f32, vacuum: f32, impingement: f32, flash: f32 };
 @group(2) @binding(0) var<uniform> material: Material;
 struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @location(1) local: vec3f, @location(2) localNormal: vec3f, @location(3) worldNormal: vec3f, @location(4) world: vec3f };
 @vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f) -> Surface {
@@ -128,7 +128,7 @@ struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @locati
         let flicker = 0.97 + 0.03 * sin(material.time * 37.0 + radial * 9.0);
         let colour = mix(material.edge, material.core * 1.5, soft);
         let alpha = clamp(soft * flicker * material.strength, 0.0, 1.0);
-        return vec4f(linearToSrgb(colour * airFilter(v.world)) * alpha, alpha);
+        return vec4f(linearToSrgb((colour + vec3f(material.flash)) * airFilter(v.world)) * alpha, alpha);
     }
     let x = object.model[0].xyz; let y = object.model[1].xyz; let z = object.model[2].xyz;
     var delta = frame.camera.xyz - v.world;
@@ -169,20 +169,51 @@ struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @locati
     let density = exp(-down * material.falloff) * tail * faint + 1.4 * wall; // Rarefied wings stay visible; stalled gas remains dense right up to the surface.
     let alpha = 1.0 - exp(-column * density * flicker * material.strength * (1.0 + 2.2 * material.diamonds * bands));
     let colour = mix(mix(material.edge, material.core, clamp(exp(-distance * 0.25) + 0.3 * material.diamonds * bands, 0.0, 1.0)), mix(vec3f(1.0, 0.75, 0.3), vec3f(1.0, 0.55, 0.15), down), wall);
-    return vec4f(linearToSrgb(colour * airFilter(v.world)) * alpha, alpha * mix(mix(1.0, 0.04, material.rarefied), 1.0, wall)); // Recirculating gas absorbs even in thin air.
+    return vec4f(linearToSrgb((colour + vec3f(material.flash) * exp(-distance * 0.8)) * airFilter(v.world)) * alpha, alpha * mix(mix(1.0, 0.04, material.rarefied), 1.0, wall)); // Recirculating gas absorbs even in thin air.
 }
 )";
     albert::gpu::define("albert:plume",plume);
+    // The bell's attachment puff, fuel-rich tail and purge: a single turbulent chord through each pooled shell.
+    Program engineCloud;engineCloud.attributes=surfaceAttributes;engineCloud.uniforms={{"density",Uniform::f32},{"time",Uniform::f32},{"seed",Uniform::f32},{"flame",Uniform::f32}};
+    engineCloud.wgsl=std::string(surface)+R"(
+struct Material { density: f32, time: f32, seed: f32, flame: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+@fragment fn fs_main(v: Surface, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+    let x = object.model[0].xyz; let y = object.model[1].xyz; let z = object.model[2].xyz;
+    var delta = frame.camera.xyz - v.world;
+    let eye = v.local + vec3f(dot(delta, x) / dot(x, x), dot(delta, y) / dot(y, y), dot(delta, z) / dot(z, z));
+    let inside = frame.projection[3][3] < 0.5 && dot(eye, eye) < 1.0;
+    if (front == inside) { discard; }
+    if (frame.projection[3][3] > 0.5) { delta = transpose(mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz)) * vec3f(0, 0, 1); }
+    let view = normalize(vec3f(dot(delta, x) / dot(x, x), dot(delta, y) / dot(y, y), dot(delta, z) / dot(z, z)));
+    let middle = v.local - view * dot(v.local, view);
+    let edge = max(0.0, 1.0 - dot(middle, middle));
+    let billow = 0.78 + 0.14 * sin(dot(middle, vec3f(13, 9, 7)) + material.seed - material.time * 6.0) + 0.08 * sin(dot(middle, vec3f(23, -17, 11)) + material.seed);
+    let alpha = 1.0 - exp(-material.density * 2.0 * pow(edge, 1.5) * billow);
+    let colour = mix(vec3f(0.9, 0.94, 0.98), vec3f(2.4, 0.65 + 0.5 * edge, 0.08), material.flame);
+    return vec4f(linearToSrgb(colour * airFilter(v.world)) * alpha, alpha * (1.0 - 0.95 * material.flame));
+}
+)";
+    albert::gpu::define("albert:engine-cloud",engineCloud);
     // Integrate inside the existing depth-tested shells so density stays attached to the vapour.
-    Program steam;steam.attributes=surfaceAttributes;steam.uniforms={{"density",Uniform::f32},{"seed",Uniform::f32},{"time",Uniform::f32},{"up",Uniform::vec3},{"hull",Uniform::vec4},{"size",Uniform::vec3},{"kind",Uniform::f32}};
+    Program steam;steam.attributes=surfaceAttributes;steam.uniforms={{"density",Uniform::f32},{"seed",Uniform::f32},{"time",Uniform::f32},{"up",Uniform::vec3},{"hull",Uniform::vec4},{"size",Uniform::vec3},{"kind",Uniform::f32},{"cloud",Uniform::vec4}};
     steam.wgsl=std::string(surface)+R"(
-struct Material { density: f32, seed: f32, time: f32, up: vec3f, hull: vec4f, size: vec3f, kind: f32 }; // Kind: vapour 0, spray 1, splash mist 2; absent fields keep vehicle vapour compatible.
+struct Material { density: f32, seed: f32, time: f32, up: vec3f, hull: vec4f, size: vec3f, kind: f32, cloud: vec4f }; // Cloud: height above ground, bank height, dust, enabled; zero keeps vehicle vapour compatible.
 @group(2) @binding(0) var<uniform> material: Material;
 fn steamHash(p: vec3f) -> f32 { return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7))) * 43758.5453); }
 fn steamNoise(p: vec3f) -> f32 {
     let i = floor(p); let f = fract(p); let u = f * f * (3.0 - 2.0 * f);
     return mix(mix(mix(steamHash(i), steamHash(i + vec3f(1, 0, 0)), u.x), mix(steamHash(i + vec3f(0, 1, 0)), steamHash(i + vec3f(1, 1, 0)), u.x), u.y),
         mix(mix(steamHash(i + vec3f(0, 0, 1)), steamHash(i + vec3f(1, 0, 1)), u.x), mix(steamHash(i + vec3f(0, 1, 1)), steamHash(i + vec3f(1, 1, 1)), u.x), u.y), u.z);
+}
+fn steamHeight(q: vec3f) -> f32 { return material.cloud.x + dot(q * material.size, material.up); }
+fn steamField(q: vec3f) -> f32 {
+    let p = q * 4.2 + vec3f(material.seed, material.seed * 0.37, material.time * 0.035);
+    let billow = steamNoise(p); let detail = steamNoise(p * 2.4 + vec3f(7.1, 3.7, -material.time * 0.025));
+    let r = length(q); let radius = 0.65 + 0.27 * billow + 0.08 * detail;
+    let edge = smoothstep(0.0, 0.16, radius - r);
+    let core = 1.0 - smoothstep(0.3, 0.7, r);
+    return (edge * (0.65 + 0.8 * billow + 0.35 * detail) + 1.6 * core) * smoothstep(-0.15, 0.6, steamHeight(q)); // Solid cores join parcels; only the fringe dissolves into wisps.
 }
 @fragment fn fs_main(v: Surface, @builtin(front_facing) front: bool) -> @location(0) vec4f {
     let x = object.model[0].xyz; let y = object.model[1].xyz; let z = object.model[2].xyz;
@@ -211,8 +242,38 @@ fn steamNoise(p: vec3f) -> f32 {
     if (material.kind > 0.5 && material.kind < 1.5) {
         let grain = steamNoise(v.local * vec3f(14, 14, 2) + vec3f(material.seed));
         let edge = pow(max(0.0, 1.0 - dot(middle, middle)), 1.5);
-        let alpha = 1.0 - exp(-material.density * path * edge * (0.4 + 0.6 * grain));
-        return vec4f(linearToSrgb(vec3f(0.92, 0.96, 1.0)) * alpha, alpha);
+        let ground = select(1.0, smoothstep(-0.15, 0.4, steamHeight(middle)), material.cloud.w > 0.5);
+        let alpha = 1.0 - exp(-material.density * path * edge * (0.65 + 0.35 * grain) * ground);
+        return vec4f(linearToSrgb(vec3f(1.0, 0.99, 0.97)) * alpha, alpha);
+    }
+    if (material.cloud.w > 0.5) {
+        let basis = mat3x3f(normalize(x), normalize(y), normalize(z));
+        let up = normalize(basis * material.up);
+        var sun = up; if (frame.sun.w > 0.0) { sun = normalize(frame.sun.xyz); }
+        let towardSun = normalize((transpose(basis) * sun) / max(material.size, vec3f(0.001)));
+        let hot = material.kind > 2.5 && material.kind < 3.5;
+        let step = path / 8.0;
+        var transmission = 1.0; var scattered = vec3f(0.0);
+        for (var i = 0; i < 8; i++) {
+            let q = middle + view * (near - (f32(i) + 0.5) * step);
+            let rho = steamField(q);
+            let alpha = 1.0 - exp(-material.density * rho * step);
+            let h = steamHeight(q);
+            let along = dot(q, towardSun);
+            let escape = max(0.0, -along + sqrt(max(0.0, along * along + 1.0 - dot(q, q))));
+            let shadow = steamField(q + towardSun * escape * 0.45) * escape;
+            let sunlight = exp(-shadow * material.density * 0.45);
+            let elevation = smoothstep(0.025, 0.75, h / max(1.0, material.cloud.y));
+            let light = (0.3 + 0.7 * elevation) * (0.4 + 0.6 * sunlight);
+            let dust = material.cloud.z * (1.0 - smoothstep(2.0, 32.0, h));
+            let shade = mix(vec3f(0.23, 0.29, 0.38), vec3f(0.39, 0.33, 0.27), dust * 0.8);
+            let steam = mix(shade, vec3f(1.0, 0.99, 0.96), light);
+            let water = mix(vec3f(0.68, 0.75, 0.81), vec3f(1.0, 0.99, 0.97), 0.55 + 0.45 * sunlight);
+            scattered += transmission * alpha * select(water, steam, hot); transmission *= 1.0 - alpha;
+            if (transmission < 0.008) { break; } // Hidden interiors need no more samples.
+        }
+        let alpha = 1.0 - transmission;
+        return vec4f(linearToSrgb(scattered / max(alpha, 0.00001)) * alpha, alpha);
     }
     let up = normalize(x * material.up.x + y * material.up.y + z * material.up.z);
     var sun = up; if (frame.sun.w > 0.0) { sun = frame.sun.xyz; }

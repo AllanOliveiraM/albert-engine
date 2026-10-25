@@ -1101,7 +1101,11 @@ int albert::runRenderer(int argc, char** argv) {
         // The flight's sound at the camera: muted until "Som do voo" is ticked (the device opens then); its emissions over
         // the last ten minutes and the listener's last place.
         bool soundOn=true;std::unique_ptr<albert::Sound> sound; // On unless unticked (ALBERT_AUDIO=0 keeps a run silent).
-        struct Heard {std::vector<albert::physics::acoustics::Emission> emissions;std::size_t booms=0;bool blasted=false;};std::map<std::string,Heard> heardFlights; // By scene id.
+        struct Heard {std::vector<albert::physics::acoustics::Emission> emissions;std::size_t booms=0;bool blasted=false;
+            struct Tail {albert::physics::acoustics::Emission emission;bool ignition=false,active=false;};std::array<Tail,256> tails{};
+            std::vector<albert::physics::acoustics::Emission> pulse=std::vector<albert::physics::acoustics::Emission>(2); // Reused propagation scratch, even after the steady roar has stopped.
+            albert::physics::acoustics::RocketNoise reference{};std::uint64_t serial=0,instance=0;double playedUtc=-1e30;
+        };std::map<std::string,Heard> heardFlights; // By scene id.
         std::optional<std::pair<double,albert::physics::V3>> lastListener;albert::physics::V3 listenerVelocity;
         const bool soundStats=std::getenv("ALBERT_SOUND_STATS")!=nullptr;auto soundReport=std::chrono::steady_clock::now();
 #endif
@@ -1213,12 +1217,12 @@ int albert::runRenderer(int argc, char** argv) {
 
         // Ajustes, kept in settings.json across runs (the sound always starts muted). The volumetric clouds and the ocean's
         // waves are the costly effects: on by default, a weaker machine turns them off.
-        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false,inset=true,broadcast=true,playground=true;int frameCap=60;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
+        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false,inset=true,broadcast=true,playground=true,deluge=true;int frameCap=60;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
             bool thirdBodies=true,relativity=true,flightAir=true,wind=true,solarPressure=true;float turbulence=0;} preferences; // The last six: the Fisica page's defaults for new flights.
         const auto preferencesFile=albert::dataDirectory()/"settings.json";
         try{std::ifstream in(preferencesFile);if(in){const auto j=json::parse(in);auto& p=preferences;auto& v=visualSettings;
             p.volumetricClouds=j.value("volumetric_clouds",p.volumetricClouds);p.oceanWaves=j.value("ocean_waves",p.oceanWaves);p.antialias=j.value("antialias",p.antialias);
-            p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);p.inset=j.value("flight_inset",p.inset);p.broadcast=j.value("broadcast_panels",p.broadcast);p.playground=j.value("interference_panel",p.playground);p.frameCap=std::clamp(j.value("frame_cap",p.frameCap),0,240);
+            p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);p.inset=j.value("flight_inset",p.inset);p.deluge=j.value("deluge_effects",p.deluge);p.broadcast=j.value("broadcast_panels",p.broadcast);p.playground=j.value("interference_panel",p.playground);p.frameCap=std::clamp(j.value("frame_cap",p.frameCap),0,240);
             p.fov=std::clamp(j.value("field_of_view",p.fov),35.f,90.f);p.uiScale=std::clamp(j.value("interface_scale",p.uiScale),.8f,1.6f);
             p.sensitivity=std::clamp(j.value("mouse_sensitivity",p.sensitivity),.25f,3.f);p.volume=std::clamp(j.value("volume",p.volume),0.f,1.f);
             p.thirdBodies=j.value("physics_third_bodies",p.thirdBodies);p.relativity=j.value("physics_relativity",p.relativity);p.flightAir=j.value("physics_atmosphere",p.flightAir);
@@ -1228,7 +1232,7 @@ int albert::runRenderer(int argc, char** argv) {
             showOrbits=j.value("orbits",showOrbits);showDebris=j.value("debris",showDebris);}}
         catch(const std::exception&){} // A damaged preference never prevents startup.
         auto savePreferences=[&]{try{const auto& p=preferences;const auto& v=visualSettings;std::filesystem::create_directories(preferencesFile.parent_path());std::ofstream out(preferencesFile);
-            out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},{"flight_inset",p.inset},{"broadcast_panels",p.broadcast},{"interference_panel",p.playground},{"frame_cap",p.frameCap},
+            out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},{"flight_inset",p.inset},{"deluge_effects",p.deluge},{"broadcast_panels",p.broadcast},{"interference_panel",p.playground},{"frame_cap",p.frameCap},
                 {"field_of_view",p.fov},{"interface_scale",p.uiScale},{"mouse_sensitivity",p.sensitivity},{"volume",p.volume},{"quality",v.quality},{"shadows",v.shadows},
                 {"atmosphere",v.atmosphere},{"terrain",v.terrain},{"live_clouds",v.clouds},{"city_lights",v.nightLights},{"borders",v.borders},{"orbits",showOrbits},{"debris",showDebris},
                 {"physics_third_bodies",p.thirdBodies},{"physics_relativity",p.relativity},{"physics_atmosphere",p.flightAir},{"physics_wind",p.wind},{"physics_solar_pressure",p.solarPressure},{"physics_turbulence",p.turbulence}}.dump(2)<<'\n';}
@@ -1640,6 +1644,7 @@ int albert::runRenderer(int argc, char** argv) {
                     check("Cinturoes e nuvem de Oort",showDebris);
                     check("Girar devagar ao chegar",preferences.autoRotate);
                     check("Segunda vista dos voos",preferences.inset,"Com dois voos ou mais, um quadro no canto mostra o outro; clique nele para trocar.");
+                    check("Efeitos do dilúvio",preferences.deluge,"O spray de água do pad na contagem e as nuvens de vapor da decolagem (pesam na placa de vídeo).");
                     slider("##Escala da interface",preferences.uiScale,.8f,1.6f,"Interface: %.1fx");
                     ImGui::Spacing();ImGui::TextDisabled("CAMERA");
                     bool free=freeCamera;if(ImGui::Checkbox("Camera livre (F)",&free))toggleFreeCamera(free);
@@ -2387,6 +2392,7 @@ int albert::runRenderer(int argc, char** argv) {
             if(rpc)for(const auto& x:rpc->flightSounds())if(x.id.rfind("site",0)==0&&x.id.find('/')==std::string::npos)objects.deluge(x.id,static_cast<float>(x.emission.pad.waterFlow/1000)); // Its pad's deluge (kg/s) as the trench's spray.
             if(rpc)for(const auto& g:rpc->flightGauges())objects.count(g.id,g.countState=="HOLD"?g.countTime:simulatedUtc-g.zero,g.countState=="SCRUB"); // The vents' pressurisation closing.
 #endif
+            objects.delugeEffects(preferences.deluge);
             objects.sync(registry,simulatedUtc,sceneOrigin);
             earthPosition.copy(earth->position);
             sunPosition.copy(sun->position);
@@ -2736,6 +2742,7 @@ int albert::runRenderer(int argc, char** argv) {
             if(const auto* at=objects.exact("earth")){earthFrame.at=*at;const double flat=6356.752314245/6378.137;
                 auto turned=[&](double a,double b,double c){const double x=c2t[0][0]*a+c2t[1][0]*b+c2t[2][0]*c,y=c2t[0][1]*a+c2t[1][1]*b+c2t[2][1]*c,z=c2t[0][2]*a+c2t[1][2]*b+c2t[2][2]*c;return std::array<double,3>{x,z,-y};};
                 const auto x=turned(1,0,0),y=turned(0,0,1),z=turned(0,-1,0);earthFrame.linear={x[0],x[1],x[2],y[0]*flat,y[1]*flat,y[2]*flat,z[0],z[1],z[2]};}
+            planets.cullToView(insetId.empty()); // Last frame's second view: its ground must not be cut to this one's.
             planets.update(solarDirection.normalize(), camera->position, shownSettings, dt, camera.get(),objects.exact("earth")?&earthFrame:nullptr,objects.exact("moon"));
             Vector3 earthCamera = camera->position;
             earth->worldToLocal(earthCamera);
@@ -2872,7 +2879,8 @@ int albert::runRenderer(int argc, char** argv) {
             { // Retarded spectra stay separate so distant vents and the stack keep their directions.
                 namespace ph=albert::physics;namespace ac=ph::acoustics;
                 const auto sources=rpc?rpc->flightSounds():std::vector<albert::rpc::FlightServices::Sound>{};
-                struct Candidate {albert::Sound::Voice voice;double level=-1e9;std::array<ac::Boom,2> booms{};unsigned count=0;};
+                struct Candidate {albert::Sound::Voice voice;double level=-1e9;std::array<ac::Boom,2> booms{};unsigned count=0;
+                    struct Transient {ac::Heard heard;bool ignition=false;double age=0;};std::array<Transient,64> tails{};unsigned tailCount=0;};
                 std::array<Candidate,albert::Sound::voices> selected{};
                 if(soundOn&&!sound&&!smokeTest)sound=std::make_unique<albert::Sound>(true);else if(!soundOn&&sound)sound.reset();
                 if(sound)sound->setVolume(preferences.volume);
@@ -2888,6 +2896,7 @@ int albert::runRenderer(int argc, char** argv) {
                     lastListener={simulatedUtc,here};
                     for(const auto& source:sources){auto& h=heardFlights[source.id];auto& emissions=h.emissions;
                         if(!emissions.empty()&&source.utc<emissions.back().time)h={}; // A new flight, or a replay.
+                        if(simulatedUtc<h.playedUtc){for(auto& t:h.tails)t.active=false;h.serial=0;}h.playedUtc=simulatedUtc;
                         if(emissions.empty()||source.utc>=emissions.back().time+.05)emissions.push_back(source.emission);
                         else if(source.utc==emissions.back().time)emissions.back()=source.emission; // Clock-only updates can close a valve without advancing physics.
                         if(emissions.size()>2&&emissions.front().time<source.utc-660)
@@ -2901,6 +2910,28 @@ int albert::runRenderer(int argc, char** argv) {
                         Candidate candidate;auto& voice=candidate.voice;voice.id=14695981039346656037ull;for(unsigned char c:source.id)voice.id=(voice.id^c)*1099511628211ull;if(!voice.id)voice.id=1;
                         voice.levels=heard.levels;voice.audible=heard.audible;voice.pan=side;voice.crackle=static_cast<float>(.6*std::clamp((heard.rocket-105)/20,0.,1.));
                         if(heard.audible)candidate.level=ac::overall(heard.levels);
+                        if(const auto* vehicle=objects.vehicle(source.id)){ // The visual clocks date each bell's main stage and cutoff, including staggered starts.
+                            const auto instance=registry.get(source.id).instance;if(instance!=h.instance){h.instance=instance;h.serial=0;}
+                            const double shares=vehicle->thrust()*vehicle->engineCount();
+                            if(source.emission.noise.thrust>0&&shares>1e-4){h.reference=source.emission.noise;h.reference.thrust/=shares;}
+                            const auto end=vehicle->soundSerial(),begin=std::max(h.serial+1,end>255?end-255:1);
+                            for(auto serial=begin;serial<=end;++serial){const auto& event=vehicle->engineSounds()[serial%vehicle->engineSounds().size()];if(event.serial!=serial||h.reference.thrust<=0)continue;
+                                auto slot=std::find_if(h.tails.begin(),h.tails.end(),[](const auto& x){return !x.active;});if(slot==h.tails.end())break;
+                                auto& e=slot->emission;e=source.emission;e.time=event.utc;e.position=e.position+e.velocity*(event.utc-source.utc);
+                                e.noise=h.reference;e.noise.exitDiameter=2*event.radius;e.on=true;e.pad={};e.dragPower=e.blast=0;slot->ignition=event.ignition;slot->active=true;}
+                            h.serial=end;
+                        }
+                        for(auto& tail:h.tails)if(tail.active){ // A short source fixed at release; the usual atmosphere, delay and Doppler carry its sound.
+                            if(simulatedUtc-tail.emission.time>660){tail.active=false;continue;}
+                            const auto path=here-tail.emission.position;const double length=ph::norm(path);double delay=0;
+                            for(int k=0;k<8;++k){const auto a=at(ph::geodetic(source.planet,tail.emission.position+path*((k+.5)/8)));delay+=length/(8*(a.sound>0?a.sound:331));}
+                            if(simulatedUtc<tail.emission.time+delay)continue; // Waiting pulses need no band spectra or absorption calculation.
+                            auto& pulse=h.pulse;pulse[0]=pulse[1]=tail.emission;pulse[1].time+=.001;
+                            const auto arrived=ac::hear(pulse,simulatedUtc,here,listenerVelocity,source.planet,at);
+                            if(arrived.audible){tail.active=false;const double age=std::max(0.,(arrived.emitted-tail.emission.time)/arrived.doppler);
+                                if(age<(tail.ignition?.09:.18)/arrived.doppler&&candidate.tailCount<candidate.tails.size()){
+                                    candidate.tails[candidate.tailCount++]={arrived,tail.ignition,age};candidate.level=std::max(candidate.level,ac::overall(arrived.levels));}}
+                        }
                         const auto booms=ac::booms(emissions,simulatedUtc,here,source.planet,at); // One more cone over the camera, just now: its boom.
                         if(booms.size()>h.booms&&booms.back().time>simulatedUtc-1)candidate.booms[candidate.count++]=booms.back();
                         h.booms=booms.size();
@@ -2909,7 +2940,7 @@ int albert::runRenderer(int argc, char** argv) {
                             if(simulatedUtc>=e->time+r/(c>0?c:340.)){h.blasted=true;const auto b=ac::blast(e->blast,r,at(ph::geodetic(source.planet,here)).pressure);
                                 if(b.overpressure>.01)candidate.booms[candidate.count++]={simulatedUtc,b.overpressure,std::max(4*b.duration,.08)};}}
                         for(unsigned k=0;k<candidate.count;++k)candidate.level=std::max(candidate.level,20*std::log10(std::max(candidate.booms[k].overpressure,1e-20)/20e-6));
-                        if(voice.audible||candidate.count)for(unsigned k=0;k<selected.size();++k)if(candidate.level>selected[k].level){
+                        if(voice.audible||candidate.count||candidate.tailCount)for(unsigned k=0;k<selected.size();++k)if(candidate.level>selected[k].level){
                             for(unsigned j=static_cast<unsigned>(selected.size())-1;j>k;--j)selected[j]=selected[j-1];selected[k]=candidate;break;}
                         if(soundStats&&steadyNow>=soundReport) // ALBERT_SOUND_STATS: once a second.
                             std::printf("sound %s: %s, %.1f dB SPL (%.1f dB above 20 Hz, engines %.1f dB) from %.0f m, %.2f s late, Doppler %.3f, %zu booms\n",source.id.c_str(),
@@ -2919,7 +2950,8 @@ int albert::runRenderer(int argc, char** argv) {
                 }else lastListener.reset();
                 std::array<albert::Sound::Voice,albert::Sound::voices> voices{};double total=0;
                 for(unsigned k=0;k<selected.size();++k){voices[k]=selected[k].voice;if(voices[k].audible)total+=std::pow(10.,ac::overall(voices[k].levels)/10);}
-                if(sound){sound->hear(voices,dt);for(const auto& c:selected)for(unsigned k=0;k<c.count;++k)sound->boom(c.booms[k].overpressure,c.booms[k].duration,c.voice.pan,c.voice.id);}
+                if(sound){sound->hear(voices,dt);for(const auto& c:selected){for(unsigned k=0;k<c.count;++k)sound->boom(c.booms[k].overpressure,c.booms[k].duration,c.voice.pan,c.voice.id);
+                    for(unsigned k=0;k<c.tailCount;++k){const auto& t=c.tails[k];sound->transient(t.heard,t.ignition,c.voice.pan,c.voice.id,t.age);}}}
                 if(soundStats&&steadyNow>=soundReport){soundReport=steadyNow+std::chrono::seconds(1);
                     std::printf("sound: %s, %.1f dB SPL, adaptation %.1f dB\n",sound&&sound->playing()?"device":"muted",total>0?10*std::log10(total):-1e9,sound?sound->adaptation():0.);std::fflush(stdout);}
             }
