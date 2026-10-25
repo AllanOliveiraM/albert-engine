@@ -11,6 +11,8 @@
 //   finish, a course into the tower): once not, given up for good, away from the tower with all it has while anything
 //   threatens it and down at sea east of it (TowerApproach: never onto the tower or the ground's works).
 #include "starship.hpp"
+#include <array>
+#include <future>
 namespace albert::example::starship {
 class ShipReturn:public TowerApproach {
 public:
@@ -369,7 +371,9 @@ private:
         // engines after the flip); short of it even unbanked, gently toward it.
         const double distance=range(s),corridor=300+.03*distance;Arrival a=arrive(s.position,s.velocity,s.mass,0);
         if(distance<40e3){auto miss=[&](double b){const Arrival q=arrive(s.position,s.velocity,s.mass,b,true);return q.along*q.along+q.cross*q.cross;};
-            double best=1e300,b=0;for(int i=-12;i<=12;++i)if(const double m=miss(i*10*deg);m<best){best=m;b=i*10*deg;}
+            std::array<double,25> m{};{std::array<std::future<void>,4> part;for(int p=0;p<4;++p)part[static_cast<std::size_t>(p)]=std::async(std::launch::async,[&,p]{for(int i=p;i<25;i+=4)m[static_cast<std::size_t>(i)]=miss((i-12)*10*deg);});
+                for(auto& f:part)f.get();} // The 25 on 4 threads (each its own fall, the same as one by one: a hitch a second live, ~100 ms).
+            double best=1e300,b=0;for(int i=-12;i<=12;++i)if(m[static_cast<std::size_t>(i+12)]<best){best=m[static_cast<std::size_t>(i+12)];b=i*10*deg;}
             for(int i=-4;i<=4;++i)if(const double m=miss(b+i*2*deg);m<best){best=m;b+=i*2*deg;i=-5;} // Refined about the best.
             bank_=b;a=arrive(s.position,s.velocity,s.mass,b,true);along_=a.along;cross_=a.cross;return;}
         if(sign_*a.cross>corridor)sign_=-sign_;
