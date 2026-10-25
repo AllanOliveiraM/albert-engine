@@ -20,9 +20,6 @@ struct RegionalImages {
     std::string error;
 };
 void prepareRegionalImages(RegionalImages& images);
-// The detail's mean colour brought to the reference's (the base map over the same region), per
-// channel, gains within 0.5-3; pixels with no alpha do not count.
-void matchTone(threepp::Image& detail,const threepp::Image& reference);
 class RegionalImagery {
 public:
     ~RegionalImagery();

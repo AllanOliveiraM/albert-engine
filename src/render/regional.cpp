@@ -1,9 +1,7 @@
 #include "regional.hpp"
 #include <array>
-#include "wms.hpp"
 #include "physics/earth.hpp"
 #include "providers/terrain.hpp"
-#include "stb_image.h"
 #include "asset_pack.hpp"
 #include "core/bodies.hpp"
 #include "threepp/geometries/SphereGeometry.hpp"
@@ -13,8 +11,6 @@ using namespace threepp;
 #include "threepp/loaders/ImageLoader.hpp"
 #include <fstream>
 #include <iostream>
-#include <iomanip>
-#include <sstream>
 #include <vector>
 #include <cmath>
 #include <thread>
@@ -51,43 +47,31 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
             result.textureOnly=pack->hasPayload("v1/"+body+"/shape.bin");
             progress.stage("Lendo detalhes incluidos",0);
             bool site=false;
-            if(body=="earth"&&region.east-region.west<=2.)try{ // Launch-site detail: aerial imagery over the contiguous United States (USDA NAIP via the
-                // USGS, public domain, ~1 m, recent), else the 31 m Landsat composite (of 2000: no Starbase in it); Copernicus 30 m relief over the EGM2008 geoid.
-                const bool naip=region.south>24.&&region.north<50.&&region.west>-125.&&region.east<-66.;
-                progress.stage(naip?"Baixando imagem aérea NAIP (USGS)":"Baixando imagem Landsat (NASA GIBS)",0);
-                const auto jpeg=naip?fetchWms([](const GeoRegion& r,unsigned w,unsigned h){std::ostringstream u;u<<std::setprecision(12)<<"https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage?bbox="
-                        <<r.west<<","<<r.south<<","<<r.east<<","<<r.north<<"&bboxSR=4326&imageSR=4326&size="<<w<<","<<h<<"&format=jpg&f=image";return u.str();},region,2048,2048,progress)
-                    :fetchWms([](const GeoRegion& r,unsigned w,unsigned h){std::ostringstream u;u<<std::setprecision(12)<<"https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0"
-                    "&LAYERS=Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual&CRS=EPSG:4326&BBOX="<<r.south<<","<<r.west<<","<<r.north<<","<<r.east<<"&WIDTH="<<w<<"&HEIGHT="<<h<<"&FORMAT=image/jpeg&TIME=2000-12-01";return u.str();},region,2048,2048,progress);
-                int w=0,h=0;std::unique_ptr<stbi_uc,decltype(&stbi_image_free)> rgba(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(jpeg.data()),static_cast<int>(jpeg.size()),&w,&h,nullptr,4),stbi_image_free);
-                if(!rgba)throw std::runtime_error("Unreadable site image");
-                Image photo(std::vector<unsigned char>(rgba.get(),rgba.get()+static_cast<std::size_t>(w)*h*4),static_cast<unsigned>(w),static_cast<unsigned>(h));
-                // Brought to the global map's tone there (Landsat's corrected reflectance is darker; the seam showed).
-                if(pack->contains(body+"-day"))matchTone(photo,pack->image(body+"-day",region,128,progress));
+            if(body=="earth"&&region.east-region.west<=2.)try{ // A launch site's relief: Copernicus 30 m over the EGM2008 geoid (its imagery the pack's, as everywhere).
                 progress.stage("Baixando relevo Copernicus",0);constexpr unsigned posts=385;
                 const auto heights=providers::copernicusDem().heights(region.west,region.south,region.east,region.north,posts,posts,progress);
                 const float geoid=static_cast<float>(physics::geoidHeight((region.south+region.north)*std::numbers::pi/360.,(region.west+region.east)*std::numbers::pi/360.));
                 std::vector<float> relief(static_cast<std::size_t>(posts)*posts*4,1.f);for(std::size_t i=0;i<heights.size();++i)relief[4*i]=heights[i]+geoid; // Ellipsoidal.
-                result.day=std::move(photo);
                 result.height=Image(std::move(relief),posts,posts);result.lift=.5f;result.segments=posts-1;site=true;
             }catch(const std::exception& e){if(progress.cancelled)throw;std::cerr<<"Terreno do sitio indisponivel: "<<e.what()<<std::endl;}
-            if(!site)result.day=pack->image(body+"-day",region,4096,progress);
+            result.day=pack->image(body+"-day",region,4096,progress);
             if(body=="earth") result.night=pack->image("earth-night",region,4096,progress);
             if(!site)result.height=pack->contains(body+"-height")?pack->image(body+"-height",region,1024,progress):Image(std::vector<float>{0,0,0,1},1,1);
+            // The Earth's roughness from its colour (water: bluer than red; smooth, for the sun's glint and the waves), at half the
+            // image's resolution (a quarter of the memory).
+            const auto roughness=[](const Image& image){const auto& rgba=image.data();const unsigned width=std::max(1u,image.width()/2),height=std::max(1u,image.height()/2);
+                std::vector<unsigned char> rough(static_cast<std::size_t>(width)*height*4,255);
+                for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){const size_t at=4*(static_cast<size_t>(std::min(2*y,image.height()-1))*image.width()+std::min(2*x,image.width()-1)),to=4*(static_cast<size_t>(y)*width+x);
+                    const float water=std::clamp((rgba[at+2]-rgba[at]*1.15f)/12.f,0.f,1.f);rough[to]=rough[to+1]=rough[to+2]=static_cast<unsigned char>(220.f-water*170.f);}
+                return Image(std::move(rough),width,height);};
             if(result.day) {
                 auto& image=*result.day;auto& rgba=image.data();
-                std::vector<unsigned char> rough(body=="earth"?rgba.size():0,255);
                 const auto width=image.width(),height=image.height();
+                if(body=="earth")result.roughness=roughness(image);
                 for(unsigned y=0;y<height;++y) for(unsigned x=0;x<width;++x) {
-                    const size_t at=4*(static_cast<size_t>(y)*width+x);
-                    if(body=="earth"){
-                        const float water=std::clamp((rgba[at+2]-rgba[at]*1.15f)/12.f,0.f,1.f);
-                        rough[at]=rough[at+1]=rough[at+2]=static_cast<unsigned char>(220.f-water*170.f);
-                    }
-                    const unsigned edge=std::min({x,y,width-1-x,height-1-y});
+                    const size_t at=4*(static_cast<size_t>(y)*width+x);const unsigned edge=std::min({x,y,width-1-x,height-1-y});
                     rgba[at+3]=static_cast<unsigned char>(rgba[at+3]*std::min(1.f,edge/(width*.025f)));
                 }
-                if(body=="earth") result.roughness=threepp::Image(std::move(rough),width,height);
             }
             progress.checkCancelled();
             prepareRegionalImages(result);
@@ -101,15 +85,6 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
     return std::nullopt;
 }
 
-void albert::matchTone(Image& detail,const Image& reference){
-    std::array<double,3> sum{},base{};double count=0,baseCount=0;
-    const auto& d=detail.data();const auto& r=reference.data();
-    for(std::size_t i=0;i+3<d.size();i+=4)if(d[i+3]){for(std::size_t c=0;c<3;++c)sum[c]+=d[i+c];++count;}
-    for(std::size_t i=0;i+3<r.size();i+=4)if(r[i+3]){for(std::size_t c=0;c<3;++c)base[c]+=r[i+c];++baseCount;}
-    if(!count||!baseCount)return;std::array<double,3> gain{};
-    for(std::size_t c=0;c<3;++c)gain[c]=std::clamp(base[c]/baseCount/std::max(sum[c]/count,1.),.5,3.);
-    auto& out=detail.data();for(std::size_t i=0;i+3<out.size();i+=4)for(std::size_t c=0;c<3;++c)out[i+c]=static_cast<unsigned char>(std::min(255.,out[i+c]*gain[c]+.5));
-}
 void albert::prepareRegionalImages(RegionalImages& images) {
     if(!images.day || images.geometry || images.textureOnly) return;
     constexpr double pi=std::numbers::pi;

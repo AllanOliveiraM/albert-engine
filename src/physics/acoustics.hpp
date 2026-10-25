@@ -5,8 +5,7 @@
 #include <functional>
 #include <vector>
 namespace albert::physics::acoustics {
-// One-third-octave bands at the exact centres 1000·10^(k/10) Hz, k = -29..12 (1.26 Hz to 15.8 kHz): a big rocket's
-// spectrum peaks below 10 Hz, inaudible but in its overall level.
+// Include infrasound so a cluster's low-frequency power survives propagation and playback.
 constexpr int bands=42;
 double bandCentre(int band);
 using Spectrum=std::array<double,bands>; // dB per band.
@@ -32,19 +31,22 @@ double overall(const Spectrum& levels); // Energy sum (dB).
 // 3x²/(1+x²)^2.5 in x = f/f_p, f_p at a Strouhal number of 0.2 on the body's diameter.
 double flowPower(double dragPower,double mach); // W.
 Spectrum flowLevels(double power,double speed,double diameter,double shift=1); // Band power levels (dB re 1 pW).
-// Ground reflection for a listener `height` (m) over hard ground on a path of grazing angle `grazing` (rad): +6 dB while the
-// image path is shorter than a sixth of the wavelength, +3 dB (incoherent) above; 0 from 100 m up.
+// Band-averaged direct/image interference over hard ground; finite bandwidth washes out distant notches.
+// height (m) and grazing (rad) set the image-path excess; reflection fades out between 50 and 100 m up.
 Spectrum ground(double height,double grazing,double soundSpeed);
+// Publish at the fixed pad position; zero flows are silent. Scales are jet/splash sizes, not the trench width.
+struct PadNoise {double ventFlow=0,ventSpeed=300,ventDiameter=.05,waterFlow=0,waterSpeed=20,waterScale=.02;}; // kg/s, m/s, m.
+Spectrum padLevels(const PadNoise& pad,double shift=1); // Estimated acoustic efficiencies; band power (dB re 1 pW).
 // A rocket's sound at a listener, both in the central body's rotating frame (m, m/s), where the air rests but for its wind.
 // history: emissions by time (s; positions linear between samples); plume: unit vector along the exhaust. The emission time
 // solves now - t = |listener - source(t)| / c̄ (its latest root) by bisection, c̄ the path's mean sound speed (8 points on the straight path,
 // which also sum the absorption); Doppler (c - v_l·n)/(c - v_s·n) with velocities relative to the air at each end, the
 // spectrum heard at f taken at f/D. The pressure at the listener for the intensity there by its air's impedance ρc (the
 // levels as at sea level's 416.9 rayl: thinner up high). Silent if the path runs underground, the listener's air is below
-// 10 Pa, the source was neither burning nor moving through the air at the emission time, or nothing emitted yet has
+// 10 Pa, the source was neither burning, venting, deluging nor moving through the air at emission, or nothing emitted yet has
 // arrived. air: the air at a point (humidity unknown: 50% RH). Each emission also carries the body's length and diameter
 // (m), its drag power (W: the flow noise) and its Mach number, sound speed (m/s) and pressure (Pa) where it is (the booms).
-struct Emission {double time=0;V3 position,velocity,plume;RocketNoise noise;bool on=false;double length=0,diameter=0,dragPower=0,mach=0,sound=0,pressure=0,blast=0;}; // blast: TNT kg it exploded with, then.
+struct Emission {double time=0;V3 position,velocity,plume;RocketNoise noise;bool on=false;double length=0,diameter=0,dragPower=0,mach=0,sound=0,pressure=0,blast=0;PadNoise pad{};}; // blast: TNT kg it exploded with, then.
 struct Heard {Spectrum levels{};double delay=0,doppler=1,distance=0,emitted=0,rocket=-1e9;bool audible=false;}; // rocket: the engines' overall level (dB).
 Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listenerVelocity,const Planet& planet,const std::function<Air(const Geodetic&)>& air);
 // The sonic booms that have reached the listener by `now`, oldest first: where the arrival time t + |listener - source(t)| / c̄

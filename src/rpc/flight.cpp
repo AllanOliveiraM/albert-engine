@@ -2,6 +2,7 @@
 #include "flight_wire.hpp"
 #include "wire.hpp"
 #include "core/simulation.hpp"
+#include "core/vents.hpp"
 #include "physics/vehicles.hpp"
 #include "physics/sensors.hpp"
 #include "physics/weather.hpp"
@@ -226,7 +227,7 @@ template<class T> struct Board {
     void put(const std::string& id,std::shared_ptr<const T> s){std::lock_guard l(lock);if(s)by[id]=std::move(s);else by.erase(id);}
     std::vector<T> all(){std::vector<T> out;std::lock_guard l(lock);for(const auto& [id,s]:by)out.push_back(*s);return out;}
 };
-struct Boards {Board<FlightServices::Sound> sounds;Board<FlightServices::Gauge> gauges;void drop(const std::string& id){sounds.put(id,nullptr);gauges.put(id,nullptr);}};
+struct Boards {Board<FlightServices::Sound> sounds;Board<FlightServices::Gauge> gauges;void drop(const std::string& id){sounds.put(id,nullptr);sounds.put(id+"/stack-vents",nullptr);sounds.put(id+"/farm",nullptr);gauges.put(id,nullptr);}};
 struct Slot {
     using Sound=FlightServices::Sound;using Gauge=FlightServices::Gauge;
     struct Command {std::uint32_t kind;double a=0,b=0,c=0;};
@@ -423,7 +424,7 @@ struct Slot {
         auto cv=[&](const api::Vector3& x){extent=std::max({extent,std::abs(x.x()),std::abs(x.y()),std::abs(x.z())});return core::Vector{x.x(),x.y(),x.z()};};
         for(const auto& x:r.scenery()){core::SceneryPart q;q.shape=static_cast<core::SceneryPart::Shape>(x.shape());q.centre=cv(x.centre_enu_meters());
             q.size={x.size_meters().x(),x.size_meters().y(),x.size_meters().z()};q.heading=x.heading_degrees()*deg;q.tilt=x.tilt_degrees()*deg;q.inner=x.inner_diameter_meters();
-            q.bar=x.bar_meters();q.color=x.color();q.structure=x.structure();look->parts.push_back(q);}
+            q.bar=x.bar_meters();q.color=x.color();q.structure=x.structure();q.name=x.name().substr(0,64);look->parts.push_back(q);}
         for(const auto& x:r.structures()){look->bars.push_back({cv(x.start_enu_meters()),cv(x.end_enu_meters()),x.has_drawn()&&!x.drawn()?0.:x.radius_meters()}); // 0: not drawn.
             if(x.has_hinge_enu_meters()){auto& b=look->bars.back();const auto& k=x.hinge_axis();b.hinged=true;b.pivot=cv(x.hinge_enu_meters());b.axis=x.has_hinge_axis()?core::Vector{k.x(),k.y(),k.z()}:core::Vector{0,0,1};}}
         const ph::Tt t=flight->state().time;const ph::M3 back=ph::transpose(flight->environment().rotation.at(t).fixed);const ph::V3 at=back*p;const ph::Q q=ph::quaternion(back*enu),a=ph::quaternion(enu);
@@ -443,6 +444,7 @@ struct Slot {
         if(!force&&bridge.waiting()>core::Bridge::capacity/2)return; // The frame loop behind (a window out of view): room for what must apply.
         published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
         boards.sounds.put(sceneId,center==ph::Center::earth?std::make_shared<const Sound>(heardSound()):nullptr); // Read by the frame loop without the flight's lock.
+        publishPadSounds();
         boards.gauges.put(sceneId,std::make_shared<const Gauge>(gauge()));
         // The stack got shorter, or the same instant again (the keeper; appending would be refused as
         // out of order): replace the cylinder in place (the camera stays on it).
@@ -458,7 +460,7 @@ struct Slot {
         if(followed==sceneId||(followed!="flight"&&followed.rfind("flight.",0)!=0)){
             // With the rate this flight runs at (simulated seconds a wall second, smoothed), so the scene runs smoothly between them.
             const double wall=std::chrono::duration<double>(now.time_since_epoch()).count();
-            if(wallUtc>0&&wall>wallAt&&s.utcSeconds>=wallUtc){const double r=std::min((s.utcSeconds-wallUtc)/(wall-wallAt),time::Simulation::maximumRate);clockRate=clockRate>0?clockRate+.3*(r-clockRate):r;}
+            if(wallUtc>0&&wall>wallAt&&s.utcSeconds>=wallUtc){const double r=std::min((s.utcSeconds-wallUtc)/(wall-wallAt),time::Simulation::maximumRate);clockRate=clockRate>0?clockRate+.08*(r-clockRate):r;} // ~0.4 s smoothing: a step's batches made it jitter 1-2x.
             wallAt=wall;wallUtc=s.utcSeconds;
             (void)bridge.submit(core::SetTime{std::clamp(s.utcSeconds,time::Simulation::earliestUtc,time::Simulation::latestUtc),clockRate,false,true});
             (void)bridge.submit(telemetry());}
@@ -478,20 +480,54 @@ struct Slot {
         if(flight->breakup()!=ph::Flight::Breakup::none)e.blast=.03*flight->state().propellant+1e3; // Broken up: what was left going off, ~3% of it as TNT (an estimate).
         return s;
     }
+    void publishPadSounds(){
+        if(!padAt){boards.sounds.put(siteId,nullptr);boards.sounds.put(siteId+"/stack-vents",nullptr);boards.sounds.put(siteId+"/farm",nullptr);return;}
+        const Sound pad=padSound();boards.sounds.put(siteId,std::make_shared<const Sound>(pad));
+        const auto& st=flight->state();const bool fuelled=st.clamped&&st.propellant>0&&st.stage==0&&flight->breakup()==ph::Flight::Breakup::none;
+        Sound stack=pad;stack.id+="/stack-vents";stack.emission.pad={};
+        const ph::V3 axis=flight->environment().rotation.at(st.time).fixed*(ph::matrix(st.attitude)*ph::V3{1,0,0});
+        const double height=padVents.empty()?0:std::max_element(padVents.begin(),padVents.end(),[](const auto& a,const auto& b){return a.height<b.height;})->height;
+        stack.emission.position=flight->sample().fixedPosition+axis*(flight->centreOfMass()-flight->vehicle().stages[st.stage].length/2+height);
+        const bool closed=zero&&core::stackVentsClosed(countState=="HOLD"?countTime:pad.utc-*zero,countState=="SCRUB"||stopped.has_value());
+        if(fuelled)for(std::size_t i=0;i<padVents.size();++i)stack.emission.pad.ventFlow+=30*padVents[i].gain*core::ventFlow(i,pad.utc,closed);
+        boards.sounds.put(siteId+"/stack-vents",std::make_shared<const Sound>(std::move(stack))); // Keep silent samples so previously emitted sound can finish travelling.
+        if(farmAt){Sound farm=pad;farm.id+="/farm";farm.emission.position=*farmAt;farm.emission.pad={};
+            for(auto id:farmVents)farm.emission.pad.ventFlow+=8*core::ventFlow(id,pad.utc);
+            boards.sounds.put(siteId+"/farm",std::make_shared<const Sound>(std::move(farm)));}
+        else boards.sounds.put(siteId+"/farm",nullptr);
+    }
+    // The deluge pours ~1.6e6 kg, 17%
+    // before ignition, 75% during, 8% after (FAA 2025): from T-17 s (its flight software's T-0) ~16 t/s, ~41 t/s from ignition
+    // to 15 s after the clamps let go, then off over 10 s.
+    Sound padSound(){
+        Sound s;s.id=siteId;s.utc=ph::utcFromTt(flight->state().time);s.planet=flight->environment().planet;s.air=flight->environment().air;auto& e=s.emission;
+        e.time=s.utc;e.position=*padAt;e.velocity={};e.plume={0,0,1};const auto& st=flight->state();
+        if(!st.clamped&&!released)released=s.utc;const double after=released?s.utc-*released:0;
+        if(st.clamped&&st.propellant>0&&st.stage==0){e.pad.ventFlow=2;e.pad.ventSpeed=100;} // Plumbing stays quiet beside the actual outlets.
+        if(st.clamped&&st.propellant>0&&!stopped&&zero&&s.utc>=*zero-9&&s.utc<*zero-7&&std::any_of(flight->environment().structures.begin(),flight->environment().structures.end(),[](const auto& x){return x.name=="ship quick disconnect";})){
+            e.pad.ventFlow+=300;e.pad.ventSpeed=350;} // Depressurise for two count seconds before the SQD swings (T-9 to T-7); preserve boil-off.
+        const bool lit=st.burning||released;e.pad.waterFlow=lit?41e3*std::clamp(1-(after-15)/10,0.,1.):zero&&s.utc>=*zero-17?16e3:0;
+        return s;
+    }
     // The flight for the broadcast's panels and timeline (see FlightServices::gauges).
     Gauge gauge()const{
         const ph::Sample x=flight->sample();const auto& st=flight->vehicle().stages[static_cast<std::size_t>(flight->state().stage)];Gauge g;
-        g.id=sceneId;g.label=st.name;g.start=ph::utcFromTt(start);g.zero=zero.value_or(g.start);g.stopped=stopped||flight->breakup()!=ph::Flight::Breakup::none;g.stop=stopped?*stopped:ph::utcFromTt(flight->breakupTime());g.utc=ph::utcFromTt(flight->state().time);g.speed=ph::norm(x.nedVelocity);g.height=x.geodetic.height;
+        g.id=sceneId;g.label=st.name;g.start=ph::utcFromTt(start);g.utc=ph::utcFromTt(flight->state().time);g.zero=countState=="HOLD"?g.utc-countTime:zero.value_or(g.start);
+        g.stopped=stopped||countState=="HOLD"||flight->breakup()!=ph::Flight::Breakup::none;g.stop=stopped?*stopped:countState=="HOLD"?g.utc:ph::utcFromTt(flight->breakupTime());g.speed=ph::norm(x.nedVelocity);g.height=x.geodetic.height; // Cap interpolation at the held T.
         g.propellant=st.propellant>0?flight->state().propellant/st.propellant:0;
         for(std::size_t i=0;i<st.engines.size();++i){const auto& e=flight->engines()[i];const auto& n=st.engines[i];
             g.engines.push_back({static_cast<float>(n.position.y),static_cast<float>(n.position.z),static_cast<float>(std::sqrt(std::max(n.exitArea,.01)/3.14159265358979323846)),
                 static_cast<float>(e.throttle),e.on&&flight->state().burning,e.failed,e.silent,e.stuck});}
         for(const auto& f:st.surfaces)g.surfaces.push_back(f.name);
-        g.milestones=milestones;g.decision=decision;g.why=why;g.decided=decided;return g;
+        g.milestones=milestones;if(countState=="HOLD")for(auto& m:g.milestones)if(m.planned)m.utc+=g.zero-zero.value_or(g.start);
+        g.countState=countState;g.countTime=countTime;g.decision=decision;g.why=why;g.decided=decided;return g;
     }
     std::vector<Gauge::Milestone> milestones; // The mission's events this flight was given (StepRequest.milestones).
+    std::string countState;double countTime=0; // Latch the count so physics can keep stepping through a hold.
     std::string decision,why;double decided=-1; // The latest decision it was given (StepRequest.decision) and when (UTC).
     std::optional<double> zero,stopped; // Its T-0 as the flight software last gave it (StepRequest.clock_zero); the UTC its clock stopped at (stop_clock).
+    std::optional<ph::V3> padAt;std::optional<double> released; // Its pad's mount (body-fixed, m) when it starts on one; when the clamps let go (UTC).
+    std::optional<ph::V3> farmAt;std::vector<std::uint64_t> farmVents;std::vector<core::StackVent> padVents;
     void note(const google::protobuf::RepeatedPtrField<api::Milestone>& given,double now){ // A done one replaces the planned one of its name.
         for(const auto& m:given){const std::string n=m.name().substr(0,40);if(n.empty())continue;const double at=m.has_utc_unix_seconds()&&std::isfinite(m.utc_unix_seconds())?m.utc_unix_seconds():now;
             auto it=std::find_if(milestones.begin(),milestones.end(),[&](const Gauge::Milestone& x){return x.name==n;});
@@ -683,7 +719,7 @@ struct FlightServices::Impl {
         std::shared_ptr<Slot> x;try{x=make(r.flight_id());}catch(const std::length_error& e){return{grpc::StatusCode::RESOURCE_EXHAUSTED,e.what()};}
         auto st=x->create(r,p,std::move(air),std::move(atmosphere),std::move(grib),std::move(days),std::move(gravity),cancelled,out);
         if(!st.ok()){drop(r.flight_id(),x);return st;}
-        if(find(r.flight_id())!=x){x->stopPacing();{std::lock_guard g(x->mutex);x->flight.reset();}boards.drop(x->sceneId);(void)bridge.submit(core::Remove{x->sceneId});(void)bridge.submit(core::Remove{x->siteId});
+        if(find(r.flight_id())!=x){x->stopPacing();{std::lock_guard g(x->mutex);x->flight.reset();}boards.drop(x->sceneId);boards.drop(x->siteId);(void)bridge.submit(core::Remove{x->sceneId});(void)bridge.submit(core::Remove{x->siteId});
             return{grpc::StatusCode::ABORTED,"The flight was ended while being created"};}
         if(made)*made=x;return st;
     }
@@ -699,7 +735,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     env.wind=on(m.has_wind(),m.wind());env.solarPressure=on(m.has_solar_radiation_pressure(),m.solar_radiation_pressure());
     env.turbulence=m.turbulence_meters_per_second();env.turbulenceSeed=m.turbulence_seed();env.water=r.water();
     if(r.structures_size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 structures"};
-    if(r.scenery_size()>512)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 512 scenery parts"};
+    if(r.scenery_size()>2048)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 2048 scenery parts"};
     for(const auto& x:r.scenery()){const auto& c=x.centre_enu_meters();const auto& z=x.size_meters();
         const bool ok=api::SceneryPart::Shape_IsValid(x.shape())&&std::isfinite(c.x())&&std::isfinite(c.y())&&std::isfinite(c.z())&&std::max({std::abs(c.x()),std::abs(c.y()),std::abs(c.z())})<=2e4&&
             z.x()>0&&z.y()>0&&z.z()>0&&std::max({z.x(),z.y(),z.z()})<=5e3&&std::isfinite(x.heading_degrees())&&std::isfinite(x.tilt_degrees())&&x.color()<=0xffffff&&
@@ -717,7 +753,8 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     if(p.body==ph::Center::earth){env.air=air;env.planet.degree=static_cast<int>(p.degree);env.rotation=ph::Rotation::iau(ph::secondsSinceJ2000(t)-(p.utc-946728000.));}
     std::optional<ph::Flight> made;
     try{
-        if(!r.has_start())made.emplace(p.vehicle,env,ph::Flight::pad(env,p.vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()},r.heading_degrees()*deg,p.pitch*deg));
+        if(!r.has_start()){const double deck=r.has_deck_height_meters()?r.deck_height_meters():0;if(!(deck>=0&&deck<=100))throw std::invalid_argument("Deck height must be 0-100 m");
+            made.emplace(p.vehicle,env,ph::Flight::pad(env,p.vehicle,t,{site.latitude_degrees()*deg,site.longitude_degrees()*deg,site.height_meters()+deck},r.heading_degrees()*deg,p.pitch*deg));}
         else{ // In flight: from the local horizon or the inertial frame, at the given stage and propellant.
             const auto& w=r.start();if(w.stage()>=p.vehicle.stages.size())throw std::invalid_argument("No such stage to start in");
             const double full=p.vehicle.stages[w.stage()].propellant,left=w.has_propellant_kilograms()?w.propellant_kilograms():full;
@@ -739,7 +776,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     made->steps(stepNs,static_cast<ph::Tt>(std::llround(p.coast*1e9)));
     if(cancelled())return{grpc::StatusCode::CANCELLED,"Flight creation cancelled; current flight kept"};
     stopPacing();std::lock_guard lock(mutex);
-    flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;milestones.clear();zero.reset();stopped.reset();this->atmosphere=atmosphere;center=p.body;degree=p.degree;
+    flight=std::move(made);step=stepNs;start=t;tick=0;events.clear();eventBits=0;milestones.clear();countState.clear();countTime=0;zero.reset();stopped.reset();this->atmosphere=atmosphere;center=p.body;degree=p.degree;
     physics.set_third_bodies(env.sunMoon);physics.set_relativity(env.relativity);physics.set_atmosphere(env.atmosphere);physics.set_wind(env.wind);physics.set_solar_radiation_pressure(env.solarPressure);
     physics.set_turbulence_meters_per_second(env.turbulence);physics.set_turbulence_seed(env.turbulenceSeed);
     { // The IMU starts with one sample at the pad.
@@ -781,7 +818,14 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}
     shown=0;(void)wait(bridge.submit(core::Remove{sceneId}));(void)wait(bridge.submit(core::Remove{siteId}));
     if(auto s=failed(wait(bridge.submit(core::Create{object()})));!s.ok())return s;
-    siteUtc=-1;siteAngles.reset();if(auto o=siteObject(r)){const double u=o->samples.back().utcSeconds;if(auto s=failed(wait(bridge.submit(core::Create{std::move(*o)})));!s.ok())return s;siteUtc=u;}
+    siteUtc=-1;siteAngles.reset();padAt.reset();released.reset();farmAt.reset();farmVents.clear();padVents.clear();boards.drop(siteId);
+    if(auto o=siteObject(r)){const double u=o->samples.back().utcSeconds;if(auto s=failed(wait(bridge.submit(core::Create{std::move(*o)})));!s.ok())return s;siteUtc=u;
+        if(!r.has_start())padAt=ph::fixedPosition(flight->environment().planet,{r.site().latitude_degrees()*deg,r.site().longitude_degrees()*deg,r.site().height_meters()});}
+    if(padAt){padVents=core::stackVents(*look());ph::V3 sum{};
+        for(int i=0;i<r.scenery_size();++i)if(r.scenery(i).name()=="tank vent"){const auto& p=r.scenery(i).centre_enu_meters();sum+=ph::V3{p.x(),p.y(),p.z()};farmVents.push_back(core::tankVentId(static_cast<std::size_t>(i)));}
+        if(!farmVents.empty()){const double la=r.site().latitude_degrees()*deg,lo=r.site().longitude_degrees()*deg;
+            const ph::M3 enu=ph::transpose(ph::nedFromFixed(la,lo))*ph::M3{{{0,1,0},{1,0,0},{0,0,-1}}};farmAt=*padAt+enu*(sum*(1./static_cast<double>(farmVents.size())));}}
+    publishPadSounds();
     publishedOrigin=origin(flight->state().time).position;publishedUtc=ph::utcFromTt(flight->state().time); // The keeper's reference.
     if(auto s=failed(wait(bridge.submit(core::SetTime{ph::utcFromTt(t),0.,false})));!s.ok())return s;
     if(r.focus_camera())(void)wait(bridge.submit(core::Focus{sceneId,true}));
@@ -958,9 +1002,20 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     for(auto& c:commands)if((c.kind&0xffff)==wire::spawn){*slot->log.add_spawns()=r->commands(static_cast<int>(c.b)).spawn();c.a=slot->log.spawns_size()-1;c.b=0;}
     const double now=slot->flight?ph::utcFromTt(slot->flight->state().time):0.;
     if(auto s=slot->run(commands,r->ticks(),[&]{return context->IsCancelled();});!s.ok()){while(slot->log.spawns_size()>before)slot->log.mutable_spawns()->RemoveLast();return s;}
-    slot->note(r->milestones(),now);if(r->has_decision()&&!r->decision().what().empty()){slot->decision=r->decision().what().substr(0,120);slot->why=r->decision().why().substr(0,120);slot->decided=now;}
-    if(r->has_clock_zero_utc_unix_seconds()&&std::isfinite(r->clock_zero_utc_unix_seconds()))slot->zero=r->clock_zero_utc_unix_seconds();
-    if(r->stop_clock()&&!slot->stopped)slot->stopped=now;slot->fill(out);}
+    if(r->has_decision()&&!r->decision().what().empty()){slot->decision=r->decision().what().substr(0,120);slot->why=r->decision().why().substr(0,120);slot->decided=now;}
+    if(r->has_clock_zero_utc_unix_seconds()&&std::isfinite(r->clock_zero_utc_unix_seconds())){
+        if(slot->countState=="HOLD")for(auto& m:slot->milestones)m.utc+=r->clock_zero_utc_unix_seconds()-slot->zero.value_or(ph::utcFromTt(slot->start)); // Every event keeps its T through a hold (the past ones slid left: the timeline seemed to run on).
+        slot->zero=r->clock_zero_utc_unix_seconds();}
+    if(r->has_count_state()){
+        if(slot->countState!=r->count_state()||(r->count_state()=="HOLD"&&r->has_clock_zero_utc_unix_seconds()&&std::isfinite(r->clock_zero_utc_unix_seconds())))slot->countTime=now-slot->zero.value_or(ph::utcFromTt(slot->start)); // A recycle can move an existing HOLD.
+        slot->countState=r->count_state();
+        if(slot->countState=="HOLD")for(const auto& m:r->milestones())if(m.planned())for(auto& old:slot->milestones)if(old.name==m.name().substr(0,40))old.planned=true; // Re-arm only replanned events, in place.
+    }
+    slot->note(r->milestones(),now);
+    if(r->stop_clock()&&!slot->stopped)slot->stopped=now;
+    slot->publishPadSounds(); // Valve state must include this request's count and scrub, after its ticks commit.
+    slot->boards.gauges.put(slot->sceneId,std::make_shared<const Gauge>(slot->gauge())); // Publish this request's clock after its ticks commit.
+    slot->fill(out);}
     impl_->adopt(*slot);return grpc::Status::OK;
 }
 grpc::Status FlightServices::GetFlight(grpc::ServerContext*,const api::FlightRequest* q,api::FlightSample* out){
@@ -977,7 +1032,7 @@ grpc::Status FlightServices::EndFlight(grpc::ServerContext*,const api::FlightReq
     if(!slot)return{grpc::StatusCode::FAILED_PRECONDITION,"No flight"};
     slot->stopPacing();core::Reply reply;
     {std::lock_guard lock(slot->mutex);
-        if(slot->flight){slot->flight.reset();impl_->boards.drop(slot->sceneId);
+        if(slot->flight){slot->flight.reset();impl_->boards.drop(slot->sceneId);impl_->boards.drop(slot->siteId);
             // Off the scene even while the frame loop is behind (the flight itself is gone already).
             for(int i=0;i<200;++i){reply=wait(impl_->bridge.submit(core::Remove{slot->sceneId}));if(reply.code!=core::Code::Exhausted)break;std::this_thread::sleep_for(std::chrono::milliseconds(25));}
             (void)impl_->bridge.submit(core::Remove{slot->siteId});out->set_revision(reply.revision);}

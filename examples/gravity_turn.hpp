@@ -48,9 +48,10 @@ public:
     }
     double kickRate=0; // The pitch kick's rate (rad/s; 0: at once).
     std::vector<std::pair<double,double>> pitch; // After the kick: the flight path angle (rad) by speed over the ground (m/s), as flown; empty: a gravity turn (no angle of attack).
+    double slewRate=0; // The upper stage's aim turned toward the guidance's at most this fast (rad/s; 0: at once).
     bool insertion=false;double exhaust=3600; // The upper stage onto its target height climbing nought as it reaches circular speed there (explicit guidance), not by the height alone; its engines' exhaust speed (m/s).
     Phase phase()const{return phase_;}
-    void upper(const Reading& r){phase_=Phase::upper;h0_=r.height;rise0_=-r.nedVelocity.z;} // Steering from here (an upper stage lit by the client).
+    void upper(const Reading& r){phase_=Phase::upper;h0_=r.height;rise0_=-r.nedVelocity.z;aimAt_=-1;} // Steering from here (an upper stage lit by the client).
     static double perigee(Vec r,Vec v,Body b=earth){ // Above the body's radius (m).
         const double rn=norm(r),energy=dot(v,v)/2-b.mu/rn,h=norm(cross(r,v));
         const double a=-b.mu/(2*energy),e=std::sqrt(std::max(0.,1+2*energy*h*h/(b.mu*b.mu)));return a*(1-e)-b.radius;
@@ -74,7 +75,7 @@ public:
                 const double g=std::clamp(want,gamma-most,gamma+most),psi=std::hypot(along.x,along.y)>1e-6?std::atan2(along.y,along.x):heading_;target={std::cos(g)*std::cos(psi),std::cos(g)*std::sin(psi),-std::sin(g)};}
             if(!r.burning&&r.propellant<=0){phase_=Phase::coast;mark_=r.elapsed;}break;
         case Phase::coast:target=along;if(r.elapsed-mark_>2){c.separate=true;phase_=Phase::separated;mark_=r.elapsed;}break;
-        case Phase::separated:target=along;if(r.elapsed-mark_>1){c.ignite=true;phase_=Phase::upper;h0_=r.height;rise0_=-r.nedVelocity.z;}break;
+        case Phase::separated:target=along;if(r.elapsed-mark_>1){c.ignite=true;phase_=Phase::upper;h0_=r.height;rise0_=-r.nedVelocity.z;aimAt_=-1;}break;
         case Phase::upper:{
             const double rn=norm(r.position),rise=-r.nedVelocity.z,v2=dot(r.velocity,r.velocity);
             // Wanted climb rate: toward the target altitude over the climb time constant, else
@@ -106,6 +107,10 @@ public:
         // PD steering of the body x axis toward the target, by gimbal and attitude torque.
         const double w=r.qw,x=r.qx,y=r.qy,z=r.qz;
         const Vec col0{1-2*(y*y+z*z),2*(x*y+w*z),2*(x*z-w*y)},col1{2*(x*y-w*z),1-2*(x*x+z*z),2*(y*z+w*x)},col2{2*(x*z+w*y),2*(y*z-w*x),1-2*(x*x+y*y)};
+        if(slewRate>0&&phase_==Phase::upper){ // From the nose as it was at staging, toward the aim no faster than slewRate (taken at once, the ship pitched up sharply).
+            if(aimAt_<0)aim_=col0;const double turn=std::acos(std::clamp(dot(aim_,target),-1.,1.)),most=slewRate*std::max(0.,aimAt_<0?0.:r.elapsed-aimAt_);aimAt_=r.elapsed;
+            if(turn>most){const Vec n=target+aim_*-dot(aim_,target);const double l=norm(n);if(l>1e-9)aim_=aim_*std::cos(most)+n*(std::sin(most)/l);}else aim_=target;
+            target=aim_;}
         const Vec e=cross(col0,target),eb{dot(col0,e),dot(col1,e),dot(col2,e)};
         constexpr double kp=2,kd=2.3,limit=.0873;
         c.gimbalPitch=std::clamp(kp*eb.y-kd*r.rate.y,-limit,limit);c.gimbalYaw=std::clamp(kp*eb.z-kd*r.rate.z,-limit,limit);
@@ -113,6 +118,7 @@ public:
         return c;
     }
 private:
+    Vec aim_{};double aimAt_=-1;
     Phase phase_=Phase::pad;double held_=-9,heading_,kick_,target_,perigee_,apoapsis_,climb_,maxClimb_,mark_=0,h0_=0,rise0_=0,pad_=0;Body body_;bool steered_,circularize_;
 };
 }

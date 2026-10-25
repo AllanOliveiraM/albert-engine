@@ -1,30 +1,107 @@
 <p align="center">
-  <img src="assets/branding/albert.png" width="80" alt="Ícone do Albert Engine">
+  <img src="assets/branding/albert.png" width="88" alt="Ícone do Albert Engine">
 </p>
 
 <h1 align="center">Albert Engine</h1>
 
-[![Build and tests](https://github.com/AllanOliveiraM/albert-engine/actions/workflows/build.yml/badge.svg)](https://github.com/AllanOliveiraM/albert-engine/actions/workflows/build.yml)
+<p align="center"><b>O universo real em 3D, em tempo real — com física de verdade para voar nele.</b></p>
 
-<p align="center">Exploração astronômica em 3D, com dados reais e controle programável.</p>
+<p align="center">
+  <a href="https://github.com/AllanOliveiraM/albert-engine/actions/workflows/build.yml"><img src="https://github.com/AllanOliveiraM/albert-engine/actions/workflows/build.yml/badge.svg" alt="Build and tests"></a>
+  <a href="https://github.com/AllanOliveiraM/albert-engine/releases"><img src="https://img.shields.io/github/v/release/AllanOliveiraM/albert-engine?include_prereleases&label=download" alt="Download"></a>
+</p>
 
+<p align="center"><sub>Feito por Allan Oliveira com IA: <b>Claude Opus 5.5</b> no Claude Code e <b>GPT-6.1 Sol</b> no Codex.</sub></p>
+
+<p align="center">
+  <a href="docs/images/starship-separacao.webp"><img src="docs/images/starship-separacao.webp" width="100%" alt="Starship e Super Heavy logo após a separação a quente, a 61 km"></a>
+</p>
+<p align="center">
+  <a href="docs/images/starship-separacao-quente.webp"><img src="docs/images/starship-separacao-quente.webp" width="32%" alt="A chama da nave contra o topo do booster na separação a quente"></a>
+  <a href="docs/images/booster-captura.webp"><img src="docs/images/booster-captura.webp" width="32%" alt="Super Heavy capturado nos braços da torre em Starbase"></a>
+  <a href="docs/images/starship-pad.webp"><img src="docs/images/starship-pad.webp" width="32%" alt="Starship no Pad 1, com a câmera dos motores no teste de vetoração"></a>
+</p>
 <p align="center">
   <a href="docs/images/earth.webp"><img src="docs/images/earth.webp" width="49%" alt="Terra renderizada no Albert Engine"></a>
   <a href="docs/images/moon.webp"><img src="docs/images/moon.webp" width="49%" alt="Lua renderizada no Albert Engine"></a>
 </p>
+<p align="center"><em>Capturas reais do Albert.</em></p>
 
-<p align="center"><em>Capturas reais do Albert. Clique nas imagens para ampliar.</em></p>
+## O que ele faz
 
-## O que é o Albert?
+- **O céu de verdade, agora.** Sol, planetas, 25 luas, cometas e asteroides, de 1900 a 2100, com o horário conferido por NTP. Sol, planetas e Lua usam efemérides NASA/JPL Horizons; os demais corpos usam órbitas aproximadas embarcadas.
+- **A Terra viva.** Relevo Copernicus de 30 m, atmosfera, nuvens e tempo ao vivo, oceano com ondas.
+- **Um laboratório de física de voo.** Foguetes do pad à órbita: aerodinâmica, aquecimento na reentrada, massa variável, sensores simulados (IMU, GNSS, medidores), falhas e FDIR.
+- **Software de voo de fora.** O voo é comandado por um programa externo pela API gRPC, que só enxerga os sensores, como um computador de voo de verdade.
+- **Starship completo.** Contagem, decolagem com 33 Raptors, separação a quente, booster de volta à torre e, um dia depois, a nave voltando da órbita, ambos capturados nos braços.
+- **Apollo 11, Lua e Marte.** O Saturn V do AS-506 pelo seu programa de voo, e subidas da Lua e de Jezero.
 
-O Albert Engine é um simulador astronômico escrito em C++20. Ele combina
-posições calculadas a partir de dados astronômicos, imagens de observação e
-uma câmera livre para explorar os objetos em 3D.
+## Baixar e rodar
 
-O projeto está se tornando uma plataforma para **visualizar e programar cenas
-espaciais**. Você pode navegar pela interface ou conectar outro programa à API
-gRPC para criar objetos, transmitir seus movimentos e acompanhar um alvo com a
-câmera. A renderização, a navegação e as animações ficam dentro do Albert.
+Baixe a versão do seu sistema na página de [**Releases**](https://github.com/AllanOliveiraM/albert-engine/releases):
+
+| Sistema | O que baixar | Como abrir |
+| --- | --- | --- |
+| **Windows 10/11 x64** | todos os volumes `AlbertEngine-<versão>-windows-x64.zip.001`, `.zip.002`… | abra o `.zip.001` com o [7-Zip](https://www.7-zip.org/), extraia e execute **AlbertEngine.exe** |
+| **Linux x64** (glibc 2.36+, como Ubuntu 24.04+, Debian 12+ e Fedora recente) | todos os volumes `AlbertEngine-<versão>-linux-x64.zip.001`, `.zip.002`… | extraia o `.zip.001` com o 7-Zip (`7z x`) e execute **./AlbertEngine** |
+
+Substitua `<versão>` pela tag da release, como `v0.2.1`, e baixe todos os volumes do mesmo pacote na mesma pasta.
+A versão **leve** acrescenta `-light` ao nome, antes de `.zip`: baixa as imagens essenciais ao abrir e completa o restante em segundo plano. A **completa** já inclui a biblioteca visual. Se houver um único `.zip`, extraia normalmente. Os arquivos `.sha256` permitem conferir os downloads.
+
+Não precisa instalar o Albert; mantenha a pasta inteira junta. Requer GPU com **Vulkan** (Linux) ou **Direct3D 12/Vulkan** (Windows); adaptadores por software (lavapipe ou WARP) também servem, mais lentos. No Linux, precisa de X11 ou XWayland. A internet é usada para os dados astronômicos e, na versão leve, para baixar as imagens.
+
+## Ver uma missão Starship
+
+O cliente de exemplo precisa ser compilado: `make build` no Linux ou `.\make.cmd build` no Windows, após a preparação descrita em [Compilar](#compilar). Ele não acompanha os pacotes de release.
+
+Na raiz do projeto, abra o Albert com o servidor de voo e rode o computador de voo de exemplo em outro terminal:
+
+```sh
+./build/linux/bin/AlbertEngine --rpc
+./build/linux/src/rpc/albert_flight_client --starship   # a missão inteira, com os trechos orbitais acelerados
+./build/linux/src/rpc/albert_flight_client --starship --utc=1792861200   # a mesma missão, em 24/10/2026 às 17:00 UTC (de dia em Starbase)
+```
+
+No Windows (PowerShell):
+
+```powershell
+.\build\windows\bin\Release\AlbertEngine.exe --rpc
+.\build\windows\src\rpc\Release\albert_flight_client.exe --starship
+```
+
+Os dois comandos Linux do cliente são alternativas. `--utc=` recebe segundos Unix; `--warp=1000` é o padrão para a espera em órbita. Use `--warp=1` para acompanhar toda a missão em tempo real.
+
+Outros voos: `--apollo11`, `--body=moon`, `--body=mars`, `--ship-return` (só a volta da nave) e `--fail=booster@landing:1` (falha do motor 1 do booster na queima de pouso).
+Durante o voo, o painel **Interferência** permite soprar rajadas, empurrar o veículo e falhar motores e sensores ao vivo.
+
+## Compilar
+
+```sh
+git clone https://github.com/AllanOliveiraM/albert-engine.git
+cd albert-engine
+```
+
+Linux (Ubuntu 24.04+, Debian 12+ ou Fedora):
+
+```sh
+bash scripts/setup-linux.sh
+make run
+```
+
+Windows 10/11 (PowerShell, com Git para Windows e Git LFS instalados):
+
+```powershell
+.\make.cmd setup
+.\make.cmd run
+```
+
+A preparação instala as ferramentas e baixa a biblioteca visual (**5,45 GB via Git LFS**); pode pedir permissão de administrador. A primeira compilação também baixa e compila as dependências e pode levar vários minutos.
+Detalhes, testes e solução de problemas em [DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+<details>
+<summary><b>Os corpos celestes e seus dados</b></summary>
+
+O Albert Engine é um simulador astronômico escrito em C++20.
 
 Hoje, a cena inclui **43 corpos**: o Sol, oito planetas, 25 luas, cinco planetas
 anões, Vesta, Pallas, Halley e 67P. A seleção é local, organizada por categorias,
@@ -61,32 +138,12 @@ a interface não busca objetos na internet.
 Novos planetas, luas, anéis, camadas de mapas e provedores de dados estão no
 [roadmap](ROADMAP.md).
 
-## O que já funciona
+</details>
 
-| Recurso | O que você encontra no programa |
-| --- | --- |
-| Posições astronômicas | Consultas ao NASA/JPL Horizons, atualização automática e movimento interpolado entre amostras |
-| Data simulada | Qualquer instante de 1900 a 2100, pausa, retrocesso e velocidades até uma semana por segundo |
-| Escala física | Dimensões e distâncias reais, Terra WGS84 e orientação dos corpos |
-| Visualização | Superfícies detalhadas, relevo regional, iluminação solar, atmosfera terrestre e luzes das cidades |
-| Zoom | Detalhes carregados do disco conforme a região visível e a aproximação |
-| Órbitas | Trajetórias dos corpos embarcados, com cores e fades para distinguir passado e futuro |
-| Céu | Estrelas baseadas em catálogo astronômico, com posições e brilhos relativos |
-| Nuvens | Observações de satélite opcionais, atualizadas automaticamente quando ativadas |
-| Navegação | Foco por objeto, órbita manual, zoom e transições animadas |
-| Apresentação | Órbita lenta ao chegar a um objeto; arraste ou use o zoom para parar |
-| Pequenos corpos | Formas rochosas individuais; representações artísticas identificadas, sem novas imagens baixadas |
-| Cometas | Coma, cauda de poeira e cauda de íons da 67P e do Halley a partir da atividade medida, em brilho físico ou realçado |
-| Eclipses Terra/Lua | Umbra, penumbra e eclipses anulares; luz avermelhada lunar aproximada. [Limites](docs/ECLIPSES.md) |
-| Camadas | Pontos e linhas programáveis, inclusive sobre o relevo terrestre, com controle no menu |
-| Catálogo local | Categorias, busca aproximada e foco em corpos já incluídos; objetos adicionais entram pela API |
-| Controle externo | API gRPC local para consultar a cena, importar GLB estático, criar/remover objetos e transmitir posição, velocidade e orientação |
-| Física de voo | Foguete de seis graus de liberdade da superfície à órbita, comandado em lockstep por software externo; validado contra casos da NASA. [Modelos e limites](docs/PHYSICS.md) |
-| Distribuição | Executável portátil para Linux e Windows, com a biblioteca visual acompanhando o programa |
+<details>
+<summary><b>Como funciona</b></summary>
 
-## Como funciona
-
-**O tempo e os dados definem a cena.** O Albert consulta as posições e trajetórias dos corpos embarcados no Horizons. Entre consultas, interpola
+**O tempo e os dados definem a cena.** O Albert consulta as posições e trajetórias do Sol, dos planetas e da Lua no Horizons. Entre consultas, interpola
 as amostras para manter o movimento contínuo. A orientação dos corpos usa
 transformações astronômicas; a Terra considera o modelo WGS84.
 
@@ -108,7 +165,7 @@ estão disponíveis pela API. Esta versão ainda não autentica NTP com NTS;
 
 **As imagens estáticas ficam no computador, completas ou baixadas aos poucos.**
 Superfícies, luzes das cidades, relevo e referência solar formam uma biblioteca de
-aproximadamente **4,89 GB**. A versão completa a traz em um único `assets/visuals.pak`
+aproximadamente **5,45 GB**. A versão completa a traz em um único `assets/visuals.pak`
 e funciona offline. A versão leve baixa ao abrir só o essencial (~78 MB, todos os
 corpos em resolução global) e completa as demais resoluções em segundo plano, com
 o corpo em foco à frente; o canto inferior esquerdo mostra o andamento. Aproximar
@@ -151,91 +208,28 @@ criar um veículo, enviar sua posição e orientação e solicitar acompanhament
 Você continua podendo orbitar e aproximar a câmera durante esse movimento.
 Os formatos e limites disponíveis estão em [RPC.md](docs/RPC.md).
 
-## Abrir o programa
+</details>
 
-Se você recebeu uma versão pronta, extraia **a pasta inteira** e abra
-**AlbertEngine** no Linux ou **AlbertEngine.exe** no Windows. Mantenha as pastas
-que acompanham o executável; o aplicativo funciona sem instalação.
-
-São necessários uma placa com **Vulkan** (Linux), **Direct3D 12 ou Vulkan** (Windows) — sem
-ela, um adaptador por software (WARP no Windows 10/11, lavapipe no Linux) também serve, mais
-lento — e acesso à internet para consultar os dados astronômicos e, quando ativadas, as nuvens.
-Use a versão do seu sistema.
-
-## Compilar a partir do projeto
-
-Clone com Git e abra um terminal na pasta do projeto:
-
-```sh
-git clone https://github.com/AllanOliveiraM/albert-engine.git
-cd albert-engine
-```
-
-A preparação instala as ferramentas e dependências do sistema e baixa as
-imagens versionadas com **Git LFS**. Pode pedir senha de administrador.
-A primeira compilação também baixa e compila as bibliotecas de código e pode
-levar vários minutos. As próximas reaproveitam o que já foi compilado.
-
-**Linux — Ubuntu 24.04+, Debian 12+ ou Fedora:**
-
-```sh
-bash scripts/setup-linux.sh
-make run
-```
-
-Para o ícone aparecer corretamente na barra e no menu de aplicativos do Linux,
-execute `make desktop` depois de compilar e reabra o Albert. Esse comando cria
-o atalho no seu usuário, mantendo o programa na pasta original.
-
-**Windows 10/11 — PowerShell:**
-
-Tenha o Git para Windows com o componente **Git LFS** instalado.
-
-```powershell
-.\make.cmd setup
-.\make.cmd run
-```
-
-O build reúne as partes das imagens em `visuals.pak` e verifica sua
-integridade. Não é necessário juntar os arquivos manualmente nem usar Docker
-na compilação nativa. `make run` prepara apenas o aplicativo; `make test`
-compila e executa os testes. No Windows, use `.\make.cmd test`.
-
-### Se aparecer “Git LFS images missing”
-
-Na pasta do projeto, execute:
-
-```sh
-git lfs install --local
-git lfs pull
-```
-
-Aguarde o download dos arquivos, **aproximadamente 4,55 GB no total**, e rode novamente
-`make run` ou `.\make.cmd run`. Se `git lfs` não for reconhecido, repita o setup
-no Linux ou instale o componente Git LFS do Git para Windows.
-
-O botão **Download ZIP** do GitHub pode fornecer apenas ponteiros para esses
-arquivos. Para compilar, prefira `git clone`. A distribuição pronta já contém
-as imagens e não precisa de Git LFS.
-
-## Navegar e ajustar a imagem
+<details>
+<summary><b>Navegar e ajustar a imagem</b></summary>
 
 - Clique no nome do objeto na barra superior: busque planetas e luas ou escolha **Tudo**.
-- Para asteroides e cometas, digite um nome/designação e clique em **Buscar asteroides e cometas online**.
-- Clique em um resultado com **+** para adicionar e acompanhar suas posições automaticamente.
+- Objetos adicionais podem ser consultados e importados pela API gRPC; a busca da interface usa o catálogo local.
 - Arraste para girar e use a roda do mouse para aproximar.
 - Use o botão **Restaurar zoom**, no canto inferior direito, para voltar à distância inicial.
 - Clique no horário, no canto superior direito, para escolher data e velocidade; **Agora** volta ao tempo real.
 - Em **Eventos**, no mesmo painel, vá direto a eclipses (2024, 2026, 2027), ao pouso da Apollo 11, à passagem da Giotto pelo Halley ou ao periélio da 67P.
 - Na 67P ou no Halley perto do periélio (por exemplo 2021-11-02 ou 1986-03-13), ative **Realçar coma e caudas** e afaste a câmera.
-- Abra **☰ → Cena** para ajustar atmosfera, nuvens, cidades, fronteiras, sombras e órbitas.
-- Ative **Nuvens em tempo real** em **Cena** para buscar as observações automaticamente.
+- Abra **Menu → Ajustes** para ajustar atmosfera, nuvens, cidades, fronteiras, sombras e órbitas.
+- Ative **Nuvens em tempo real** em **Ajustes** para buscar as observações automaticamente.
 - O brilho auxiliar de cada objeto com lado escuro ajuda a enxergar o lado escuro; começa desligado e é ajustável.
 - Em **Dados**, acompanhe as atualizações, retente consultas e gerencie o cache.
-- Em **Dados → Consultas do catálogo**, acompanhe importações e tente novamente após falhas.
-- Em **Dados → Manutenção dos arquivos**, recarregue as texturas ou limpe e baixe as nuvens novamente.
+- Em **Dados → Manutenção das nuvens**, recarregue as texturas ou limpe e baixe as nuvens novamente.
 
-## Programar cenas com gRPC
+</details>
+
+<details>
+<summary><b>Programar cenas e voos com gRPC</b></summary>
 
 Compile o projeto completo e abra o servidor local:
 
@@ -285,7 +279,7 @@ voos de 2025) e captura nos braços, a 0,4 m do eixo da torre, com 52 t de sobra
 captura deixa de ser possível (motores, propelante, alcance), desiste e cai longe da torre ou no mar. Tirado o booster dos braços, a nave espera em órbita a passagem que a traz de volta sobre Starbase, cerca de 22 h
 depois. Então queima para sair de órbita, reentra de barriga guiada pela inclinação lateral, com flaps e RCS segurando a
 atitude e o escudo térmico abaixo do limite. Ela se vira para os motores, queima para pousar e é capturada nos mesmos braços.
-Em tempo real, a órbita passa acelerada (`--warp=1000`, o padrão) e o resto em 1×. `--follow-booster` leva a câmera para o
+Em tempo real, a órbita passa acelerada (`--warp=1000`, o padrão) e o trecho balístico do retorno em até 60×; as manobras, a reentrada e o pouso ficam em 1×. `--follow-booster` leva a câmera para o
 booster na separação. Os veículos aparecem como são definidos: corpo, flaps e grid fins mexendo, sinos com o cardã, plumas
 que se abrem no vácuo e jatos do RCS. Starbase está no chão: a torre, os braços (abertos na subida, fechando em volta do
 booster e da nave que pairam), a mesa de lançamento, os tanques. `--pad` mostra a pilha na mesa, com a câmera dando a volta. Os guiamentos aguentam motores falhando (`--fail=booster@landing:1`
@@ -300,6 +294,7 @@ e no meio ficam o relógio T± da missão (a contagem regressiva antes da decola
 
 Durante um voo, o painel **Interferência** (Ajustes: "Painel de interferência") mexe nele ao vivo, pelos mesmos comandos da
 API:
+
 - rajadas de vento e empurrões por dois joysticks (norte/leste) e controles verticais;
 - o mapa de motores do voo escolhido: um clique faz um falhar, falhar calado (ele diz que está bem) ou travar o cardã, como
   escolhido acima dele; o botão direito faz falhar calado; as superfícies (grid fins, flaps) travadas onde estão;
@@ -330,45 +325,8 @@ O primeiro catálogo interno já reutiliza o Horizons. O suporte inicial a GLB e
 Texturas/animação de modelos, polígonos, rótulos, camadas raster e novas fontes
 públicas são próximas entregas.
 
-## Criar uma versão para compartilhar
+</details>
 
-O GitHub Actions também gera os pacotes dos dois sistemas. Em **Actions → Portable
-releases → Run workflow**, você pode testar o empacotamento e baixar os artefatos.
-Ao enviar uma tag de versão, como `v0.2.1`, ele compila, testa e publica a release
-automaticamente. [Instruções de publicação](docs/DEVELOPMENT.md#releases-no-github-actions).
+## Documentação
 
-Como a biblioteca visual ultrapassa o limite por arquivo das releases do GitHub,
-o ZIP é dividido em volumes. Baixe todas as partes do seu sistema na mesma pasta
-e abra a `.zip.001` com 7-Zip para extrair. O programa fica na raiz da pasta extraída.
-
-Execute `make dist` no Linux ou `.\make.cmd dist` no Windows. Depois, zipe
-**a pasta inteira** `dist/linux` ou `dist/windows`.
-O executável fica na raiz, acompanhado apenas dos recursos necessários e das
-licenças de terceiros. Fontes, logs, cache e documentação ficam fora do pacote.
-
-Com Docker instalado, é possível gerar as duas versões pelo Linux:
-
-```sh
-bash scripts/build-portable.sh all
-```
-
-O build Linux portátil usa Debian 12 como base. O driver gráfico e os
-componentes básicos do sistema continuam sendo fornecidos pela máquina.
-
-## Desenvolvimento e próximos passos
-
-O núcleo mantém estados físicos em dupla precisão, a renderização usa
-threepp (cena), WebGPU (wgpu-native) e Dear ImGui, e as integrações usam libcurl, ERFA, JSON e
-gRPC/Protobuf. O CMake declara as versões e os hashes das dependências.
-
-As próximas entregas ampliam os corpos embarcados, modelos externos e camadas,
-além de aprofundar a precisão do tempo e os provedores internos de dados. Cada etapa
-deve preservar precisão, fluidez e compatibilidade Linux/Windows.
-
-- [Roadmap e andamento](ROADMAP.md)
-- [Compilação, arquitetura, precisão e validação](docs/DEVELOPMENT.md)
-- [API gRPC e exemplo de integração](docs/RPC.md)
-- [Física de voo: modelos, limites e validação](docs/PHYSICS.md)
-- [Fontes das imagens e dos dados](assets/README.md)
-- [Preparação da biblioteca visual](docs/ASSETS.md)
-- [Dependências e créditos](THIRD_PARTY.md)
+[Roadmap](ROADMAP.md) · [Física de voo](docs/PHYSICS.md) · [API gRPC](docs/RPC.md) · [Desenvolvimento](docs/DEVELOPMENT.md) · [Fontes dos dados](assets/README.md) · [Créditos](THIRD_PARTY.md)

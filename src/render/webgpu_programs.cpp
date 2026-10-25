@@ -107,9 +107,9 @@ void earthLayers(){
     albert::gpu::define("albert:corona",corona);
     // vehicle.cpp: one density contribution per ray through an open cone, or a soft nozzle disc to fill the axial opening.
     Program plume;plume.attributes=surfaceAttributes;plume.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32},{"diamonds",Uniform::f32},
-        {"time",Uniform::f32},{"radii",Uniform::vec2},{"falloff",Uniform::f32},{"rarefied",Uniform::f32},{"disc",Uniform::f32},{"metres",Uniform::f32}};
+        {"time",Uniform::f32},{"radii",Uniform::vec2},{"falloff",Uniform::f32},{"rarefied",Uniform::f32},{"disc",Uniform::f32},{"metres",Uniform::f32},{"vacuum",Uniform::f32},{"impingement",Uniform::f32}};
     plume.wgsl=R"(
-struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32, time: f32, radii: vec2f, falloff: f32, rarefied: f32, disc: f32, metres: f32 };
+struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32, time: f32, radii: vec2f, falloff: f32, rarefied: f32, disc: f32, metres: f32, vacuum: f32, impingement: f32 };
 @group(2) @binding(0) var<uniform> material: Material;
 struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @location(1) local: vec3f, @location(2) localNormal: vec3f, @location(3) worldNormal: vec3f, @location(4) world: vec3f };
 @vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f) -> Surface {
@@ -127,7 +127,7 @@ struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @locati
         let soft = 1.0 - smoothstep(0.15, 1.0, radial);
         let flicker = 0.97 + 0.03 * sin(material.time * 37.0 + radial * 9.0);
         let colour = mix(material.edge, material.core * 1.5, soft);
-        let alpha = soft * flicker * material.strength;
+        let alpha = clamp(soft * flicker * material.strength, 0.0, 1.0);
         return vec4f(linearToSrgb(colour * airFilter(v.world)) * alpha, alpha);
     }
     let x = object.model[0].xyz; let y = object.model[1].xyz; let z = object.model[2].xyz;
@@ -154,20 +154,89 @@ struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @locati
     let endDistance = abs(end - v.local.y) / max(abs(inward.y), 0.00001);
     let path = min(sideDistance, endDistance);
     let metres = length(x * inward.x + y * inward.y + z * inward.z) / length(x);
-    let column = min(5.0, path * metres / (2.0 * material.radii.x)); // Bound axial brightness while fading tangential chords to zero.
-    let down = clamp(-v.local.y, 0.0, 1.0);
+    let middle = v.local + inward * path * 0.5;
+    let down = clamp(-mix(v.local.y, middle.y, material.rarefied), 0.0, 1.0); // Sample the gas along the chord, including through the open downstream end.
+    let sampleRadius = material.radii.x + slope * down;
+    let column = min(5.0, path * metres / (2.0 * mix(material.radii.x, sampleRadius, material.rarefied))); // Dilution keeps the broad bloom translucent and brightest along its axis.
     let distance = down * material.metres; // Keep diamonds within the first twenty metres despite the growing envelope.
     let wave = sin(v.uv.x * 18.84956 + down * 47.0 - material.time * 11.0);
     let flicker = 0.94 + 0.04 * wave + 0.02 * sin(down * 91.0 - material.time * 29.0);
     let phase = distance * 1.9635 + 0.06 * wave;
     let bands = pow(0.5 + 0.5 * cos(phase), 8.0) * exp(-distance * 0.09) * (1.0 - smoothstep(15.0, 24.0, distance));
-    let density = exp(-down * (material.falloff + 1.3 * material.rarefied)) * (1.0 - smoothstep(0.65, 1.0, down));
+    let wall = material.impingement * smoothstep(0.55, 1.0, down);
+    let tail = mix(1.0 - smoothstep(0.65, 1.0, down), 1.0, wall);
+    let faint = mix(1.0, (0.015 + 0.985 * exp(-distance * 0.045)) * (1.0 - smoothstep(25.0, 100.0, distance)), material.vacuum);
+    let density = exp(-down * material.falloff) * tail * faint + 1.4 * wall; // Rarefied wings stay visible; stalled gas remains dense right up to the surface.
     let alpha = 1.0 - exp(-column * density * flicker * material.strength * (1.0 + 2.2 * material.diamonds * bands));
-    let colour = mix(material.edge, material.core, clamp(exp(-distance * 0.25) + 0.3 * material.diamonds * bands, 0.0, 1.0));
-    return vec4f(linearToSrgb(colour * airFilter(v.world)) * alpha, alpha * mix(1.0, 0.04, material.rarefied)); // Thin gas emits with little absorption.
+    let colour = mix(mix(material.edge, material.core, clamp(exp(-distance * 0.25) + 0.3 * material.diamonds * bands, 0.0, 1.0)), mix(vec3f(1.0, 0.75, 0.3), vec3f(1.0, 0.55, 0.15), down), wall);
+    return vec4f(linearToSrgb(colour * airFilter(v.world)) * alpha, alpha * mix(mix(1.0, 0.04, material.rarefied), 1.0, wall)); // Recirculating gas absorbs even in thin air.
 }
 )";
     albert::gpu::define("albert:plume",plume);
+    // Integrate inside the existing depth-tested shells so density stays attached to the vapour.
+    Program steam;steam.attributes=surfaceAttributes;steam.uniforms={{"density",Uniform::f32},{"seed",Uniform::f32},{"time",Uniform::f32},{"up",Uniform::vec3},{"hull",Uniform::vec4},{"size",Uniform::vec3},{"kind",Uniform::f32}};
+    steam.wgsl=std::string(surface)+R"(
+struct Material { density: f32, seed: f32, time: f32, up: vec3f, hull: vec4f, size: vec3f, kind: f32 }; // Kind: vapour 0, spray 1, splash mist 2; absent fields keep vehicle vapour compatible.
+@group(2) @binding(0) var<uniform> material: Material;
+fn steamHash(p: vec3f) -> f32 { return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7))) * 43758.5453); }
+fn steamNoise(p: vec3f) -> f32 {
+    let i = floor(p); let f = fract(p); let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(steamHash(i), steamHash(i + vec3f(1, 0, 0)), u.x), mix(steamHash(i + vec3f(0, 1, 0)), steamHash(i + vec3f(1, 1, 0)), u.x), u.y),
+        mix(mix(steamHash(i + vec3f(0, 0, 1)), steamHash(i + vec3f(1, 0, 1)), u.x), mix(steamHash(i + vec3f(0, 1, 1)), steamHash(i + vec3f(1, 1, 1)), u.x), u.y), u.z);
+}
+@fragment fn fs_main(v: Surface, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+    let x = object.model[0].xyz; let y = object.model[1].xyz; let z = object.model[2].xyz;
+    var delta = frame.camera.xyz - v.world;
+    let eye = v.local + vec3f(dot(delta, x) / dot(x, x), dot(delta, y) / dot(y, y), dot(delta, z) / dot(z, z));
+    let inside = frame.projection[3][3] < 0.5 && dot(eye, eye) < 1.0;
+    if (front == inside) { discard; } // Count each ray once, including when the camera enters the cloud.
+    if (frame.projection[3][3] > 0.5) { delta = transpose(mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz)) * vec3f(0, 0, 1); }
+    if (material.hull.x > 0.0) {
+        let point = v.local * material.size + vec3f(0, 0, material.hull.y);
+        if (length(point.xz) < material.hull.x || point.y < material.hull.z || point.y > material.hull.w) { discard; }
+        let normal = normalize(x * point.x / material.size.x + z * point.z / material.size.z);
+        let grazing = pow(1.0 - smoothstep(0.05, 0.55, abs(dot(normal, normalize(delta)))), 2.0);
+        let p = vec3f(point.x * 9.0, (point.y + material.time * 0.7) * 0.65, (point.z - material.hull.x) * 5.0) + vec3f(material.seed);
+        let streak = smoothstep(0.48, 0.8, steamNoise(p)) * smoothstep(0.3, 0.75, steamNoise(p * 2.3 + vec3f(7.1, 3.7, 0)));
+        let edge = (1.0 - smoothstep(0.2, 1.0, dot(v.local.xy, v.local.xy))) * exp(-8.0 * max(0.0, length(point.xz) - material.hull.x));
+        let frost = smoothstep(material.hull.z, material.hull.z + 0.15, point.y) * (1.0 - smoothstep(material.hull.w - 0.15, material.hull.w, point.y));
+        let alpha = 1.0 - exp(-2.5 * material.density * grazing * streak * edge * frost);
+        return vec4f(linearToSrgb(vec3f(0.98, 0.99, 1.0)) * alpha, alpha);
+    }
+    let view = normalize(vec3f(dot(delta, x) / dot(x, x), dot(delta, y) / dot(y, y), dot(delta, z) / dot(z, z)));
+    let middle = v.local - view * dot(v.local, view);
+    let half = sqrt(max(0.0, 1.0 - dot(middle, middle)));
+    let near = select(half, clamp(dot(eye, view), -half, half), inside);
+    let path = near + half;
+    if (material.kind > 0.5 && material.kind < 1.5) {
+        let grain = steamNoise(v.local * vec3f(14, 14, 2) + vec3f(material.seed));
+        let edge = pow(max(0.0, 1.0 - dot(middle, middle)), 1.5);
+        let alpha = 1.0 - exp(-material.density * path * edge * (0.4 + 0.6 * grain));
+        return vec4f(linearToSrgb(vec3f(0.92, 0.96, 1.0)) * alpha, alpha);
+    }
+    let up = normalize(x * material.up.x + y * material.up.y + z * material.up.z);
+    var sun = up; if (frame.sun.w > 0.0) { sun = frame.sun.xyz; }
+    let step = path / 6.0;
+    var transmission = 1.0; var scattered = vec3f(0.0);
+    for (var i = 0; i < 6; i++) {
+        let q = middle + view * (near - (f32(i) + 0.5) * step);
+        let p = q * 3.4 + vec3f(material.seed, material.seed * 0.37, material.time * 0.025);
+        let billow = steamNoise(p); let detail = steamNoise(p * 2.2 + vec3f(7.1, 3.7, -material.time * 0.018));
+        let radius = 0.76 + 0.18 * billow + 0.06 * detail;
+        let edge = smoothstep(0.0, 0.24, radius - length(q));
+        let rho = edge * (0.25 + 1.4 * smoothstep(0.2, 0.8, 0.7 * billow + 0.3 * detail));
+        let alpha = 1.0 - exp(-material.density * rho * step);
+        let normal = normalize(object.normalWorld * (q + vec3f(0.0001)));
+        let light = smoothstep(-0.6, 0.85, dot(normal, sun));
+        let sky = 0.88 + 0.12 * smoothstep(-0.8, 0.8, dot(normal, up));
+        let colour = mix(vec3f(0.46, 0.50, 0.55), vec3f(1.0, 0.99, 0.97), light) * sky * (0.93 + 0.07 * billow);
+        scattered += transmission * alpha * colour; transmission *= 1.0 - alpha;
+    }
+    let alpha = 1.0 - transmission;
+    return vec4f(linearToSrgb(scattered / max(alpha, 0.00001)) * alpha, alpha);
+}
+)";
+    albert::gpu::define("albert:steam",steam);
     // vehicle.cpp: axial heat bands on the existing metal bell avoid another shell and draw call per engine.
     Program bell;bell.attributes=surfaceAttributes;bell.uniforms={{"diffuse",Uniform::vec3},{"opacity",Uniform::f32},{"emissive",Uniform::vec3},{"roughness",Uniform::f32},{"metalness",Uniform::f32},
         {"auxiliaryStrength",Uniform::f32},{"auxiliarySolarDirection",Uniform::vec3},{"doubleSided",Uniform::f32},{"burn",Uniform::vec3},{"lip",Uniform::vec3},{"bellLength",Uniform::f32}};

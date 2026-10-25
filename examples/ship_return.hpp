@@ -333,7 +333,7 @@ private:
     double flipCost(Vec p,Vec v)const{
         const Vec axis=p+front(),east=cross(north_,up_);const double d=std::max(norm(axis),1.);const Vec u=axis*(-1/d);const double toward=dot(v,u),across=norm(v+u*-toward);
         const double stop=toward>0?toward*toward/2:0,behind=std::max(30-dot(axis,east),0.),away=std::min(toward,0.);
-        const double far=std::max(d-250,0.);return (d-stop-40)*(d-stop-40)/900+toward*toward/400+far*far/400+across*across/25+away*away/25+behind*behind/100;
+        const double beyond=std::max(d-250,0.);return (d-stop-40)*(d-stop-40)/900+toward*toward/400+beyond*beyond/400+across*across/25+away*away/25+behind*behind/100;
     }
     // Each half second: the nose's way (round about the vertical every 15°, then 5° about the best), the tilt (every 5°, then
     // 1.25°, within 30°) and where its glide begins (now, or falling flat down to 5, 3.5 or 2.5 km: the way the flip's push along

@@ -1,7 +1,7 @@
 #pragma once
 // The terminal count of a launch as the vehicle's own computer runs it (its autosequence, from T-60 s), on what its sensors
 // and its actuators' feedback report, never the flight's truth:
-// - Self-tests from T-60 s until ignition, each second on the last 10 s: each IMU unit reading and alive (an accelerometer
+// - Self-tests from T-60 s until passed, on the last 10 s: each IMU unit reading and alive (an accelerometer
 //   or gyroscope repeating its output exactly 5 times is frozen), its specific force the pad's gravity and its rate the
 //   Earth's turning within its errors, the units within theirs of each other; the alignment checked against them (a
 //   gyrocompass: level within 0.03°, heading within 0.5°); the GNSS on an RTK fix where the navigation stands (0.3 m); the
@@ -9,11 +9,12 @@
 // - T-30 to T-24 s: each gimballed engine swept 5° each way in pitch and in yaw and back, its actuator's feedback within
 //   0.2° of the command at the end of each second.
 // - T-10 s: the flame deflector's water (the ground's).
+// - T-7 s: the ship QD swings clear (stowed by T-4, before the T-3 ignition) after its T-9 s vent; the booster QDs fold away with the clamps at T-0.
 // - From T-3 s the engines lit ring by ring from the axis out, 0.4 s apart, each held to its expected thrust as it comes up
 //   (failed, or short of 90% 1.2 s after its start: abort); at T-0, every one at thrust, the clamps let go.
 // Anything out of line before ignition scrubs the count; after it, aborts on the pad (every engine cut, the clamps holding).
-// So do the FDIR's findings while counting. The operator's uplinks: HOLD holds the count before ignition (up to the window;
-// during it, aborts), GO resumes it, ABORT scrubs it.
+// So do the FDIR's findings while counting. HOLD after T-40 recycles to re-arm the terminal count; earlier holds stay put.
+// RECYCLE holds at T-40, GO resumes, ABORT scrubs; HOLD or RECYCLE during ignition aborts on the pad.
 #include "navigation.hpp"
 #include <algorithm>
 #include <cmath>
@@ -29,9 +30,11 @@ public:
     // design: the vehicle (its first stage's engines lit and swept); s: the flight on the pad as the count starts; flight: the
     // events after liftoff for the broadcast; from: the count's start (s before T-0); window: the longest the count may stand
     // in a hold (s).
-    Countdown(const api::VehicleDefinition& design,const api::FlightSample& s,std::vector<Event> flight={},double from=60,double window=1800)
-        :from_(from),window_(window),zero_(s.elapsed_seconds()+from),last_(s.elapsed_seconds()),units_(static_cast<std::size_t>(s.imus_size())){
+    Countdown(const api::VehicleDefinition& design,const api::FlightSample& s,std::vector<Event> flight={},double from=60,double window=1800,unsigned shipQd=0,unsigned boosterQd=0)
+        :from_(from),window_(window),zero_(s.elapsed_seconds()+from),last_(s.elapsed_seconds()),shipQd_(shipQd),boosterQd_(boosterQd),units_(static_cast<std::size_t>(s.imus_size())){
         events_={{"GO PARA LANÇAMENTO",-40},{"TESTE DOS GIMBALS",-30},{"DEFLETOR DE CHAMAS",-10},{"IGNIÇÃO",-3},{"DECOLAGEM",0}};
+        if(shipQd_)events_.insert(events_.begin()+3,{{"DESPRESSURIZAÇÃO DO QD DA NAVE",-9},{"RETRAÇÃO DO QD DA NAVE",-7}});
+        if(shipQd_&&shipQd_<=static_cast<unsigned>(s.structure_radians_size()))shipQdConnected_=s.structure_radians(static_cast<int>(shipQd_-1)); // Zero is stowed; retain the connected pose.
         for(auto& e:flight)events_.push_back(std::move(e));
         const auto& es=design.stages(0).engines();std::vector<double> radii;
         for(int i=0;i<es.size();++i){const auto& e=es[i];const double r=std::hypot(e.position_meters().y(),e.position_meters().z());
@@ -45,21 +48,28 @@ public:
         const double now=s.elapsed_seconds(),utc=s.utc_unix_seconds();
         if(!started_){started_=true;refused_=nav.refused();mark(q,"AUTOSSEQUÊNCIA");plan(q,utc,now-zero_);say(now-zero_,"o computador de voo assume a contagem (autossequência)");}
         const double dt=std::max(now-last_,0.);last_=now;
+        q.set_count_state(phase_==Phase::scrubbed?"SCRUB":""); // Clear a hold on GO; keep a scrub through safing.
         if(phase_==Phase::launched||phase_==Phase::scrubbed)return;
-        if(phase_==Phase::holding)zero_+=dt; // The clock stands.
-        const double T=now-zero_;
+        if(phase_==Phase::holding||waiting_)zero_+=dt; // Sensor waits freeze T too.
+        double T=now-zero_;q.set_clock_zero_utc_unix_seconds(utc-T); // A stop during a hold needs this step's T-0 too.
         for(const auto& u:s.uplinks()){
             if(u=="ABORT"){stop(q,"aborto pedido pelo operador",T);return;}
-            if(u=="HOLD"&&phase_==Phase::igniting){stop(q,"espera pedida na ignição",T);return;}
-            if(u=="HOLD"&&phase_==Phase::counting){phase_=Phase::holding;held_=now;mark(q,"CONTAGEM EM ESPERA");say(T,"em espera pelo operador");}
+            if(u=="HOLD"||u=="RECYCLE"){
+                if(phase_==Phase::igniting||T>=-3){phase_=Phase::igniting;stop(q,"espera pedida na ignição",T);return;} // No rewind once ignition is due.
+                if(disconnected_){auto* c=q.add_commands();c->set_index(shipQd_);c->set_structure_radians(shipQdConnected_);disconnected_=false;} // Reconnect in this request, not on GO.
+                if(phase_==Phase::counting){phase_=Phase::holding;held_=now;mark(q,"CONTAGEM EM ESPERA");say(T,"em espera pelo operador");}
+                if(u=="RECYCLE"||T>-40){ // Late holds need the same re-arming as an explicit recycle.
+                    T=-40;zero_=now-T;q.set_clock_zero_utc_unix_seconds(utc-T);go_=deluge_=vented_=false; // Retain passed checks and sensor history.
+                    if(!swept_){segment_=-1;pitch_=yaw_=0;q.add_commands()->mutable_gimbal();} // An unfinished sweep must restart from centre.
+                    plan(q,utc,T);say(T,"reciclada em espera");}}
             else if(u=="GO"&&phase_==Phase::holding){phase_=Phase::counting;plan(q,utc,T);say(T,"retomada");}}
         if(!fdir.empty()){stop(q,"FDIR: "+fdir.front(),T);return;}
         if(phase_!=Phase::igniting&&dt>0){collect(s,dt); // Until ignition (its shaking past what the tests allow), held or counting.
             if(std::floor(now)!=second_){second_=std::floor(now);roll();
-                if(full()){if(const std::string bad=selfTest(s,nav);!bad.empty()){stop(q,bad,T);return;}checked_=true;}}}
-        if(phase_==Phase::holding){if(now-held_>window_)stop(q,"janela de lançamento encerrada em espera",T);else q.set_clock_zero_utc_unix_seconds(utc-T);return;}
-        if(T>=-40&&!go_){if(!checked_){zero_+=dt;q.set_clock_zero_utc_unix_seconds(utc-T);return;} // Not yet a window of data: the clock waits for it.
-            go_=true;mark(q,"GO PARA LANÇAMENTO");say(T,"autotestes em ordem (IMUs, alinhamento, GNSS/RTK, medidor, motores): GO para lançamento");}
+                if(!checked_&&full()){if(const std::string bad=selfTest(s,nav);!bad.empty()){stop(q,bad,T);return;}checked_=true;}}} // Keep passed checks through a recycle.
+        if(phase_==Phase::holding){q.set_count_state("HOLD");if(now-held_>window_)stop(q,"janela de lançamento encerrada em espera",T);return;}
+        if(T>=-40&&!go_){if(!checked_){waiting_=true;zero_=now+40;q.set_clock_zero_utc_unix_seconds(utc+40);q.set_count_state("HOLD");return;} // Wait at T-40 for a full window.
+            waiting_=false;go_=true;mark(q,"GO PARA LANÇAMENTO");say(T,"autotestes em ordem (IMUs, alinhamento, GNSS/RTK, medidor, motores): GO para lançamento");}
         if(T>=-30&&!swept_){const int k=std::min(static_cast<int>(std::floor(T+30)),6); // Six one-second segments, then done.
             if(k!=segment_){if(segment_>=0)if(const std::string bad=followed(s);!bad.empty()){stop(q,bad,T);return;}
                 segment_=k;if(k==0){mark(q,"TESTE DOS GIMBALS");say(T,"varredura dos gimbals de "+std::to_string(gimballed_.size())+" motores");}
@@ -67,10 +77,13 @@ public:
                 else{const double a=5*deg,p[]{a,-a,0,0,0,0},y[]{0,0,0,a,-a,0};pitch_=p[k];yaw_=y[k];
                     for(int i:gimballed_){auto* c=q.add_commands();c->set_index(static_cast<unsigned>(i+1));c->mutable_gimbal()->set_pitch_radians(pitch_);c->mutable_gimbal()->set_yaw_radians(yaw_);}}}}
         if(T>=-10&&!deluge_){deluge_=true;mark(q,"DEFLETOR DE CHAMAS");say(T,"água do defletor de chamas");}
+        if(T>=-9&&shipQd_&&!vented_){vented_=true;mark(q,"DESPRESSURIZAÇÃO DO QD DA NAVE");say(T,"despressurização das linhas do QD da nave");}
+        if(T>=-7&&shipQd_&&!disconnected_){disconnected_=true;auto* c=q.add_commands();c->set_index(shipQd_);c->set_structure_radians(0);mark(q,"RETRAÇÃO DO QD DA NAVE");say(T,"QD da nave desconectado, braço recolhendo");}
         if(T>=-3&&phase_==Phase::counting){phase_=Phase::igniting;mark(q,"IGNIÇÃO");say(T,"sequência de ignição");}
         if(phase_==Phase::igniting){
             for(std::size_t r=0;r<rings_.size();++r)if(T>=-3+.4*static_cast<double>(r)&&!(lit_[static_cast<std::size_t>(rings_[r].front())]>-1e9))
-                for(int e:rings_[r]){auto* c=q.add_commands();c->set_ignite(true);c->set_index(static_cast<unsigned>(e+1));lit_[static_cast<std::size_t>(e)]=T;}
+                for(int e:rings_[r]){if(e<s.engines_size()&&s.engines(e).failed()){stop(q,"motor "+std::to_string(e+1)+" falhou antes da ignição",T);return;} // Never commanded: refused, it ended the client.
+                    auto* c=q.add_commands();c->set_ignite(true);c->set_index(static_cast<unsigned>(e+1));lit_[static_cast<std::size_t>(e)]=T;}
             const double p=s.static_pressure_pascals();bool ready=true;
             for(std::size_t e=0;e<lit_.size()&&static_cast<int>(e)<s.engines_size();++e){
                 if(!(lit_[e]>-1e9)){ready=false;continue;}
@@ -79,9 +92,9 @@ public:
                 if(age>1.2&&share<.9){stop(q,"motor "+std::to_string(e+1)+" sem empuxo ("+std::to_string(static_cast<int>(100*share))+"% a "+number(age)+" s da partida)",T);return;}
                 ready=ready&&share>=.9;}
             if(T>=0){if(!ready){stop(q,"motores fora do empuxo no T-0",T);return;}
+                if(boosterQd_){auto* c=q.add_commands();c->set_index(boosterQd_);c->set_structure_radians(0);} // Keep the booster connected until release is permitted.
                 q.add_commands()->set_release(true);phase_=Phase::launched;zero_=now;mark(q,"DECOLAGEM");q.set_clock_zero_utc_unix_seconds(utc);
                 say(0,std::to_string(lit_.size())+" motores no empuxo: garras soltas, decolagem");return;}}
-        q.set_clock_zero_utc_unix_seconds(utc-T);
     }
     double clock(double elapsed)const{return elapsed-zero_;} // The mission's time (s; negative before T-0).
     double zero()const{return zero_;}                        // T-0 on the flight's clock (its elapsed seconds).
@@ -94,9 +107,9 @@ private:
     static std::string number(double x){char b[32];std::snprintf(b,sizeof b,std::abs(x)>=100?"%.0f":"%.2g",x);return b;}
     static void say(double T,const std::string& what){std::printf("%7.2f s  contagem: %s\n",T,what.c_str());}
     static void mark(api::StepRequest& q,const char* name,double plannedUtc=-1){auto* m=q.add_milestones();m->set_name(name);if(plannedUtc>=0){m->set_utc_unix_seconds(plannedUtc);m->set_planned(true);}}
-    void plan(api::StepRequest& q,double utc,double T)const{for(const auto& e:events_)if(e.at>T)mark(q,e.name.c_str(),utc+e.at-T);} // The events to come at their UTC.
+    void plan(api::StepRequest& q,double utc,double T)const{for(const auto& e:events_)if(e.at>=T&&!(swept_&&e.name=="TESTE DOS GIMBALS"))mark(q,e.name.c_str(),utc+e.at-T);} // Keep a completed sweep done through a recycle.
     void stop(api::StepRequest& q,const std::string& why,double T){
-        const bool lit=phase_==Phase::igniting;phase_=Phase::scrubbed;why_=why;q.set_stop_clock(true); // The broadcast's clock stops there.
+        const bool lit=phase_==Phase::igniting;phase_=Phase::scrubbed;why_=why;q.set_stop_clock(true);q.set_count_state("SCRUB"); // The broadcast's clock stops there.
         if(lit)q.add_commands()->set_cutoff(true);q.add_commands()->mutable_gimbal(); // Every engine out, every gimbal centred.
         mark(q,lit?"ABORTO NA PLATAFORMA":"CONTAGEM CANCELADA");say(T,std::string(lit?"ABORTO NA PLATAFORMA (motores cortados, garras fechadas): ":"CANCELADA: ")+why);
     }
@@ -154,8 +167,8 @@ private:
                 return "gimbal do motor "+std::to_string(i+1)+" não seguiu o comando ("+number(g.pitch_radians()/deg)+"°, "+number(g.yaw_radians()/deg)+"° para "+number(pitch_/deg)+"°, "+number(yaw_/deg)+"°)";}
         return {};
     }
-    double from_,window_,zero_,last_,held_=0,pitch_=0,yaw_=0,gaugeAt_=-1,second_=0;int segment_=-1,refused_=0;
-    bool started_=false,checked_=false,go_=false,swept_=false,deluge_=false,gaugeDead_=false;Phase phase_=Phase::counting;std::string why_;
+    double from_,window_,zero_,last_,held_=0,pitch_=0,yaw_=0,gaugeAt_=-1,second_=0,shipQdConnected_=0;int segment_=-1,refused_=0;
+    bool started_=false,checked_=false,waiting_=false,go_=false,swept_=false,deluge_=false,gaugeDead_=false,vented_=false,disconnected_=false;Phase phase_=Phase::counting;std::string why_;unsigned shipQd_=0,boosterQd_=0;
     std::vector<Event> events_;std::vector<Unit> units_;std::pair<double,int> gaugeNow_{};std::deque<std::pair<double,int>> gauges_;
     std::vector<double> vac_,area_,lit_;std::vector<int> gimballed_;std::vector<std::vector<int>> rings_;
 };

@@ -24,10 +24,10 @@ Simulation::Simulation(Now utc,Now monotonic):utc_(std::move(utc)),monotonic_(st
     if(!monotonic_)monotonic_=monotonicSeconds;
 }
 Simulated Simulation::at(double monotonic) const{
-    if(live_)return {utc_(),1.,true,false,generation_};
+    if(live_)return {utc_(),1.,true,false,generation_,1.};
     const double value=anchorUtc_+rate_*(monotonic-anchorMonotonic_);
-    if(value<earliestUtc||value>latestUtc)return {std::clamp(value,earliestUtc,latestUtc),0.,false,true,generation_};
-    return {value,rate_,false,false,generation_};
+    if(value<earliestUtc||value>latestUtc)return {std::clamp(value,earliestUtc,latestUtc),0.,false,true,generation_,0.};
+    return {value,rate_,false,false,generation_,pace_};
 }
 Simulated Simulation::read() const{std::lock_guard lock(mutex_);return at(monotonic_());}
 void Simulation::setRate(double rate){choose(std::nullopt,rate);}
@@ -39,7 +39,7 @@ void Simulation::choose(std::optional<double> utc,std::optional<double> rate){
     if(!utc&&(!rate||(live_&&*rate==1.)))return; // A live clock at 1x stays live.
     const double now=monotonic_();
     anchorUtc_=utc?*utc:at(now).utcSeconds;anchorMonotonic_=now;
-    if(rate)rate_=*rate;
+    if(rate)pace_=rate_=*rate;
     live_=false;
     if(utc)++generation_;
 }
@@ -52,10 +52,12 @@ void Simulation::follow(double utc,double rate){
     validInstant(utc);validRate(rate);std::lock_guard lock(mutex_);
     if(live_)return;
     const double now=monotonic_(),current=at(now).utcSeconds,error=utc-current;anchorMonotonic_=now;
-    if(std::abs(error)>std::max(1.,.5*std::abs(rate))){anchorUtc_=utc;rate_=rate;return;}
-    anchorUtc_=current;rate_=std::clamp(rate+error/.25,0.,maximumRate);
+    pace_=rate;if(std::abs(error)>std::max(1.,.5*std::abs(rate))){anchorUtc_=utc;rate_=rate;return;}
+    // Eased over 2 s within half to twice its rate: a flight publishing in bursts (a slow frame loop, a throttled CPU) had the scene
+    // stop and dash (over a quarter second, clamped at nought).
+    anchorUtc_=current;rate_=std::clamp(rate+error/2.,std::max(0.,.5*rate),std::min(maximumRate,2*rate));
 }
-void Simulation::live(){std::lock_guard lock(mutex_);if(live_)return;live_=true;rate_=1.;++generation_;}
+void Simulation::live(){std::lock_guard lock(mutex_);if(live_)return;live_=true;pace_=rate_=1.;++generation_;}
 Simulation& simulation(){static Simulation value;return value;}
 
 Civil civil(double utc){

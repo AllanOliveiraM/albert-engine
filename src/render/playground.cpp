@@ -110,8 +110,11 @@ void drawPlayground(rpc::Server& server,ImVec2 display,float margin){
     if(ImGui::CollapsingHeader("Operador",ImGuiTreeNodeFlags_DefaultOpen)){
         const float half=(ImGui::GetContentRegionAvail().x-ImGui::GetStyle().ItemSpacing.x)/2;
         if(ImGui::Button("SEGURAR (HOLD)",ImVec2(half,0))){api::FlightCommand c;c.set_uplink("HOLD");send(c,"Espera pedida");}
-        if(ImGui::IsItemHovered())ImGui::SetTooltip("Segura a contagem regressiva (na ignição, aborta na plataforma).");ImGui::SameLine();
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("Até T-40 s, segura onde está. Depois de T-40 s e antes da ignição, volta a T-40 s em HOLD, reconecta imediatamente o QD da nave e rearma a sequência. Na ignição, aborta na plataforma.");ImGui::SameLine();
         if(ImGui::Button("RETOMAR (GO)",ImVec2(half,0))){api::FlightCommand c;c.set_uplink("GO");send(c,"Contagem retomada");}
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("Retoma do ponto de espera: T-40 s após espera tardia ou RECICLAR; nos demais casos, de onde parou.");
+        if(ImGui::Button("RECICLAR (T-40)",ImVec2(-1,0))){api::FlightCommand c;c.set_uplink("RECYCLE");send(c,"Reciclo para T-40 pedido");}
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("Segura em T-40 s e reconecta o QD da nave; RETOMAR (GO) continua dali. Na ignição, aborta na plataforma; após decolar ou cancelar, ignora.");
         ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.75f,.45f,.08f,1));
         if(ImGui::Button("ABORTAR",ImVec2(-1,0))){api::FlightCommand c;c.set_uplink("ABORT");send(c,"Aborto enviado ao voo");}ImGui::PopStyleColor();
         if(ImGui::IsItemHovered())ImGui::SetTooltip("O software de voo toma a saída mais segura para a sua fase (na contagem, cancela; na ignição, aborta na plataforma).");

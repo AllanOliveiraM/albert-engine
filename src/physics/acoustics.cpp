@@ -1,6 +1,7 @@
 #include "physics/acoustics.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 namespace albert::physics::acoustics {
 namespace {
 constexpr double pi=3.14159265358979323846,reference=101325,t0=293.15,t01=273.16;
@@ -20,6 +21,12 @@ double density(double st){ // The curve as a density in St with unit area (the f
 // The directivity lobe: k (floor + exp(-((θ - 65°)/σ)²)), σ 24.06° (−3 dB at ±20°), floor 0.012, k so the sphere averages 1.
 constexpr double lobeCentre=65,lobeWidth=24.0637,lobeFloor=.012;
 double lobe(double theta){return lobeFloor+std::exp(-std::pow((theta-lobeCentre)/lobeWidth,2));}
+double fluctuation(double t){ // Smooth, repeatable eddies without mutable propagation state.
+    auto value=[](double n){auto x=static_cast<std::uint64_t>(static_cast<std::int64_t>(n))+0x9e3779b97f4a7c15ull;
+        x=(x^(x>>30))*0xbf58476d1ce4e5b9ull;x=(x^(x>>27))*0x94d049bb133111ebull;x^=x>>31;
+        return 2*static_cast<double>(x>>11)*(1./9007199254740992.)-1;};
+    const double i=std::floor(t),f=t-i;return value(i)+(value(i+1)-value(i))*f*f*(3-2*f);
+}
 }
 double bandCentre(int band){return 1000*std::pow(10.,(band-29)/10.);}
 double absorption(double f,double temperature,double pressure,double h){
@@ -62,9 +69,19 @@ Spectrum flowLevels(double w,double speed,double diameter,double shift){
 double overall(const Spectrum& l){double s=0;for(double x:l)s+=std::pow(10.,x/10);return s>0?10*std::log10(s):-1e9;}
 Spectrum ground(double height,double grazing,double c){
     Spectrum g{};const double fade=std::clamp((100-height)/50,0.,1.);if(fade<=0||height<0)return g;
-    const double path=2*height*std::max(std::sin(grazing),0.);
-    for(int b=0;b<bands;++b){const double phase=std::min(2*pi*bandCentre(b)/c*path,pi/2);g[static_cast<std::size_t>(b)]=fade*10*std::log10(2+2*std::cos(phase));}
+    const double delay=2*height*std::max(std::sin(grazing),0.)/std::max(c,1.);
+    for(int b=0;b<bands;++b){const double f=bandCentre(b),lo=f*std::pow(2.,-1./6),hi=f*std::pow(2.,1./6),x=pi*(hi-lo)*delay;
+        const double coherence=std::abs(x)>1e-9?std::sin(x)/x:1.; // Integrate power, so narrow notches cannot erase an entire band.
+        g[static_cast<std::size_t>(b)]=10*std::log10(std::max(1+fade*fade+2*fade*coherence*std::cos(pi*(hi+lo)*delay),1e-6));}
     return g;
+}
+Spectrum padLevels(const PadNoise& p,double shift){
+    const double v=std::max(p.ventSpeed,0.),w=std::max(p.waterSpeed,0.);
+    // Small, estimated jet/hydraulic efficiencies keep pad noise below the engine roar.
+    const auto vent=flowLevels(.001*.5*std::max(p.ventFlow,0.)*v*v,v,p.ventDiameter,shift);
+    const auto water=flowLevels(.0001*.5*std::max(p.waterFlow,0.)*w*w,w,p.waterScale,shift);Spectrum l;
+    for(int b=0;b<bands;++b){const auto k=static_cast<std::size_t>(b);const double s=std::pow(10.,vent[k]/10)+std::pow(10.,water[k]/10);l[k]=s>0?10*std::log10(s):-1e9;}
+    return l;
 }
 Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listenerVelocity,const Planet& planet,const std::function<Air(const Geodetic&)>& air){
     Heard h;if(history.empty())return h;
@@ -93,7 +110,7 @@ Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listen
         double lo=history[k-1].time,hi=k<history.size()?std::min(history[k].time,now):now;
         for(int i=0;i<60;++i){const double mid=(lo+hi)/2;(f(mid)>0?lo:hi)=mid;}
         te=(lo+hi)/2;p=path(at(te).position);}
-    const Emission e=at(te);if(!(e.on||e.dragPower>0)||p.blocked)return h;
+    const Emission e=at(te);const bool pad=e.pad.ventFlow>0||e.pad.waterFlow>0;if(!(e.on||e.dragPower>0||pad)||p.blocked)return h;
     const V3 d=listener-e.position;const double r=norm(d);const V3 n=d*(1/std::max(r,1e-9));
     auto windAt=[&](const Geodetic& g){const Air a=air(g);const double sl=std::sin(g.latitude),cl=std::cos(g.latitude),so=std::sin(g.longitude),co=std::cos(g.longitude);
         const V3 north{-sl*co,-sl*so,cl},east{-so,co,0};return north*a.wind.x+east*a.wind.y;};
@@ -107,10 +124,15 @@ Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listen
     const double impedance=local.density>0?10*std::log10(local.density*c/416.9):0.,spread=10*std::log10(4*pi*std::max(r,1.)*std::max(r,1.));
     const Spectrum rocket=e.on?freeField(e.noise,r,plume,h.doppler):Spectrum{};
     const Spectrum flow=e.dragPower>0?flowLevels(flowPower(e.dragPower,e.mach),e.mach>0?e.mach*e.sound:norm(e.velocity),e.diameter,h.doppler):Spectrum{};
+    const Spectrum rush=pad?padLevels(e.pad,h.doppler):Spectrum{};
+    // Weak scintillation grows along the path; long wavelengths fluctuate less than the tearing highs.
+    const double phase=dot(e.position,V3{.00017,.00011,.00007}),t=now+phase;
+    const double shimmer=3*std::sqrt(-std::expm1(-r/5000))*(.65*fluctuation(t/.7)+.35*fluctuation(t/1.7+97));
     Spectrum engines{};
-    for(int b=0;b<bands;++b){const auto k=static_cast<std::size_t>(b);const double loss=g[k]-p.absorbed[k]+impedance;
+    for(int b=0;b<bands;++b){const auto k=static_cast<std::size_t>(b);const double loss=g[k]-p.absorbed[k]+impedance+shimmer*std::clamp(std::sqrt(bandCentre(b)/80),.25,1.);
         engines[k]=e.on?rocket[k]+loss:-1e9;const double f=e.dragPower>0?flow[k]-spread+loss:-1e9;
-        const double sum=std::pow(10.,engines[k]/10)+std::pow(10.,f/10);h.levels[k]=sum>0?10*std::log10(sum):-1e9;}
+        const double water=pad?rush[k]-spread+loss:-1e9;
+        const double sum=std::pow(10.,engines[k]/10)+std::pow(10.,f/10)+std::pow(10.,water/10);h.levels[k]=sum>0?10*std::log10(sum):-1e9;}
     h.rocket=e.on?overall(engines):-1e9;h.delay=now-te;h.distance=r;h.emitted=te;h.audible=true;return h;
 }
 Boom blast(double tnt,double distance,double pressure){

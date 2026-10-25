@@ -39,7 +39,7 @@ void vehicle(ImDrawList* d,const BroadcastVehicle& v,float x,float bottom,float 
         text(d,10*k,ImVec2(bx+3.5f*k,top+h+6*k),grey,i?"CH4":"LOX",.5f);}
 }
 }
-void drawBroadcast(const std::vector<BroadcastVehicle>& vehicles,double missionTime,const std::vector<BroadcastEvent>& events,const BroadcastDecision& decision){
+void drawBroadcast(const std::vector<BroadcastVehicle>& vehicles,double missionTime,const std::vector<BroadcastEvent>& events,const BroadcastDecision& decision,double pace,std::optional<double> followedHeight,const BroadcastCount& count){
     ImDrawList* d=ImGui::GetBackgroundDrawList();const ImVec2 size=ImGui::GetIO().DisplaySize;const float k=std::clamp(size.x/1600.f,.7f,1.4f),bottom=size.y-18*k;
     if(!decision.what.empty()){
         const double age=missionTime-decision.time;const float u=static_cast<float>(std::clamp(age/.4,0.,1.)),entry=u*u*(3-2*u),fade=entry*static_cast<float>(1-.55*std::clamp((age-25.4)/1.5,0.,1.)); // In over 0.4 s, dimmed to 45% over 1.5 s after 25 s.
@@ -83,6 +83,29 @@ void drawBroadcast(const std::vector<BroadcastVehicle>& vehicles,double missionT
     std::snprintf(b,sizeof b,"T%c %02lld:%02lld:%02lld",missionTime<0?'-':'+',s/3600,s/60%60,s%60);
     ImFont* f=ImGui::GetFont();float digit=0,width=0;for(char ch='0';ch<='9';++ch)digit=std::max(digit,f->CalcTextSizeA(30*k,1e9f,0,&ch,&ch+1).x); // Fixed cells stop the clock wandering.
     for(const char* p=b;*p;++p)width+=*p>='0'&&*p<='9'?digit:f->CalcTextSizeA(30*k,1e9f,0,p,p+1).x;
-    float x=cx-width/2;for(const char* p=b;*p;++p){const float w=f->CalcTextSizeA(30*k,1e9f,0,p,p+1).x,cell=*p>='0'&&*p<='9'?digit:w;char ch[2]{*p,0};text(d,30*k,ImVec2(x+(cell-w)/2,bottom-50*k),IM_COL32(245,247,250,245),ch);x+=cell;}
+    if(count.state=="HOLD"||count.state=="SCRUB"){
+        const bool hold=count.state=="HOLD";const float glow=hold?static_cast<float>(.75+.25*std::sin(ImGui::GetTime()*6.28318530718)):1; // Wall time pulses even while the count stands.
+        text(d,30*k,ImVec2(cx,bottom-50*k),hold?IM_COL32(static_cast<int>(255*glow),static_cast<int>(190*glow),static_cast<int>(60*glow),245):IM_COL32(235,65,65,245),count.state,.5f);
+        const long long held=static_cast<long long>(std::abs(count.time));std::snprintf(b,sizeof b,"T%c%02lld:%02lld:%02lld",count.time<0?'-':'+',held/3600,held/60%60,held%60);
+        text(d,12*k,ImVec2(cx,bottom-16*k),IM_COL32(170,178,188,220),b,.5f);
+    }else{float x=cx-width/2;for(const char* p=b;*p;++p){const float w=f->CalcTextSizeA(30*k,1e9f,0,p,p+1).x,cell=*p>='0'&&*p<='9'?digit:w;char ch[2]{*p,0};text(d,30*k,ImVec2(x+(cell-w)/2,bottom-50*k),IM_COL32(245,247,250,245),ch);x+=cell;}}
+    static float notice=0,held=0;static int lastFrame=-2;static double noticePace=1,noticeHeight=0;
+    const int frame=ImGui::GetFrameCount();if(frame!=lastFrame+1)notice=held=0;lastFrame=frame; // A hidden broadcast must not retain a visible notice.
+    // Shown once the clock has run over 3x for 1.5 s, gone once under 2x: a flight's measured pace wanders about 1x in real time.
+    held=pace>3&&followedHeight?held+ImGui::GetIO().DeltaTime:pace<2||!followedHeight?0:held;const bool accelerated=held>1.5f||(notice>0&&pace>=2&&followedHeight);
+    if(accelerated&&followedHeight){noticePace=pace;noticeHeight=*followedHeight;}
+    notice=std::clamp(notice+(accelerated?1.f:-1.f)*ImGui::GetIO().DeltaTime/.4f,0.f,1.f); // Wall time keeps the fade steady while the mission clock races.
+    if(notice>0){
+        const float fade=notice*notice*(3-2*notice),wrap=std::min(600*k,std::max(1.f,size.x-96*k));
+        const std::string title="Tempo acelerado  "+std::to_string(std::llround(noticePace))+"×",why=decision.what.rfind("planeio",0)==0?"Depois da queima de saída de órbita, a nave cai em direção ao ar, sem motores. O tempo corre mais rápido até a reentrada; a reentrada e o pouso acontecem em tempo real."
+            :noticeHeight>100000?"A nave está em órbita: uma volta leva cerca de 90 minutos. O tempo corre mais rápido até a manobra de saída de órbita, mostrada em tempo real.":"A nave desce da órbita até o ar. A reentrada e o pouso acontecem em tempo real.";
+        std::vector<std::string> lines;const char* p=why.c_str(),*end=p+why.size();
+        while(p<end){const char* stop=f->CalcWordWrapPosition(15*k,p,end,wrap);if(stop==p){stop=p+1;while(stop<end&&(static_cast<unsigned char>(*stop)&0xc0)==0x80)++stop;}
+            lines.emplace_back(p,stop);p=stop;while(p<end&&(*p==' '||*p=='\t'))++p;}
+        const float height=(96+18*static_cast<float>(lines.size()))*k,top=(size.y-height)*.5f;
+        d->AddRectFilled(ImVec2(cx-wrap*.5f-24*k,top),ImVec2(cx+wrap*.5f+24*k,top+height),IM_COL32(0,0,0,static_cast<int>(110*fade)),6*k);
+        text(d,30*k,ImVec2(cx,top+24*k),IM_COL32(245,247,250,240),title,.5f,fade);
+        for(std::size_t i=0;i<lines.size();++i)text(d,15*k,ImVec2(cx,top+(72+18*static_cast<float>(i))*k),IM_COL32(170,178,188,220),lines[i],.5f,fade);
+    }
 }
 }

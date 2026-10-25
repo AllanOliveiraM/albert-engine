@@ -253,11 +253,11 @@ public:
     // |(y, z) - (ȳ, z̄)|² about x; at most `limit` (rad) and what the common gimbal leaves of the 15°, net of the roll the common
     // gimbal itself gives with the thrust centre off the axis (T (ȳ pitch + z̄ yaw)); the torque given (the common's included).
     double roll(Command& c,const State& s,double torque,double limit=6*deg)const{
-        if(lit_.empty())return 0;const Vec m=centre();double spread=0,far=0;
-        for(int e:lit_){const Vec d=nozzle_(e)+m*-1.;spread+=d.y*d.y+d.z*d.z;far=std::max(far,std::hypot(d.y,d.z));}
+        if(lit_.empty())return 0;const Vec m=centre();double spread=0,widest=0;
+        for(int e:lit_){const Vec d=nozzle_(e)+m*-1.;spread+=d.y*d.y+d.z*d.z;widest=std::max(widest,std::hypot(d.y,d.z));}
         const double each=s.thrust/static_cast<double>(lit_.size()),common=s.thrust*(m.y*c.gimbalPitch+m.z*c.gimbalYaw);
         if(lit_.size()<2||!(each*spread>0))return common; // One engine cannot roll without yawing: the roll left to the RCS.
-        const double room=std::max(std::min(limit,15*deg-std::max(std::abs(c.gimbalPitch),std::abs(c.gimbalYaw))),0.)/far,k=std::clamp((torque-common)/(each*spread),-room,room);
+        const double room=std::max(std::min(limit,15*deg-std::max(std::abs(c.gimbalPitch),std::abs(c.gimbalYaw))),0.)/widest,k=std::clamp((torque-common)/(each*spread),-room,room);
         for(int e:lit_){const Vec d=nozzle_(e)+m*-1.;c.gimbals.push_back({e,c.gimbalPitch+k*d.y,c.gimbalYaw+k*d.z});}
         return common+k*each*spread;
     }

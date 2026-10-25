@@ -4,6 +4,7 @@
 //   m below 1 km), its propellant (one share for both tanks, LOX and CH4) and its engines seen from below (lit white by
 //   throttle, off dark, failed red);
 // - between them the mission's clock and its events on a line around now (the past dimmed).
+#include <optional>
 #include <string>
 #include <vector>
 namespace albert {
@@ -14,5 +15,6 @@ struct BroadcastVehicle {
 struct BroadcastEvent {std::string name;double time=0;bool planned=false;}; // time: the mission's seconds (T+).
 // The latest decision a vehicle's flight software took and why, for the top-left corner (time: the mission's seconds; none: empty what).
 struct BroadcastDecision {std::string vehicle,what,why;double time=0;};
-void drawBroadcast(const std::vector<BroadcastVehicle>& vehicles,double missionTime,const std::vector<BroadcastEvent>& events,const BroadcastDecision& decision={});
+struct BroadcastCount {std::string state;double time=0;}; // The followed count keeps its own time through a hold or scrub.
+void drawBroadcast(const std::vector<BroadcastVehicle>& vehicles,double missionTime,const std::vector<BroadcastEvent>& events,const BroadcastDecision& decision={},double pace=1,std::optional<double> followedHeight={},const BroadcastCount& count={});
 }

@@ -1,5 +1,6 @@
 #include "vehicle.hpp"
 #include "lighting.hpp"
+#include "core/vents.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -27,7 +28,7 @@ std::shared_ptr<BufferGeometry> plate(float w,float t,float span,float tip,float
 std::shared_ptr<ShaderMaterial> plumeMaterial(){ // Dense exhaust hides the background; rarefied gas mostly adds light.
     auto m=ShaderMaterial::create();m->name="albert:plume";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::OneMinusSrcAlpha;
     m->uniforms={{"core",Uniform(Vector3(.78f,.86f,1))},{"edge",Uniform(Vector3(1,.28f,.19f))},{"strength",Uniform(0.f)},{"diamonds",Uniform(0.f)},
-        {"time",Uniform(0.f)},{"radii",Uniform(Vector2(1,1))},{"falloff",Uniform(3.f)},{"rarefied",Uniform(0.f)},{"disc",Uniform(0.f)},{"metres",Uniform(1.f)}};return m;
+        {"time",Uniform(0.f)},{"radii",Uniform(Vector2(1,1))},{"falloff",Uniform(3.f)},{"rarefied",Uniform(0.f)},{"disc",Uniform(0.f)},{"metres",Uniform(1.f)},{"vacuum",Uniform(0.f)},{"impingement",Uniform(0.f)}};return m;
 }
 std::shared_ptr<MeshBasicMaterial> glow(std::uint32_t colour,float opacity){ // A jet: unlit, added to what is behind.
     auto m=MeshBasicMaterial::create();m->color=Color(colour);m->transparent=true;m->opacity=opacity;m->blending=Blending::Additive;m->depthWrite=false;m->side=Side::Double;return m;
@@ -74,7 +75,7 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         for(std::size_t k=0;k<x.plume.size();++k){
             auto g=CylinderGeometry::create(1,1,1,24,1,true);g->translate(0,-.5f,0);auto plume=Mesh::create(g,plumeMaterial());plume->position.y=-length;plume->visible=false;
             plume->frustumCulled=false;plume->renderOrder=10+static_cast<int>(k);x.pivot->add(plume);x.plume[k]=plume;} // The shader's spread exceeds the cylinder's bounds.
-        auto exit=CircleGeometry::create(r*.98f,32);exit->rotateX(pi/2);auto m=plumeMaterial();m->side=Side::Front;m->uniforms.at("disc").setValue(1.f);
+        auto exit=CircleGeometry::create(r*.98f,32);exit->rotateX(pi/2);auto m=plumeMaterial();m->uniforms.at("disc").setValue(1.f);
         x.exit=Mesh::create(exit,m);x.exit->position.y=-length-.008f*r;x.exit->visible=false;x.exit->renderOrder=12;x.pivot->add(x.exit); // The open cone alone cannot fill an axial view.
         root_->add(x.pivot);engines_.push_back(std::move(x));
     }
@@ -89,9 +90,15 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         plasma_=Mesh::create(g,m);plasma_->visible=false;plasma_->renderOrder=11;root_->add(plasma_);}
     { // Frost on the tanks below their liquid: white and matte over the steel (not the tiles: the widest tiles' arc of the body).
         double tiles=0;for(const auto& sct:look.sections)tiles=std::max(tiles,std::clamp(sct.tiles,0.,2*3.14159265358979));const float arc=static_cast<float>(tiles);
-        const float r=static_cast<float>(look.diameter/2)*1.006f;
+        const float r=static_cast<float>(look.diameter/2)*1.006f;radius_=r;frostArc_=arc;
         for(const auto& t:look.tanks){auto g=CylinderGeometry::create(r,r,1,48,1,true,arc/2,2*pi-arc);g->translate(0,-.5f,0); // Its top at 0: scaled down from there.
             auto m=Mesh::create(g,assistedMaterial(Color(0xe8edf0),0.f,.95f));m->visible=false;root_->add(m);frost_.push_back({m,t});}}
+    if(!frost_.empty()){ // Fixed slots keep countdown vapour cheap beside the engine plumes.
+        for(const auto& v:core::stackVents(look)){Vector3 d(static_cast<float>(std::sin(v.angle)),0,static_cast<float>(std::cos(v.angle)));
+            vents_.push_back({Vector3(d).multiplyScalar(radius_).setY(static_cast<float>(v.height)),d,static_cast<float>(v.gain)});}
+        auto g=SphereGeometry::create(1,16,10);for(auto& p:mist_){auto m=ShaderMaterial::create();m->name="albert:steam";m->transparent=true;m->depthTest=true;m->depthWrite=false;m->side=Side::Double;
+            m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::OneMinusSrcAlpha;m->uniforms={{"density",Uniform(0.f)},{"seed",Uniform(0.f)},{"time",Uniform(0.f)},{"up",Uniform(Vector3(0,1,0))},{"hull",Uniform(Vector4())},{"size",Uniform(Vector3(1,1,1))}};
+            p.mesh=Mesh::create(g,m);p.mesh->visible=false;p.mesh->renderOrder=8;root_->add(p.mesh);}}
     for(const auto& t:look.thrusters){ // A cold-gas puff out against the push.
         Jet j;auto g=CylinderGeometry::create(.15f,.9f,3.5f,16,1,true);g->translate(0,-1.75f,0);j.mesh=Mesh::create(g,glow(0xdfe8ff,.5f));j.mesh->visible=false;j.mesh->renderOrder=10;
         j.mesh->position.copy(point(t.position));j.mesh->quaternion.setFromUnitVectors(Vector3(0,1,0),axisOf(t.direction).normalize());root_->add(j.mesh);jets_.push_back(std::move(j));
@@ -132,6 +139,44 @@ void Vehicle::shine(float heating,float fill){
     for(auto& f:frost_){const double level=f.tank.full?1.:std::clamp(static_cast<double>(fill),0.,1.),top=f.tank.to-level*(f.tank.to-f.tank.from); // Liquid settles aft.
         f.mesh->visible=level>.005;f.mesh->position.y=static_cast<float>(half-top);f.mesh->scale.y=static_cast<float>(f.tank.to-top);}
 }
+void Vehicle::impinge(float metres,float glow){obstruction_=std::max(0.f,metres);impingement_=std::clamp(glow,0.f,1.f);}
+void Vehicle::venting(float strength,double utc,bool closed){
+    if(!std::isfinite(utc))return;const bool reset=ventTimed_&&utc<ventUtc_;
+    const float dt=ventTimed_&&!reset?static_cast<float>(utc-ventUtc_):0.f;ventUtc_=utc;ventTimed_=true;
+    if(reset){for(auto& p:mist_){p.life=0;p.mesh->visible=false;}for(auto& v:vents_)v.pending=0;}
+    strength=std::isfinite(strength)?std::clamp(strength,0.f,1.f):0;if(vents_.empty())return;
+    if(strength<=0||fire_){for(auto& p:mist_){p.life=0;p.mesh->visible=false;}for(auto& v:vents_)v.pending=0;return;}
+    const float step=std::min(dt,.25f),half=static_cast<float>(length_/2);
+    auto random=[&]{ventSeed_^=ventSeed_<<13;ventSeed_^=ventSeed_>>17;ventSeed_^=ventSeed_<<5;return static_cast<float>(ventSeed_>>8)/16777216.f;};
+    Vector3 pole(0,1,0);Quaternion inverse=root_->quaternion;inverse.invert();pole.applyQuaternion(inverse);Vector3 east;east.crossVectors(pole,Vector3(0,1,0));
+    if(east.lengthSq()<1e-6f)east.set(1,0,0);else east.normalize(); // Earth's render pole is +y; wind must not rotate with the vehicle's roll.
+    for(auto& p:mist_)if(p.life>0){p.age+=dt;if(p.age>=p.life){p.life=0;p.mesh->visible=false;}}
+    for(std::size_t k=0;k<vents_.size();++k){auto& v=vents_[k];const float flow=static_cast<float>(core::ventFlow(k,utc,closed));
+        if(flow<=0){v.pending=0;continue;}v.pending=std::min(2.f,v.pending+step*5.f/static_cast<float>(vents_.size())*flow*v.gain*strength);
+        while(v.pending>=1){v.pending-=1;Puff* slot=nullptr;for(std::size_t i=0;i<24;++i)if(mist_[i].life<=0){slot=&mist_[i];break;}if(!slot)break;
+            auto& p=*slot;p.age=0;p.life=10+4*random();p.seed=random();p.strength=v.gain*flow;p.outward=v.direction;p.origin=Vector3(v.origin).add(Vector3(p.outward).multiplyScalar(1.5f));p.velocity=Vector3(v.direction).multiplyScalar(4+2*random());
+            p.drift=Vector3(east).multiplyScalar(1.1f+.8f*random());p.drift.y=-.18f-.16f*random();p.mesh->quaternion.setFromUnitVectors(Vector3(1,0,0),v.direction);}}
+    for(std::size_t i=24;i<40;++i){auto& p=mist_[i];const auto& f=frost_[(i-24)%frost_.size()];
+        if(!f.mesh->visible||frostArc_>=2*pi){p.life=0;p.mesh->visible=false;continue;}
+        if(p.life<=0){p.age=0;p.seed=random();p.strength=.09f+.05f*random();p.life=3+3*random();p.level=random();
+            const float arc=2*pi-frostArc_;p.width=std::min(.25f+.35f*random(),radius_*arc*.25f);const float margin=std::atan2(p.width,radius_);
+            const float angle=frostArc_/2+margin+(arc-2*margin)*(static_cast<float>(i-24)+.15f+.7f*random())/16.f;
+            p.origin.set(std::sin(angle)*(radius_+.11f),0,std::cos(angle)*(radius_+.11f));p.mesh->rotation.set(0,angle,0);}
+    }
+    for(std::size_t i=40;i<mist_.size();++i){auto& p=mist_[i];if(p.life<=0){p.age=0;p.life=9+6*random();p.seed=random();p.strength=.15f+.1f*random();
+            const float angle=2*pi*random();p.outward.set(std::sin(angle),0,std::cos(angle));p.origin=Vector3(p.outward).multiplyScalar(radius_+3).setY(-half-1.f);p.drift=Vector3(east).multiplyScalar(1.1f+.7f*random());p.mesh->rotation.set(0,angle,0);}}
+    for(std::size_t i=0;i<mist_.size();++i){auto& p=mist_[i];if(p.life<=0)continue;auto& m=*p.mesh;const float a=p.age,t=a/p.life,fade=std::min(1.f,(p.life-a)/2.f),birth=std::min(1.f,.15f+a/.3f);float density=0;
+        if(i<24){const float grow=1-std::exp(-a/2.6f),jet=.7f*(1-std::exp(-a/.7f));m.scale.set(1.5f+(13+3*p.seed)*grow,.35f+(8+3*p.seed)*grow,.45f+(11+3*p.seed)*grow);
+            m.position.copy(p.origin).add(Vector3(p.outward).multiplyScalar(m.scale.x-1.5f)).add(Vector3(p.velocity).multiplyScalar(jet)).add(Vector3(p.drift).multiplyScalar(a));m.position.y=std::max(m.position.y,-half-1.f+.5f*m.scale.y);
+            density=.65f*p.strength*birth*std::exp(-a/4.5f)*fade;}
+        else if(i<40){const auto& f=frost_[(i-24)%frost_.size()];const float h=f.mesh->scale.y,sheet=std::min(1.2f,h*.2f);m.scale.set(p.width,sheet,.11f);
+            m.position.copy(p.origin);m.position.y=f.mesh->position.y-sheet-(h-2*sheet)*p.level-.5f*a;density=p.strength*std::sin(pi*t)*fade;
+            auto& u=m.material()->as<ShaderMaterial>()->uniforms;u.at("hull").setValue(Vector4(radius_,radius_+.11f,f.mesh->position.y-h-m.position.y,f.mesh->position.y-m.position.y));u.at("size").setValue(m.scale);}
+        else{m.scale.set(3+10*t,.3f+.65f*t,3+8*t);m.position.copy(p.origin).add(Vector3(p.drift).multiplyScalar(a));m.position.y+=m.scale.y*.7f;density=p.strength*birth*fade*(1-.65f*t);}
+        if(i<24||i>=40){const float reach=i<24?m.scale.x:m.scale.z,gap=radius_+reach-m.position.dot(p.outward);if(gap>0)m.position.add(Vector3(p.outward).multiplyScalar(gap));} // Keep growing puffs outside the hull.
+        m.visible=density*strength>.001f;auto& u=m.material()->as<ShaderMaterial>()->uniforms;u.at("density").setValue(density*strength);u.at("seed").setValue(p.seed*97.f);u.at("time").setValue(a);
+    }
+}
 void Vehicle::animate(const std::vector<float>* parts){
     const auto now=std::chrono::steady_clock::now();const float dt=static_cast<float>(std::chrono::duration<double>(now-updated_).count());updated_=now;time_+=dt;const float time=static_cast<float>(std::fmod(time_,4096.));
     const std::size_t engines=engines_.size(),need=engines*3+jets_.size()+7;const std::size_t surfaces=parts&&parts->size()>=need?parts->size()-need:0;
@@ -148,7 +193,8 @@ void Vehicle::animate(const std::vector<float>* parts){
         vapour_->scale.y=tail(3,0)<0?-1.f:1.f;const float v=std::clamp(1-std::abs(mach-1.f)/(mach<1?.12f:.2f),0.f,1.f)*std::clamp((pressure-1e4f)/3e4f,0.f,1.f);vapour_->visible=v>.01f;
         vapour_->material()->opacity=.42f*v;}
     const float diamonds=std::clamp((pressure-2e4f)/6e4f,0.f,1.f); // Shock diamonds in the plume, in thick air.
-    std::size_t lit=0;for(std::size_t i=0;i<engines;++i)lit+=at(3*i)>.01f;
+    const float space=std::clamp((expansion-.98f)/.02f,0.f,1.f),vacuum=space*space*(3-2*space),hit=obstruction_>0?impingement_:0; // Keep the MECO bloom before smoothly losing collisional light in vacuum.
+    std::size_t lit=0;thrust_=0;for(std::size_t i=0;i<engines;++i){lit+=at(3*i)>.01f;thrust_+=std::clamp(at(3*i),0.f,1.f)/static_cast<float>(engines);}
     const float crowd=std::min(1.f,6.f/static_cast<float>(std::max<std::size_t>(lit,1))); // Many plumes overlap: each fainter.
     for(std::size_t i=0;i<engines;++i){ // The gimballed thrust as the physics turns it: yaw about z, then pitch about y.
         auto& e=engines_[i];const float share=at(3*i),pitch=at(3*i+1),yaw=at(3*i+2);const auto& d=e.direction;
@@ -158,15 +204,18 @@ void Vehicle::animate(const std::vector<float>* parts){
         e.heat+=(on?flow-e.heat:-e.heat)*(1-std::exp(-dt/(on?8.f:45.f))); // Thermal inertia leaves a red lip for roughly 30-60 seconds after a long burn.
         auto& bell=e.bell->uniforms;bell.at("burn").setValue(blackBody(300+1000*e.heat));bell.at("lip").setValue(blackBody(300+1350*e.heat));bell.at("emissive").setValue(aftGlow_);
         if(e.hot){e.hot->visible=e.heat>.4f;e.hot->material()->as<MeshBasicMaterial>()->opacity=.35f*std::max(0.f,(e.heat-.4f)/.6f);} // Keep the radiatively cooled vacuum extension warm between burns.
-        e.exit->visible=on;auto& exit=e.exit->material()->as<ShaderMaterial>()->uniforms;exit.at("strength").setValue(.95f*throttle);exit.at("time").setValue(time+static_cast<float>(i)*1.73f);
+        e.exit->visible=on;auto& exit=e.exit->material()->as<ShaderMaterial>()->uniforms;exit.at("strength").setValue((obstruction_>0?1.4f*hit*std::sqrt(crowd):.95f*(1-.6f*vacuum))*throttle);exit.at("time").setValue(time+static_cast<float>(i)*1.73f);
+        e.exit->position.y=e.plume[0]->position.y-(obstruction_>0?obstruction_:.008f*r);const float splash=obstruction_>0?5+3*hit:1;e.exit->scale.set(splash,1,splash); // Reuse the axial glow where the gas spreads over the obstruction.
+        exit.at("core").setValue(obstruction_>0?Vector3(1,.75f,.3f):Vector3(.78f,.86f,1));exit.at("edge").setValue(obstruction_>0?Vector3(1,.55f,.15f):Vector3(1,.28f,.19f));
         for(std::size_t k=0;k<e.plume.size();++k){auto& p=*e.plume[k];const bool core=k==1;
             const float strength=(core?1.7f*(.2f+.8f*air)*std::sqrt(crowd):(1.5f*air+.045f+.09f*(1-expansion))*crowd)*throttle;p.visible=on;
-            const float metres=r*flow*(core?34.f+16.f*expansion:160.f+700.f*expansion); // Raptor: ~90 m visible at sea level, hundreds of metres near MECO.
+            const float free=r*flow*(core?(34.f+16.f*expansion)*(1-vacuum)+30.f*vacuum:(160.f+180.f*expansion)*(1-vacuum)+100.f*vacuum),metres=obstruction_>0?obstruction_:free;
+            const float nozzle=core?1.f:1.04f,spread=core?1.35f+3.f*expansion:3.f+44.f*expansion+44.f*expansion*expansion; // Width grows faster than length as the ambient confinement falls.
             p.scale.set(r*flow,metres,r*flow);
             auto& u=p.material()->as<ShaderMaterial>()->uniforms;u.at("strength").setValue(strength);u.at("time").setValue(time+static_cast<float>(i)*1.73f);
-            u.at("radii").setValue(Vector2(core?1.f:1.04f,core?1.35f+3.f*expansion:3.f+100.f*expansion*expansion));u.at("metres").setValue(metres);
+            u.at("radii").setValue(Vector2(nozzle,nozzle+(spread-nozzle)*std::min(1.f,metres/std::max(free,.001f))));u.at("metres").setValue(metres);
             u.at("core").setValue(core?Vector3(.78f,.86f,1):Vector3(1-.4f*expansion,.82f-.12f*expansion,.32f+.68f*expansion));u.at("edge").setValue(core?Vector3(.44f,.55f,1):Vector3(1-.55f*expansion,.28f+.22f*expansion,.04f+.96f*expansion));
-            u.at("diamonds").setValue(diamonds);u.at("falloff").setValue(core?3.8f:1.2f);u.at("rarefied").setValue(expansion);}
+            u.at("diamonds").setValue(diamonds);u.at("falloff").setValue(core?3.8f:1.2f-.85f*expansion);u.at("rarefied").setValue(expansion);u.at("vacuum").setValue(vacuum);u.at("impingement").setValue(hit);}
     }
     for(auto& p:parts_){const float d=p.surface>0&&p.surface<=surfaces?at(engines*3+p.surface-1):0.f;
         Quaternion turn;turn.setFromAxisAngle(p.axis,static_cast<float>(p.gain*d+p.offset));p.pivot->quaternion.copy(turn).multiply(p.base);}

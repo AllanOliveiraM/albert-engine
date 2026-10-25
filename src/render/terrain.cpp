@@ -187,6 +187,7 @@ struct Terrain::Impl {
     // visible ones are built; a node evicted earlier is drawn by its children meanwhile.
     void visit(const Key& k,const Vec& camera,double distance,bool cull,const Frustum* frustum){
         const Shape& s=shape(k);if(cull&&culled(s,camera,distance,frustum))return;
+        if(auto* n=node(k))n->lastUsed=frame; // Every node the selection passes, drawn or not: one whose children are all out of view drew nothing, went unused, was released, and its parent then stopped refining (every 2 s the ground fell to coarse nodes for a few frames).
         const double size=2*std::sin(s.radius); // Chord across the node.
         const bool split=k.level<body.maxLevel&&std::max(0.,(camera-s.centre).length()-size)<1.25*size;
         std::array<Key,4> children;int n=0;for(std::uint32_t dy:{0u,1u})for(std::uint32_t dx:{0u,1u})children[static_cast<std::size_t>(n++)]={k.face,k.level+1,k.x*2+dx,k.y*2+dy};
@@ -215,7 +216,6 @@ bool Terrain::update(const Vector3& camera,const Frustum* frustum,bool horizonCu
     for(const auto& k:previous)if(auto* n=g.node(k);n&&n->morph&&!now.count(pack(k))){n->morph->t=1;g.stepMorph(*n,0);} // Hidden mid-way: its own shape.
     for(const auto& k:g.selected){auto& n=*g.node(k);n.mesh->visible=true;g.finest=std::max(g.finest,k.level);if(n.detailVersion!=g.detailVersion)g.applyDetail(n);
         if(n.morph)g.stepMorph(n,seconds);else if(!shown.count(pack(k))&&k.level&&shown.count(pack({k.face,k.level-1,k.x/2,k.y/2})))g.beginMorph(k,n);
-        for(Key a=k;;){if(auto* up=g.node(a))up->lastUsed=g.frame;if(!a.level)break;a={a.face,a.level-1,a.x/2,a.y/2};} // Ancestors too: the selection descends through them.
         if(n.provisional&&n.generation<generation)g.request(k,k.level*1e3,true); // Finer data arrived.
         const auto& s=g.shape(k);g.solidAngle+=triangle(s.corners[0],s.corners[1],s.corners[2])+triangle(s.corners[0],s.corners[2],s.corners[3]);}
     static const bool debug=std::getenv("ALBERT_TERRAIN_DEBUG")!=nullptr;

@@ -30,6 +30,7 @@
 #include <map>
 #include <cmath>
 #include <cstdio>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -77,7 +78,7 @@ int main(int argc,char** argv){try{
     if(!camera.empty()){auto c=api::CameraService::NewStub(channel);api::Applied done; // In order: each applied before the next.
         for(const auto& a:camera){const std::string v=a.substr(a.find('=')+1);
             if(a.rfind("--focus=",0)==0){api::FocusRequest r;r.set_id(v);ex::call([&](grpc::ClientContext& x){return c->Focus(&x,r,&done);});}
-            else if(a.rfind("--orbit=",0)==0){double az=0,el=0,scale=0;const int n=std::sscanf(v.c_str(),"%lf,%lf,%lf",&az,&el,&scale);api::OrbitRequest r;r.set_azimuth_radians(az*M_PI/180);r.set_elevation_radians(el*M_PI/180);if(n>=3)r.set_distance_scale(scale);
+            else if(a.rfind("--orbit=",0)==0){double az=0,el=0,scale=0;const int n=std::sscanf(v.c_str(),"%lf,%lf,%lf",&az,&el,&scale);api::OrbitRequest r;r.set_azimuth_radians(az*std::numbers::pi/180);r.set_elevation_radians(el*std::numbers::pi/180);if(n>=3)r.set_distance_scale(scale);
                 ex::call([&](grpc::ClientContext& x){return c->Orbit(&x,r,&done);});}
             else{api::CaptureRequest r;r.set_file_name(v);ex::call([&](grpc::ClientContext& x){return c->Capture(&x,r,&done);});}}
         return 0;}

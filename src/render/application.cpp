@@ -1078,6 +1078,8 @@ int albert::runRenderer(int argc, char** argv) {
         controls.enablePan = false;
         controls.minDistance = 1.01f;
         controls.maxDistance = 65000.f;
+        controls.minPolarAngle = .035f; // 2° off the orbit's axis: straight above or below, the view's roll is undefined and it shook.
+        controls.maxPolarAngle = static_cast<float>(PI) - .035f;
 
         auto stars = albert::makeStarField(albert::assetDirectory() / "stars.csv", simulatedTDB());
         scene->add(stars);
@@ -1098,7 +1100,7 @@ int albert::runRenderer(int argc, char** argv) {
         bool broadcasting=false; // The broadcast's panels were shown last frame: the corner views make room for them.
         // The flight's sound at the camera: muted until "Som do voo" is ticked (the device opens then); its emissions over
         // the last ten minutes and the listener's last place.
-        bool soundOn=false;std::unique_ptr<albert::Sound> sound;
+        bool soundOn=true;std::unique_ptr<albert::Sound> sound; // On unless unticked (ALBERT_AUDIO=0 keeps a run silent).
         struct Heard {std::vector<albert::physics::acoustics::Emission> emissions;std::size_t booms=0;bool blasted=false;};std::map<std::string,Heard> heardFlights; // By scene id.
         std::optional<std::pair<double,albert::physics::V3>> lastListener;albert::physics::V3 listenerVelocity;
         const bool soundStats=std::getenv("ALBERT_SOUND_STATS")!=nullptr;auto soundReport=std::chrono::steady_clock::now();
@@ -1758,8 +1760,9 @@ int albert::runRenderer(int argc, char** argv) {
             const auto gauges=preferences.broadcast&&rpc?rpc->flightGauges():std::vector<albert::rpc::FlightServices::Gauge>{};
             broadcasting=!gauges.empty();
             if(!gauges.empty()){
-                std::vector<albert::BroadcastVehicle> vehicles;std::vector<albert::BroadcastEvent> events;double start=gauges.front().zero,shown=simulatedUtc;
+                std::vector<albert::BroadcastVehicle> vehicles;std::vector<albert::BroadcastEvent> events;albert::BroadcastCount count;double start=gauges.front().zero,shown=simulatedUtc;
                 for(const auto& g:gauges){if(g.id=="flight"){start=g.zero;if(g.stopped)shown=std::min(shown,g.stop);} // Its clock stopped (a scrub, an abort, its end): there.
+                    if(g.id==focus)count={g.countState,g.countTime};
                     albert::BroadcastVehicle v;v.label=g.label;v.speed=g.speed;v.height=g.height;v.propellant=g.propellant;
                     for(const auto& e:g.engines)v.engines.push_back({e.y,e.z,e.radius,e.throttle,e.on,e.failed});vehicles.push_back(std::move(v));}
                 for(const auto& g:gauges)for(const auto& m:g.milestones)if(std::none_of(events.begin(),events.end(),[&](const albert::BroadcastEvent& e){return e.name==m.name;}))
@@ -1768,7 +1771,7 @@ int albert::runRenderer(int argc, char** argv) {
                 if(vehicles.size()>2)vehicles.resize(2);if(vehicles.size()==2)vehicles[1].right=true;else vehicles[0].right=vehicles[0].engines.size()<=6;
                 albert::BroadcastDecision decision; // The newest of every flight's latest decision.
                 for(const auto& g:gauges)if(g.decided>=0&&!g.decision.empty()&&(decision.what.empty()||g.decided-start>decision.time))decision={g.label,g.decision,g.why,g.decided-start};
-                albert::drawBroadcast(vehicles,shown-start,events,decision);
+                albert::drawBroadcast(vehicles,shown-start,events,decision,simulation.read().pace,[&]() -> std::optional<double>{for(const auto& g:gauges)if(g.id==focus)return g.height;return std::nullopt;}(),count);
             }
             if(rpc&&preferences.playground&&menuProgress<=0.f)drawPlayground(*rpc,display,margin); // Live interference on the flights.
 #else
@@ -1815,7 +1818,7 @@ int albert::runRenderer(int argc, char** argv) {
                 if(approximatePositions) ImGui::TextColored(refreshError.empty() ? busy : attention, "Posicoes aproximadas");
                 else if(shown.limited) ImGui::TextColored(attention, "Limite: 1900 a 2100");
                 else if(!shown.live && shown.rate == 0.) ImGui::TextDisabled("Pausado");
-                else if(!shown.live) ImGui::TextColored(busy, "Simulado: %s%s", shown.rate < 0 ? "voltando " : "", speedLabel(shown.rate).c_str());
+                else if(!shown.live) ImGui::TextColored(busy, "Simulado: %s%s", shown.pace < 0 ? "voltando " : "", speedLabel(shown.pace).c_str());
                 else if(timing.quality==albert::time::Quality::Local)ImGui::TextColored(attention,"Horario local");
                 else if(timing.quality!=albert::time::Quality::Synchronized)ImGui::TextColored(attention,"Horario estimado");
                 else if (refreshing || refreshingOrbits || cloudSync.active || catalog.busy()) ImGui::TextColored(busy, "Atualizando dados");
@@ -1835,7 +1838,7 @@ int albert::runRenderer(int argc, char** argv) {
                 if (ImGui::BeginPopup("Tempo da simulacao")) {
                     protectPanel();
                     // Follow changes made elsewhere (API) while the panel is open.
-                    if (shown.rate != 0.) {chosenSpeed = std::abs(shown.rate);backwards = shown.rate < 0;}
+                    if (shown.rate != 0.) {chosenSpeed = std::abs(shown.pace);backwards = shown.pace < 0;}
                     const float spacing = ImGui::GetStyle().ItemSpacing.x, full = ImGui::GetContentRegionAvail().x;
                     const float half = (full - spacing) / 2, third = (full - 2 * spacing) / 3, quarter = (full - 3 * spacing) / 4;
                     auto selectable = [&](const char* label, bool selected, ImVec2 size) {
@@ -2380,6 +2383,10 @@ int albert::runRenderer(int argc, char** argv) {
             if(eyeOrigin||originId!=nextOriginId){camera->position.add(shift);controls.target.add(shift);originId=nextOriginId;}
             if(transition.active)transition.startTarget.add(shift);
             sceneOrigin=nextOrigin;
+#ifdef ALBERT_HAS_RPC
+            if(rpc)for(const auto& x:rpc->flightSounds())if(x.id.rfind("site",0)==0&&x.id.find('/')==std::string::npos)objects.deluge(x.id,static_cast<float>(x.emission.pad.waterFlow/1000)); // Its pad's deluge (kg/s) as the trench's spray.
+            if(rpc)for(const auto& g:rpc->flightGauges())objects.count(g.id,g.countState=="HOLD"?g.countTime:simulatedUtc-g.zero,g.countState=="SCRUB"); // The vents' pressurisation closing.
+#endif
             objects.sync(registry,simulatedUtc,sceneOrigin);
             earthPosition.copy(earth->position);
             sunPosition.copy(sun->position);
@@ -2862,10 +2869,11 @@ int albert::runRenderer(int argc, char** argv) {
             // the frame cap pacing it, so the flights keep moving and their samples keep flowing.
             graphics.setSamples(preferences.antialias?4:1);graphics.setVsync(preferences.vsync&&graphics.focused());ImGui::GetIO().FontGlobalScale=preferences.uiScale;
 #ifdef ALBERT_HAS_RPC
-            { // The flights' sound at the camera, at the shown instant (Earth flights; physics/acoustics.hpp): each heard its own way and
-              // summed by band, the crackle by the loudest engines, a boom as each Mach cone sweeps over the camera.
+            { // Retarded spectra stay separate so distant vents and the stack keep their directions.
                 namespace ph=albert::physics;namespace ac=ph::acoustics;
-                const auto sources=rpc?rpc->flightSounds():std::vector<albert::rpc::FlightServices::Sound>{};bool audible=false;ac::Spectrum levels;levels.fill(-1e9);float pan=0;double engines=-1e9;
+                const auto sources=rpc?rpc->flightSounds():std::vector<albert::rpc::FlightServices::Sound>{};
+                struct Candidate {albert::Sound::Voice voice;double level=-1e9;std::array<ac::Boom,2> booms{};unsigned count=0;};
+                std::array<Candidate,albert::Sound::voices> selected{};
                 if(soundOn&&!sound&&!smokeTest)sound=std::make_unique<albert::Sound>(true);else if(!soundOn&&sound)sound.reset();
                 if(sound)sound->setVolume(preferences.volume);
                 for(auto it=heardFlights.begin();it!=heardFlights.end();)if(std::none_of(sources.begin(),sources.end(),[&](const auto& x){return x.id==it->first;}))it=heardFlights.erase(it);else ++it;
@@ -2873,43 +2881,47 @@ int albert::runRenderer(int argc, char** argv) {
                     // The camera in the Earth's rotating frame (renderPosition inverted); its velocity there between shown instants.
                     const double r=albert::core::earthRadiusMeters;const auto& c=camera->position;
                     const ph::V3 gcrf{c.x*r+sceneOrigin.x,-c.z*r+sceneOrigin.y,c.y*r+sceneOrigin.z};const ph::Tt tt=ph::ttFromUtc(simulatedUtc);
-                    const ph::V3 here=ph::Rotation::iau(ph::secondsSinceJ2000(tt)-(simulatedUtc-946728000.)).at(tt).fixed*gcrf;
+                    const auto fixed=ph::Rotation::iau(ph::secondsSinceJ2000(tt)-(simulatedUtc-946728000.)).at(tt).fixed;const ph::V3 here=fixed*gcrf;
+                    Vector3 right;right.setFromMatrixColumn(*camera->matrixWorld,0);right.normalize();const ph::V3 cameraRight=fixed*ph::V3{right.x,-right.z,right.y};
                     if(lastListener&&simulatedUtc>lastListener->first)listenerVelocity=(here-lastListener->second)*(1/(simulatedUtc-lastListener->first));
                     else if(!lastListener||simulatedUtc<lastListener->first)listenerVelocity={};
                     lastListener={simulatedUtc,here};
-                    double total=0,weighted=0;
                     for(const auto& source:sources){auto& h=heardFlights[source.id];auto& emissions=h.emissions;
                         if(!emissions.empty()&&source.utc<emissions.back().time)h={}; // A new flight, or a replay.
                         if(emissions.empty()||source.utc>=emissions.back().time+.05)emissions.push_back(source.emission);
+                        else if(source.utc==emissions.back().time)emissions.back()=source.emission; // Clock-only updates can close a valve without advancing physics.
                         if(emissions.size()>2&&emissions.front().time<source.utc-660)
                             emissions.erase(emissions.begin(),std::lower_bound(emissions.begin(),emissions.end(),source.utc-600,[](const ac::Emission& e,double t){return e.time<t;}));
                         const auto air=source.air;const auto at=[&](const ph::Geodetic& g){return air?air->at(tt,g.latitude,g.longitude,g.height):ph::standardAtmosphere(g.height);};
-                        float side=0; // Where it is on the screen: -1 left to 1 right.
-                        if(const auto node=objects.nodes().find(source.id);node!=objects.nodes().end()){
-                            Vector3 to=node->second->position;to.sub(camera->position);Vector3 right;right.setFromMatrixColumn(*camera->matrixWorld,0);
-                            if(to.length()>0)side=to.normalize().dot(right.normalize());}
                         const auto heard=ac::hear(emissions,simulatedUtc,here,listenerVelocity,source.planet,at);
-                        if(heard.audible){audible=true;const double power=std::pow(10.,ac::overall(heard.levels)/10);total+=power;weighted+=power*side;engines=std::max(engines,heard.rocket);
-                            for(int b=0;b<ac::bands;++b){auto& l=levels[static_cast<std::size_t>(b)];l=10*std::log10(std::pow(10.,l/10)+std::pow(10.,heard.levels[static_cast<std::size_t>(b)]/10)+1e-300);}}
+                        ph::V3 position=source.emission.position;
+                        if(heard.audible){const auto next=std::upper_bound(emissions.begin(),emissions.end(),heard.emitted,[](double t,const ac::Emission& e){return t<e.time;});
+                            if(next!=emissions.begin()){const auto& prev=*(next-1);position=prev.position;if(next!=emissions.end()&&next->time>prev.time)position=position+(next->position-position)*std::clamp((heard.emitted-prev.time)/(next->time-prev.time),0.,1.);}}
+                        const auto direction=position-here;const double distance=ph::norm(direction);const float side=distance>0?static_cast<float>(std::clamp(ph::dot(direction,cameraRight)/distance,-1.,1.)):0.f;
+                        Candidate candidate;auto& voice=candidate.voice;voice.id=14695981039346656037ull;for(unsigned char c:source.id)voice.id=(voice.id^c)*1099511628211ull;if(!voice.id)voice.id=1;
+                        voice.levels=heard.levels;voice.audible=heard.audible;voice.pan=side;voice.crackle=static_cast<float>(.6*std::clamp((heard.rocket-105)/20,0.,1.));
+                        if(heard.audible)candidate.level=ac::overall(heard.levels);
                         const auto booms=ac::booms(emissions,simulatedUtc,here,source.planet,at); // One more cone over the camera, just now: its boom.
-                        if(booms.size()>h.booms&&booms.back().time>simulatedUtc-1&&sound)sound->boom(booms.back().overpressure,booms.back().duration,side);
+                        if(booms.size()>h.booms&&booms.back().time>simulatedUtc-1)candidate.booms[candidate.count++]=booms.back();
                         h.booms=booms.size();
                         if(!h.blasted)if(const auto e=std::find_if(emissions.begin(),emissions.end(),[](const ac::Emission& x){return x.blast>0;});e!=emissions.end()){ // It blew up: its blast, once arrived.
                             const double r=ph::norm(here-e->position),c=at(ph::geodetic(source.planet,here)).sound;
                             if(simulatedUtc>=e->time+r/(c>0?c:340.)){h.blasted=true;const auto b=ac::blast(e->blast,r,at(ph::geodetic(source.planet,here)).pressure);
-                                if(sound&&b.overpressure>.01)sound->boom(b.overpressure,std::max(4*b.duration,.08),side);}}
+                                if(b.overpressure>.01)candidate.booms[candidate.count++]={simulatedUtc,b.overpressure,std::max(4*b.duration,.08)};}}
+                        for(unsigned k=0;k<candidate.count;++k)candidate.level=std::max(candidate.level,20*std::log10(std::max(candidate.booms[k].overpressure,1e-20)/20e-6));
+                        if(voice.audible||candidate.count)for(unsigned k=0;k<selected.size();++k)if(candidate.level>selected[k].level){
+                            for(unsigned j=static_cast<unsigned>(selected.size())-1;j>k;--j)selected[j]=selected[j-1];selected[k]=candidate;break;}
                         if(soundStats&&steadyNow>=soundReport) // ALBERT_SOUND_STATS: once a second.
                             std::printf("sound %s: %s, %.1f dB SPL (%.1f dB above 20 Hz, engines %.1f dB) from %.0f m, %.2f s late, Doppler %.3f, %zu booms\n",source.id.c_str(),
                                 heard.audible?"audible":"silent",heard.audible?ac::overall(heard.levels):-1e9,[&]{ac::Spectrum a=heard.levels;if(!heard.audible)a.fill(-1e9);for(int b=0;b<12;++b)a[static_cast<std::size_t>(b)]=-1e9;return ac::overall(a);}(),
                                 heard.rocket,heard.distance,heard.delay,heard.doppler,booms.size());
                     }
-                    if(soundStats&&steadyNow>=soundReport){soundReport=steadyNow+std::chrono::seconds(1);
-                        std::printf("sound: %s, %.1f dB SPL, adaptation %.1f dB\n",sound&&sound->playing()?"device":"muted",ac::overall(levels),sound?sound->adaptation():0.);std::fflush(stdout);}
-                    if(total>0)pan=static_cast<float>(weighted/total);
                 }else lastListener.reset();
-                // Crackle (the shocks in a big rocket's jet noise, steepening on the way) from ~105 dB of engines heard, at most 60% of
-                // the treble's power at ~125 dB; air absorption leaves little treble far away, so then mostly the rumble.
-                if(sound)sound->hear(levels,audible,pan,dt,static_cast<float>(.6*std::clamp((engines-105)/20,0.,1.)));
+                std::array<albert::Sound::Voice,albert::Sound::voices> voices{};double total=0;
+                for(unsigned k=0;k<selected.size();++k){voices[k]=selected[k].voice;if(voices[k].audible)total+=std::pow(10.,ac::overall(voices[k].levels)/10);}
+                if(sound){sound->hear(voices,dt);for(const auto& c:selected)for(unsigned k=0;k<c.count;++k)sound->boom(c.booms[k].overpressure,c.booms[k].duration,c.voice.pan,c.voice.id);}
+                if(soundStats&&steadyNow>=soundReport){soundReport=steadyNow+std::chrono::seconds(1);
+                    std::printf("sound: %s, %.1f dB SPL, adaptation %.1f dB\n",sound&&sound->playing()?"device":"muted",total>0?10*std::log10(total):-1e9,sound?sound->adaptation():0.);std::fflush(stdout);}
             }
 #endif
             const bool insetFrame=(++insetFrames&1)==0;if(insetFrame)insetTexture=0; // The second view every other frame: half its cost.
@@ -2929,13 +2941,20 @@ int albert::runRenderer(int argc, char** argv) {
                         const auto& node=*focused->second;float lowest=1e9f,reach=.1f;Vector3 target;std::size_t i=0;
                         for(const auto& pivot:node.children){if(pivot->children.empty())continue;const auto bell=pivot->children.front()->material();if(!bell||bell->name!="albert:bell")continue;
                             if(i>=look->engines.size())break;const float r=static_cast<float>(look->engines[i++].exitRadius),length=(r>1?2.6f:2.2f)*r;
-                            Vector3 exit(0,-length,0),along(0,1,0);exit.applyQuaternion(pivot->quaternion).add(pivot->position);along.applyQuaternion(pivot->quaternion);
-                            lowest=std::min(lowest,exit.y-r*std::sqrt(std::max(0.f,1-along.y*along.y)));reach=std::max(reach,std::hypot(exit.x,exit.z)+r);target.add(exit);}
-                        const float distance=std::clamp(reach*2.6f,10.f,14.f),floor=-static_cast<float>(look->length)*.5f+.5f;target.multiplyScalar(1.f/static_cast<float>(std::max<std::size_t>(i,1)));
-                        Vector3 eye(distance*std::cos(.52f),std::max(lowest-.35f,floor),distance*std::sin(.52f)),up(0,1,0); // The base clearance takes precedence over looking up into a low bell.
+                            Vector3 exit(0,-length,0);exit.add(pivot->position); // At rest: the camera holds still while the bells swing in its view (aimed at them as swung, it shook).
+                            lowest=std::min(lowest,exit.y);reach=std::max(reach,std::hypot(exit.x,exit.z)+r);target.add(exit);}
+                        // On a mount's deck (its base metres over its site's ground): from under the bells, just over the flame bucket, looking up
+                        // at them through the deck's opening, as the pads' trench cameras do; else beside them, over the base.
+                        float clear=0;if(const auto site=objects.nodes().find("site"+focus.substr(6));site!=objects.nodes().end()){Vector3 up(0,0,1),aft(0,-1,0),d=node.position;
+                            up.applyQuaternion(site->second->quaternion);aft.applyQuaternion(node.quaternion);d.sub(site->second->position);
+                            clear=static_cast<float>(d.dot(up)*albert::core::earthRadiusMeters+look->length/2*aft.dot(up));}
+                        const bool under=clear>8;const float half=static_cast<float>(look->length)*.5f;target.multiplyScalar(1.f/static_cast<float>(std::max<std::size_t>(i,1)));
+                        const float distance=under?6.f:std::clamp(reach*2.6f,10.f,14.f),floor=under?-half-clear+5.6f:-half+.5f;
+                        Vector3 eye(distance*std::cos(.52f),under?floor:std::max(lowest-.35f,floor),distance*std::sin(.52f)),up(0,1,0); // Beside: the base clearance takes precedence over looking up into a low bell.
                         target.multiplyScalar(node.scale.x).applyQuaternion(node.quaternion).add(node.position);eye.multiplyScalar(node.scale.x).applyQuaternion(node.quaternion).add(node.position);up.applyQuaternion(node.quaternion);
                         insetCamera->position.copy(eye);insetCamera->up.copy(up);insetCamera->lookAt(target);
-                        insetCamera->fov=2*std::atan2(std::max(reach*1.15f*static_cast<float>(h)/static_cast<float>(w),2.f),distance)*static_cast<float>(180/PI);insetCamera->nearPlane=std::clamp(distance*node.scale.x*.02f,1e-9f,100.f);
+                        const float away=under?std::hypot(distance,lowest-floor):distance;
+                        insetCamera->fov=std::min(100.f,2*std::atan2(std::max(reach*1.15f*static_cast<float>(h)/static_cast<float>(w),2.f),away)*static_cast<float>(180/PI));insetCamera->nearPlane=std::clamp(away*node.scale.x*.02f,1e-9f,100.f);
                     }else{
                     // Its own camera, the main one's moves aside: three-quarters off the vehicle's side (its local x turned 30° toward
                     // local z, rolling with it), the horizon level (up: away from the Earth's centre; along the vehicle when looking straight down).

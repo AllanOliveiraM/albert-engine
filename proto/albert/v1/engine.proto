@@ -308,6 +308,9 @@ message CreateFlightRequest {
   // The pad's clamps hold the vehicle until a release command, however much it pushes (a launch commit by the flight software);
   // unset, they let go once its thrust beats its weight.
   bool hold_down=23;
+  // On the pad, the vehicle's base this high over the site's ground (0-100 m; default 0): it stands on a launch mount there,
+  // held by its clamps; the ground stays at the site's height.
+  optional double deck_height_meters=24;
   // Central body. Coordinates (sites and samples): Earth WGS 84; Moon mean-Earth frame over the
   // 1737.4 km sphere; Mars IAU 2015 frame, east longitude and ellipsoid-normal (planetographic)
   // latitude over the 3396.19 x 3376.20 km ellipsoid. Site heights -10 to 25 km off Earth.
@@ -327,7 +330,7 @@ message CreateFlightRequest {
   // struck by the stages' hard points.
   repeated StructureDefinition structures=21;
   // The site's scenery (a pad's tower, mount, tanks), drawn only, fixed to the ground with the structures (drawn as steel
-  // bars; parts on a hinged one turn with it): up to 512 parts. The scene shows them as object "site" ("site.<id>" for the
+  // bars; parts on a hinged one turn with it): up to 2048 parts (merged by colour when drawn). The scene shows them as object "site" ("site.<id>" for the
   // other flights; none without scenery or off the Earth).
   repeated SceneryPart scenery=22;
 }
@@ -446,7 +449,7 @@ message Spawn { string flight_id=1; VehicleDefinition definition=2; double nose_
 // through a hold, the liftoff's once it lifts off); unset: the main flight's start. stop_clock: the clock stops at this
 // step's start (a scrub, a pad abort); it stops too once the flight breaks up. decision: the latest decision its flight
 // software took, at this step's start, for the broadcast's corner (the newest of every flight's shown).
-message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; repeated Milestone milestones=4; optional double clock_zero_utc_unix_seconds=5; bool stop_clock=6; optional Decision decision=7; }
+message StepRequest { repeated FlightCommand commands=1; uint32 ticks=2; string flight_id=3; repeated Milestone milestones=4; optional double clock_zero_utc_unix_seconds=5; bool stop_clock=6; optional Decision decision=7; optional string count_state=8; } // Keep the count visible: HOLD, SCRUB, or empty to clear; unset keeps the last value.
 // What a flight software decided and why (up to 120 characters each): "captura cancelada", "propelante insuficiente para
 // terminar a captura".
 message Decision { string what=1; string why=2; }
