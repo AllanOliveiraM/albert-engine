@@ -503,8 +503,10 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
                 std::printf("Lançamento cancelado (%s); a pilha %s.\n",count.why().c_str(),out.padSafe?"inteira, presa à plataforma e com os motores apagados":"NÃO ficou segura");return out;}
             pace(ship.elapsed_seconds(),pace.hurry);continue;}
         for(const auto& m:marks)mark(step,m.c_str());marks.clear();
-        if(!spawned&&ship.stage()==0&&!ship.clamped()&&clock()>90&&clock()>=needAt){needAt=clock()+1; // What its way back takes, once a second (the booster's own prediction: predictive MECO).
-            const State x=nav.state(ship);int working=0;for(int i=0;i<13&&i<static_cast<int>(x.failed.size());++i)working+=!x.failed[static_cast<std::size_t>(i)];need=1.05*back.returnNeed(x,x.propellant,working);}
+        if(!spawned&&ship.stage()==0&&!ship.clamped()&&clock()>90&&clock()>=needAt){ // What its way back takes, once a second (the booster's own prediction: predictive MECO);
+            // seconds apart while far above it (the gap closes under 28 t/s: ~20 burnt, the need growing ~7; 40 t/s kept), the same second's grid.
+            const State x=nav.state(ship);int working=0;for(int i=0;i<13&&i<static_cast<int>(x.failed.size());++i)working+=!x.failed[static_cast<std::size_t>(i)];need=1.05*back.returnNeed(x,x.propellant,working);
+            needAt=clock()+std::clamp(std::floor((x.propellant-need)/40e3),1.,10.);}
         if(!spawned&&ship.stage()==0&&!ship.clamped()&&(nav.state(ship).propellant<=std::max(reserve,need)||(clock()>30&&speedOf(ship)>=mecoSpeed))){ // At the flights' cutoff speed, or down to what the booster's way back takes (its own prediction, 5% kept; never under the reserve), as its gauges read it. // MECO and hot staging: the booster becomes its own flight.
             api::StepRequest stage;stage.add_commands()->set_cutoff(true);auto* sp=stage.add_commands()->mutable_spawn();sp->set_flight_id("booster");*sp->mutable_definition()=superHeavy();
             if(step.has_decision()){decide(stage,step.decision().what(),step.decision().why());step.clear_decision();}
