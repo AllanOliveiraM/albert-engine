@@ -72,7 +72,7 @@ struct Synth {
 struct albert::Sound::Impl {
     std::array<Synth,voices> synth;std::array<std::uint64_t,voices> identities{};double adaptation=0; // Fixed FFT buffers bound callback work without allocation.
     ma_device device{};bool open=false;std::atomic<float> volume{1};
-    const double rmsStep=-std::expm1(-1/(.03*rate)),compressAttack=-std::expm1(-1/(.015*rate)),compressRelease=-std::expm1(-1/(.25*rate)),limitRelease=-std::expm1(-1/(.08*rate));
+    const double rmsStep=-std::expm1(-1/(.03*rate)),compressAttack=-std::expm1(-1/(.015*rate)),compressRelease=-std::expm1(-1/(.25*rate)),limitRelease=-std::expm1(-1/(.004*rate)); // 4 ms: crackle's 800 shocks a second held the gain down over 80 ms (the whole roar ~2 dB lower, its crackle flattened).
     double rmsPower=0,compressGain=1,limitGain=1;
     struct Boom {float amplitude=0,length=0,pan=0;std::size_t age=0;std::uint64_t voice=0;};std::array<Boom,8> pending{},booms{};std::atomic<unsigned> written{0},read{0};
     Impl(){for(unsigned i=1;i<voices;++i){auto& v=synth[i];v.random.s^=0x632be59bd9b4e019ull*i;v.lowRandom.s^=0xa0761d6478bd642full*i;v.shockRandom.s^=0xe7037ed1a0b428dbull*i;}} // Independent phases keep coincident bands from cancelling.
@@ -157,9 +157,9 @@ void albert::Sound::render(float* out,unsigned frames,unsigned channels){
             float l,r;gains(b.pan,l,r);boomLeft+=v*l;boomRight+=v*r;if(t>=b.length+rise)b.length=0;}
         const double l=(mixLeft+boomLeft)*volume,r=(mixRight+boomRight)*volume,m=(mixMono+.5*(boomLeft+boomRight))*volume;
         d.rmsPower+=((channels==1?m*m:.5*(l*l+r*r))-d.rmsPower)*d.rmsStep; // Average power keeps panning from driving the compressor.
-        const double over=10*std::log10(std::max(d.rmsPower,1e-20))+18;
+        const double over=10*std::log10(std::max(d.rmsPower,1e-20))+10; // Over -10 dBFS only: the calibrated 95 dB at -14 dBFS passes untouched.
         const double reduction=over<=-3?0:over>=3?.5*over:(over+3)*(over+3)/24; // A 6 dB knee eases into 2:1 compression.
-        const double want=std::pow(10.,(1-reduction)/20); // 1 dB make-up preserves the usual roar level.
+        const double want=std::pow(10.,-reduction/20);
         d.compressGain+=(want-d.compressGain)*(want<d.compressGain?d.compressAttack:d.compressRelease);
         const double peak=(channels==1?std::abs(m):std::max(std::abs(l),std::abs(r)))*d.compressGain;
         const double limit=peak>.891?.891/peak:1.;
