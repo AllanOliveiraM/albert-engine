@@ -6,6 +6,8 @@ Standard library, ffmpeg (libx264) and a built Albert:
 starts AlbertEngine on that X display (an Xvfb: nothing on the local screen, no sound), the flight client with the
 arguments after "--", and serves http://BIND:PORT/ (only on that address): the video (a 1 s segment HLS stream,
 ~3-5 s behind) and, under it, the client's log. Ctrl+C or the client's end stops it all.
+--direct: Albert on this desktop's display and its GPU (a Vulkan driver cannot present to an Xvfb: the picture came out black),
+its frames handed to ffmpeg by Albert itself through a pipe (ALBERT_STREAM) rather than grabbed off a screen.
 """
 import argparse,functools,http.server,os,pathlib,shutil,signal,subprocess,sys,tempfile,threading,time
 ROOT=pathlib.Path(__file__).resolve().parents[1]
@@ -27,12 +29,13 @@ def main():
     a=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
     a.add_argument('--display',default=os.environ.get('DISPLAY',':0'));a.add_argument('--bind',required=True,help='address to serve on (the VPN one)')
     a.add_argument('--port',type=int,default=8080);a.add_argument('--size',default='1280x720');a.add_argument('--fps',type=int,default=30)
-    a.add_argument('--rpc',type=int,default=50061);a.add_argument('client',nargs=argparse.REMAINDER)
+    a.add_argument('--rpc',type=int,default=50061);a.add_argument('--direct',action='store_true');a.add_argument('client',nargs=argparse.REMAINDER)
     o=a.parse_args();args=[x for x in o.client if x!='--']
     build=ROOT/'build';out=pathlib.Path(tempfile.mkdtemp(prefix='albert-stream-'));(out/'index.html').write_text(PAGE,encoding='utf-8')
     env=dict(os.environ,DISPLAY=o.display,ALBERT_AUDIO='0',ALBERT_WINDOW=o.size,ALBERT_ASSET_DIR=str(ROOT/'assets'),
              ALBERT_PACK_PATH=str(build/'linux/imagery/visuals-v2.pak'),ALBERT_DATA_DIR=str(build/'simulation-cache'))
-    env.pop('WAYLAND_DISPLAY',None);procs=[]
+    env.pop('WAYLAND_DISPLAY',None);procs=[];fifo=out/'frames.rgba'
+    if o.direct:os.mkfifo(fifo);env.update(ALBERT_STREAM=str(fifo),ALBERT_STREAM_FPS=str(o.fps))
     def stop(*_):
         for p in reversed(procs):
             if p.poll() is None:p.terminate()
@@ -46,7 +49,14 @@ def main():
     while f'gRPC: 127.0.0.1:{o.rpc}' not in (out/'app.txt').read_text(errors='replace'):
         if app.poll() is not None or time.monotonic()>end:print((out/'app.txt').read_text(errors='replace')[-2000:]);stop()
         time.sleep(.5)
-    video=subprocess.Popen(['ffmpeg','-hide_banner','-loglevel','error','-f','x11grab','-draw_mouse','0','-video_size',o.size,'-framerate',str(o.fps),'-i',f'{o.display}+0,0',
+    if o.direct: # Its own frames, at the size it renders (a scaled desktop's too), scaled to the stream's.
+        end=time.monotonic()+60
+        while not pathlib.Path(str(fifo)+'.size').exists():
+            if app.poll() is not None or time.monotonic()>end:print('Albert sent no frames');stop()
+            time.sleep(.2)
+        source=['-f','rawvideo','-pix_fmt','rgba','-video_size',pathlib.Path(str(fifo)+'.size').read_text().strip(),'-framerate',str(o.fps),'-i',str(fifo),'-vf','scale='+o.size.replace('x',':')]
+    else:source=['-f','x11grab','-draw_mouse','0','-video_size',o.size,'-framerate',str(o.fps),'-i',f'{o.display}+0,0']
+    video=subprocess.Popen(['ffmpeg','-nostdin','-hide_banner','-loglevel','error',*source,
         '-c:v','libx264','-preset','ultrafast','-tune','zerolatency','-pix_fmt','yuv420p','-b:v','3M','-maxrate','3M','-bufsize','3M','-g',str(o.fps),
         '-f','hls','-hls_time','1','-hls_list_size','6','-hls_flags','delete_segments+independent_segments',str(out/'live.m3u8')],stdout=subprocess.DEVNULL);procs.append(video)
     class Quiet(http.server.SimpleHTTPRequestHandler):

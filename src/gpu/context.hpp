@@ -2,6 +2,7 @@
 #include <webgpu/webgpu.h>
 #include <functional>
 #include <string>
+#include <vector>
 struct GLFWwindow;
 namespace albert::gpu {
 // WebGPU instance, adapter, device and queue; with a window, its surface (FIFO, no tearing).
@@ -26,6 +27,7 @@ public:
     // The size of the image acquire() gave this frame (a resize reaches it a frame on): what a pass on it may draw within.
     [[nodiscard]] unsigned imageWidth()const;[[nodiscard]] unsigned imageHeight()const;
     void capturePng(const std::string& path); // After submission, before present; throws on readback or write failure.
+    void readRgba(std::vector<unsigned char>& rgba,unsigned& width,unsigned& height); // The same frame as RGBA rows (no padding).
     static void beforePresent(std::function<void(Context&)> work); // One-shot work on this thread's next surface, after submission.
     void present();
 private:

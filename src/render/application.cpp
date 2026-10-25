@@ -75,6 +75,9 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <condition_variable>
+#include <csignal>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -85,6 +88,29 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr double PI = 3.14159265358979323846;
+
+// ALBERT_STREAM=path: the frames as raw RGBA rows, at the window's first size, written into that pipe (watch-stream.py's ffmpeg
+// reads it) at ALBERT_STREAM_FPS a second (20), their size first into path.size; on a thread of their own, the newest frame only:
+// a slow reader drops frames, never the render.
+class FrameStream {
+    struct State {std::mutex lock;std::condition_variable ready;std::vector<unsigned char> frame;bool fresh=false,busy=false,stop=false;unsigned width=0,height=0;};
+    std::shared_ptr<State> s_=std::make_shared<State>();std::string path_;
+public:
+    explicit FrameStream(std::string path):path_(std::move(path)){
+#ifndef _WIN32
+        std::signal(SIGPIPE,SIG_IGN); // Its reader gone: a failed write, not the end of the app.
+#endif
+        std::thread([s=s_,path=path_]{std::FILE* f=std::fopen(path.c_str(),"wb");if(!f){std::cerr<<"Transmissao: "<<path<<" nao abriu"<<std::endl;return;}std::vector<unsigned char> out;
+            for(;;){{std::unique_lock l(s->lock);s->ready.wait(l,[&]{return s->fresh||s->stop;});if(s->stop)break;out.swap(s->frame);s->fresh=false;s->busy=true;}
+                const bool ok=std::fwrite(out.data(),1,out.size(),f)==out.size()&&std::fflush(f)==0;std::lock_guard l(s->lock);s->busy=false;if(!ok)break;}
+            std::fclose(f);}).detach(); // Blocked opening a pipe nobody reads yet, it must not hold the app's exit.
+    }
+    ~FrameStream(){{std::lock_guard l(s_->lock);s_->stop=true;}s_->ready.notify_all();}
+    bool wanted()const{std::lock_guard l(s_->lock);return !s_->fresh&&!s_->busy;}
+    void put(std::vector<unsigned char>&& rgba,unsigned w,unsigned h){std::lock_guard l(s_->lock);
+        if(!s_->width){s_->width=w;s_->height=h;std::ofstream(path_+".size")<<w<<"x"<<h<<"\n";}if(w!=s_->width||h!=s_->height)return; // Resized: its frames left out.
+        s_->frame=std::move(rgba);s_->fresh=true;s_->ready.notify_one();}
+};
 
 // Valores em km
 constexpr double EARTH_RADIUS = 6378.137;
@@ -1308,6 +1334,8 @@ int albert::runRenderer(int argc, char** argv) {
         struct PendingEvent {const SimulationEvent* event;std::uint64_t generation;};
         std::optional<PendingEvent> pendingEvent;
         std::vector<fs::path> pendingCaptures;
+        std::unique_ptr<FrameStream> frameStream;if(const char* p=std::getenv("ALBERT_STREAM"))frameStream=std::make_unique<FrameStream>(p);
+        const double streamFps=std::getenv("ALBERT_STREAM_FPS")?std::clamp(std::atof(std::getenv("ALBERT_STREAM_FPS")),1.,60.):20.;std::chrono::steady_clock::time_point streamAt{};
         std::optional<albert::core::FlightTelemetry> flightTelemetry; // From the gRPC flight API.
         auto flightTelemetryAt=std::chrono::steady_clock::now(); // Its latest sample (the sea's wind ignores a stale one).
         bool menuOpen = false;
@@ -3006,10 +3034,13 @@ int albert::runRenderer(int argc, char** argv) {
             graphics.render(*scene, *camera);
             graphics.ui();
             // Display submits the scene and ImGui together; read back only once both have reached the queue.
-            if(!pendingCaptures.empty())albert::gpu::Context::beforePresent([&](albert::gpu::Context& gpu){
+            const bool streamNow=frameStream&&std::chrono::duration<double>(std::chrono::steady_clock::now()-streamAt).count()>=1/streamFps&&frameStream->wanted();if(streamNow)streamAt=std::chrono::steady_clock::now();
+            if(!pendingCaptures.empty()||streamNow)albert::gpu::Context::beforePresent([&,streamNow](albert::gpu::Context& gpu){ // One slot a frame: the captures and the stream together.
                 auto paths=std::move(pendingCaptures);pendingCaptures.clear();
                 for(const auto& path:paths)try{gpu.capturePng(path.string());std::cout<<"Captura: "<<path.string()<<std::endl;}
                     catch(const std::exception& e){std::cerr<<"Capture failed: "<<e.what()<<std::endl;}
+                if(streamNow)try{std::vector<unsigned char> rgba;unsigned w=0,h=0;gpu.readRgba(rgba,w,h);frameStream->put(std::move(rgba),w,h);}
+                    catch(const std::exception& e){std::cerr<<"Transmissao interrompida: "<<e.what()<<std::endl;frameStream.reset();}
             });
 #ifdef ALBERT_HAS_RPC
             if(rpcPort && !rpc && introductionElapsed>=introductionDuration) {

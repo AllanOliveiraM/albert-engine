@@ -98,13 +98,17 @@ WGPUTextureView Context::acquire(){
     current_=t.texture;view_=wgpuTextureCreateView(current_,nullptr);return view_;
 }
 void Context::capturePng(const std::string& path){
+    std::vector<unsigned char> rgba;unsigned w=0,h=0;readRgba(rgba,w,h);
+    if(!stbi_write_png(path.c_str(),static_cast<int>(w),static_cast<int>(h),4,rgba.data(),static_cast<int>(w*4)))throw std::runtime_error("Could not write PNG: "+path);
+}
+void Context::readRgba(std::vector<unsigned char>& rgba,unsigned& width,unsigned& height){
     if(!copySrc_)throw std::runtime_error("Surface does not support CopySrc; PNG capture unavailable");
     if(!current_)throw std::runtime_error("No current surface frame to capture");
     const bool bgra=format_==WGPUTextureFormat_BGRA8Unorm||format_==WGPUTextureFormat_BGRA8UnormSrgb;
     if(!bgra&&format_!=WGPUTextureFormat_RGBA8Unorm&&format_!=WGPUTextureFormat_RGBA8UnormSrgb)throw std::runtime_error("PNG capture requires a BGRA8 or RGBA8 surface");
     const unsigned w=imageWidth(),h=imageHeight();const std::uint64_t row=std::uint64_t(w)*4,stride=(row+255)&~std::uint64_t(255),bytes=stride*h;
     if(!w||!h||row>(std::numeric_limits<int>::max)()||h>static_cast<unsigned>((std::numeric_limits<int>::max)())||bytes>(std::numeric_limits<std::size_t>::max)())throw std::runtime_error("Surface dimensions exceed PNG capture limits");
-    std::vector<unsigned char> rgba(static_cast<std::size_t>(row*h));
+    rgba.resize(static_cast<std::size_t>(row*h));width=w;height=h;
     WGPUBufferDescriptor d{};d.size=bytes;d.usage=WGPUBufferUsage_CopyDst|WGPUBufferUsage_MapRead;
     struct Readback {WGPUBuffer value;~Readback(){if(value){wgpuBufferDestroy(value);wgpuBufferRelease(value);}}} buffer{wgpuDeviceCreateBuffer(device_,&d)};
     if(!buffer.value)throw std::runtime_error("Could not allocate PNG readback buffer");
@@ -127,7 +131,6 @@ void Context::capturePng(const std::string& path){
     for(unsigned y=0;y<h;++y)std::memcpy(rgba.data()+static_cast<std::size_t>(y*row),pixels+static_cast<std::size_t>(y*stride),static_cast<std::size_t>(row));
     wgpuBufferUnmap(buffer.value);
     if(bgra)for(std::size_t i=0;i<rgba.size();i+=4)std::swap(rgba[i],rgba[i+2]);
-    if(!stbi_write_png(path.c_str(),static_cast<int>(w),static_cast<int>(h),4,rgba.data(),static_cast<int>(row)))throw std::runtime_error("Could not write PNG: "+path);
 }
 void Context::present(){
     if(!current_)return;
