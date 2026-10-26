@@ -30,6 +30,9 @@ constexpr double pinOut=radius+1; // The catch pins' ends off the axis (m): 1 m 
 // The axial drag coefficient engines first, by Mach: a blunt base, near a flat disc's above Mach 2 (~1.6), as the descents'
 // telemetry shows (Flight 3's booster: 1206 m/s at 25 km down to 858 m/s at 10 km).
 constexpr double dragMach[]{0,.8,1.2,2,5},baseDragTable[]{1,1.1,1.5,1.65,1.6};
+// The booster's fall engines first as Flight 14's V3 slowed (its bigger fins, the tilt it falls at): 1.8 times that base drag,
+// 13.5 km at ~3100 km/h and 7.4 km at ~2000 (the base table alone, from Flight 3's V1: ~3860 and ~2600).
+constexpr double descentDrag=1.8;
 constexpr double boosterEmpty=275e3,boosterPropellant=3800e3,shipEmpty=100e3,shipPropellant=1600e3,engineMass=1.72e3,reserve=.1*boosterPropellant;
 // A solid cylinder from `from` to `to` m aft of the nose: mass, its centre, and principal moments about that centre.
 struct Part {double mass,from,to;};
@@ -47,10 +50,10 @@ inline std::vector<Part> booster(bool full){std::vector<Part> p{{boosterEmpty-33
 inline void put(api::Vector3* o,double x,double y,double z){o->set_x(x);o->set_y(y);o->set_z(z);}
 // Coefficients on the 9 m disc (π r²) for a cylinder of this length: axial drag nose-first or base-first by Mach, and the
 // crossflow (Cd 1.2 on the side, L D / π r² times) for lift, side force and drag at any angle.
-inline void aerodynamics(api::StageDefinition* st,double length){
+inline void aerodynamics(api::StageDefinition* st,double length,double baseScale=1){ // baseScale: the base drag's (engines first).
     auto* a=st->mutable_aerodynamics();a->set_reference_area_meters2(pi*radius*radius);a->set_reference_length_meters(length);a->set_reference_span_meters(2*radius);
     a->set_pitch_damping(-20);a->set_yaw_damping(-20);a->set_roll_damping(-1);st->set_aerodynamic_reference_meters(length/2);
-    const std::array<double,5> mach{dragMach[0],dragMach[1],dragMach[2],dragMach[3],dragMach[4]},nose{.35,.4,.65,.5,.35},base{baseDragTable[0],baseDragTable[1],baseDragTable[2],baseDragTable[3],baseDragTable[4]};const double side=1.2*length*2*radius/(pi*radius*radius);
+    const std::array<double,5> mach{dragMach[0],dragMach[1],dragMach[2],dragMach[3],dragMach[4]},nose{.35,.4,.65,.5,.35},base{baseDragTable[0]*baseScale,baseDragTable[1]*baseScale,baseDragTable[2]*baseScale,baseDragTable[3]*baseScale,baseDragTable[4]*baseScale};const double side=1.2*length*2*radius/(pi*radius*radius);
     std::vector<double> total,signed_;for(int i=0;i<=18;++i)total.push_back(i*10);for(int i=-18;i<=18;++i)signed_.push_back(i*10);
     auto table=[&](api::AeroTable* t,const std::vector<double>& angles,auto f){for(double m:mach)t->add_mach(m);for(double x:angles)t->add_angle_degrees(x);
         for(std::size_t i=0;i<mach.size();++i)for(double x:angles)t->add_values(f(i,x*deg));};
@@ -187,7 +190,7 @@ inline api::VehicleDefinition shipAlone(){
 }
 inline api::VehicleDefinition superHeavy(){
     api::VehicleDefinition v;v.set_name("Super Heavy-class booster (approximate)");v.set_crash_speed_meters_per_second(5); /* A steel hull: striking anything faster breaks it up. */v.set_diameter_meters(2*radius);
-    auto* s=v.add_stages();cryogens(s,20e3);s->set_name("Super Heavy"); /* Its RCS on the tanks' ullage gas: drawn from the propellant. */mass(s,combine(booster(true)),combine(booster(false)),boosterPropellant,boosterLength);raptors(s,boosterLength,true);aerodynamics(s,boosterLength);
+    auto* s=v.add_stages();cryogens(s,20e3);s->set_name("Super Heavy"); /* Its RCS on the tanks' ullage gas: drawn from the propellant. */mass(s,combine(booster(true)),combine(booster(false)),boosterPropellant,boosterLength);raptors(s,boosterLength,true);aerodynamics(s,boosterLength,descentDrag);
     boosterLook(s->mutable_appearance(),0,true);
     for(const double y:{-pinOut,pinOut})put(s->add_hard_points_meters(),pinAt,y,0);
     // The three grid fins, always out, each where it is: its normal force along body x × its spindle (finSlope a radian of
@@ -793,7 +796,7 @@ public:
         case Phase::coast:{ // Engines first through the descent: held by the RCS above the air, then the grid fins tilt the body so its
             // crossflow lift (away from the nose's tilt) carries the impact onto the aim; the landing burn when the stop needs it.
             if(catch_&&over<divert)aim_=east_*front; // Low enough: the fins carry it from off the coast onto the approach.
-            if(age_--<=0){aimed_=landing(s,&seconds_);age_=25;miss_=norm(aimed_);if(over<15e3&&reach(s)>3e3)giveUp(s,"pouso previsto fora do alcance da torre");}
+            if(age_--<=0){aimed_=landing(s,&seconds_,catch_?leadBrake:0.);age_=25;miss_=norm(aimed_);if(over<15e3&&reach(s)>3e3)giveUp(s,"pouso previsto fora do alcance da torre");}
             const Vec e=aimed_;const double seconds=seconds_;const Vec vhat=unit(s.velocity);
             if(s.q<2e3){if(!(norm(slewed_)>.5))slewed_=bodyX(s); // Engines first slowly (1.5°/s, the RCS's gentle turn after the boostback), faster only as the
                 // air nears (what is left of the turn by 45 km, 30% to spare, up to 6°/s), held right at the entry attitude within 20 s of
@@ -874,8 +877,8 @@ public:
             const double kv=std::min(.6,bandwidth(s)/3);Vec side;
             const bool line=catch_&&(std::abs(dot(flat,north_))<=4||in_);const double T=std::max(2*std::max(above,0.)/std::max(1-vz,1.),std::sqrt(6.)*3/bandwidth(s)); // At least what keeps it within a third of its attitude's bandwidth.
             if(above<-5)side=across*-std::max(kv,.4);
-            else if(line){const double n=dot(to,north_),vn=dot(across,north_);side=onto(s,to+north_*-n,kv,8,20*deg);side=side+north_*(-dot(side,north_)-6*n/(T*T)-4*vn/T);}
-            else side=onto(s,to,kv,8,20*deg);
+            else if(line){const double n=dot(to,north_),vn=dot(across,north_);side=onto(s,to+north_*-n,kv,30,20*deg);side=side+north_*(-dot(side,north_)-6*n/(T*T)-4*vn/T);}
+            else side=onto(s,to,kv,30,20*deg);
             side=side+push_*-1.;{const double most=limit*std::tan(lean(s,flat,side,20*deg))/std::tan(20*deg);if(norm(side)>most)side=side*(most/norm(side));} // The observer's push netted.
             {const Vec a=up_*up+side;if(set_.wanted()==5&&s.mass*norm(a)<.42*5*raptorSea)set_.use(c,s,3); // Then to 3 once 5 at their least would lift too much.
                 count(c,s,thrust(c,s,a),std::min(set_.count(),2));} // 2 once 3 at their least would lift it (a light booster: Raptor 3's 40% of 280 t each).close_=catch_&&centred(s,flat); // On the 3 it took over with: none put out on the way in.
@@ -973,6 +976,9 @@ public:
     // normalForce: the body's normal force coefficient a radian off the flow, engines first, as flights measure it (the IMU
     // across the flow; the tables read near 3.5).
     static constexpr double gateSpeed=80,plan=.7,residual=20e3,boostbackThrottle=.8,boostbackG=5*g0,normalForce=.8,landingShare=140e3;
+    // lead: the coast's aim moved upstream by the stopping distance of what it reaches the gate moving across, braked at this (m/s²);
+    // the final approach then carrying it in at up to 30 m/s (a short burn kept retrograde leaves 20-30 m/s across).
+    static constexpr double leadBrake=4;
     double dt=.02,boostbackPitch=5*deg; // boostbackPitch: above the horizon (negative: below): up a little, as the flights' (apogee 83-99 km, the landing burn ~4 min after staging).
     // The boostback and the fall aim this far east of the tower (over the sea, away from the tower's side), the landing
     // burn then bringing it onto the arms' axis from there while still high (m); without the catch, onto the sea this far east.
@@ -1027,9 +1033,11 @@ private:
             return std::abs(n)<=1||edge>5||e>13+radius?slope:std::max(slope,std::max(arms_+armTop+5+stand(s)-top(s),0.)*std::clamp((5-edge)/3,0.,1.));}
         return std::max(slope,towerTop+10+stand(s)-top(s));
     }
-    // What getting round to the corridor from off it costs (kg): up to that height at 3 m/s and across at 5 m/s, hovering.
+    // What getting round to the corridor from off it costs (kg): up to that height at 3 m/s and across at 5 m/s, hovering (or
+    // at 70% of what it already moves that way: a burn kept retrograde brings it in moving).
     double around(const State& s,Vec flat,double over)const{
-        const double up=std::max(top(s)+safe(s,flat)-over,0.);return (up/3+norm(goal(flat))/5)*g0*s.mass/raptorExhaust;
+        const Vec g=goal(flat),v=s.velocity+up_*-dot(s.velocity,up_);const double toward=norm(g)>0?std::max(-dot(v,unit(g)),0.):0.;
+        const double up=std::max(top(s)+safe(s,flat)-over,0.);return (up/3+norm(g)/std::max(5.,.7*toward))*g0*s.mass/raptorExhaust;
     }
     double top(const State& s)const{return catch_?catchHeight(s)+hoverAbove:stand(s);} // The height (over the site) the burns stop at.
     Vec goal(Vec flat)const{return catch_?approach(flat):flat+aim_*-1.;} // From the point it is going for to it.
@@ -1118,22 +1126,25 @@ private:
     // 0.5 s below 40 km, interpolated between the last two checks), then that burn: horizontal from the point aimed at (m);
     // seconds: the time to it. The burn flown from every 8th check, then from each since the last one ending above the gate:
     // the first to end low enough, as flying it from every check finds it (its end only falls as it waits), 1/5 of the burns.
-    Vec landing(const State& s,double* seconds=nullptr)const{
+    // lead (m/s², 0: none): the aim moved upstream of its point by the stopping distance of the speed across it reaches the gate
+    // with, braked at that (a burn kept retrograde keeps its path's slant: what it carries in, the final approach takes in).
+    Vec landing(const State& s,double* seconds=nullptr,double lead=0)const{
         const double mass=landingMass(s.mass),accel=set_.working(s,13)*plan*raptorSea/mass,low=top(s)+gate(mass,set_.working(s,3))+50;Vec r=s.position,v=s.velocity;int n=0;
         auto height=[&](Vec p){return dot(p+site_*-1,up_);};
-        auto gated=[&](Vec p,Vec u,double& t){int m=0;fly(p,u,mass,accel,.25,[&]{++m;return -dot(u,up_)<=gateSpeed||height(p)<0;},.85,3*std::max(accel-g0,1.));t=.25*m;return p;}; // As the burn flies it.
-        Vec at,before;double h=1e300,hb=1e300,t=0,tb=0;struct Check{Vec r,v;int n;};std::vector<Check> span;span.reserve(8);
+        auto gated=[&](Vec p,Vec u,double& t,Vec& w){int m=0;fly(p,u,mass,accel,.25,[&]{++m;return -dot(u,up_)<=gateSpeed||height(p)<0;},.85,3*std::max(accel-g0,1.));t=.25*m;w=u;return p;}; // As the burn flies it.
+        Vec at,before,atV,beforeV;double h=1e300,hb=1e300,t=0,tb=0;struct Check{Vec r,v;int n;};std::vector<Check> span;span.reserve(8);
         fly(r,v,mass,0,.5,[&]{++n;if(dot(v,up_)<0&&height(r)<40e3){span.push_back({r,v,n});
-            if(span.size()==8){double te;const Vec end=gated(r,v,te);if(height(end)<=low)return true;at=end;h=height(end);t=te;span.clear();}}
+            if(span.size()==8){double te;Vec ve;const Vec end=gated(r,v,te,ve);if(height(end)<=low)return true;at=end;atV=ve;h=height(end);t=te;span.clear();}}
             return height(r)<0&&dot(v,up_)<0;});
-        for(const auto& k:span){before=at;hb=h;tb=t;at=gated(k.r,k.v,t);h=height(at);if(h<=low){n=k.n;break;}}
-        if(!(h<=low)){at=gated(r,v,t);hb=h=height(at);}
-        const double f=hb<1e299&&hb>h?std::clamp((hb-low)/(hb-h),0.,1.):1;const Vec p=hb<1e299&&hb>h?before+(at+before*-1.)*f:at;
-        if(seconds)*seconds=.5*(n-1)-.5*(1-f)+(hb<1e299&&hb>h?tb+(t-tb)*f:t);const Vec rel=p+site_*-1;return rel+up_*-dot(rel,up_)+aim_*-1.;
+        for(const auto& k:span){before=at;beforeV=atV;hb=h;tb=t;at=gated(k.r,k.v,t,atV);h=height(at);if(h<=low){n=k.n;break;}}
+        if(!(h<=low)){at=gated(r,v,t,atV);hb=h=height(at);}
+        const double f=hb<1e299&&hb>h?std::clamp((hb-low)/(hb-h),0.,1.):1;const Vec p=hb<1e299&&hb>h?before+(at+before*-1.)*f:at,pv=hb<1e299&&hb>h?beforeV+(atV+beforeV*-1.)*f:atV;
+        if(seconds)*seconds=.5*(n-1)-.5*(1-f)+(hb<1e299&&hb>h?tb+(t-tb)*f:t);const Vec rel=p+site_*-1,across=pv+up_*-dot(pv,up_);
+        return rel+up_*-dot(rel,up_)+aim_*-1.+(lead>0?across*(norm(across)/(2*lead)):Vec{});
     }
     // The drag coefficient engines first (the stage's base table and the fins').
     static double baseDrag(double v,double h){const double m=v/sound(h);const auto& x=dragMach;const auto& y=baseDragTable;
-        for(int i=0;i<4;++i)if(m<=x[i+1])return 3*finDrag+y[i]+(y[i+1]-y[i])*(m-x[i])/(x[i+1]-x[i]);return y[4]+3*finDrag;}
+        constexpr double k=descentDrag;for(int i=0;i<4;++i)if(m<=x[i+1])return 3*finDrag+k*(y[i]+(y[i+1]-y[i])*(m-x[i])/(x[i+1]-x[i]));return k*y[4]+3*finDrag;}
     double drag(const State& s)const{const double h=norm(s.position)-norm(site_),v=norm(s.velocity);return .5*density(h)*baseDrag(v,h)*pi*radius*radius*v*v/s.mass;}
     // RK4 in ECEF (gravity, the Earth's turning, drag engines first, thrust against the air) until done.
     // upright: within that many m/s of falling at gateSpeed, the thrust straight up (the landing burn's last seconds).

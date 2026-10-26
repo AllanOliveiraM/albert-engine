@@ -618,7 +618,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
 // approach and the catch or the escape, the site as in the mission (the arms on its own flight). The defaults: the mission's
 // booster as it lights its landing burn. wind: added to the air from the start (NED, m/s). Its outcome as Mission's booster
 // fields (caught, at rest, down or lost and where, the tower's clearance, why given up, FDIR).
-struct Gate {double east=22527.8,north=-2060.2,height=50018.2,vn=51.86,ve=-538.09,vd=964.48,propellant=163465;std::uint64_t seed=7;Vec wind;}; // The mission's at 50 km down (ALBERT_TRACE's GATE), its ascent as Flights 12-14's.
+struct Gate {double east=22117.2,north=-2027.7,height=50019.6,vn=52.03,ve=-540.35,vd=963.74,propellant=163140;std::uint64_t seed=7;Vec wind;}; // The mission's at 50 km down (ALBERT_TRACE's GATE), its ascent as Flights 12-14's.
 inline Mission landing(api::FlightService::Stub& flight,const Gate& g,std::vector<Fault> faults={},bool quiet=true){
     Mission out;api::CreateFlightRequest create;create.set_vehicle(api::CUSTOM);*create.mutable_definition()=superHeavy();
     create.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);addTower(create);avionics(create,g.seed);
