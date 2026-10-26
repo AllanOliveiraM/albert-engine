@@ -767,6 +767,9 @@ public:
         if(catch_&&phase_>=Phase::flip&&phase_<=Phase::descend){const int n=phase_<=Phase::boostback?3:phase_<=Phase::landing?5:static_cast<int>(std::ceil(s.mass*norm(gravity(s.position))/(.9*raptorSea)));
             if(set_.working(s,phase_<=Phase::landing?13:3)<n||(phase_>=Phase::coast&&set_.balanced(s)<2))giveUp(s,balanceWhy);}
         // The arms leave 0.8 m: going for them needs the navigation to a third of that (RTK's centimetres; drifting without it).
+        // Its pins under the rails with nothing bearing them (a lean or a sway put them past the bars): never on down between the
+        // arms; given up, away while it can (as the ship's).
+        if(catch_&&(phase_==Phase::hover||phase_==Phase::descend||phase_==Phase::caught)&&norm(s.contact)==0&&over-catchHeight(s)<-1.5)giveUp(s,"pinos abaixo dos trilhos");
         if(catch_&&phase_>=Phase::final&&phase_<=Phase::descend&&s.navSigma>.3){if(++unsure_>25)giveUp(s,"navegação imprecisa para a captura");}else unsure_=0;
         // On the way in: short of finishing from here (its Δv: the speed it has, and gravity's over the braked way down, 2 h / |vz|,
         // and the 17 s over the arms to the catch; 10% kept), away while it can, else on; at the bingo (what is left down to
@@ -976,9 +979,9 @@ public:
     // normalForce: the body's normal force coefficient a radian off the flow, engines first, as flights measure it (the IMU
     // across the flow; the tables read near 3.5).
     static constexpr double gateSpeed=80,plan=.7,residual=20e3,boostbackThrottle=.8,boostbackG=5*g0,normalForce=.8,landingShare=140e3;
-    // lead: the coast's aim moved upstream by the stopping distance of what it reaches the gate moving across, braked at this (m/s²);
+    // lead: the coast's aim moved upstream along the arms' line by the stopping distance of what it reaches the gate moving along it, braked at this (m/s²: about what the collision monitor credits; 2-3 on the bench);
     // the final approach then carrying it in at up to 30 m/s (a short burn kept retrograde leaves 20-30 m/s across).
-    static constexpr double leadBrake=4;
+    static constexpr double leadBrake=2.5;
     double dt=.02,boostbackPitch=5*deg; // boostbackPitch: above the horizon (negative: below): up a little, as the flights' (apogee 83-99 km, the landing burn ~4 min after staging).
     // The boostback and the fall aim this far east of the tower (over the sea, away from the tower's side), the landing
     // burn then bringing it onto the arms' axis from there while still high (m); without the catch, onto the sea this far east.
@@ -1126,8 +1129,9 @@ private:
     // 0.5 s below 40 km, interpolated between the last two checks), then that burn: horizontal from the point aimed at (m);
     // seconds: the time to it. The burn flown from every 8th check, then from each since the last one ending above the gate:
     // the first to end low enough, as flying it from every check finds it (its end only falls as it waits), 1/5 of the burns.
-    // lead (m/s², 0: none): the aim moved upstream of its point by the stopping distance of the speed across it reaches the gate
-    // with, braked at that (a burn kept retrograde keeps its path's slant: what it carries in, the final approach takes in).
+    // lead (m/s², 0: none): the aim moved upstream of its point, along the arms' line, by the stopping distance of the speed along
+    // it the gate is reached with, braked at that (a burn kept retrograde keeps its path's slant: what it carries in, the final
+    // approach takes in).
     Vec landing(const State& s,double* seconds=nullptr,double lead=0)const{
         const double mass=landingMass(s.mass),accel=set_.working(s,13)*plan*raptorSea/mass,low=top(s)+gate(mass,set_.working(s,3))+50;Vec r=s.position,v=s.velocity;int n=0;
         auto height=[&](Vec p){return dot(p+site_*-1,up_);};
@@ -1140,7 +1144,8 @@ private:
         if(!(h<=low)){at=gated(r,v,t,atV);hb=h=height(at);}
         const double f=hb<1e299&&hb>h?std::clamp((hb-low)/(hb-h),0.,1.):1;const Vec p=hb<1e299&&hb>h?before+(at+before*-1.)*f:at,pv=hb<1e299&&hb>h?beforeV+(atV+beforeV*-1.)*f:atV;
         if(seconds)*seconds=.5*(n-1)-.5*(1-f)+(hb<1e299&&hb>h?tb+(t-tb)*f:t);const Vec rel=p+site_*-1,across=pv+up_*-dot(pv,up_);
-        return rel+up_*-dot(rel,up_)+aim_*-1.+(lead>0?across*(norm(across)/(2*lead)):Vec{});
+        const double along=dot(across,cross(north_,up_)); // Along the arms' line only: across it the final approach brings it onto the line.
+        return rel+up_*-dot(rel,up_)+aim_*-1.+(lead>0?cross(north_,up_)*(along*std::abs(along)/(2*lead)):Vec{});
     }
     // The drag coefficient engines first (the stage's base table and the fins').
     static double baseDrag(double v,double h){const double m=v/sound(h);const auto& x=dragMach;const auto& y=baseDragTable;
