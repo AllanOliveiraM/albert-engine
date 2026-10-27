@@ -49,6 +49,9 @@ inline void addStarbase(api::CreateFlightRequest& create){
     auto part=[&](const char* name,Shape::Shape shape,Vec at,Vec size,std::uint32_t colour,double heading=0,double tilt=0,double inner=0){auto* x=create.add_scenery();
         x->set_name(name);x->set_shape(shape);put(x->mutable_centre_enu_meters(),at);put(x->mutable_size_meters(),size);x->set_color(colour);x->set_heading_degrees(heading);
         x->set_tilt_degrees(tilt);x->set_inner_diameter_meters(inner);};
+    for(const auto& row:starbaseRoads){auto* road=create.add_roads();road->set_osm_way(row.id);road->set_width_meters(row.width);
+        road->set_surface(static_cast<api::SceneryRoad::Surface>(row.surface));road->set_highway(row.highway);road->set_stop_start(row.stopStart);road->set_stop_end(row.stopEnd);
+        for(unsigned i=0;i<row.count;++i){const auto& p=starbaseRoadPoints[row.first+i];put(road->add_points_enu_meters(),{p.x,p.y,0});}}
     constexpr double beam=3.2,depth=4;
     const double trench=33,s=std::sin(trench*deg),c=std::cos(trench*deg);
     auto place=[&](double across,double along,double z){return Vec{across*c+along*s,-across*s+along*c,z};}; // Keep the exhaust axis clear of the tower.

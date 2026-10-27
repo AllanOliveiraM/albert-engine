@@ -153,6 +153,7 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
 }
 )";
 }
+Program surfaceProgram(){Program p;p.wgsl=builtinWgsl;p.attributes={{"normal",3},{"uv",2},{"uv2",2}};p.textures={"map","alphaMap","lightMap","bumpMap","roughnessMap"};return p;}
 struct SceneRenderer::Impl {
     Context& gpu;WGPUDevice device;WGPUQueue queue;
     // Depth and multisampled colour (resolved into the target) by size, two kept: a second, smaller view keeps its own.
@@ -226,7 +227,7 @@ struct SceneRenderer::Impl {
             WGPUBufferDescriptor b{};b.size=16;b.usage=WGPUBufferUsage_QueryResolve|WGPUBufferUsage_CopySrc;resolved=wgpuDeviceCreateBuffer(device,&b);
             b.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;readback=wgpuDeviceCreateBuffer(device,&b);
         }
-        Program b;b.wgsl=builtinWgsl;b.attributes={{"normal",3},{"uv",2},{"uv2",2}};b.textures={"map","alphaMap","lightMap","bumpMap","roughnessMap"};define("albert:builtin",b);
+        define("albert:builtin",surfaceProgram());
     }
     ~Impl(){
         clouds.reset();if(cloudNoise.valid())cloudNoise.wait();
@@ -301,8 +302,9 @@ struct SceneRenderer::Impl {
         entries[0].binding=0;entries[0].visibility=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;entries[0].buffer.type=WGPUBufferBindingType_Uniform;
         for(std::size_t i=0;i<p->textures.size();++i){
             auto& t=entries[1+2*i];t.binding=static_cast<std::uint32_t>(1+2*i);t.visibility=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;
-            t.texture.sampleType=WGPUTextureSampleType_Float;t.texture.viewDimension=WGPUTextureViewDimension_2D;
-            auto& s=entries[2+2*i];s.binding=static_cast<std::uint32_t>(2+2*i);s.visibility=t.visibility;s.sampler.type=WGPUSamplerBindingType_Filtering;
+            const bool exact=std::find(p->exactTextures.begin(),p->exactTextures.end(),p->textures[i])!=p->exactTextures.end();
+            t.texture.sampleType=exact?WGPUTextureSampleType_UnfilterableFloat:WGPUTextureSampleType_Float;t.texture.viewDimension=WGPUTextureViewDimension_2D;
+            auto& s=entries[2+2*i];s.binding=static_cast<std::uint32_t>(2+2*i);s.visibility=t.visibility;s.sampler.type=exact?WGPUSamplerBindingType_NonFiltering:WGPUSamplerBindingType_Filtering;
         }
         WGPUBindGroupLayoutDescriptor ld{};ld.entryCount=entries.size();ld.entries=entries.data();c.layout=wgpuDeviceCreateBindGroupLayout(device,&ld);
         WGPUBindGroupLayout layouts[]{frameLayout,objectLayout,c.layout};WGPUPipelineLayoutDescriptor pd{};pd.bindGroupLayoutCount=3;pd.bindGroupLayouts=layouts;
@@ -351,10 +353,10 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
     // RGBA bytes, floats (or half floats without float32 filtering) of a threepp image: the
     // image's own buffer when it already has that layout (Albert's large textures), else a converted
     // copy kept in `out` for the rest of the upload.
-    WGPUTextureFormat format(const Image& image)const{return image.isFloat()||image.isHalfFloat()?(floatFilterable?WGPUTextureFormat_RGBA32Float:WGPUTextureFormat_RGBA16Float):WGPUTextureFormat_RGBA8Unorm;}
-    const std::byte* rgba(const threepp::Texture& source,std::vector<std::byte>& out){
+    WGPUTextureFormat format(const Image& image,bool exact=false)const{return image.isFloat()||image.isHalfFloat()?((floatFilterable||exact)?WGPUTextureFormat_RGBA32Float:WGPUTextureFormat_RGBA16Float):WGPUTextureFormat_RGBA8Unorm;}
+    const std::byte* rgba(const threepp::Texture& source,std::vector<std::byte>& out,bool exact=false){
         const Image& image=source.image();const std::size_t pixels=static_cast<std::size_t>(image.width())*std::max(1u,image.height());
-        const int channels=std::max(1,image.channels());const auto f=format(image);
+        const int channels=std::max(1,image.channels());const auto f=format(image,exact);
         if(channels==4&&f==WGPUTextureFormat_RGBA32Float&&image.isFloat())return reinterpret_cast<const std::byte*>(image.data<float>().data());
         if(channels==4&&f==WGPUTextureFormat_RGBA16Float&&image.isHalfFloat())return reinterpret_cast<const std::byte*>(image.data<std::uint16_t>().data());
         if(channels==4&&f==WGPUTextureFormat_RGBA8Unorm)return reinterpret_cast<const std::byte*>(image.data<unsigned char>().data());
@@ -373,13 +375,13 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
     // The texture's GPU view and its serial. A first copy, a small image or one of another size (a
     // placeholder being replaced) uploads at once; a new version of a large one streams within the
     // frame budget while the previous copy, a valid stand-in, keeps drawing.
-    WGPUTextureView view(threepp::Texture* source,bool blank,std::uint64_t& serial){ // blank: black instead of white when absent.
+    WGPUTextureView view(threepp::Texture* source,bool blank,std::uint64_t& serial,bool exact=false){ // blank: black instead of white when absent.
         serial=blank?2:1;if(!source)return blank?black:white;
         auto& t=textures[source->id];t.used=frame;if(t.view)serial=t.serial;
         if(t.version==source->version()&&t.view)return t.view;
         const Image& image=source->image();const unsigned w=image.width(),h=std::max(1u,image.height());
         if(!w)return t.view?t.view:blank?black:white;
-        const WGPUTextureFormat f=format(image);const std::size_t texel=f==WGPUTextureFormat_RGBA32Float?16:f==WGPUTextureFormat_RGBA16Float?8:4;
+        const WGPUTextureFormat f=format(image,exact);const std::size_t texel=f==WGPUTextureFormat_RGBA32Float?16:f==WGPUTextureFormat_RGBA16Float?8:4;
         if(t.pendingVersion!=source->version()||t.width!=w||t.height!=h||t.texel!=texel){ // Start (or restart: new version or a replaced image) a copy.
             if(t.pending)wgpuTextureRelease(t.pending);t.converted.clear();t.row=0;t.width=w;t.height=h;t.texel=texel;t.pendingVersion=source->version();
             const bool mips=source->generateMipmaps&&source->minFilter!=Filter::Linear&&source->minFilter!=Filter::Nearest;
@@ -388,7 +390,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
             d.usage=WGPUTextureUsage_TextureBinding|WGPUTextureUsage_CopyDst|(t.levels>1?WGPUTextureUsage_RenderAttachment:WGPUTextureUsage_None);
             d.mipLevelCount=t.levels;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;t.pending=wgpuDeviceCreateTexture(device,&d);
         }
-        const std::byte* data=rgba(*source,t.converted);const std::size_t rowBytes=static_cast<std::size_t>(t.width)*t.texel;
+        const std::byte* data=rgba(*source,t.converted,exact);const std::size_t rowBytes=static_cast<std::size_t>(t.width)*t.texel;
         const bool whole=!t.view||rowBytes*t.height<=(4u<<20)||t.shownWidth!=t.width||t.shownHeight!=t.height;
         while(t.row<t.height){
             std::size_t rows=whole?t.height-t.row:std::min<std::size_t>(t.height-t.row,streamBudget/rowBytes);
@@ -451,7 +453,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         if(!state.uniforms.buffer||state.uniforms.bytes<bytes.size()){if(state.uniforms.buffer)wgpuBufferRelease(state.uniforms.buffer);state.uniforms.buffer=buffer(bytes.size(),WGPUBufferUsage_Uniform);state.uniforms.bytes=bytes.size();if(state.group){wgpuBindGroupRelease(state.group);state.group=nullptr;}}
         wgpuQueueWriteBuffer(queue,state.uniforms.buffer,0,bytes.data(),bytes.size());
         const bool shader=dynamic_cast<ShaderMaterial*>(&m)!=nullptr;std::vector<WGPUTextureView> views;std::vector<std::uint64_t> serials(maps.size());
-        for(std::size_t i=0;i<maps.size();++i)views.push_back(view(maps[i],shader||i>0,serials[i]));
+        for(std::size_t i=0;i<maps.size();++i)views.push_back(view(maps[i],shader||i>0,serials[i],std::find(c.program.exactTextures.begin(),c.program.exactTextures.end(),c.program.textures[i])!=c.program.exactTextures.end()));
         if(state.group&&serials==state.serials&&state.program==m.name)return state.group;
         if(state.group)wgpuBindGroupRelease(state.group);state.serials=serials;state.program=m.name;
         std::vector<WGPUBindGroupEntry> e(1+2*maps.size());e[0].binding=0;e[0].buffer=state.uniforms.buffer;e[0].size=state.uniforms.bytes;

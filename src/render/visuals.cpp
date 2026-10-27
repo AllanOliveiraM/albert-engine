@@ -531,7 +531,7 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     auto frustumIn=[&](Object3D& body){std::optional<Frustum> f; // The camera's frustum in a body's frame.
         if(camera){Matrix4 m;m.multiplyMatrices(camera->projectionMatrix,camera->matrixWorldInverse);m.multiply(*body.matrixWorld);f.emplace();f->setFromProjectionMatrix(m);}return f;};
     const auto view=cullToView_?frustumIn(*earth):std::nullopt; // With a second view on screen: by the horizon only (its ground was cut to the main view's).
-    if(earthTerrain_)earthTerrain_->detail(earthTerrainDetail_,terrainBounds_[0]); // The region's imagery on its nodes (at every quality: a texture, not a rendering cost).
+    if(earthTerrain_){earthTerrain_->material(roads_.material(earthTerrainMaterial_,settings.quality));earthTerrain_->detail(roads_.material(earthTerrainDetail_,settings.quality),terrainBounds_[0]);} // The region's imagery on its nodes (at every quality: a texture, not a rendering cost).
     if(moonTerrain_)moonTerrain_->detail(settings.quality?moonTerrainDetail_:nullptr,terrainBounds_[1]);
     const bool terrainCovers=earthTerrain_&&settings.terrain&&localCamera.length()<3.f&&earthTerrain_->update(localCamera,view?&*view:nullptr,true,earthFrame);
     if(earthTerrain_&&!terrainCovers) earthTerrain_->hide();

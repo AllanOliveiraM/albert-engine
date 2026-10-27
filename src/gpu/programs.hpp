@@ -14,12 +14,14 @@ struct Program {
     std::string wgsl; // vs_main and fs_main.
     std::vector<std::pair<std::string,Uniform>> uniforms;
     std::vector<std::string> textures;
+    std::vector<std::string> exactTextures; // textureLoad data: unfilterable f32, nearest sampler, no half-float fallback.
     std::vector<std::pair<std::string,int>> attributes; // Name and float components.
     bool points=false;
     // Drawn before everything else, without depth and showing back faces only: a shell (the sky)
     // around the camera, or seen from outside, covers its whole disc once and objects overwrite it.
     bool background=false;
 };
+Program surfaceProgram(); // The standard terrain lighting, reusable by ground decals.
 void define(const std::string& name,Program program);
 const Program* program(const std::string& name);
 extern const char* const prelude;

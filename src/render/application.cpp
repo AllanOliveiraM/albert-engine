@@ -2770,6 +2770,7 @@ int albert::runRenderer(int argc, char** argv) {
             if(const auto* at=objects.exact("earth")){earthFrame.at=*at;const double flat=6356.752314245/6378.137;
                 auto turned=[&](double a,double b,double c){const double x=c2t[0][0]*a+c2t[1][0]*b+c2t[2][0]*c,y=c2t[0][1]*a+c2t[1][1]*b+c2t[2][1]*c,z=c2t[0][2]*a+c2t[1][2]*b+c2t[2][2]*c;return std::array<double,3>{x,z,-y};};
                 const auto x=turned(1,0,0),y=turned(0,0,1),z=turned(0,-1,0);earthFrame.linear={x[0],x[1],x[2],y[0]*flat,y[1]*flat,y[2]*flat,z[0],z[1],z[2]};}
+            planets.roads(registry);
             planets.cullToView(insetId.empty()); // Last frame's second view: its ground must not be cut to this one's.
             planets.update(solarDirection.normalize(), camera->position, shownSettings, dt, camera.get(),objects.exact("earth")?&earthFrame:nullptr,objects.exact("moon"));
             Vector3 earthCamera = camera->position;

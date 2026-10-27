@@ -12,6 +12,7 @@
 #include "solids.hpp"
 #include "lighting.hpp"
 #include "terrain.hpp"
+#include "roads.hpp"
 #include <future>
 #include <thread>
 
@@ -55,6 +56,7 @@ public:
     bool detailActive() const { return pendingImage_.valid() || uploads_.active(); }
     bool uploading() const { return uploads_.active(); }
     void stageRegionalImages(RegionalImages images);
+    void roads(const core::Scene& scene){roads_.sync(scene);}
     void updateUploads(); // Publishes staged textures, one a frame.
     void retryDetails() { imageFailed_.fill(false); detailError.clear(); }
     void replaceAssets(DecodedAssets assets);
@@ -81,6 +83,7 @@ public:
     threepp::Scene* scene_=nullptr; // Where the terrain's nodes hang (placed in double precision, not as the bodies' children).
 
 private:
+    Roads roads_;
     TextureUploads uploads_;
     std::optional<RegionalImages> uploadingRegion_;
     std::shared_ptr<threepp::Texture> uploadingSun_;

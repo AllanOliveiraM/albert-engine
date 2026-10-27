@@ -333,6 +333,7 @@ message CreateFlightRequest {
   // bars; parts on a hinged one turn with it): up to 2048 parts (merged by colour when drawn). The scene shows them as object "site" ("site.<id>" for the
   // other flights; none without scenery or off the Earth).
   repeated SceneryPart scenery=22;
+  repeated SceneryRoad roads=25; // Up to 128 ways, 4096 points total; draped decals, no collision geometry.
 }
 // A piece of scenery in metres east, north and up of the site: its centre and size along its own axes, which are turned by
 // heading_degrees (its y toward it, clockwise from north) and tilted by tilt_degrees (its z leaning from up toward its y).
@@ -341,6 +342,11 @@ message CreateFlightRequest {
 // when that is hinged (0: fixed).
 message SceneryPart { enum Shape { BOX=0; CYLINDER=1; TRUSS=2; } string name=1; Shape shape=2; Vector3 centre_enu_meters=3; Vector3 size_meters=4;
   double heading_degrees=5; double tilt_degrees=6; uint32 color=7; double inner_diameter_meters=8; double bar_meters=9; uint32 structure=10; }
+// Centre lines in site ENU metres. Width includes shoulders. Highway paint is double solid yellow and white edges.
+message SceneryRoad { enum Surface { ASPHALT=0; CONCRETE=1; COMPACTED=2; SAND=3; }
+  repeated Vector3 points_enu_meters=1; double width_meters=2; Surface surface=3; bool highway=4;
+  bool stop_start=5; bool stop_end=6; uint64 osm_way=7;
+}
 message StructureDefinition { string name=1; Vector3 start_enu_meters=2; Vector3 end_enu_meters=3; double radius_meters=4;
   optional double stiffness_newtons_per_meter=5; optional double damping_newton_seconds_per_meter=6; optional double friction=7; // Unset: 1e7, 1e5, 0.5.
   // Hinged (with hinge_enu_meters): it turns about hinge_axis (east, north, up; unset: up) through that point by an angle from

@@ -35,7 +35,7 @@ struct Extent {double a0,b0,size;};
 Extent extent(const Key& k){const double size=2./static_cast<double>(1u<<k.level);return{-1+k.x*size,-1+k.y*size,size};}
 // Solid angle of the spherical triangle a, b, c (Van Oosterom and Strackee).
 double triangle(const Vec& a,const Vec& b,const Vec& c){return 2*std::atan2(std::abs(a.dot(b.cross(c))),1+a.dot(b)+b.dot(c)+c.dot(a));}
-struct Built {Key key;Vec centre;float radius=0;std::vector<float> positions,normals,uvs;std::vector<unsigned> index;bool complete=true;std::uint64_t generation=0;};
+struct Built {Key key;Vec centre;float radius=0;std::vector<float> positions,normals,uvs,residuals;std::vector<unsigned> index;bool complete=true;std::uint64_t generation=0;};
 std::uint64_t pack(const Key& k){return static_cast<std::uint64_t>(k.face)<<61|static_cast<std::uint64_t>(k.level)<<56|static_cast<std::uint64_t>(k.x)<<28|k.y;} // Levels ≤ 27.
 struct Shape {Vec centre;double radius=0;std::array<Vec,4> corners;}; // Angular radius (radians).
 Shape shapeOf(const Key& k){
@@ -139,6 +139,7 @@ struct Terrain::Impl {
             const Vec n=(p[at+1]-p[at-1]).cross(p[at+m]-p[at-m]).unit();for(double v:{n.x,n.y,n.z})b.normals.push_back(static_cast<float>(v));
             const double u=(centrePhi+std::remainder(phi[at]-centrePhi,2*pi))/(2*pi); // Unwrapped across the date line (textures repeat).
             b.uvs.push_back(static_cast<float>(u));b.uvs.push_back(static_cast<float>(lat[at]/pi+.5));
+            b.residuals.push_back(static_cast<float>(u-static_cast<float>(u)));const double v=lat[at]/pi+.5;b.residuals.push_back(static_cast<float>(v-static_cast<float>(v)));
             b.radius=std::max(b.radius,static_cast<float>(q.length()));
         };
         for(int j=1;j<=posts;++j)for(int i=1;i<=posts;++i)vertex(i,j,0);
@@ -160,6 +161,7 @@ struct Terrain::Impl {
         for(auto& b:ready){
             auto g=BufferGeometry::create();
             g->setAttribute("position",FloatBufferAttribute::create(std::move(b.positions),3));g->setAttribute("normal",FloatBufferAttribute::create(std::move(b.normals),3));
+            g->setAttribute("geoResidual",FloatBufferAttribute::create(std::move(b.residuals),2));
             g->setAttribute("uv",FloatBufferAttribute::create(b.uvs,2));g->setAttribute("uv2",FloatBufferAttribute::create(std::move(b.uvs),2));g->setIndex(std::move(b.index));
             g->boundingSphere=Sphere(Vector3(),b.radius);const Vec at=b.centre*body.scale;
             auto mesh=Mesh::create(g,material);if(root)mesh->matrixAutoUpdate=false;else mesh->position.set(static_cast<float>(at.x),static_cast<float>(at.y),static_cast<float>(at.z));
@@ -240,6 +242,7 @@ std::size_t Terrain::drawn()const{return impl_->selected.size();}
 std::size_t Terrain::pending()const{std::lock_guard l(impl_->lock);return impl_->queued.size()+impl_->done.size();}
 int Terrain::finestLevel()const{return impl_->finest;}
 double Terrain::coveredSolidAngle()const{return impl_->solidAngle;}
+void Terrain::material(std::shared_ptr<Material> material){auto& g=*impl_;if(g.material==material)return;g.material=std::move(material);++g.detailVersion;}
 void Terrain::detail(std::shared_ptr<Material> material,std::optional<Vector4> bounds){
     auto& g=*impl_;if(material==g.detailMaterial&&bounds==g.detailBounds)return;g.detailMaterial=std::move(material);g.detailBounds=bounds;++g.detailVersion;}
 std::size_t Terrain::detailed()const{std::size_t n=0;for(const auto& k:impl_->selected)if(const auto* node=impl_->node(k);node&&node->detailed)++n;return n;}

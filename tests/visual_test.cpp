@@ -18,6 +18,7 @@
 #include "lighting.hpp"
 #include "sound.hpp"
 #include "webgpu_programs.hpp"
+#include "threepp/textures/DataTexture.hpp"
 #include <string_view>
 #include <memory>
 #include <algorithm>
@@ -250,7 +251,33 @@ struct GpuTarget final:Target {
         wgpuBufferUnmap(b);wgpuBufferRelease(b);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);return out;
     }
 };
+void roadGraphics(Target& renderer){
+    auto site=std::make_shared<albert::core::Scenery>();site->latitude=25.996128*3.141592653589793/180;site->longitude=-97.154517*3.141592653589793/180;
+    albert::core::SceneryRoad highway;highway.surface=albert::core::SceneryRoad::Surface::Asphalt;highway.width=10.5;highway.highway=true;highway.points={{-30,0,0},{0,0,0},{30,0,0}};site->roads.push_back(highway);
+    albert::core::SceneryRoad service;service.width=7;service.stopStart=true;service.points={{0,0,0},{0,30,0}};site->roads.push_back(service);
+    albert::core::SceneryPart apron;apron.centre={0,24,0};apron.size={12,6,1};apron.name="test apron";site->parts.push_back(apron);
+    albert::core::Scene registry;albert::core::Object object;object.id="road-site";object.name="Road site";object.appearance={albert::core::Shape::Box,{60,60,1},0xffffff};object.scenery=site;object.samples.emplace_back();registry.create(object);albert::Roads roads;roads.sync(registry);
+    require(roads.segments()==3&&roads.candidates()>=3,"Road spatial index omitted a junction");
+    auto base=MeshStandardMaterial::create();auto image=DataTexture::create(ImageData(std::vector<unsigned char>{210,190,140,255}),1,1);base->map=image;base->roughness=1;
+    auto material=roads.material(base,1);auto geometry=PlaneGeometry::create(60,60,1,1);
+    auto* positions=geometry->getAttribute<float>("position");std::vector<float> uv,residual;
+    const double pi=3.141592653589793,a=6378137,e2=6.69437999014e-3,sn=std::sin(site->latitude),n=a/std::sqrt(1-e2*sn*sn);
+    for(int i=0;i<positions->count();++i){const double u=(site->longitude+pi)/(2*pi)+positions->getX(i)/(2*pi*n*std::cos(site->latitude));
+        const double v=site->latitude/pi+.5+positions->getY(i)/(pi*a*(1-e2)/std::pow(1-e2*sn*sn,1.5));uv.insert(uv.end(),{float(u),float(v)});residual.insert(residual.end(),{float(u-float(u)),float(v-float(v))});}
+    geometry->setAttribute("uv2",FloatBufferAttribute::create(std::move(uv),2));geometry->setAttribute("geoResidual",FloatBufferAttribute::create(std::move(residual),2));
+    auto world=Scene::create();world->background=Color(0);auto sun=DirectionalLight::create(Color(0xffffff),3);sun->position.set(0,0,50);world->add(sun);world->add(Mesh::create(geometry,material));
+    auto camera=OrthographicCamera::create(-30,30,30,-30,.1,100);camera->position.set(0,0,50);camera->lookAt(Vector3());renderer.render(*world,*camera);const auto pixels=renderer.readRGBPixels();
+    auto bright=[&](int x,int y){const auto i=3*(y*192+x);return int(pixels[i])+pixels[i+1]+pixels[i+2];};
+    require(bright(55,102)<bright(55,140)*.7,"Asphalt did not replace the ground imagery");
+    require(bright(96,138)>bright(55,102)*1.3,"Concrete service road missing");
+    require(bright(96,173)>bright(96,138),"Road paint was not clipped under the apron");
+    int yellow=0;for(int y=94;y<98;++y)for(int x=20;x<170;++x){const auto i=3*(y*192+x);yellow+=pixels[i]>pixels[i+2]+20&&pixels[i+1]>pixels[i+2]+10;}
+    require(yellow>50,"Antialiased yellow highway centre lines missing");
+    sun->intensity=0;renderer.render(*world,*camera);const auto dark=renderer.readRGBPixels();require(dark[3*(96*192+55)]<pixels[3*(96*192+55)]/3,"Roads glow without sunlight");
+    registry.remove("road-site");roads.sync(registry);require(roads.material(base,1)==base,"Removed site retained its road decal");
+}
 void graphics(Target& renderer) {
+    roadGraphics(renderer);
     { // A handful of offscreen frames compiles and exercises the transient shaders without a flight or a warm GPU.
         auto world=Scene::create();world->background=Color(0x000000);world->add(AmbientLight::create(Color(0xffffff),.2f));
         albert::core::VehicleLook look;look.length=4;look.diameter=2;look.engines.push_back({{4,0,0},{1,0,0},.5});albert::Vehicle vehicle(look);world->add(vehicle.node());
