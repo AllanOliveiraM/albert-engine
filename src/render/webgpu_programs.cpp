@@ -1,5 +1,6 @@
 #include "webgpu_programs.hpp"
 #include "gpu/programs.hpp"
+#include "roads.hpp"
 using albert::gpu::Program;using albert::gpu::Uniform;
 namespace {
 // Points: one quad per vertex; `corner` spans [-1, 1]² and replaces gl_PointCoord.
@@ -823,6 +824,36 @@ void objects(){
     p.wgsl=assisted(false,false);albert::gpu::define("albert:assisted",p);
     p.wgsl=assisted(true,false);albert::gpu::define("albert:assisted-flat",p);
     p.wgsl=assisted(false,true);albert::gpu::define("albert:rock",p);
+    auto concrete=p;concrete.wgsl=assisted(false,false);
+    for(const char* name:{"padOne","padTwo","concreteQuality"})concrete.uniforms.emplace_back(name,Uniform::vec4);
+    auto& c=concrete.wgsl;auto at=c.find("rockScale: f32 }");c.replace(at,std::string("rockScale: f32 }").size(),"rockScale: f32, padOne: vec4f, padTwo: vec4f, concreteQuality: vec4f }");
+    at=c.find("@fragment fn fs_main");c.insert(at,albert::concreteWgsl());
+    at=c.find("    let air = airLight");c.insert(at,R"(
+    let relOne=v.local.xy-material.padOne.xy;let relTwo=v.local.xy-material.padTwo.xy;
+    let pad=select(material.padTwo,material.padOne,length(relOne)<length(relTwo));
+    let rel=v.local.xy-pad.xy;let q=vec2f(dot(rel,vec2f(pad.w,-pad.z)),dot(rel,pad.zw));
+    let strength=select(0.16,0.95,length(relOne)<length(relTwo));
+    let radial=exp(-dot(q,q)/(24.0*24.0));
+    let mouth=vec2f(q.x/(15.0+max(0.0,abs(q.y)-42.0)*0.4),(abs(q.y)-42.0)/25.0);
+    let soot=strength*max(radial,0.85*exp(-dot(mouth,mouth)))*(0.8+0.2*roadNoise(q*0.4));
+    let localNormal=normalize(cross(dpdx(v.local),dpdy(v.local)));
+    let horizontal=smoothstep(0.65,0.95,abs(localNormal.z));
+    let pixel=abs(dpdx(q))+abs(dpdy(q));
+    let slab=concreteSurface(q,pixel,soot,material.concreteQuality.x);
+    let wallQ=vec2f(select(v.local.y,v.local.x,abs(localNormal.y)>abs(localNormal.x)),v.local.z);
+    let wallPixel=abs(dpdx(wallQ))+abs(dpdy(wallQ));
+    let boards=roadRepeat(wallQ.y,0.30,0.008,wallPixel.y);
+    let streak=roadNoise(vec2f(wallQ.x*2.2,wallQ.y*0.07))*roadNoise(vec2f(wallQ.x*0.43,4.0));
+    let wall=concreteSurface(wallQ,wallPixel,soot*0.4,material.concreteQuality.x)*(1.0-0.13*boards-0.23*streak);
+    albedo=mix(wall,slab,horizontal);
+)");albert::gpu::define("albert:concrete",std::move(concrete));
+    auto detail=p;detail.wgsl=assisted(false,false);detail.attributes.emplace_back("color",3);
+    auto& d=detail.wgsl;at=d.find("worldNormal: vec3f }");d.replace(at,std::string("worldNormal: vec3f }").size(),"worldNormal: vec3f, @location(5) colour: vec3f }");
+    at=d.find("@location(1) normal: vec3f)");d.replace(at,std::string("@location(1) normal: vec3f)").size(),"@location(1) normal: vec3f, @location(2) colour: vec3f)");
+    at=d.find("o.local = position;");d.insert(at+std::string("o.local = position;").size()," o.colour = colour;");
+    at=d.find("var albedo = material.diffuse;");d.replace(at,std::string("var albedo = material.diffuse;").size(),"var albedo = v.colour;");
+    albert::gpu::define("albert:site-detail",std::move(detail));
+
     Program debris;debris.points=true;debris.uniforms={{"opacity",Uniform::f32},{"ink",Uniform::vec3}};
     debris.wgsl=std::string(quadCorner)+R"(
 struct Material { opacity: f32, ink: vec3f };

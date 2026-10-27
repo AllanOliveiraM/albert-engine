@@ -11,6 +11,23 @@ struct Primitive {Vector4 ends,info,extra;};
 void defineRoads();
 std::shared_ptr<DataTexture> texture(std::vector<float> values,unsigned width,unsigned height){auto t=DataTexture::create(ImageData(std::move(values)),width,height);t->type=Type::Float;t->minFilter=t->magFilter=Filter::Nearest;t->generateMipmaps=false;return t;}
 }
+// The terrain roads and scenery slabs use the same metre-scale concrete, including filtered joints.
+std::string_view concreteWgsl(){return R"(
+fn roadHash(q: vec2f) -> f32 { return fract(sin(dot(q, vec2f(127.1, 311.7))) * 43758.5453); }
+fn roadNoise(q: vec2f) -> f32 { let i = floor(q); let a = fract(q); let f = a*a*(3.0-2.0*a);
+    return mix(mix(roadHash(i),roadHash(i+vec2f(1,0)),f.x),mix(roadHash(i+vec2f(0,1)),roadHash(i+vec2f(1,1)),f.x),f.y); }
+fn roadLine(x: f32, half: f32, pixel: f32) -> f32 { let p = max(pixel, 0.001); return clamp((x+half)/p+0.5,0.0,1.0)-clamp((x-half)/p+0.5,0.0,1.0); }
+fn roadIntegral(x: f32, period: f32, width: f32) -> f32 { let q = (x+width*0.5)/period; return floor(q)*width+min(fract(q)*period,width); }
+fn roadRepeat(x: f32, period: f32, width: f32, pixel: f32) -> f32 { let p = max(pixel,0.001);return (roadIntegral(x+p*0.5,period,width)-roadIntegral(x-p*0.5,period,width))/p; }
+fn concreteSurface(q: vec2f, pixel: vec2f, soot: f32, quality: f32) -> vec3f {
+    let footprint = max(pixel.x,pixel.y);
+    let fine = quality*(1.0-smoothstep(0.004,0.02,footprint));
+    let grain = mix(0.5,roadNoise(q*65.0),fine);let stain = roadNoise(q*0.21);
+    let joint = max(roadRepeat(q.x,5.5,0.018,pixel.x),roadRepeat(q.y,5.5,0.018,pixel.y));
+    let wet = smoothstep(0.62,0.82,roadNoise(q*0.065+vec2f(17,9)))*smoothstep(0.3,0.7,stain);
+    return vec3f(0.42,0.41,0.38)*(0.90+0.15*stain+0.08*(grain-0.5))*(1.0-0.65*joint)*(1.0-0.32*wet)*(1.0-0.72*soot*(0.6+0.4*stain));
+}
+)";}
 void Roads::sync(const core::Scene& scene){
     std::shared_ptr<const core::Scenery> next;
     for(const auto& [id,o]:scene.objects())if(o.visible&&o.scenery&&!o.scenery->roads.empty()){next=o.scenery;break;}
@@ -71,17 +88,11 @@ void defineRoads(){
         at=w.find("@location(5) worldNormal: vec3f }");w.replace(at,std::string("@location(5) worldNormal: vec3f }").size(),"@location(5) worldNormal: vec3f, @location(6) road: vec2f }");
         at=w.find("@location(3) uv2: vec2f) -> Varyings");w.replace(at,std::string("@location(3) uv2: vec2f) -> Varyings").size(),"@location(3) uv2: vec2f, @location(4) geoResidual: vec2f) -> Varyings");
         at=w.find("    return o;\n}");w.insert(at,"    o.road = (uv2 - material.roadOrigin.xy) * material.roadOrigin.zw + geoResidual * material.roadOrigin.zw + material.roadOffset.xy;\n");
-        at=w.find("@fragment fn fs_main");w.insert(at,R"(
+        at=w.find("@fragment fn fs_main");w.insert(at,std::string(concreteWgsl())+R"(
 @group(2) @binding(11) var roadIndex: texture_2d<f32>;
 @group(2) @binding(12) var roadIndexSampler: sampler;
 @group(2) @binding(13) var roadData: texture_2d<f32>;
 @group(2) @binding(14) var roadDataSampler: sampler;
-fn roadHash(q: vec2f) -> f32 { return fract(sin(dot(q, vec2f(127.1, 311.7))) * 43758.5453); }
-fn roadNoise(q: vec2f) -> f32 { let i = floor(q); let a = fract(q); let f = a*a*(3.0-2.0*a);
-    return mix(mix(roadHash(i),roadHash(i+vec2f(1,0)),f.x),mix(roadHash(i+vec2f(0,1)),roadHash(i+vec2f(1,1)),f.x),f.y); }
-fn roadLine(x: f32, half: f32, pixel: f32) -> f32 { let p = max(pixel, 0.001); return clamp((x+half)/p+0.5,0.0,1.0)-clamp((x-half)/p+0.5,0.0,1.0); }
-fn roadIntegral(x: f32, period: f32, width: f32) -> f32 { let q = (x+width*0.5)/period; return floor(q)*width+min(fract(q)*period,width); }
-fn roadRepeat(x: f32, period: f32, width: f32, pixel: f32) -> f32 { let p = max(pixel,0.001);return (roadIntegral(x+p*0.5,period,width)-roadIntegral(x-p*0.5,period,width))/p; }
 // Return albedo and coverage; all derivatives are computed before the spatially varying loop.
 fn roadSurface(q: vec2f, dx: vec2f, dy: vec2f) -> vec4f {
     let tile = vec2i(floor((q-material.roadGrid.xy)/material.roadGeo.x));
@@ -115,8 +126,7 @@ fn roadSurface(q: vec2f, dx: vec2f, dy: vec2f) -> vec4f {
     let crack = roadLine(sin(q.x*0.7+sin(q.y*0.6))*0.6,0.012,max(footprint,0.01)) * smoothstep(0.65,0.8,stain);
     colour *= 1.0-0.45*crack*material.roadGeo.w;
     if (info.y>0.5&&info.y<1.5) {
-        let joint = max(roadRepeat(along,5.0,0.018,alongPixel),roadRepeat(across,5.0,0.018,lateralPixel));
-        colour = vec3f(0.42,0.41,0.38)*(0.90+0.15*stain+0.08*(grain-0.5))*(1.0-0.65*joint)*(1.0-0.55*soot*(0.6+0.4*stain));
+        colour = concreteSurface(vec2f(along,across),vec2f(alongPixel,lateralPixel),soot,material.roadGeo.w);
     }
     if (sand) {colour=mix(vec3f(0.34,0.30,0.23),vec3f(0.50,0.43,0.32),select(0.0,1.0,info.y>2.5))*(0.9+0.2*stain);let sw = (abs(across)-0.85)/0.22;colour*=1.0-0.13*exp(-sw*sw);}
     // Conservative no-passing paint near this industrial site: two 12 cm yellow lines, 12 cm white edges.

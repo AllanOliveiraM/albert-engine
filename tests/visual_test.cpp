@@ -276,8 +276,29 @@ void roadGraphics(Target& renderer){
     sun->intensity=0;renderer.render(*world,*camera);const auto dark=renderer.readRGBPixels();require(dark[3*(96*192+55)]<pixels[3*(96*192+55)]/3,"Roads glow without sunlight");
     registry.remove("road-site");roads.sync(registry);require(roads.material(base,1)==base,"Removed site retained its road decal");
 }
+void padGraphics(Target& renderer){
+    albert::core::Scenery scenery;
+    auto part=[&](const char* name,albert::core::Vector at,albert::core::Vector size){albert::core::SceneryPart p;p.name=name;p.centre=at;p.size=size;scenery.parts.push_back(p);};
+    for(double x:{0.,100.}){part("test apron",{x,0,.5},{80,120,1});part("trench floor",{x,0,.15},{18,84,.3});part("mount leg",{x+10,8,5.3},{5.8,5.8,9.5});}
+    part("detail truck",{30,25,1},{2.5,7,2});
+    albert::Site site(scenery);auto detail=site.node()->getObjectByName("pad furnishings");require(detail,"Missing merged furnishings");
+    auto world=Scene::create();world->background=Color(0);world->add(site.node());auto sun=DirectionalLight::create(Color(0xffffff),3);sun->position.set(-30,-50,200);world->add(sun);
+    auto camera=OrthographicCamera::create(-95,95,65,-65,.1,500);camera->position.set(50,0,200);camera->lookAt(Vector3(50,0,0));
+    renderer.render(*world,*camera);auto lit=renderer.readRGBPixels();
+    auto sample=[&](double x,double y){const int ix=int((x+45)/190*192),iy=int((y+65)/130*192);const int k=3*(iy*192+ix);return int(lit[k])+lit[k+1]+lit[k+2];};
+    std::cout<<"pad scorch luminance: "<<sample(0,48)<<" / "<<sample(100,48)<<"\n";require(sample(0,48)<sample(100,48)*.90,"Flown pad lacks stronger trench-mouth scorch");
+    require(sample(30,-25)>sample(0,48)*1.1,"Scorch covered the entire apron");
+    site.quality(0);require(!detail->visible,"Low quality retained small furnishings");renderer.render(*world,*camera);const auto low=renderer.readRGBPixels();require(low!=lit,"Quality switch failed to alter the rendered furnishings");
+    require(std::count_if(low.begin(),low.end(),[](auto c){return c>40;})>10000,"Low quality lost the concrete aprons");
+    site.quality(1);require(detail->visible,"High quality failed to restore furnishings");sun->intensity=0;renderer.render(*world,*camera);const auto night=renderer.readRGBPixels();
+    require(std::count_if(night.begin(),night.end(),[](auto c){return c>20;})==0,"Concrete or furnishings emit light without the sun");
+    // A ground-level view exercises the sloping faces and vertical board-form material as well.
+    sun->intensity=3;camera->left=-18;camera->right=18;camera->top=12;camera->bottom=-12;camera->updateProjectionMatrix();camera->position.set(35,-25,15);camera->lookAt(Vector3(10,8,5));renderer.render(*world,*camera);
+    const auto pier=renderer.readRGBPixels();require(std::count_if(pier.begin(),pier.end(),[](auto c){return c>30;})>1000,"Concrete pier faces disappeared");
+}
 void graphics(Target& renderer) {
     roadGraphics(renderer);
+    padGraphics(renderer);
     { // A handful of offscreen frames compiles and exercises the transient shaders without a flight or a warm GPU.
         auto world=Scene::create();world->background=Color(0x000000);world->add(AmbientLight::create(Color(0xffffff),.2f));
         albert::core::VehicleLook look;look.length=4;look.diameter=2;look.engines.push_back({{4,0,0},{1,0,0},.5});albert::Vehicle vehicle(look);world->add(vehicle.node());

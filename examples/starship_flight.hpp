@@ -60,8 +60,17 @@ inline void addStarbase(api::CreateFlightRequest& create){
     auto bar=[&](const char* name,Vec a,Vec b,double width,std::uint32_t colour,unsigned on=0){const Vec d=b+a*-1.;part(name,Shape::BOX,(a+b)*.5,{width,width,norm(d)},colour,std::atan2(d.x,d.y)/deg,std::atan2(std::hypot(d.x,d.y),d.z)/deg);onPart(on);};
     auto guard=[&](Vec a,Vec b,int bays,unsigned on=0,double inset=0){const Vec d=b+a*-1.;for(const double z:{.55,1.1})bar("safety rail",a+Vec{0,0,z},b+Vec{0,0,z},.065,white,on);
         for(int i=0;i<=bays;++i){const Vec p=a+d*(double(i)/bays+(i==0?inset:i==bays?-inset:0)/norm(d));bar("railing post",p+Vec{0,0,-.03},p+Vec{0,0,1.13},.125,dark,on);}};
-    auto tower=[&](Vec centre,double bearing,double height){const double sn=std::sin(bearing*deg),cs=std::cos(bearing*deg),section=height/16;
+    auto tower=[&](Vec centre,double bearing,double height,bool service=true){const double sn=std::sin(bearing*deg),cs=std::cos(bearing*deg),section=height/16;
         auto p=[&](double x,double y,double z){return centre+Vec{x*cs+y*sn,-x*sn+y*cs,z};};
+        part("tower concrete plinth",Shape::BOX,p(0,0,.78),{13.8,13.8,1.5},concrete,bearing);
+        if(service){part("tower service building",Shape::BOX,p(-10,-5,3.7),{5.5,9,5.5},concrete,bearing);
+        part("service building roof",Shape::BOX,p(-10,-5,6.53),{5.8,9.3,.18},tankSteel,bearing);
+        for(const double z:{2.4,4.9})for(int i=0;i<3;++i)part("service building window",Shape::BOX,p(-12.78,-7.5+i*2.5,z),{.08,1.5,.9},0x344e60,bearing);}
+        for(const double side:{-1.,1.}){
+            part("tower lower steel cladding",Shape::BOX,p(side*4.81,0,height/6+.8),{.12,9.5,height/3},0x85898c,bearing);
+            part("tower lower steel cladding",Shape::BOX,p(0,side*4.81,height/6+.8),{9.5,.12,height/3},0x85898c,bearing);
+            for(int i=-3;i<=3;++i){part("cladding standing seam",Shape::BOX,p(side*4.9,i*1.35,height/6+.8),{.08,.055,height/3},lattice,bearing);
+                part("cladding standing seam",Shape::BOX,p(i*1.35,side*4.9,height/6+.8),{.055,.08,height/3},lattice,bearing);}}
         for(const double x:{-4.39,4.39})for(const double y:{-4.39,4.39})part("tower corner column",Shape::BOX,p(x,y,height/2),{.72,.72,height},lattice,bearing);
         for(int j=0;j<=16;++j){const double z=j==0?.24:j==16?height-.27:j*section;
             for(const double side:{-1.,1.}){bar("section joint girt",p(-4.42,side*4.39,z),p(4.42,side*4.39,z),.46,lattice);bar("section joint girt",p(side*4.39,-4.42,z+.03),p(side*4.39,4.42,z+.03),.46,lattice);}}
@@ -122,6 +131,10 @@ inline void addStarbase(api::CreateFlightRequest& create){
         pipe("ship QD hose droop",bend,shipRoot+shipAxis*(shipReach-2.28)+offset+Vec{0,0,-.25},.6);shipPart();} // Steel hoses enter the head's side.
     for(int i=0;i<3;++i)flex(shipRoot+shipAxis*(shipReach-2.28)+shipAcross*-1.72+Vec{0,0,.65-i*.6},shipRoot+shipAcross*(-2.05-i*.48)+Vec{0,0,-4.8},i==2?.22:.38,1.8,8);
     part("SQD tower valve cabinet",Shape::BOX,shipRoot+shipAcross*-2.65+Vec{0,0,-5.15},{2.1,1.5,1.6},tankSteel,45);shipPart(); // The cabinet and hose tails follow the arm hinge.
+    auto roadDistance=[&](Vec q,const auto& road){double best=1e9;for(unsigned i=1;i<road.count;++i){const auto& a=starbaseRoadPoints[road.first+i-1];const auto& b=starbaseRoadPoints[road.first+i];const Vec d{b.x-a.x,b.y-a.y,0},v=q+Vec{-a.x,-a.y,0};const double t=std::clamp((v.x*d.x+v.y*d.y)/(d.x*d.x+d.y*d.y),0.,1.);best=std::min(best,norm(v+d*(-t)));}return best;};
+    auto groundPart=[&](const char* name,Vec at,Vec size,std::uint32_t colour,double bearing){const double radius=std::hypot(size.x,size.y)/2+.4;
+        for(const auto& road:starbaseRoads)if(roadDistance(at,road)<road.width/2+radius)return; // Keep entrances and service lanes open, including Pad 2's diagonal access.
+        part(name,Shape::BOX,at,size,colour,bearing);};
     auto pad=[&](Vec centre,double bearing,Vec qd,unsigned on=0){const double s=std::sin(bearing*deg),c=std::cos(bearing*deg);
         auto place=[&](double across,double along,double z){return centre+Vec{across*c+along*s,-across*s+along*c,z};};
         part("west bunker apron",Shape::BOX,place(-39.515,-42.5,.47),{60.97,215,1},apron,bearing);
@@ -133,8 +146,8 @@ inline void addStarbase(api::CreateFlightRequest& create){
         part("trench wall",Shape::BOX,place(side*9.75,0,3.13),{1.5,84,5.74},wall,bearing);
         part("steel wall facing",Shape::BOX,place(side*9.02,0,3.125),{.08,83.96,5.69},dark,bearing); // Sink the lining without sharing its top face.
         for(int i=0;i<3;++i)part("raised pad terrace",Shape::BOX,place(side*(12+3*i),0,2.975-.99*i),{3.06,84.06,5.99-1.98*i},wall,bearing); // Steps expose the bathtub above natural ground.
-        const double drop=4.4;part("flame bucket ramp",Shape::BOX,place(0,side*10,2.6),{17.8,std::hypot(20.,drop)+.04,.35},lattice,side>0?bearing:bearing+180,std::atan2(drop,20.)/deg); // Split the plume below the hanging bells.
-        for(const double along:{-8.,8.})part("mount leg",Shape::BOX,place(side*9.75,along,7.99),{3,3,4.04},lattice,bearing); // Seat the legs into the walls and deck.
+        const double drop=4.4;part("flame bucket ramp",Shape::BOX,place(0,side*21,2.6),{17.8,std::hypot(42.,drop)+.04,.35},concrete,side>0?bearing:bearing+180,std::atan2(drop,42.)/deg); // Split the plume below the hanging bells.
+        for(const double along:{-8.,8.})part("mount leg",Shape::BOX,place(side*9.75,along,5.3),{5.8,5.8,9.5},concrete,bearing); // Drawn-only splayed piers reach the underside of the unchanged steel deck.
         part("mount deck side",Shape::BOX,place(side*8.2,0,deck-1.02),{5.6,22,2},lattice,bearing);
         part("mount deck end",Shape::BOX,place(0,side*8.2,deck-1.05),{10.84,5.6,2},lattice,bearing); // Stagger overlapping faces by 3 cm.
     }
@@ -162,6 +175,13 @@ inline void addStarbase(api::CreateFlightRequest& create){
             for(const double lamp:{-1.,1.})part("pad floodlight",Shape::BOX,place(x+lamp,y,26.75),{1.1,.4,.8},0xfff4d2,bearing+(y>0?180:0),28);}
         for(const double side:{-1.,1.}){part("covered cable trench",Shape::BOX,place(side*27,0,1.01),{.8,84,.14},dark,bearing);
             part("pad electrical junction",Shape::BOX,place(side*27,36,1.65),{1.5,1.1,1.4},tankSteel,bearing);} // Keep cable routes outside the terrace steps.
+        // Furnish the outer apron, leaving both exhaust exits and the tank-farm access open.
+        for(const double x:{-67.,77.})for(int i=0;i<11;++i)if(i!=4&&i!=5)groundPart("perimeter T wall",place(x,-136+i*16,2.07),{1.8,15.8,2.2},concrete,bearing);
+        for(const double side:{-1.,1.})for(int i=0;i<5;++i)groundPart("perimeter T wall",place(side*(24+i*10),-147,2.07),{1.8,9.8,2.2},concrete,bearing+90);
+        for(int row=0;row<2;++row)for(int i=0;i<5;++i)groundPart(i==4?"detail truck":"detail pickup",place(-53+row*11,-118+i*7.5,.97),i==4?Vec{2.72,7,2.1}:Vec{2.22,5.5,1.8},i%3==0?0x637b8a:white,bearing+90);
+        for(int i=0;i<9;++i)groundPart("detail cone",place(-34,-126+i*5,.97),{.48,.48,.7},0xf37924,bearing);
+        for(int i=0;i<4;++i){groundPart("detail skid",place(-42+i*6,47,.97),{2.5,4,1.5},tankSteel,bearing);
+            groundPart("detail cable tray",place(-42+i*6,36,.97),{.9,8,.4},dark,bearing);}
     };
     pad({0,0,0},trench,{-1,0,0},9);
     for(const double side:{-1.,1.})part("steam vent",Shape::BOX,place(0,side*42,3),{18,1,6},wet,side>0?trench:trench+180); // Not drawn: where the deluge's steam leaves the trench.
@@ -169,7 +189,7 @@ inline void addStarbase(api::CreateFlightRequest& create){
     for(const auto& row:starbaseOsm){const std::string kind=row.kind,name=row.name;const Vec centre{row.x,row.y,0},axis{std::sin(row.heading*deg),std::cos(row.heading*deg),0},across{axis.y,-axis.x,0};
         if(kind=="trench"){const Vec toward{tower2->x-row.x,tower2->y-row.y,0};pad(centre,row.heading,toward*(1/norm(toward)));}
         else if(kind=="tower"){const Vec toward{pad2->x-row.x,pad2->y-row.y,0},reach=toward*(1/norm(toward)),side{reach.y,-reach.x,0};const double bearing=std::atan2(reach.x,reach.y)/deg;
-            tower(centre,row.heading,row.height);
+            tower(centre,row.heading,row.height,false); // Its OSM service building already occupies the foot of Tower 2.
             part("tower 2 crown",Shape::BOX,centre+Vec{0,0,row.height+1},{10.5,10.5,3},dark,row.heading);
             part("tower 2 lightning mast",Shape::CYLINDER,centre+Vec{0,0,row.height+9.98},{.6,.6,15},dark); // Bury the mast base in the crown.
             part("tower 2 carriage",Shape::BOX,centre+reach*4.5+Vec{0,0,armHeight-armRadius-depth/2},{12.54,9.5,depth+3},dark,bearing); // Overlap the roots to separate end faces.
@@ -178,7 +198,8 @@ inline void addStarbase(api::CreateFlightRequest& create){
                 armDetail(centre+reach*(half+1.5)+side*(sign*5)+Vec{0,0,armHeight-armRadius},reach,side,25,sign,0,3,23);}
             part("tower 2 ship arm",Shape::TRUSS,centre+reach*(half+6.5)+side*7.5+Vec{0,0,deck+78},{2.6,2.6,13},lattice,bearing,90);
         }else if(kind=="building"){const bool vapor=name.find("Vaporizer")!=std::string::npos,bunker=name.find("bunker")!=std::string::npos||name.find("Bunker")!=std::string::npos;
-            part(name.empty()?"OSM building":row.name,Shape::BOX,centre+Vec{0,0,vapor?3:row.height/2},vapor?Vec{2.5,2.14,6}:Vec{row.width,row.length,row.height},vapor?dark:bunker?0x6f6d69:0x9a9893,row.heading);
+            const bool towerService=tower2&&std::hypot(row.x-tower2->x,row.y-tower2->y)<12;
+            part(towerService?"tower service building":name.empty()?"OSM building":row.name,Shape::BOX,centre+Vec{0,0,vapor?3:row.height/2},vapor?Vec{2.5,2.14,6}:Vec{row.width,row.length,row.height},vapor?dark:bunker?0x6f6d69:0x9a9893,row.heading);
             if(vapor)for(int i=0;i<4;++i)part("vaporizer fin",Shape::BOX,centre+across*(-.9+.6*i)+Vec{0,0,3.03},{.12,2.5,5.88},dark,row.heading); // Expose fins on both sides; recess their tops by 3 cm.
         }else if(kind=="tank"||kind=="lying tank"){const bool lying=kind=="lying tank",methane=name.find("methane")!=std::string::npos,oxygen=name.find("oxygen")!=std::string::npos||name.find("LOX")!=std::string::npos,nitrogen=name.find("nitrogen")!=std::string::npos;
             const double diameter=lying?row.width:row.length,z=lying?diameter/2+.6:row.height/2;const std::uint32_t colour=nitrogen?tankSteel:name.find("water")!=std::string::npos?0xd8d6cf:oxygen||methane?white:tankSteel;
@@ -214,6 +235,14 @@ inline void addStarbase(api::CreateFlightRequest& create){
     };
     services({0,0,0},trench,{-1,0,0},{-34,84,0},true);
     if(pad2&&tower2){const Vec toward{tower2->x-pad2->x,tower2->y-pad2->y,0};services({pad2->x,pad2->y,0},pad2->heading,toward*(1/norm(toward)),{-148,98,0},false);}
+    // Launch-day parking follows the saved highway tangents, outside its full paved width and clear of junctions.
+    int parked=0;
+    for(const auto& road:starbaseRoads)if(road.highway)for(unsigned i=1;i<road.count&&parked<20;i+=2){const auto& a=starbaseRoadPoints[road.first+i-1];const auto& b=starbaseRoadPoints[road.first+i];Vec d{b.x-a.x,b.y-a.y,0};if(norm(d)<8)continue;d=d*(1/norm(d));
+        for(const double side:{-1.,1.}){const Vec at=Vec{(a.x+b.x)*.5,(a.y+b.y)*.5,0}+Vec{d.y,-d.x,0}*(side*(road.width/2+1.7));bool clear=at.x>-500&&at.x<250&&at.y<220;
+            for(const auto& other:starbaseRoads)if(roadDistance(at,other)<other.width/2+(other.highway?.9:8.))clear=false;
+            for(const auto& row:starbaseOsm)if(norm(at+Vec{-row.x,-row.y,0})<std::hypot(row.length,row.width)/2+4)clear=false;
+            for(int k=0;k<create.scenery_size();++k){const auto& p=create.scenery(k);if(!p.name().starts_with("detail "))continue;const auto& v=p.centre_enu_meters();if(std::hypot(at.x-v.x(),at.y-v.y())<9)clear=false;}
+            if(clear){part("detail car",Shape::BOX,at,{2,4.5,1.8},parked%3==0?0x637b8a:white,std::atan2(d.x,d.y)/deg);++parked;}}}
 }
 // What a vehicle coming back must never strike or come down on, as its computer knows the site (TowerApproach's columns and
 // works): the tower's column (its lattice's corners, the crown and the mast), the tank farm; the catch arms and the ship's

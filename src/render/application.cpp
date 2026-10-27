@@ -2745,7 +2745,7 @@ int albert::runRenderer(int argc, char** argv) {
             solids.update(*camera,sunPosition,tdb,detailFocus,visualSettings.quality,dt,visualSettings.auxiliary,visualSettings.terrain);
             {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
              comets.update(*camera,sunPosition,nuclei,cometStates,tdb,dt);}
-            objects.updateLighting(*camera,sunPosition,visualSettings.auxiliary,dt);
+            objects.quality(visualSettings.quality);objects.updateLighting(*camera,sunPosition,visualSettings.auxiliary,dt);
 
             if (appliedQuality != visualSettings.quality) {
                 sunlight->shadow->dispose();

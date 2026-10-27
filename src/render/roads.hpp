@@ -4,7 +4,9 @@
 #include "threepp/textures/DataTexture.hpp"
 #include "threepp/materials/ShaderMaterial.hpp"
 #include <map>
+#include <string_view>
 namespace albert {
+std::string_view concreteWgsl(); // Shared by terrain roads and solid concrete; coordinates are metres.
 // An exact ground decal. A spatial index selects short lists of analytic capsules and footprint masks;
 // the terrain's existing triangles carry it, including their LOD morph, shadows and regional imagery.
 class Roads {

@@ -4,6 +4,7 @@
 // by the structures' angles (a sample's parts).
 #include "core/scene.hpp"
 #include "threepp/threepp.hpp"
+#include "threepp/materials/ShaderMaterial.hpp"
 #include <array>
 #include <memory>
 #include <vector>
@@ -13,6 +14,7 @@ public:
     explicit Site(const core::Scenery& scenery);
     const std::shared_ptr<threepp::Mesh>& node()const{return root_;}
     void animate(const std::vector<float>* angles);
+    void quality(int value); // Small furnishings are one optional merged draw; concrete survives low quality.
     void venting(double utc); // Simulated UTC keeps tank vapour on the acoustic schedule.
     void exhaust(float thrust,float above,float seconds,float waterFlow,const threepp::Vector3& wind=threepp::Vector3(2,-.8f,0)); // Water: m³/s, 0 off, -1 ignition-only fallback; wind: site ENU m/s. Call while idle to age clouds.
 private:
@@ -20,6 +22,7 @@ private:
     struct Vent {threepp::Vector3 centre,ahead,across,up;float width,height;std::size_t structure;float pending=1;std::uint64_t id=0;};
     struct Puff {std::shared_ptr<threepp::Mesh> mesh;threepp::Vector3 origin,velocity,drift;float age=0,life=0,width=0,height=0,strength=0,seed=0,ground=0;unsigned kind=0;};
     std::shared_ptr<threepp::Mesh> root_;std::vector<Hinge> hinges_; // By structure; no pivot when fixed.
+    std::shared_ptr<threepp::Mesh> detail_;std::shared_ptr<threepp::ShaderMaterial> concrete_;
     std::vector<Vent> vents_,tankVents_,sprays_,pools_;std::array<Puff,160> steam_;std::array<Puff,72> spray_;std::array<Puff,24> boiloff_;std::uint32_t seed_=0x73a91b5du,tankSeed_=0xd19bc273u;std::size_t tankCursor_=0,sprayCursor_=0,poolCursor_=0,deckCursor_=0,runoffCursor_=0;float sprayPending_=0,mistPending_=0,deckPending_=1,runoffPending_=0;
     double ventUtc_=0;bool ventTimed_=false;
 };

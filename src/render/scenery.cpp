@@ -28,13 +28,55 @@ void truss(Pieces& out,float w,float d,float l,float t){ // Four chords along z,
         for(int k=0;k<=n;++k)bar(out,at(i,k),at(i+1,k),.8f*t);
         for(int k=0;k<n;++k)(k+i)%2?bar(out,at(i,k),at(i+1,k+1),.6f*t):bar(out,at(i+1,k),at(i,k+1),.6f*t);}
 }
+std::shared_ptr<BufferGeometry> pier(float w,float d,float h){ // Splayed on all faces; small edge bevels catch the sun.
+    std::vector<Vector3> vertices;const float bevel=.12f;
+    for(int ring=0;ring<4;++ring){const float inset=ring==0||ring==3?bevel:0,scale=ring<2?1.f:.58f;
+        const float x=w*.5f*scale-inset,y=d*.5f*scale-inset,c=.28f;
+        const float z=ring==0?-h/2:ring==1?-h/2+bevel:ring==2?h/2-bevel:h/2;
+        for(const auto& v:std::array<Vector3,8>{{{-x+c,-y,z},{x-c,-y,z},{x,-y+c,z},{x,y-c,z},{x-c,y,z},{-x+c,y,z},{-x,y-c,z},{-x,-y+c,z}}})vertices.push_back(v);}
+    std::vector<float> positions;std::vector<unsigned> indices;
+    auto triangle=[&](int a,int b,int c){for(int i:{a,b,c}){const auto& v=vertices[i];indices.push_back(static_cast<unsigned>(indices.size()));positions.insert(positions.end(),{v.x,v.y,v.z});}};
+    for(int r=0;r<3;++r)for(int i=0;i<8;++i){const int a=r*8+i,b=r*8+(i+1)%8;triangle(a,b,b+8);triangle(a,b+8,a+8);}
+    for(int i=1;i<7;++i){triangle(0,i+1,i);triangle(24,24+i,25+i);}
+    auto g=BufferGeometry::create();g->setAttribute("position",FloatBufferAttribute::create(std::move(positions),3));g->setIndex(indices);g->computeVertexNormals();
+    g->setAttribute("uv",FloatBufferAttribute::create(std::vector<float>(indices.size()*2,0),2));return g;
+}
+bool concretePart(const std::string& n){return n.find("apron")!=std::string::npos||n=="mount leg"||n=="trench floor"||n=="trench wall"||n=="raised pad terrace"||n=="flame bucket ramp"||n=="tower concrete plinth"||n=="tower service building"||n=="perimeter T wall"||n=="floodlight pole footing"||n=="tank saddle";}
+void furnishing(Pieces& out,const core::SceneryPart& p,const Matrix4& m){
+    auto add=[&](std::shared_ptr<BufferGeometry> g,std::uint32_t color,Vector3 at){g->translate(at.x,at.y,at.z);g->applyMatrix4(m);const Color c(color);std::vector<float> colors;
+        for(int i=0;i<g->getAttribute<float>("position")->count();++i)colors.insert(colors.end(),{c.r,c.g,c.b});
+        g->setAttribute("color",FloatBufferAttribute::create(std::move(colors),3));out.push_back(g);};
+    auto box=[&](float x,float y,float z,float w,float d,float h,std::uint32_t color){add(BoxGeometry::create(w,d,h),color,{x,y,z});};
+    constexpr std::uint32_t rubber=0x242c30,glass=0x344e60,steel=0x858d91;
+    if(p.name=="detail cone"){
+        box(0,0,.035f,.48f,.48f,.07f,rubber);auto g=CylinderGeometry::create(.045f,.20f,.62f,8);g->rotateX(pi/2);add(g,0xf37924,{0,0,.38f});
+        auto band=CylinderGeometry::create(.107f,.145f,.15f,8);band->rotateX(pi/2);add(band,0xe4e4e2,{0,0,.38f});
+    }else if(p.name=="detail cable tray"){
+        for(float x:{-.38f,.38f})box(x,0,.22f,.09f,8,.4f,steel);
+        for(int i=-7;i<=7;++i)box(0,i*.5f,.08f,.7f,.07f,.1f,steel);
+    }else if(p.name=="detail skid"){
+        box(0,0,.12f,2.5f,4,.24f,steel);box(-.65f,0,.8f,.9f,2.5f,1.3f,p.color);box(.5f,.3f,.6f,1,1.8f,.9f,rubber);
+        for(float y:{-1.4f,1.4f})box(0,y,.5f,2,.15f,.6f,steel);
+    }else{
+        const bool truck=p.name=="detail truck",car=p.name=="detail car";const float length=truck?7.f:car?4.5f:5.5f,width=truck?2.5f:2.f;
+        box(0,0,.68f,width,length,.65f,p.color);box(0,length*.17f,1.25f,width-.12f,car?2.2f:1.9f,.75f,glass);
+        box(0,length*.17f,1.67f,width,car?2.4f:2.1f,.14f,p.color);
+        for(float x:{-.5f,.5f})box(x*width,length*.17f,1.3f,.12f,1.95f,.8f,p.color);
+        if(truck)box(0,-1.4f,1.45f,2.4f,3.6f,1.25f,steel);
+        else if(!car){box(0,-1.55f,1.03f,1.65f,1.7f,.12f,rubber);for(float x:{-.94f,.94f})box(x,-1.55f,1.12f,.12f,1.85f,.45f,p.color);}
+        for(float y:{-length*.32f,length*.31f})for(float x:{-width*.5f,width*.5f}){auto g=CylinderGeometry::create(truck?.48f:.36f,truck?.48f:.36f,.22f,10);g->rotateZ(pi/2);add(g,rubber,{x,y,truck?.48f:.36f});}
+        for(float x:{-.65f,.65f})box(x,length*.5f+.015f,.78f,.35f,.035f,.18f,0xe4e4e2);
+    }
+}
 }
 Site::Site(const core::Scenery& s){
     root_=Mesh::create(BufferGeometry::create());root_->frustumCulled=false;
     const std::size_t n=s.bars.size();hinges_.resize(n);
     for(std::size_t k=0;k<n;++k)if(s.bars[k].hinged){auto& h=hinges_[k];h.pivot=Object3D::create();h.pivot->position.copy(vec(s.bars[k].pivot));h.axis=vec(s.bars[k].axis).normalize();root_->add(h.pivot);}
     // By what carries them (0: the ground, k: the k-th structure's pivot) and colour, about that pivot.
-    std::map<std::pair<std::size_t,std::uint32_t>,Pieces> by;constexpr std::uint32_t steel=0x1000000; // Past any colour: the bars' own material.
+    std::map<std::pair<std::size_t,std::uint32_t>,Pieces> by;Pieces details;constexpr std::uint32_t steel=0x1000000,concrete=0x1000001; // Past any colour: shared materials.
+    std::array<Vector4,2> pads{Vector4(0,0,0,1),Vector4(1e6f,1e6f,0.f,1.f)};unsigned pad=0;
+    for(const auto& p:s.parts)if(p.name=="trench floor"&&pad<2)pads[pad++]=Vector4(float(p.centre.x),float(p.centre.y),float(std::sin(p.heading)),float(std::cos(p.heading)));
     auto carrier=[&](unsigned structure){return structure>0&&structure<=n&&hinges_[structure-1].pivot?structure:0u;};
     auto relative=[&](std::size_t k,std::shared_ptr<BufferGeometry> g){if(k)g->translate(-hinges_[k-1].pivot->position.x,-hinges_[k-1].pivot->position.y,-hinges_[k-1].pivot->position.z);return g;};
     for(std::size_t i=0;i<s.parts.size();++i){const auto& p=s.parts[i];
@@ -49,8 +91,14 @@ Site::Site(const core::Scenery& s){
             sprays_.push_back({vec(p.centre).add(Vector3(out).multiplyScalar(static_cast<float>(p.inner)*.5f)).add(Vector3(z).multiplyScalar(static_cast<float>(p.size.z)*.5f+.05f)),out,Vector3(z).cross(out),z,.25f,1,carrier(p.structure)});} // Start above the lip so the deck cannot bury the spray.
         if(p.name=="trench floor")pools_.push_back({vec(p.centre).add(Vector3(z).multiplyScalar(static_cast<float>(p.size.z)*.5f+.5f)),y,across,z,static_cast<float>(p.size.x),static_cast<float>(p.size.y),carrier(p.structure)});
         Pieces local;const float w=static_cast<float>(p.size.x),d=static_cast<float>(p.size.y),l=static_cast<float>(p.size.z);
+        Matrix4 m;m.makeBasis(across,y,z);m.setPosition(vec(p.centre));
+        if(p.name.starts_with("detail ")){furnishing(details,p,m);continue;}
         switch(p.shape){
-        case core::SceneryPart::Shape::Box:local.push_back(BoxGeometry::create(w,d,l));break;
+        case core::SceneryPart::Shape::Box:
+            if(p.name=="mount leg")local.push_back(pier(w,d,l));
+            else if(p.name=="perimeter T wall"){auto foot=BoxGeometry::create(w,d,.3f);foot->translate(0,0,-l/2+.15f);local.push_back(foot);auto stem=BoxGeometry::create(.28f,d,l-.3f);stem->translate(0,0,.15f);local.push_back(stem);}
+            else local.push_back(BoxGeometry::create(w,d,l));
+            break;
         case core::SceneryPart::Shape::Cylinder:{ // Built round (radius 1) along y, then laid along z and stretched to its diameters.
             const float k=static_cast<float>(p.inner)/w;
             if(k<=0)local.push_back(CylinderGeometry::create(1,1,l,48));
@@ -59,15 +107,18 @@ Site::Site(const core::Scenery& s){
             for(auto& g:local){g->rotateX(pi/2);g->scale(w/2,d/2,1);}break;}
         case core::SceneryPart::Shape::Truss:truss(local,w,d,l,p.bar>0?static_cast<float>(p.bar):.08f*std::min(w,d));break;
         }
-        Matrix4 m;m.makeBasis(across,y,z);m.setPosition(vec(p.centre));const std::size_t k=carrier(p.structure);
-        for(auto& g:local){g->applyMatrix4(m);by[{k,p.color}].push_back(relative(k,std::move(g)));}
+        const std::size_t k=carrier(p.structure);
+        for(auto& g:local){g->applyMatrix4(m);by[{k,concretePart(p.name)?concrete:p.color}].push_back(relative(k,std::move(g)));}
     }
     for(std::size_t i=0;i<n;++i){const auto& b=s.bars[i];const Vector3 a=vec(b.from),e=vec(b.to);Vector3 dir=Vector3(e).sub(a);const float l=dir.length();if(l<1e-4f||!(b.radius>0))continue; // Round steel bars (radius 0: not drawn).
         auto g=CylinderGeometry::create(static_cast<float>(b.radius),static_cast<float>(b.radius),l,24);Quaternion q;q.setFromUnitVectors(Vector3(0,1,0),dir.normalize());
         Matrix4 m;m.compose(Vector3(a).add(e).multiplyScalar(.5f),q,Vector3(1,1,1));g->applyMatrix4(m);const std::size_t k=carrier(static_cast<unsigned>(i+1));by[{k,steel}].push_back(relative(k,std::move(g)));}
     for(const auto& [key,pieces]:by){
-        auto x=Mesh::create(mergeBufferGeometries(pieces),key.second==steel?assistedMaterial(Color(0x9c9c9a),.8f,.35f):assistedMaterial(Color(key.second),.25f,.7f));
+        auto material=key.second==steel?assistedMaterial(Color(0x9c9c9a),.8f,.35f):assistedMaterial(Color(key.second),.25f,.7f);
+        if(key.second==concrete){concrete_=assistedMaterial(Color(0xffffff),0,.92f);concrete_->name="albert:concrete";concrete_->uniforms["padOne"].setValue(pads[0]);concrete_->uniforms["padTwo"].setValue(pads[1]);concrete_->uniforms["concreteQuality"].setValue(Vector4(1,0,0,0));material=concrete_;}
+        auto x=Mesh::create(mergeBufferGeometries(pieces),material);
         x->castShadow=x->receiveShadow=true;(key.first?hinges_[key.first-1].pivot:root_)->add(x);}
+    if(!details.empty()){auto material=assistedMaterial(Color(0xffffff),.15f,.75f);material->name="albert:site-detail";detail_=Mesh::create(mergeBufferGeometries(details),material);detail_->name="pad furnishings";detail_->castShadow=detail_->receiveShadow=true;root_->add(detail_);}
     auto active=[&](const Vent& s){return std::none_of(vents_.begin(),vents_.end(),[&](const Vent& v){return Vector3(s.centre).sub(v.centre).lengthSq()<120*120;});};
     std::erase_if(sprays_,active);std::erase_if(pools_,active); // Only water the mount served by the exhaust markers.
     if(!vents_.empty()||!tankVents_.empty()){auto g=SphereGeometry::create(1,20,12);auto pool=[&](auto& puffs){for(auto& p:puffs){
@@ -75,6 +126,7 @@ Site::Site(const core::Scenery& s){
         m->uniforms={{"density",Uniform(0.f)},{"seed",Uniform(0.f)},{"time",Uniform(0.f)},{"up",Uniform(Vector3(0,0,1))},{"kind",Uniform(0.f)},{"size",Uniform(Vector3(1,1,1))},{"cloud",Uniform(Vector4(0,0,0,0))}};p.mesh=Mesh::create(g,m);p.mesh->visible=false;root_->add(p.mesh);}};
         if(!vents_.empty()){pool(steam_);pool(spray_);}if(!tankVents_.empty())pool(boiloff_);} // Reserve water slots so the launch cannot starve the deluge; 256 shared-geometry shells total.
 }
+void Site::quality(int value){if(detail_)detail_->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
 void Site::animate(const std::vector<float>* angles){
     for(std::size_t k=0;k<hinges_.size();++k)if(auto& h=hinges_[k];h.pivot)h.pivot->quaternion.setFromAxisAngle(h.axis,angles&&k<angles->size()?(*angles)[k]:0.f);
 }
