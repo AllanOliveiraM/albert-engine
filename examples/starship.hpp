@@ -395,13 +395,16 @@ protected:
         const Vec across=s.velocity+up_*-dot(s.velocity,up_),way=norm(across)>0?across*-1.:cross(north_,up_);
         return std::min(most,lit*raptorSea/s.mass)*std::sin(std::min(lean(s,flat,way,30*deg),lean(s,flat+across*lag,way,30*deg)));
     }
-    int collides(const State& s,Vec flat,double brake,double floor,double margin=clearance+1,double horizon=12,double lag=2)const{
+    int collides(const State& s,Vec flat,double brake,double floor,double margin=clearance+1,double horizon=12)const{const double react=escapeReact,swing=escapeSwing;
         if(columns.empty()&&arms.empty())return -1;const double vz=dot(s.velocity,up_),over=dot(s.position+site_*-1.,up_);Vec v=s.velocity+up_*-vz,at;
         const Vec f=tmul(s.toBody,s.specific),thrust=norm(s.contact)>0||!laggedThrust?Vec{}:f+up_*-dot(f,up_)+push_*-1.; // The thrust's push across now, kept up while the attitude turns (less and less over the lag): laggedThrust.
         for(double t=0;t<=horizon+1e-9;t+=.1){int k=-1;const double d=norm(at),rise=vz<0?std::max(vz*t,std::min(floor-over,0.)):vz*t;
             if(gap(s,flat,{},0,d>0?at*(1/d):Vec{},d,rise,&k,t)<margin){hitAt_=flat+at;hitT_=t;hitRise_=rise;return k;}
-            const double speed=norm(v);if(t>lag&&speed<.05&&norm(push_)<brake)break; // Stopped, and held there.
-            const Vec a=push_+(t<lag?thrust*(1-t/lag):Vec{})+(t>=lag&&speed>0?v*(-std::min(brake,speed/.1)/speed):Vec{});at=at+v*.1+a*.005;v=v+a*.1;}
+            const double speed=norm(v);if(t>react&&speed<.05&&norm(push_)<brake)break; // Stopped, and held there.
+            // The escape as flown: its push now kept up for `react` s, then the braking taken up as the attitude swings onto it (time
+            // constant `swing`), each vehicle's as its escapes were measured (escapeReact, escapeSwing).
+            const double onto=t<react?0:1-std::exp(-(t-react)/swing);
+            const Vec a=push_+thrust*(1-onto)+(speed>0?v*(-std::min(brake*onto,speed/.1)/speed):Vec{});at=at+v*.1+a*.005;v=v+a*.1;}
         return -1;
     }
     // Which way to get away (horizontal unit): toward `aim` (from it to the vehicle: flat - aim, as goal() gives it), pushed off
@@ -730,6 +733,11 @@ protected:
     }
     bool grip_=false; // In the arms' grip (gripped()).
 public:
+    // How its escape takes hold, as measured (s): the ship's from 20 m out at 5.9 m/s toward the tower, pushed in at 3.7 m/s², went
+    // 17.7 m (0.7, 0.6 at all of the braking: 18 m); the booster's from 107 m out at 41 m/s, 136 m (0.5, 2.5: 143 m; its lean takes
+    // ~3 s to reach 25°). The monitor credits 90% of the braking, as the lean allows it where it is once that braking takes hold
+    // (2 s on regardless, by the tower's face, gave the ship 2 m/s² and aborted catches it then made untouched).
+    double escapeReact=.5,escapeSwing=2.5;
     bool laggedThrust=false; // The collision monitor keeps the thrust's push across now up over its lag (the ship's planned way in: it leads its lean).
     bool fineAim=false; // Its precision phases (the planned burn, the settling, over the arms) on aim()'s fine law and bandwidth (the ship).
 protected:
@@ -782,8 +790,8 @@ public:
         // escape's braking at 70%, after a second's lag), or a fall over the works its engines cannot stop with what is left:
         // the catch given up, and away with all it has (escape_).
         if((phase_>=Phase::final&&phase_<=Phase::descend)||phase_==Phase::divert||(phase_==Phase::landing&&over<400)){
-            const double brake=stopping(s,flat,std::max(set_.count(),1),rush(s)); // What leaning against its way gives (any way, still).
-            const char* why=into(collides(s,flat,.7*brake,catch_?top(s)+(phase_==Phase::final?safe(s,flat):0):phase_==Phase::divert?std::min(held_,over):stand(s)));
+            const double brake=stopping(s,flat,std::max(set_.count(),1),rush(s),escapeReact+escapeSwing); // What leaning against its way gives (any way, still), where it is once that braking takes hold.
+            const char* why=into(collides(s,flat,.9*brake,catch_?top(s)+(phase_==Phase::final?safe(s,flat):0):phase_==Phase::divert?std::min(held_,over):stand(s)));
             if(!why&&!stops(s,stand(s),set_.working(s,33),true)&&overWorks(flat,length_))why="queda sobre a infraestrutura de solo";
             if(why&&!escape_&&!(phase_==Phase::descend&&norm(s.contact)>0)){if(catch_)giveUp(s,why);if(phase_==Phase::divert){escape_=true;threat_=why;}}}
         switch(phase_){

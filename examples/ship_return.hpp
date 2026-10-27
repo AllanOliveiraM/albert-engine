@@ -18,7 +18,7 @@ class ShipReturn:public TowerApproach {
 public:
     enum class Phase {orbit,orient,deorbit,glide,entry,flip,landing,hover,descend,caught,divert,down};
     ShipReturn(Vec site,double latitude,double longitude,double arms,double rest)
-        :TowerApproach(site,latitude,longitude,arms,rest,shipLength,shipPinAt,combine(ship(true)),combine(ship(false)),shipPropellant){header_=shipHeader;headerAt_=shipHeaderAt;holdAlong=true;slide=3;hoverAbove=4;laggedThrust=true;fineAim=true;} // From in front of the arms' V it slides in as the booster does, at 3 m/s at most.
+        :TowerApproach(site,latitude,longitude,arms,rest,shipLength,shipPinAt,combine(ship(true)),combine(ship(false)),shipPropellant){header_=shipHeader;headerAt_=shipHeaderAt;holdAlong=true;slide=3;hoverAbove=4;laggedThrust=true;fineAim=true;escapeReact=.7;escapeSwing=.7;} // From in front of the arms' V it slides in as the booster does, at 3 m/s at most.
     Phase phase()const{return phase_;}
     bool falling()const{return falling_;} // Its belly flop begun (the entry's fall under 300 m/s).
     double nextStep()const{return next_;} // How far (s) the client may step next: long in orbit, 20 ms otherwise.
@@ -53,8 +53,8 @@ public:
         if(catch_&&(phase_==Phase::hover||phase_==Phase::descend||phase_==Phase::caught)&&over-catchHeight(s)<-1.5)giveUp(s,"pinos abaixo dos trilhos");
         // Never into the tower, never down onto the ground's works (as the booster's).
         if(phase_>=Phase::landing&&phase_<=Phase::descend&&!(phase_==Phase::descend&&norm(s.contact)>0)||phase_==Phase::divert){
-            const Vec across=s.velocity+up_*-dot(s.velocity,up_);const double brake=stopping(s,flat,std::max(set_.count(),1),rush(s));(void)across;
-            if(const char* why=into(collides(s,flat,(phase_==Phase::landing?.6:.7)*brake,phase_==Phase::divert?std::min(kept_,over):catchHeight(s)+hoverAbove));why&&!escape_){
+            const Vec across=s.velocity+up_*-dot(s.velocity,up_);const double brake=stopping(s,flat,std::max(set_.count(),1),rush(s),escapeReact+escapeSwing);(void)across;
+            if(const char* why=into(collides(s,flat,.9*brake,phase_==Phase::divert?std::min(kept_,over):catchHeight(s)+hoverAbove));why&&!escape_){
                 if(std::getenv("ALBERT_MONITOR")){const Vec east=cross(north_,up_),way=norm(across)>0?across*-1.:east;std::printf("MONITOR %s brake %.2f lean %.1f %.1f e %.1f n %.1f ve %.2f vn %.2f over %.1f lit %d hit at %.1f %.1f in %.1f s rise %.1f\n",why,brake,lean(s,flat,way,30*deg)/deg,lean(s,flat+across*2.,way,30*deg)/deg,dot(flat,east),dot(flat,north_),dot(across,east),dot(across,north_),over,set_.count(),dot(hitAt_,east),dot(hitAt_,north_),hitT_,hitRise_);}
                 giveUp(s,why);if(phase_==Phase::divert){escape_=true;threat_=why;}}} // In the burn, braking assumed at less: an escape from its lean and fall gets less than all of it (the plan's own envelope stops it at 1.5 m/s²).
         switch(phase_){
