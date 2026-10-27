@@ -603,7 +603,7 @@ protected:
     // them with the pins not yet in the grooves (they open again for another go).
     double closing=30*deg/(8*deg); // How long the arms take to swing shut (s).
     // descending: going down onto them (a touch then is the pins').
-    bool centred(const State& s,Vec flat,bool descending=false)const{flat=pinsAt(s,flat);
+    bool centred(const State& s,Vec flat,bool descending=false,double room=.6)const{flat=pinsAt(s,flat);
         const Vec v=s.velocity+up_*-dot(s.velocity,up_);const double n=dot(flat,north_),e=dot(flat,cross(north_,up_)),vn=dot(v,north_);
         if(close_)return grip_||(onRails(flat)&&!(norm(s.contact)>0&&armsClosed&&!inGrooves(flat)&&!descending)); // In their grip: kept shut.
         // Sliding in from the front of their V (as the real catches: the arms swing as it comes in), where it will be once they
@@ -612,7 +612,7 @@ protected:
         // Across, within the rails' room round the hull (0.55 m each side) with half its drift over that time (the loop takes the
         // rest out as they swing): the pins' grooves (0.15 m) matter only going down.
         if(!holdAlong)return std::abs(n)<.3&&std::abs(n+vn*closing)<.3&&std::abs(vn)<.1&&e>-4&&e<8&&norm(v)<3; // The ship: over the axis, still.
-        return std::abs(n)<.6&&std::abs(n+vn*closing/2)<.6&&std::abs(vn)<.4&&along>-4&&along<8&&e<25&&norm(v)<7; // 0.6 m: inside the rails' room round the hull; the loop across takes the rest out as they swing.
+        return std::abs(n)<room&&std::abs(n+vn*closing/2)<room&&std::abs(vn)<room*2/3&&along>-4&&along<8&&e<25&&norm(v)<7; // 0.6 m: inside the rails' room round the hull; the loop across takes the rest out as they swing.
     }
     // The pins over the rails: across them within 0.6 m, along them 5 m west to 9 m east of the axis (a touch there is the
     // pins on them, not an arm on the hull); in the grooves: within 0.15 m across (the bars' crests 0.2 m out).
@@ -884,7 +884,8 @@ public:
             else side=onto(s,to,kv,30,20*deg);
             side=side+push_*-1.;{const double most=limit*std::tan(lean(s,flat,side,20*deg))/std::tan(20*deg);if(norm(side)>most)side=side*(most/norm(side));} // The observer's push netted.
             {const Vec a=up_*up+side;if(set_.wanted()==5&&s.mass*norm(a)<.42*5*raptorSea)set_.use(c,s,3); // Then to 3 once 5 at their least would lift too much.
-                count(c,s,thrust(c,s,a),std::min(set_.count(),2));} // 2 once 3 at their least would lift it (a light booster: Raptor 3's 40% of 280 t each).close_=catch_&&centred(s,flat); // On the 3 it took over with: none put out on the way in.
+                count(c,s,thrust(c,s,a),std::min(set_.count(),2));} // 2 once 3 at their least would lift it (a light booster: Raptor 3's 40% of 280 t each).
+            close_=catch_&&centred(s,flat,false,.3); // On the 3 it took over with: none put out on the way in. Still coming in, within 0.3 m of the line (in a crosswind the loop across did not take 0.6 m out as they swung: an arm shut against the hull, the pins never over their grooves).
             if(over_&&over-catchHeight(s)<3){if(armsClosed&&aligned(s,flat))phase_=Phase::descend;else if(above<.3)phase_=Phase::hover;} // On down if aligned in the shut arms; else held there.
             else if(!catch_&&(norm(s.contact)>0||above<.3)){set_.use(c,s,0);phase_=Phase::down;}
             break;}

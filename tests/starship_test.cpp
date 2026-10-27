@@ -58,8 +58,8 @@ int main(int argc,char** argv){try{
             catch(const std::exception& e){what=std::string("UNSAFE: ")+e.what();}
             caught+=ok;safe+=ok||clear;lost+=!(ok||clear);std::printf("HOME %3.0f° %3.0f t  belly flop from %5.0f m, unsteered miss %5.0f m  %s\n",ahead,load/1e3,handoff,miss,what.c_str());}
         std::printf("HOME %d caught, %d safe, %d unsafe of %d\n",caught,safe,lost,n);return lost?1:0;}
-    if(argc>1&&std::string(argv[1]).rfind("--home",0)==0){const std::string a=argv[1]; // The ship's return alone (development); "=t": its propellant (t).
-        albert::example::starship::homecoming(*flight,true,1000,560,{},a.size()>7?std::stod(a.substr(7))*1e3:189e3);return 0;}
+    if(argc>1&&std::string(argv[1]).rfind("--home",0)==0){const std::string a=argv[1]; // The ship's return alone (development); "=t[,deg]": its propellant (t), how far round its orbit it starts (560°).
+        const std::size_t comma=a.find(',');albert::example::starship::homecoming(*flight,true,1000,comma!=std::string::npos?std::stod(a.substr(comma+1)):560,{},a.size()>7?std::stod(a.substr(7))*1e3:189e3);return 0;}
     if(argc>1&&std::string(argv[1]).rfind("--scenarios",0)==0){ // Each system failing or lying, and winds: the count must refuse a launch with it, the booster's way back ride it out or end safe.
         // expect: 'c' caught and at rest on the arms; 's' that, or down clear of the ground's works by its length (never on the
         // tower, the pad or the tanks); 'p' the
