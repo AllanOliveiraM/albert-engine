@@ -4,9 +4,26 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <erfa.h>
 namespace albert::core {
 namespace {
 bool finite(Vector v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
+// The Earth's turn from `from` to `to` (Unix UTC s) in the geocentric frame: ITRS fixed, GCRS(to) <- GCRS(from) (the same UT1
+// and polar motion at both ends cancel in it).
+void earthTurn(double from,double to,double r[3][3]){
+    double a[3][3],b[3][3];const double ja=from/86400.+2440587.5,jb=to/86400.+2440587.5;
+    eraC2t06a(ja,0,ja,0,0,0,a);eraC2t06a(jb,0,jb,0,0,0,b); // GCRS to ITRS at each.
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j){r[i][j]=0;for(int k=0;k<3;++k)r[i][j]+=b[k][i]*a[k][j];}
+}
+Vector turned(const double r[3][3],Vector v){return {r[0][0]*v.x+r[0][1]*v.y+r[0][2]*v.z,r[1][0]*v.x+r[1][1]*v.y+r[1][2]*v.z,r[2][0]*v.x+r[2][1]*v.y+r[2][2]*v.z};}
+Quaternion turned(const double r[3][3],Quaternion q){ // The rotation r applied after q.
+    const double t=r[0][0]+r[1][1]+r[2][2];Quaternion p;
+    if(t>0){const double k=.5/std::sqrt(t+1);p={(r[2][1]-r[1][2])*k,(r[0][2]-r[2][0])*k,(r[1][0]-r[0][1])*k,.25/k};}
+    else if(r[0][0]>r[1][1]&&r[0][0]>r[2][2]){const double k=2*std::sqrt(1+r[0][0]-r[1][1]-r[2][2]);p={.25*k,(r[0][1]+r[1][0])/k,(r[0][2]+r[2][0])/k,(r[2][1]-r[1][2])/k};}
+    else if(r[1][1]>r[2][2]){const double k=2*std::sqrt(1+r[1][1]-r[0][0]-r[2][2]);p={(r[0][1]+r[1][0])/k,.25*k,(r[1][2]+r[2][1])/k,(r[0][2]-r[2][0])/k};}
+    else{const double k=2*std::sqrt(1+r[2][2]-r[0][0]-r[1][1]);p={(r[0][2]+r[2][0])/k,(r[1][2]+r[2][1])/k,.25*k,(r[1][0]-r[0][1])/k};}
+    return {p.w*q.x+p.x*q.w+p.y*q.z-p.z*q.y,p.w*q.y-p.x*q.z+p.y*q.w+p.z*q.x,p.w*q.z+p.x*q.y-p.y*q.x+p.z*q.w,p.w*q.w-p.x*q.x-p.y*q.y-p.z*q.z};
+}
 double length(Vector v){return std::hypot(v.x,v.y,v.z);}
 Quaternion blend(Quaternion a,Quaternion b,double t){
     double dot=a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w;
@@ -133,7 +150,13 @@ Evaluated sampled(const Object& o,double now){ // Between its samples.
     if(now<=v.front().utcSeconds)return {v.front(),now<v.front().utcSeconds};
     if(now>=v.back().utcSeconds){ // Past the last sample: on along its velocity for a second (a flight's samples come every ~33 ms of its own
         // clock; frozen in between, a vehicle riding the Earth would jump against what turns with it, the ground and its tower).
-        Sample r=v.back();const double ahead=std::min(now-r.utcSeconds,1.);if(r.hasVelocity)r.positionMeters=r.positionMeters+r.velocityMetersPerSecond*ahead;
+        Sample r=v.back();const double ahead=std::min(now-r.utcSeconds,1.);
+        // Resting on the ground or a tower (within 2 m/s of the Earth's turning there): carried round with the Earth past that
+        // second (held in the sky, a caught ship left behind by the client slid off its tower at ~400 m/s).
+        if(r.hasVelocity&&now-r.utcSeconds>1){double m[3][3];earthTurn(r.utcSeconds,r.utcSeconds+1,m);const Vector p=r.positionMeters,carried=turned(m,p)-p;
+            if(length(r.velocityMetersPerSecond-carried)<2){earthTurn(r.utcSeconds,now,m);r.positionMeters=turned(m,p);r.velocityMetersPerSecond=turned(m,r.velocityMetersPerSecond);
+                if(r.attitude)r.attitude=turned(m,*r.attitude);r.utcSeconds=now;return {r,true};}}
+        if(r.hasVelocity)r.positionMeters=r.positionMeters+r.velocityMetersPerSecond*ahead;
         r.utcSeconds=now;return {r,now-v.back().utcSeconds>1.};}
     const auto b=std::upper_bound(v.begin(),v.end(),now,[](double t,const Sample& s){return t<s.utcSeconds;});const auto& a=*(b-1);
     const double dt=b->utcSeconds-a.utcSeconds,t=(now-a.utcSeconds)/dt;
