@@ -296,9 +296,42 @@ void padGraphics(Target& renderer){
     sun->intensity=3;camera->left=-18;camera->right=18;camera->top=12;camera->bottom=-12;camera->updateProjectionMatrix();camera->position.set(35,-25,15);camera->lookAt(Vector3(10,8,5));renderer.render(*world,*camera);
     const auto pier=renderer.readRGBPixels();require(std::count_if(pier.begin(),pier.end(),[](auto c){return c>30;})>1000,"Concrete pier faces disappeared");
 }
+void towerGraphics(Target& renderer){
+    albert::core::Scenery scenery;
+    auto part=[&](const char* name,albert::core::Vector at,albert::core::Vector size,unsigned on=0,float heading=0,float tilt=0){
+        albert::core::SceneryPart p;p.name=name;p.centre=at;p.size=size;p.structure=on;p.heading=heading;p.tilt=tilt;p.color=0xa3abb0;scenery.parts.push_back(p);};
+    part("launch tower lattice",{0,0,73},{9.5,9.5,146});part("tower cladding panels",{0,0,25.13},{9.74,9.74,48.67});
+    part("tower crane crown",{0,0,146},{9.5,9.5,4.5});part("tower aviation beacon",{0,0,163.5},{.7,.7,.7});
+    part("catch carriage frame",{0,0,97.75},{12.54,12.5,7});
+    // Exercise the real attachment indices, including a horizontal folding hinge on the booster QD.
+    scenery.bars.resize(9);for(unsigned k:{0u,2u,7u,8u}){auto& b=scenery.bars[k];b.hinged=true;b.radius=0;b.pivot={6,k==2?5.:-5.,100};b.axis=k==8?albert::core::Vector{0,1,0}:albert::core::Vector{0,0,1};}
+    for(unsigned on:{1u,3u}){const double y=on==3?5:-5;part("tapered catch truss",{20,y,97.6},{3.1,3.67,28.75},on,1.5707963f,1.5707963f);
+        part("catch inner rail bed",{20,y,99.3},{.7,.38,20},on,1.5707963f,1.5707963f);}
+    part("ship QD truss",{11,5,90},{3,3,10},8,1.5707963f,1.5707963f);part("booster QD truss hood",{10,-5,12},{3.5,3,3},9);
+    albert::Site site(scenery);auto world=Scene::create();world->background=Color(0);world->add(site.node());
+    auto sun=DirectionalLight::create(Color(0xffffff),3);sun->position.set(200,-300,500);world->add(sun);
+    auto camera=OrthographicCamera::create(-65,65,90,-90,.1,1000);camera->up.set(0,0,1);camera->position.set(210,-300,180);camera->lookAt(Vector3(8,0,80));
+    renderer.render(*world,*camera);const auto lit=renderer.readRGBPixels();require(std::count_if(lit.begin(),lit.end(),[](auto c){return c>30;})>400,"Tower steel failed to render");
+    std::vector<float> angles(9);angles[0]=-.52f;angles[2]=.52f;angles[7]=-.8f;angles[8]=-1.5707963f;site.animate(&angles);
+    unsigned hinged=0;for(auto* pivot:site.node()->children)if(pivot->name.empty()&&!pivot->children.empty()){
+        auto* main=pivot->getObjectByName("tower steel");auto* detail=pivot->getObjectByName("tower fittings");require(main&&detail,"Moving tower fittings escaped their structure pivot");
+        const unsigned k=hinged==0?0:hinged==1?2:hinged==2?7:8;const Vector3 axis= k==8?Vector3(0,1,0):Vector3(0,0,1);
+        Vector3 expected(2,0,1),actual=expected;expected.applyAxisAngle(axis,angles[k]);actual.applyQuaternion(pivot->quaternion);
+        require(actual.sub(expected).length()<1e-4f,"Tower visuals failed to follow the sampled hinge angle");++hinged;
+    }
+    require(hinged==4,"Missing catch or QD pivot");renderer.render(*world,*camera);require(renderer.readRGBPixels()!=lit,"Arm hinge motion left the rendered view unchanged");
+    site.quality(0);for(auto* pivot:site.node()->children){if(auto* detail=pivot->getObjectByName("tower fittings"))require(!detail->visible,"Low quality retained tower fittings");}
+    require(site.node()->getObjectByName("tower steel")->visible,"Low quality removed the tower silhouette");renderer.render(*world,*camera);
+    site.quality(1);require(site.node()->getObjectByName("tower fittings")->visible,"High quality failed to restore tower fittings");
+    sun->intensity=0;camera->left=-2;camera->right=2;camera->top=2;camera->bottom=-2;camera->updateProjectionMatrix();camera->position.set(4,-6,164);camera->lookAt(Vector3(0,0,163.5));
+    renderer.render(*world,*camera);const auto night=renderer.readRGBPixels();int red=0;for(std::size_t i=0;i<night.size();i+=3)red+=night[i]>100&&night[i]>night[i+1]*2;require(red>20,"Aviation beacon disappeared without sunlight");
+    site.node()->getObjectByName("tower aviation beacons")->visible=false;renderer.render(*world,*camera);const auto unlit=renderer.readRGBPixels();
+    require(std::count_if(unlit.begin(),unlit.end(),[](auto c){return c>20;})==0,"Tower steel emits light without the sun");
+}
 void graphics(Target& renderer) {
     roadGraphics(renderer);
     padGraphics(renderer);
+    towerGraphics(renderer);
     { // A handful of offscreen frames compiles and exercises the transient shaders without a flight or a warm GPU.
         auto world=Scene::create();world->background=Color(0x000000);world->add(AmbientLight::create(Color(0xffffff),.2f));
         albert::core::VehicleLook look;look.length=4;look.diameter=2;look.engines.push_back({{4,0,0},{1,0,0},.5});albert::Vehicle vehicle(look);world->add(vehicle.node());

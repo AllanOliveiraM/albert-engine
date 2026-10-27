@@ -28,6 +28,95 @@ void truss(Pieces& out,float w,float d,float l,float t){ // Four chords along z,
         for(int k=0;k<=n;++k)bar(out,at(i,k),at(i+1,k),.8f*t);
         for(int k=0;k<n;++k)(k+i)%2?bar(out,at(i,k),at(i+1,k+1),.6f*t):bar(out,at(i+1,k),at(i,k+1),.6f*t);}
 }
+void tint(const std::shared_ptr<BufferGeometry>& g,std::uint32_t colour){
+    const Color c(colour);std::vector<float> colors;
+    for(int i=0;i<g->getAttribute<float>("position")->count();++i)colors.insert(colors.end(),{c.r,c.g,c.b});
+    g->setAttribute("color",FloatBufferAttribute::create(std::move(colors),3));
+}
+// Named scenery markers describe drawn steel only. All coordinates remain in the marker's frame until Site puts the
+// merged pieces under its original structure pivot. The optional fittings use the very same transform and carrier.
+bool towerGeometry(Pieces& solid,Pieces& fine,const core::SceneryPart& p){
+    const float w=float(p.size.x),d=float(p.size.y),l=float(p.size.z);const auto& name=p.name;
+    auto add=[&](std::shared_ptr<BufferGeometry> g,std::uint32_t colour,bool detail){tint(g,colour);(detail?fine:solid).push_back(g);};
+    auto box=[&](Vector3 at,Vector3 size,std::uint32_t colour,bool detail=false){auto g=BoxGeometry::create(size.x,size.y,size.z);g->translate(at.x,at.y,at.z);add(g,colour,detail);};
+    auto beam=[&](Vector3 a,Vector3 b,float thickness,std::uint32_t colour,bool detail=false){Pieces pieces;bar(pieces,a,b,thickness);for(auto& g:pieces)add(g,colour,detail);};
+    constexpr std::uint32_t black=0x252b30,edge=0x606a72,rubber=0x171c20,steel=0xa3abb0;
+    if(name=="launch tower lattice"){
+        const float x=w/2-.36f,y=d/2-.36f,bay=l/16;
+        for(float sx:{-1.f,1.f})for(float sy:{-1.f,1.f}){
+            box({sx*x,sy*y,0},{.72f,.72f,l},p.color);
+            // Flange edges and splice collars catch the sun without filling the open bays.
+            for(float z=-l/2+bay;z<l/2-.1f;z+=bay)box({sx*x,sy*y,z},{.84f,.84f,.24f},edge,true);
+        }
+        for(int face=0;face<4;++face){auto at=[&](float across,float z,float offset=0.f){return face<2?Vector3(across,(face==0?-y:y)+offset,z):Vector3((face==2?-x:x)+offset,across,z);};
+            for(int j=0;j<=16;++j){const float z=-l/2+std::clamp(j*bay,.24f,l-.27f);beam(at(-x,z),at(x,z),.46f,p.color);}
+            for(int j=0;j<16;++j){const float bottom=-l/2+j*bay+.44f,top=-l/2+(j+1)*bay-.44f;
+                beam(at(-x+.14f,bottom,-.02f),at(x-.14f,top,-.02f),.28f,p.color);
+                beam(at(x-.14f,bottom,.02f),at(-x+.14f,top,.02f),.28f,p.color);
+                for(float side:{-1.f,1.f})for(float z:{bottom,top})box(at(side*(x-.25f),z),face<2?Vector3(.65f,.12f,.55f):Vector3(.12f,.65f,.55f),edge,true);
+            }
+        }
+    }else if(name=="tower cladding panels"){
+        const float x=w/2,y=d/2;
+        for(float side:{-1.f,1.f}){
+            box({side*(x-.06f),0,0},{.12f,d-.24f,l},p.color);box({0,side*(y-.06f),0},{w-.24f,.12f,l},p.color);
+            for(int i=-3;i<=3;++i){box({side*(x+.025f),i*1.35f,0},{.08f,.055f,l},edge,true);box({i*1.35f,side*(y+.025f),0},{.055f,.08f,l},edge,true);}
+            for(float z=-l/2+3.f;z<l/2;z+=3.f){box({side*(x+.015f),0,z},{.045f,d-.24f,.045f},edge,true);box({0,side*(y+.015f),z},{w-.24f,.045f,.045f},edge,true);}
+        }
+    }else if(name=="tower crane crown"){
+        const float x=w/2,y=d/2;
+        for(float side:{-1.f,1.f}){
+            for(float z:{.15f,4.2f}){beam({-x,side*y,z},{x,side*y,z},.4f,black);beam({side*x,-y,z},{side*x,y,z},.4f,black);}
+            for(float end:{-1.f,1.f})beam({side*x,end*y,0},{side*x,end*y,4.2f},.48f,black);
+            beam({-x,side*y,0},{x,side*y,4.2f},.22f,black);
+            beam({-3,side*.85f,4.6f},{17,side*.55f,4.6f},.24f,black);
+            beam({-3,side*.85f,6.3f},{17,side*.55f,5.5f},.24f,black);
+            for(int i=0;i<8;++i){const float a=-3+i*2.5f,b=a+2.5f,t=float(i)/8,u=float(i+1)/8;
+                beam({a,side*(.85f-.3f*t),4.6f},{b,side*(.85f-.3f*u),6.3f-.8f*u},.14f,black);
+                beam({a,side*(.85f-.3f*t),6.3f-.8f*t},{a,side*(.85f-.3f*t),4.6f},.14f,black);}
+            beam({-3,side*1.1f,4.2f},{-1,0,11},.22f,black);
+            beam({-1,0,11},{16,side*.55f,5.55f},.065f,edge,true);
+            beam({-1,0,11},{-7,side*.6f,4.6f},.065f,edge,true);
+            box({-5,side*1.3f,3.8f},{4,1.2f,1.4f},edge);
+            beam({16,side*.55f,4.5f},{16,side*.55f,-.8f},.065f,edge,true);
+        }
+        beam({0,0,.5f},{0,0,17.5f},.24f,steel);beam({-3,-3,3},{0,0,10},.07f,edge,true);beam({3,3,3},{0,0,10},.07f,edge,true);
+        box({16,0,-.8f},{.7f,1.4f,.6f},black,true);
+        for(float side:{-1.f,1.f})for(int i=0;i<=8;++i)box({-x+i*w/8,side*y,4.9f},{.08f,.08f,1.3f},steel,true);
+        for(float side:{-1.f,1.f})beam({-x,side*y,5.55f},{x,side*y,5.55f},.07f,steel,true);
+    }else if(name=="catch carriage frame"){
+        const float x=w/2,y=d/2,z=l/2;
+        for(float side:{-1.f,1.f}){
+            for(float h:{-z,z}){beam({-x,side*y,h},{x,side*y,h},.5f,black);beam({side*x,-y,h},{side*x,y,h},.5f,black);}
+            for(float end:{-1.f,1.f}){beam({side*x,end*y,-z},{side*x,end*y,z},.65f,black);
+                box({side*(x-.25f),end*3.05f,0},{.85f,1.3f,l+1.2f},edge);}
+            beam({-x,side*y,-z},{x,side*y,z},.35f,black);beam({side*x,-y,-z},{side*x,y,z},.35f,black);
+            for(float end:{-1.f,1.f})for(float h:{-z+.4f,z-.4f})box({side*(x+.12f),end*3.05f,h},{.4f,.9f,.9f},steel,true);
+        }
+        box({x,0,0},{1,4.4f,2.2f},black); // Crosshead between the two original arm roots.
+    }else if(name=="tapered catch truss"){
+        const int bays=8;auto at=[&](int side,int bottom,int k){const float t=float(k)/bays;return Vector3(side*(w/2-.12f)*(1-.58f*t),-d/2+.12f+bottom*(d-.24f)*(1-.65f*t),-l/2+l*t);};
+        for(int side:{-1,1}){
+            for(int bottom:{0,1})beam(at(side,bottom,0),at(side,bottom,bays),.24f,black);
+            for(int k=0;k<bays;++k){beam(at(side,0,k),at(side,1,k),.17f,black);beam(at(side,k%2,k),at(side,1-k%2,k+1),.17f,black);}
+            beam(at(side,0,bays),at(side,1,bays),.17f,black);
+        }
+        for(int bottom:{0,1})for(int k=0;k<=bays;++k){beam(at(-1,bottom,k),at(1,bottom,k),.16f,black);
+            if(k<bays)beam(at(-1,bottom,k),at(1,bottom,k+1),.10f,edge,true);}
+        for(int side:{-1,1})for(int k=0;k<=bays;++k)box(at(side,0,k),{.3f,.12f,.48f},edge,true);
+    }else if(name=="catch arm walkway"){
+        for(float side:{-1.f,1.f}){beam({side*w*.4f,0,-l/2},{side*w*.17f,0,l/2},.18f,edge);
+            for(int i=0;i<=40;++i){const float t=float(i)/40,z=-l/2+l*t,x=side*w*(.4f-.23f*t);box({x,0,z},{.38f,.12f,.075f},steel,true);}}
+    }else if(name=="catch inner rail bed"){
+        box({0,0,0},{w,d,l},edge);
+        for(float z=-l/2+.5f;z<l/2;z+=2){box({0,-.25f,z},{1.05f,.3f,.65f},rubber,true);box({0,.25f,z},{.65f,.3f,.85f},black,true);}
+    }else if(name=="ship QD truss"||name=="booster QD truss hood"){
+        Pieces pieces;truss(pieces,w,d,l,.17f);for(auto& g:pieces)add(g,black,false);
+        if(name=="booster QD truss hood")box({0,0,l/2-.15f},{w,d,.3f},edge); // The connector shield survives, its support stays open.
+        for(float side:{-1.f,1.f})for(float z:{-l/2+.25f,l/2-.25f})box({side*w/2,0,z},{.12f,d,.35f},edge,true);
+    }else return false;
+    return true;
+}
 std::shared_ptr<BufferGeometry> pier(float w,float d,float h){ // Splayed on all faces; small edge bevels catch the sun.
     std::vector<Vector3> vertices;const float bevel=.12f;
     for(int ring=0;ring<4;++ring){const float inset=ring==0||ring==3?bevel:0,scale=ring<2?1.f:.58f;
@@ -74,7 +163,8 @@ Site::Site(const core::Scenery& s){
     const std::size_t n=s.bars.size();hinges_.resize(n);
     for(std::size_t k=0;k<n;++k)if(s.bars[k].hinged){auto& h=hinges_[k];h.pivot=Object3D::create();h.pivot->position.copy(vec(s.bars[k].pivot));h.axis=vec(s.bars[k].axis).normalize();root_->add(h.pivot);}
     // By what carries them (0: the ground, k: the k-th structure's pivot) and colour, about that pivot.
-    std::map<std::pair<std::size_t,std::uint32_t>,Pieces> by;Pieces details;constexpr std::uint32_t steel=0x1000000,concrete=0x1000001; // Past any colour: shared materials.
+    std::map<std::pair<std::size_t,std::uint32_t>,Pieces> by;Pieces details;constexpr std::uint32_t steel=0x1000000,concrete=0x1000001,beacon=0x1000002; // Past any colour: shared materials.
+    std::map<std::size_t,Pieces> towerSteel,towerFine;
     std::array<Vector4,2> pads{Vector4(0,0,0,1),Vector4(1e6f,1e6f,0.f,1.f)};unsigned pad=0;
     for(const auto& p:s.parts)if(p.name=="trench floor"&&pad<2)pads[pad++]=Vector4(float(p.centre.x),float(p.centre.y),float(std::sin(p.heading)),float(std::cos(p.heading)));
     auto carrier=[&](unsigned structure){return structure>0&&structure<=n&&hinges_[structure-1].pivot?structure:0u;};
@@ -93,6 +183,11 @@ Site::Site(const core::Scenery& s){
         Pieces local;const float w=static_cast<float>(p.size.x),d=static_cast<float>(p.size.y),l=static_cast<float>(p.size.z);
         Matrix4 m;m.makeBasis(across,y,z);m.setPosition(vec(p.centre));
         if(p.name.starts_with("detail ")){furnishing(details,p,m);continue;}
+        const std::size_t k=carrier(p.structure);Pieces fine;
+        if(towerGeometry(local,fine,p)){
+            auto collect=[&](Pieces& from,Pieces& into){for(auto& g:from){g->applyMatrix4(m);into.push_back(relative(k,std::move(g)));}};
+            collect(local,towerSteel[k]);collect(fine,towerFine[k]);continue;
+        }
         switch(p.shape){
         case core::SceneryPart::Shape::Box:
             if(p.name=="mount leg")local.push_back(pier(w,d,l));
@@ -107,8 +202,7 @@ Site::Site(const core::Scenery& s){
             for(auto& g:local){g->rotateX(pi/2);g->scale(w/2,d/2,1);}break;}
         case core::SceneryPart::Shape::Truss:truss(local,w,d,l,p.bar>0?static_cast<float>(p.bar):.08f*std::min(w,d));break;
         }
-        const std::size_t k=carrier(p.structure);
-        for(auto& g:local){g->applyMatrix4(m);by[{k,concretePart(p.name)?concrete:p.color}].push_back(relative(k,std::move(g)));}
+        for(auto& g:local){g->applyMatrix4(m);by[{k,concretePart(p.name)?concrete:p.name=="tower aviation beacon"?beacon:p.color}].push_back(relative(k,std::move(g)));}
     }
     for(std::size_t i=0;i<n;++i){const auto& b=s.bars[i];const Vector3 a=vec(b.from),e=vec(b.to);Vector3 dir=Vector3(e).sub(a);const float l=dir.length();if(l<1e-4f||!(b.radius>0))continue; // Round steel bars (radius 0: not drawn).
         auto g=CylinderGeometry::create(static_cast<float>(b.radius),static_cast<float>(b.radius),l,24);Quaternion q;q.setFromUnitVectors(Vector3(0,1,0),dir.normalize());
@@ -116,8 +210,14 @@ Site::Site(const core::Scenery& s){
     for(const auto& [key,pieces]:by){
         auto material=key.second==steel?assistedMaterial(Color(0x9c9c9a),.8f,.35f):assistedMaterial(Color(key.second),.25f,.7f);
         if(key.second==concrete){concrete_=assistedMaterial(Color(0xffffff),0,.92f);concrete_->name="albert:concrete";concrete_->uniforms["padOne"].setValue(pads[0]);concrete_->uniforms["padTwo"].setValue(pads[1]);concrete_->uniforms["concreteQuality"].setValue(Vector4(1,0,0,0));material=concrete_;}
+        if(key.second==beacon){material=assistedMaterial(Color(0x9a1005),.1f,.5f);material->uniforms.at("emissive").setValue(Color(0xff1505));}
         auto x=Mesh::create(mergeBufferGeometries(pieces),material);
-        x->castShadow=x->receiveShadow=true;(key.first?hinges_[key.first-1].pivot:root_)->add(x);}
+        x->castShadow=x->receiveShadow=key.second!=beacon;if(key.second==beacon)x->name="tower aviation beacons";(key.first?hinges_[key.first-1].pivot:root_)->add(x);}
+    auto towerMaterial=assistedMaterial(Color(0xffffff),.65f,.53f);towerMaterial->name="albert:site-detail";
+    auto mergedTower=[&](const auto& groups,bool fine){for(const auto& [k,pieces]:groups)if(!pieces.empty()){
+        auto x=Mesh::create(mergeBufferGeometries(pieces),towerMaterial);x->name=fine?"tower fittings":"tower steel";x->castShadow=x->receiveShadow=true;
+        (k?hinges_[k-1].pivot:root_)->add(x);if(fine)towerDetails_.push_back(x);}};
+    mergedTower(towerSteel,false);mergedTower(towerFine,true);
     if(!details.empty()){auto material=assistedMaterial(Color(0xffffff),.15f,.75f);material->name="albert:site-detail";detail_=Mesh::create(mergeBufferGeometries(details),material);detail_->name="pad furnishings";detail_->castShadow=detail_->receiveShadow=true;root_->add(detail_);}
     auto active=[&](const Vent& s){return std::none_of(vents_.begin(),vents_.end(),[&](const Vent& v){return Vector3(s.centre).sub(v.centre).lengthSq()<120*120;});};
     std::erase_if(sprays_,active);std::erase_if(pools_,active); // Only water the mount served by the exhaust markers.
@@ -126,7 +226,7 @@ Site::Site(const core::Scenery& s){
         m->uniforms={{"density",Uniform(0.f)},{"seed",Uniform(0.f)},{"time",Uniform(0.f)},{"up",Uniform(Vector3(0,0,1))},{"kind",Uniform(0.f)},{"size",Uniform(Vector3(1,1,1))},{"cloud",Uniform(Vector4(0,0,0,0))}};p.mesh=Mesh::create(g,m);p.mesh->visible=false;root_->add(p.mesh);}};
         if(!vents_.empty()){pool(steam_);pool(spray_);}if(!tankVents_.empty())pool(boiloff_);} // Reserve water slots so the launch cannot starve the deluge; 256 shared-geometry shells total.
 }
-void Site::quality(int value){if(detail_)detail_->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
+void Site::quality(int value){if(detail_)detail_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
 void Site::animate(const std::vector<float>* angles){
     for(std::size_t k=0;k<hinges_.size();++k)if(auto& h=hinges_[k];h.pivot)h.pivot->quaternion.setFromAxisAngle(h.axis,angles&&k<angles->size()?(*angles)[k]:0.f);
 }

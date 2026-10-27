@@ -45,7 +45,7 @@ constexpr double towerX=-22,half=4.75,armPivot=towerX+half+1.5,armSwing=8*deg,ar
 // disconnect arm swung back, the launch mount (a ring the stack stands on, its clamps), the concrete pad, the tank farm
 // (upright and lying tanks) and its propellant line.
 inline void addStarbase(api::CreateFlightRequest& create){
-    using Shape=api::SceneryPart;constexpr std::uint32_t lattice=0x6b6e71,dark=0x46484b,concrete=0x9d9a94,apron=0x7f7d79,wall=0x8a8884,white=0xe4e4e2,tankSteel=0xb9bdc0,wet=0x343c40;
+    using Shape=api::SceneryPart;constexpr std::uint32_t lattice=0x6b6e71,galvanised=0xa3abb0,dark=0x46484b,armSteel=0x252b30,concrete=0x9d9a94,apron=0x7f7d79,wall=0x8a8884,white=0xe4e4e2,tankSteel=0xb9bdc0,wet=0x343c40;
     auto part=[&](const char* name,Shape::Shape shape,Vec at,Vec size,std::uint32_t colour,double heading=0,double tilt=0,double inner=0){auto* x=create.add_scenery();
         x->set_name(name);x->set_shape(shape);put(x->mutable_centre_enu_meters(),at);put(x->mutable_size_meters(),size);x->set_color(colour);x->set_heading_degrees(heading);
         x->set_tilt_degrees(tilt);x->set_inner_diameter_meters(inner);};
@@ -66,17 +66,11 @@ inline void addStarbase(api::CreateFlightRequest& create){
         if(service){part("tower service building",Shape::BOX,p(-10,-5,3.7),{5.5,9,5.5},concrete,bearing);
         part("service building roof",Shape::BOX,p(-10,-5,6.53),{5.8,9.3,.18},tankSteel,bearing);
         for(const double z:{2.4,4.9})for(int i=0;i<3;++i)part("service building window",Shape::BOX,p(-12.78,-7.5+i*2.5,z),{.08,1.5,.9},0x344e60,bearing);}
-        for(const double side:{-1.,1.}){
-            part("tower lower steel cladding",Shape::BOX,p(side*4.81,0,height/6+.8),{.12,9.5,height/3},0x85898c,bearing);
-            part("tower lower steel cladding",Shape::BOX,p(0,side*4.81,height/6+.8),{9.5,.12,height/3},0x85898c,bearing);
-            for(int i=-3;i<=3;++i){part("cladding standing seam",Shape::BOX,p(side*4.9,i*1.35,height/6+.8),{.08,.055,height/3},lattice,bearing);
-                part("cladding standing seam",Shape::BOX,p(i*1.35,side*4.9,height/6+.8),{.055,.08,height/3},lattice,bearing);}}
-        for(const double x:{-4.39,4.39})for(const double y:{-4.39,4.39})part("tower corner column",Shape::BOX,p(x,y,height/2),{.72,.72,height},lattice,bearing);
-        for(int j=0;j<=16;++j){const double z=j==0?.24:j==16?height-.27:j*section;
-            for(const double side:{-1.,1.}){bar("section joint girt",p(-4.42,side*4.39,z),p(4.42,side*4.39,z),.46,lattice);bar("section joint girt",p(side*4.39,-4.42,z+.03),p(side*4.39,4.42,z+.03),.46,lattice);}}
-        for(int j=0;j<16;++j)for(const double side:{-1.,1.})for(const double cross:{-1.,1.}){const double bottom=j*section+.44,top=(j+1)*section-.44;
-            bar("section X brace",p(cross*4.25,side*4.34+cross*.015,bottom),p(-cross*4.25,side*4.34+cross*.015,top),.22,lattice);
-            bar("section X brace",p(side*4.34+cross*.015,cross*4.25,bottom+.03),p(side*4.34+cross*.015,-cross*4.25,top+.03),.22,lattice);} // Separate the crossing faces and expose the section joints.
+        // Render markers expand into merged steel, panel seams and fittings, never contact structures.
+        part("launch tower lattice",Shape::TRUSS,p(0,0,height/2),{9.5,9.5,height},galvanised,bearing);
+        part("tower cladding panels",Shape::BOX,p(0,0,height/6+.8),{9.74,9.74,height/3},0x858e95,bearing);
+        part("tower crane crown",Shape::TRUSS,p(0,0,height),{9.5,9.5,4.5},armSteel,bearing);
+        for(const Vec at:{p(-4.6,-4.6,height+4.8),p(4.6,4.6,height+4.8),p(0,0,height+17.5)})part("tower aviation beacon",Shape::CYLINDER,at,{.28,.28,.32},0xff2210);
         part("enclosed lift and stairs",Shape::BOX,p(-2.9,-3.2,height/2),{1.7,2.2,height-.06},0x85898c,bearing);
         for(const int level:{3,6,9,12,15,16}){const double z=level*section-.28;
             part("tower service landing",Shape::BOX,p(0,-3.65,z),{9.12,1.6,.18},dark,bearing);
@@ -100,8 +94,10 @@ inline void addStarbase(api::CreateFlightRequest& create){
     };
     auto armDetail=[&](Vec root,Vec axis,Vec across,double length,double side,unsigned on,double railFrom,double railTo){
         auto p=[&](double along,double out,double z){return root+axis*along+across*out+Vec{0,0,z};};
-        guard(p(.25,side*1.3,0),p(length-.25,side*1.3,0),4,on); // Keep the walkway outboard of the catch groove.
+        guard(p(.25,side*1.3,0),p(length-.25,side*.55,0),4,on); // Keep the walkway outboard of the catch groove.
         for(const double out:{-.85,.85}){const Vec a=p(.2,out,-2.25),b=p(5.1,out,-.85),d=b+a*-1.;pipe("catch hinge actuator barrel",a,a+d*.52,.65);onPart(on);pipe("catch hinge actuator rod",a+d*.51,b,.25);onPart(on);}
+        part("catch inner rail bed",Shape::BOX,p((railFrom+railTo)/2,-side*.8,-.48),{.7,.38,railTo-railFrom},armSteel,std::atan2(axis.x,axis.y)/deg,90);onPart(on);
+        if(!on)for(const double lip:{-armLip,armLip})pipe("tower 2 catch rail",p(railFrom,-side*.8+lip,armRadius),p(railTo,-side*.8+lip,armRadius),2*armRadius); // Tower 1's rails are drawn from its unchanged contact bars.
         for(const double along:{railFrom,railTo}){part("catch rail shock bumper",Shape::CYLINDER,p(along,-side*.8,.38),{.75,.75,1.1},wet);onPart(on);}
     };
     auto flex=[&](Vec a,Vec b,double diameter,double sag,unsigned on){auto p=[&](double t){return a+(b+a*-1.)*t+Vec{0,0,-sag*std::sin(t*std::numbers::pi)};};
@@ -109,28 +105,27 @@ inline void addStarbase(api::CreateFlightRequest& create){
             part("QD braided sleeve ferrule",Shape::CYLINDER,(from+to)*.5,{diameter+.06,diameter+.06,norm(d)-.06},tankSteel,std::atan2(d.x,d.y)/deg,std::atan2(std::hypot(d.x,d.y),d.z)/deg,diameter-.03);onPart(on);
             if(i==1||i==2){part("QD diagonal braid binding",Shape::CYLINDER,(from+to)*.5,{diameter+.12,diameter+.12,.08},dark,std::atan2(d.x,d.y)/deg,std::atan2(std::hypot(d.x,d.y),d.z)/deg+(i==1?18:-18),diameter+.04);onPart(on);}}}; // Opposed bindings break the silver sleeve into a woven flex run.
     tower({towerX,0,0},0,146);
-    part("tower crown",Shape::BOX,{towerX,0,147},{2*half+1,2*half+1,3},dark);
-    part("lightning mast",Shape::CYLINDER,{towerX,0,155.98},{.6,.6,15},dark); // Sink the base into the crown to separate faces.
-    part("carriage",Shape::BOX,{towerX,0,armHeight-armRadius-depth/2},{2*half+3.04,2*half+3,depth+3},dark); // Overlap the arm roots to separate end faces.
+    part("catch carriage frame",Shape::BOX,{towerX,0,armHeight-armRadius-depth/2},{2*half+3.04,2*half+3,depth+3},armSteel);
     for(const double side:{-1.,1.}){const double y=side*(pinOut+.8);const double from=armPivot,to=13;const unsigned on=side>0?3:1; // The catch arms, under their rails.
-        part("catch arm",Shape::TRUSS,{(from+to)/2,y,armHeight-armRadius-(depth+.33)/2},{beam-.1,depth-.33,to-from},lattice,90,90);create.mutable_scenery(create.scenery_size()-1)->set_structure(on); // Recess below the deck; keep the bottom fixed.
-        part("arm deck",Shape::BOX,{(from+to)/2,y,armHeight-armRadius-.15},{to-from,beam,.3},dark);create.mutable_scenery(create.scenery_size()-1)->set_structure(on);
+        part("tapered catch truss",Shape::TRUSS,{(from+to)/2,y,armHeight-armRadius-(depth+.33)/2},{beam-.1,depth-.33,to-from},armSteel,90,90);onPart(on);
+        part("catch arm walkway",Shape::BOX,{(from+to)/2,y,armHeight-armRadius-.15},{beam,.3,to-from},armSteel,90,90);onPart(on);
         armDetail({from,y,armHeight-armRadius},{1,0,0},{0,1,0},to-from,side,on,-10-from,10-from);}
-    const Vec shipRoot{towerX+half,half,deck+78},shipAxis{1/std::sqrt(2.),1/std::sqrt(2.),0},shipAcross{shipAxis.y,-shipAxis.x,0};const double shipReach=std::hypot(shipRoot.x,shipRoot.y)-5.56; // The plate's face 3 cm outside the tanks' frost (4.527 m: at the hull's 4.5 m it shimmered through the plate).
-    auto shipPart=[&](){create.mutable_scenery(create.scenery_size()-1)->set_structure(8);};const double girderEnd=shipReach-3.5;
-    part("ship arm",Shape::BOX,shipRoot+shipAxis*((girderEnd+.03)/2),{3,3,girderEnd-.03},0x85898c,45,90);shipPart(); // Closed steel cladding.
-    for(const double side:{-1.,1.})for(const double z:{-1.,0.,1.}){
-        part("ship arm stiffener",Shape::BOX,shipRoot+shipAxis*((girderEnd+.03)/2)+shipAcross*(side*1.53)+Vec{0,0,z},{.12,.18,girderEnd-.09},dark,45,90);shipPart();} // Embed strips; inset ends 3 cm.
-    part("ship arm hinge",Shape::CYLINDER,shipRoot,{2.5,2.5,3.4},dark);shipPart();
-    pipe("ship arm brace",shipRoot+Vec{0,0,-6},shipRoot+shipAxis*(girderEnd*.72)+Vec{0,0,-1.47},.8);shipPart();
-    part("ship QD head",Shape::BOX,shipRoot+shipAxis*(shipReach-2.28),{3.5,2,2.5},0x777c80,45,90);shipPart(); // Overlap girder 3 cm; clear plate 3 cm.
-    part("ship QD head pivot",Shape::CYLINDER,shipRoot+shipAxis*(girderEnd+.37),{1.05,1.05,2.46},dark);shipPart();
-    part("ship QD plate",Shape::BOX,shipRoot+shipAxis*shipReach,{3,3,2},dark,45,90);shipPart(); // Preserve hull contact.
-    for(int i=-1;i<=1;++i){const Vec offset=shipAcross*2.02+Vec{0,0,i*.75},bend=shipRoot+shipAxis*(girderEnd-.4)+offset;
-        pipe("ship QD hose",shipRoot+shipAxis*.6+offset,bend,.6);shipPart();
-        pipe("ship QD hose droop",bend,shipRoot+shipAxis*(shipReach-2.28)+offset+Vec{0,0,-.25},.6);shipPart();} // Steel hoses enter the head's side.
-    for(int i=0;i<3;++i)flex(shipRoot+shipAxis*(shipReach-2.28)+shipAcross*-1.72+Vec{0,0,.65-i*.6},shipRoot+shipAcross*(-2.05-i*.48)+Vec{0,0,-4.8},i==2?.22:.38,1.8,8);
-    part("SQD tower valve cabinet",Shape::BOX,shipRoot+shipAcross*-2.65+Vec{0,0,-5.15},{2.1,1.5,1.6},tankSteel,45);shipPart(); // The cabinet and hose tails follow the arm hinge.
+    auto shipArm=[&](Vec shipRoot,Vec shipAxis,Vec shipAcross,double shipReach,unsigned on){const double bearing=std::atan2(shipAxis.x,shipAxis.y)/deg;
+        auto shipPart=[&](){create.mutable_scenery(create.scenery_size()-1)->set_structure(on);};const double girderEnd=shipReach-3.5;
+        part("ship QD truss",Shape::TRUSS,shipRoot+shipAxis*((girderEnd+.03)/2),{3,3,girderEnd-.03},armSteel,bearing,90);shipPart();
+        part("ship arm hinge",Shape::CYLINDER,shipRoot,{2.5,2.5,3.4},dark);shipPart();
+        pipe("ship arm brace",shipRoot+Vec{0,0,-6},shipRoot+shipAxis*(girderEnd*.72)+Vec{0,0,-1.47},.8);shipPart();
+        part("ship QD head",Shape::BOX,shipRoot+shipAxis*(shipReach-2.28),{3.5,2,2.5},0x777c80,bearing,90);shipPart(); // Overlap girder 3 cm; clear plate 3 cm.
+        part("ship QD head pivot",Shape::CYLINDER,shipRoot+shipAxis*(girderEnd+.37),{1.05,1.05,2.46},dark);shipPart();
+        part("ship QD plate",Shape::BOX,shipRoot+shipAxis*shipReach,{3,3,2},dark,bearing,90);shipPart(); // Preserve hull contact.
+        for(int i=-1;i<=1;++i){const Vec offset=shipAcross*2.02+Vec{0,0,i*.75},bend=shipRoot+shipAxis*(girderEnd-.4)+offset;
+            pipe("ship QD hose",shipRoot+shipAxis*.6+offset,bend,.6);create.mutable_scenery(create.scenery_size()-1)->set_color(wet);shipPart();
+            pipe("ship QD hose droop",bend,shipRoot+shipAxis*(shipReach-2.28)+offset+Vec{0,0,-.25},.6);create.mutable_scenery(create.scenery_size()-1)->set_color(wet);shipPart();} // Hoses enter the head's side.
+        for(int i=0;i<3;++i)flex(shipRoot+shipAxis*(shipReach-2.28)+shipAcross*-1.72+Vec{0,0,.65-i*.6},shipRoot+shipAcross*(-2.05-i*.48)+Vec{0,0,-4.8},i==2?.22:.38,1.8,on);
+        part("SQD tower valve cabinet",Shape::BOX,shipRoot+shipAcross*-2.65+Vec{0,0,-5.15},{2.1,1.5,1.6},tankSteel,bearing);shipPart(); // The cabinet and hose tails follow the arm hinge.
+    };
+    const Vec shipRoot{towerX+half,half,deck+78},shipAxis{1/std::sqrt(2.),1/std::sqrt(2.),0},shipAcross{shipAxis.y,-shipAxis.x,0};
+    shipArm(shipRoot,shipAxis,shipAcross,std::hypot(shipRoot.x,shipRoot.y)-5.56,8); // Preserve the existing QD plate and hinge positions.
     auto roadDistance=[&](Vec q,const auto& road){double best=1e9;for(unsigned i=1;i<road.count;++i){const auto& a=starbaseRoadPoints[road.first+i-1];const auto& b=starbaseRoadPoints[road.first+i];const Vec d{b.x-a.x,b.y-a.y,0},v=q+Vec{-a.x,-a.y,0};const double t=std::clamp((v.x*d.x+v.y*d.y)/(d.x*d.x+d.y*d.y),0.,1.);best=std::min(best,norm(v+d*(-t)));}return best;};
     auto groundPart=[&](const char* name,Vec at,Vec size,std::uint32_t colour,double bearing){const double radius=std::hypot(size.x,size.y)/2+.4;
         for(const auto& road:starbaseRoads)if(roadDistance(at,road)<road.width/2+radius)return; // Keep entrances and service lanes open, including Pad 2's diagonal access.
@@ -157,7 +152,7 @@ inline void addStarbase(api::CreateFlightRequest& create){
             part("clamp",Shape::BOX,centre+Vec{5.13*std::sin(a),5.13*std::cos(a),deck+.23},{.8,1.2,.5},dark,i*18+bearing-trench);} // Overhang the opening to grip the base; their inner faces 3 cm off the hull (at 4.5 m they shared its surface and shimmered).
         const Vec across{qd.y,-qd.x,0};
         auto qdPoint=[&](double radius,double side,double z){return centre+qd*(on?6.5-(z-deck-1.2):radius)+across*side+Vec{0,0,on?deck+1.2+radius-6.5:z};}; // Undo the connected hinge pose for scenery.
-        for(const double side:{-1.,1.}){part(side<0?"LOX QD hood":"methane QD hood",Shape::BOX,qdPoint(5.5,side*2.1,deck+1.75),on?Vec{3.5,3,3}:Vec{3,3,3.5},tankSteel,std::atan2(qd.x,qd.y)/deg+90);
+        for(const double side:{-1.,1.}){part("booster QD truss hood",Shape::BOX,qdPoint(5.5,side*2.1,deck+1.75),on?Vec{3.5,3,3}:Vec{3,3,3.5},armSteel,std::atan2(qd.x,qd.y)/deg+90);
             if(on)create.mutable_scenery(create.scenery_size()-1)->set_structure(on);
             for(const double line:{-.45,.45}){pipe("booster QD umbilical",qdPoint(6.4,side*2.1+line,deck+.05),qdPoint(6.4,side*2.1+line,deck+2.6),.55);
                 if(on)create.mutable_scenery(create.scenery_size()-1)->set_structure(on);}
@@ -190,13 +185,11 @@ inline void addStarbase(api::CreateFlightRequest& create){
         if(kind=="trench"){const Vec toward{tower2->x-row.x,tower2->y-row.y,0};pad(centre,row.heading,toward*(1/norm(toward)));}
         else if(kind=="tower"){const Vec toward{pad2->x-row.x,pad2->y-row.y,0},reach=toward*(1/norm(toward)),side{reach.y,-reach.x,0};const double bearing=std::atan2(reach.x,reach.y)/deg;
             tower(centre,row.heading,row.height,false); // Its OSM service building already occupies the foot of Tower 2.
-            part("tower 2 crown",Shape::BOX,centre+Vec{0,0,row.height+1},{10.5,10.5,3},dark,row.heading);
-            part("tower 2 lightning mast",Shape::CYLINDER,centre+Vec{0,0,row.height+9.98},{.6,.6,15},dark); // Bury the mast base in the crown.
-            part("tower 2 carriage",Shape::BOX,centre+reach*4.5+Vec{0,0,armHeight-armRadius-depth/2},{12.54,9.5,depth+3},dark,bearing); // Overlap the roots to separate end faces.
-            for(const double sign:{-1.,1.}){part("tower 2 catch arm",Shape::TRUSS,centre+reach*(half+1.5+12.5)+side*(sign*5)+Vec{0,0,armHeight-armRadius-(depth+.33)/2},{beam-.1,depth-.33,25},lattice,bearing,90);
-                part("tower 2 arm deck",Shape::BOX,centre+reach*(half+1.5+12.5)+side*(sign*5)+Vec{0,0,armHeight-armRadius-.15},{beam,25,.3},dark,bearing);
+            part("catch carriage frame",Shape::BOX,centre+Vec{0,0,armHeight-armRadius-depth/2},{12.54,12.5,depth+3},armSteel,row.heading);
+            for(const double sign:{-1.,1.}){part("tapered catch truss",Shape::TRUSS,centre+reach*(half+1.5+12.5)+side*(sign*5)+Vec{0,0,armHeight-armRadius-(depth+.33)/2},{beam-.1,depth-.33,25},armSteel,bearing,90);
+                part("catch arm walkway",Shape::BOX,centre+reach*(half+1.5+12.5)+side*(sign*5)+Vec{0,0,armHeight-armRadius-.15},{beam,.3,25},armSteel,bearing,90);
                 armDetail(centre+reach*(half+1.5)+side*(sign*5)+Vec{0,0,armHeight-armRadius},reach,side,25,sign,0,3,23);}
-            part("tower 2 ship arm",Shape::TRUSS,centre+reach*(half+6.5)+side*7.5+Vec{0,0,deck+78},{2.6,2.6,13},lattice,bearing,90);
+            shipArm(centre+reach*half+side*half+Vec{0,0,deck+78},reach,side,13,0);
         }else if(kind=="building"){const bool vapor=name.find("Vaporizer")!=std::string::npos,bunker=name.find("bunker")!=std::string::npos||name.find("Bunker")!=std::string::npos;
             const bool towerService=tower2&&std::hypot(row.x-tower2->x,row.y-tower2->y)<12;
             part(towerService?"tower service building":name.empty()?"OSM building":row.name,Shape::BOX,centre+Vec{0,0,vapor?3:row.height/2},vapor?Vec{2.5,2.14,6}:Vec{row.width,row.length,row.height},vapor?dark:bunker?0x6f6d69:0x9a9893,row.heading);
