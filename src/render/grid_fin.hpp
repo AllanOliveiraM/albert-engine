@@ -68,14 +68,14 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
             ++result.walls;
         }
     }
-    // The rim: from each junction to the next an arc bowed out of the fin by a sixth of its chord (the crown's scallops), straight
-    // along the root; as deep as the walls, its edges dipping between junctions as theirs do.
+    // The rim: straight from each junction to the next, as deep as the walls, its edges dipping between junctions as theirs do:
+    // those dips, front and back, are the crown.
     std::sort(junctions.begin(),junctions.end());
     {std::vector<float> kept;for(const float s:junctions)if(kept.empty()||s-kept.back()>.02f)kept.push_back(s);junctions.swap(kept);}
     {const float rim=.035f;const int steps=tier==0?8:2;
         for(std::size_t k=0;k<junctions.size();++k){const float s0=junctions[k],s1=k+1<junctions.size()?junctions[k+1]:junctions.front()+perimeter.back();
             const bool root=s1<=perimeter[1]+1e-4f;const Vector3 p0=rimAt(s0),p1=rimAt(s1);Vector3 chord=Vector3(p1).sub(p0);const float length=chord.length();
-            if(length<1e-4f)continue;chord.divideScalar(length);const Vector3 out(chord.z,0,-chord.x);const float bulge=root?0.f:std::min(length/6,.08f);
+            if(length<1e-4f)continue;chord.divideScalar(length);const Vector3 out(chord.z,0,-chord.x);const float bulge=0; // Straight in the plane: the crown is the depth's scallops, not the outline's.
             auto at=[&](float t,Vector3& centre,Vector3& normal,float& h){centre=Vector3(p0).lerp(p1,t).addScaledVector(out,bulge*std::sin(pi*t));
                 const Vector3 tangent=Vector3(chord).multiplyScalar(length).addScaledVector(out,bulge*pi*std::cos(pi*t)).normalize();normal.set(tangent.z,0,-tangent.x);
                 h=thickness/2-(tier==0&&!root?.10f*std::sin(pi*t):0.f);};
