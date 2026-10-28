@@ -422,7 +422,7 @@ struct Slot {
     }
     // The site's scenery and structures, fixed to the ground (none without either, or off the Earth).
     std::optional<core::Object> siteObject(const api::CreateFlightRequest& r)const{
-        if(center!=ph::Center::earth||(r.scenery().empty()&&r.roads().empty()))return{};
+        if(center!=ph::Center::earth||(r.scenery().empty()&&r.roads().empty()&&r.buildings().empty()))return{};
         const auto& g=r.site();const double la=g.latitude_degrees()*deg,lo=g.longitude_degrees()*deg;
         const ph::V3 p=ph::fixedPosition(flight->environment().planet,{la,lo,g.height_meters()});
         const ph::M3 enu=ph::transpose(ph::nedFromFixed(la,lo))*ph::M3{{{0,1,0},{1,0,0},{0,0,-1}}}; // East, north, up into the body-fixed frame.
@@ -433,6 +433,9 @@ struct Slot {
             q.bar=x.bar_meters();q.color=x.color();q.structure=x.structure();q.name=x.name().substr(0,64);look->parts.push_back(q);}
         for(const auto& x:r.roads()){core::SceneryRoad q;q.width=x.width_meters();q.surface=static_cast<core::SceneryRoad::Surface>(x.surface());q.highway=x.highway();
             q.stopStart=x.stop_start();q.stopEnd=x.stop_end();q.osm=x.osm_way();for(const auto& p:x.points_enu_meters())q.points.push_back(cv(p));look->roads.push_back(std::move(q));}
+        for(const auto& x:r.buildings()){core::SceneryBuilding q;q.centre=cv(x.centre_enu_meters());q.size=cv(x.size_meters());q.heading=x.heading_degrees()*deg;
+            q.style=static_cast<core::SceneryBuilding::Style>(x.style());q.name=x.name().substr(0,64);q.osm=x.osm_way();
+            for(const auto& r:x.rings()){auto& ring=q.rings.emplace_back();for(const auto& p:r.points_enu_meters())ring.push_back(cv(p));}look->buildings.push_back(std::move(q));}
         for(const auto& x:r.structures()){look->bars.push_back({cv(x.start_enu_meters()),cv(x.end_enu_meters()),x.has_drawn()&&!x.drawn()?0.:x.radius_meters()}); // 0: not drawn.
             if(x.has_hinge_enu_meters()){auto& b=look->bars.back();const auto& k=x.hinge_axis();b.hinged=true;b.pivot=cv(x.hinge_enu_meters());b.axis=x.has_hinge_axis()?core::Vector{k.x(),k.y(),k.z()}:core::Vector{0,0,1};}}
         const ph::Tt t=flight->state().time;const ph::M3 back=ph::transpose(flight->environment().rotation.at(t).fixed);const ph::V3 at=back*p;const ph::Q q=ph::quaternion(back*enu),a=ph::quaternion(enu);
@@ -578,7 +581,7 @@ struct Slot {
         ph::State x;x.time=s.time;x.position=s.position+r;x.velocity=s.velocity+ph::cross(b*s.rate,r);x.attitude=s.attitude;x.rate=s.rate;x.propellant=left;
         (void)ph::Flight(v,f.environment(),x); // Checks the vehicle against the core's rules now, not after the step.
         api::CreateFlightRequest q=log.request();q.set_flight_id(flightName(sp.flight_id()));q.set_vehicle(api::CUSTOM);*q.mutable_definition()=sp.definition();q.clear_payload_kilograms();
-        q.set_utc_unix_seconds(ph::utcFromTt(s.time));q.set_focus_camera(false);q.set_terrain_height(false);q.clear_scenery();q.clear_roads(); // The site is its parent's; its structures as they are now.
+        q.set_utc_unix_seconds(ph::utcFromTt(s.time));q.set_focus_camera(false);q.set_terrain_height(false);q.clear_scenery();q.clear_roads();q.clear_buildings(); // The site is its parent's; its structures as they are now.
         for(int j=0;j<q.structures_size()&&j<static_cast<int>(f.structures().size());++j)if(q.structures(j).has_hinge_enu_meters())q.mutable_structures(j)->set_start_radians(f.structures()[static_cast<std::size_t>(j)].angle);
         q.mutable_imu()->set_seed(q.imu().seed()^(0x9e3779b97f4a7c15ull*(k+1)));q.mutable_sensors()->set_seed(q.sensors().seed()^(0xbf58476d1ce4e5b9ull*(k+1)));
         q.mutable_physics()->set_turbulence_seed(q.physics().turbulence_seed()^(0x94d049bb133111ebull*(k+1)));
@@ -749,12 +752,21 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
     env.wind=on(m.has_wind(),m.wind());env.solarPressure=on(m.has_solar_radiation_pressure(),m.solar_radiation_pressure());
     env.turbulence=m.turbulence_meters_per_second();env.turbulenceSeed=m.turbulence_seed();env.water=r.water();
     if(r.structures_size()>64)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 64 structures"};
-    if(r.roads_size()>128)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 128 roads"};
+    if(r.roads_size()>512)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 512 roads"};
     std::size_t roadPoints=0;for(const auto& x:r.roads()){
         roadPoints+=x.points_enu_meters_size();if(roadPoints>4096||x.points_enu_meters_size()<2||!api::SceneryRoad::Surface_IsValid(x.surface())||
             !std::isfinite(x.width_meters())||x.width_meters()<.5||x.width_meters()>30)return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid road"};
         for(const auto& p:x.points_enu_meters())if(!std::isfinite(p.x())||!std::isfinite(p.y())||!std::isfinite(p.z())||
             std::max({std::abs(p.x()),std::abs(p.y()),std::abs(p.z())})>2e4)return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid road point"};}
+    if(r.buildings_size()>1024)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 1024 buildings"};
+    std::size_t buildingPoints=0;for(const auto& b:r.buildings()){
+        const auto& z=b.size_meters();const auto& c=b.centre_enu_meters();
+        if(!api::SceneryBuilding::Style_IsValid(b.style())||b.rings_size()<1||b.rings_size()>16||!std::isfinite(b.heading_degrees())||
+            !std::isfinite(c.x())||!std::isfinite(c.y())||!std::isfinite(c.z())||std::max({std::abs(c.x()),std::abs(c.y()),std::abs(c.z())})>2e4||
+            !(z.x()>0&&z.y()>0&&z.z()>0)||std::max({z.x(),z.y(),z.z()})>5e3)return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid scenery building"};
+        for(const auto& ring:b.rings()){buildingPoints+=ring.points_enu_meters_size();if(ring.points_enu_meters_size()<3||buildingPoints>16384)return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid building ring"};
+            for(const auto& p:ring.points_enu_meters())if(!std::isfinite(p.x())||!std::isfinite(p.y())||!std::isfinite(p.z())||
+                std::max({std::abs(p.x()),std::abs(p.y()),std::abs(p.z())})>2e4)return{grpc::StatusCode::INVALID_ARGUMENT,"Invalid building point"};}}
     if(r.scenery_size()>2048)return{grpc::StatusCode::INVALID_ARGUMENT,"At most 2048 scenery parts"};
     for(const auto& x:r.scenery()){const auto& c=x.centre_enu_meters();const auto& z=x.size_meters();
         const bool ok=api::SceneryPart::Shape_IsValid(x.shape())&&std::isfinite(c.x())&&std::isfinite(c.y())&&std::isfinite(c.z())&&std::max({std::abs(c.x()),std::abs(c.y()),std::abs(c.z())})<=2e4&&

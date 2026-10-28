@@ -47,7 +47,10 @@ struct SceneryPart {enum class Shape {Box,Cylinder,Truss} shape=Shape::Box;Vecto
 struct SceneryBar {Vector from,to;double radius=.5;bool hinged=false;Vector pivot,axis{0,0,1};};
 // Roads are ground decals: ENU centre lines, full paved width, and conservative two-way highway paint.
 struct SceneryRoad {enum class Surface {Asphalt,Concrete,Compacted,Sand} surface=Surface::Concrete;std::vector<Vector> points;double width=7;bool highway=false;bool stopStart=false,stopEnd=false;std::uint64_t osm=0;};
-struct Scenery {std::vector<SceneryPart> parts;std::vector<SceneryBar> bars;std::vector<SceneryRoad> roads;double latitude=0,longitude=0;};
+// Polygon scenery is never transferred into the flight's contact structures.
+struct SceneryBuilding {enum class Style {Shed,Office,House,Factory,Bay,Ship,Booster,Tank,Nosecone} style=Style::Shed;
+    std::vector<std::vector<Vector>> rings;Vector centre,size;double heading=0;std::string name;std::uint64_t osm=0;};
+struct Scenery {std::vector<SceneryPart> parts;std::vector<SceneryBar> bars;std::vector<SceneryRoad> roads;std::vector<SceneryBuilding> buildings;double latitude=0,longitude=0;};
 // Fixed on a built-in body (the Earth): its place in metres in the body-fixed frame (ITRS) and its local axes there; its
 // state then follows the body's frame (Scene::builtinFrame), its samples standing in until that is known.
 struct Anchor {ObjectId body;Vector position;Quaternion attitude;};

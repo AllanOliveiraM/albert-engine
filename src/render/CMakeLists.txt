@@ -36,7 +36,7 @@ else()
     target_compile_options(albert_miniaudio PRIVATE -w)
 endif()
 
-add_library(albert_render STATIC application.cpp display.cpp sound.cpp webgpu_programs.cpp window_icon.cpp lighting.cpp layers.cpp solids.cpp ring_systems.cpp comets.cpp shapes.cpp objects.cpp vehicle.cpp scenery.cpp roads.cpp broadcast.cpp rocks.cpp eclipses.cpp debris.cpp visuals.cpp uploads.cpp paths.cpp borders.cpp clouds.cpp asset_pack.cpp asset_downloads.cpp cache.cpp regional.cpp wms.cpp terrain.cpp terrain_heights.cpp)
+add_library(albert_render STATIC application.cpp display.cpp sound.cpp webgpu_programs.cpp window_icon.cpp lighting.cpp layers.cpp solids.cpp ring_systems.cpp comets.cpp shapes.cpp objects.cpp vehicle.cpp scenery.cpp production.cpp roads.cpp broadcast.cpp rocks.cpp eclipses.cpp debris.cpp visuals.cpp uploads.cpp paths.cpp borders.cpp clouds.cpp asset_pack.cpp asset_downloads.cpp cache.cpp regional.cpp wms.cpp terrain.cpp terrain_heights.cpp)
 target_include_directories(albert_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${threepp_SOURCE_DIR}/src/external/stb)
 target_link_libraries(albert_render PRIVATE threepp::threepp albert_gpu

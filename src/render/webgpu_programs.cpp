@@ -886,6 +886,19 @@ void objects(){
     at=d.find("@location(1) normal: vec3f)");d.replace(at,std::string("@location(1) normal: vec3f)").size(),"@location(1) normal: vec3f, @location(2) colour: vec3f)");
     at=d.find("o.local = position;");d.insert(at+std::string("o.local = position;").size()," o.colour = colour;");
     at=d.find("var albedo = material.diffuse;");d.replace(at,std::string("var albedo = material.diffuse;").size(),"var albedo = v.colour;");
+    auto production=detail;auto& campus=production.wgsl;
+    at=campus.find("@fragment fn fs_main");campus.insert(at,albert::concreteWgsl());
+    at=campus.find("var albedo = v.colour;")+std::string("var albedo = v.colour;").size();campus.insert(at,R"(
+    // Site-local metres and integrated pulses keep roof seams and cladding bands
+    // stable below a pixel. The campus's main axes follow the saved OSM halls.
+    let roofNormal = normalize(cross(dpdx(v.local),dpdy(v.local)));
+    let roof = smoothstep(0.75,0.98,abs(roofNormal.z));
+    let axis = dot(v.local.xy,vec2f(0.7193,-0.6947));
+    let seam = roadRepeat(axis,2.4,0.025,max(fwidth(axis),0.001));
+    let band = roadRepeat(v.local.z,5.0,0.12,max(fwidth(v.local.z),0.001));
+    let panels = select(1.0,0.96+0.04*roadNoise(v.local.xy*0.025)-0.18*roof*seam-0.12*(1.0-roof)*band,material.metalness<0.5);
+    albedo *= panels;
+)");albert::gpu::define("albert:production",std::move(production));
     albert::gpu::define("albert:site-detail",std::move(detail));
 
     Program debris;debris.points=true;debris.uniforms={{"opacity",Uniform::f32},{"ink",Uniform::vec3}};

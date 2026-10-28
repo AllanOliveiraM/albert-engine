@@ -333,7 +333,15 @@ message CreateFlightRequest {
   // bars; parts on a hinged one turn with it): up to 2048 parts (merged by colour when drawn). The scene shows them as object "site" ("site.<id>" for the
   // other flights; none without scenery or off the Earth).
   repeated SceneryPart scenery=22;
-  repeated SceneryRoad roads=25; // Up to 128 ways, 4096 points total; draped decals, no collision geometry.
+  repeated SceneryRoad roads=25; // Up to 512 ways, 4096 points total; draped decals, no collision geometry.
+  repeated SceneryBuilding buildings=26; // Drawn only: up to 1024 polygon buildings, 16384 footprint vertices total.
+}
+// First ring is the outer boundary, subsequent rings are courtyard holes. Coordinates are site ENU metres.
+message SceneryRing { repeated Vector3 points_enu_meters=1; }
+message SceneryBuilding {
+  enum Style { SHED=0; OFFICE=1; HOUSE=2; FACTORY=3; BAY=4; SHIP=5; BOOSTER=6; TANK=7; NOSECONE=8; }
+  string name=1; uint64 osm_way=2; repeated SceneryRing rings=3;
+  Vector3 centre_enu_meters=4; Vector3 size_meters=5; double heading_degrees=6; Style style=7;
 }
 // A piece of scenery in metres east, north and up of the site: its centre and size along its own axes, which are turned by
 // heading_degrees (its y toward it, clockwise from north) and tilted by tilt_degrees (its z leaning from up toward its y).

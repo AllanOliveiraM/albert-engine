@@ -160,6 +160,7 @@ void furnishing(Pieces& out,const core::SceneryPart& p,const Matrix4& m){
 }
 Site::Site(const core::Scenery& s){
     root_=Mesh::create(BufferGeometry::create());root_->frustumCulled=false;
+    if(!s.buildings.empty()){production_=std::make_unique<ProductionSite>(s.buildings);root_->add(production_->node());}
     const std::size_t n=s.bars.size();hinges_.resize(n);
     for(std::size_t k=0;k<n;++k)if(s.bars[k].hinged){auto& h=hinges_[k];h.pivot=Object3D::create();h.pivot->position.copy(vec(s.bars[k].pivot));h.axis=vec(s.bars[k].axis).normalize();root_->add(h.pivot);}
     // By what carries them (0: the ground, k: the k-th structure's pivot) and colour, about that pivot.
@@ -226,7 +227,7 @@ Site::Site(const core::Scenery& s){
         m->uniforms={{"density",Uniform(0.f)},{"seed",Uniform(0.f)},{"time",Uniform(0.f)},{"up",Uniform(Vector3(0,0,1))},{"kind",Uniform(0.f)},{"size",Uniform(Vector3(1,1,1))},{"cloud",Uniform(Vector4(0,0,0,0))}};p.mesh=Mesh::create(g,m);p.mesh->visible=false;root_->add(p.mesh);}};
         if(!vents_.empty()){pool(steam_);pool(spray_);}if(!tankVents_.empty())pool(boiloff_);} // Reserve water slots so the launch cannot starve the deluge; 256 shared-geometry shells total.
 }
-void Site::quality(int value){if(detail_)detail_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
+void Site::quality(int value){if(production_)production_->quality(value);if(detail_)detail_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
 void Site::animate(const std::vector<float>* angles){
     for(std::size_t k=0;k<hinges_.size();++k)if(auto& h=hinges_[k];h.pivot)h.pivot->quaternion.setFromAxisAngle(h.axis,angles&&k<angles->size()?(*angles)[k]:0.f);
 }

@@ -116,6 +116,14 @@ int main(int argc,char** argv){try{
         create.mutable_site()->set_latitude_degrees(28.6082);create.mutable_site()->set_longitude_degrees(-80.6041);
         {grpc::ClientContext c;api::StepRequest r;r.set_ticks(1);require(flight->Step(&c,r,&s).error_code()==grpc::StatusCode::FAILED_PRECONDITION,"Step without flight accepted");}
         {grpc::ClientContext c;api::CreateFlightRequest bad=create;bad.set_step_seconds(1);require(flight->CreateFlight(&c,bad,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Invalid step accepted");}
+        {api::CreateFlightRequest campus=create;auto* b=campus.add_buildings();b->set_name("Polygon hall");b->set_osm_way(123);b->mutable_size_meters()->set_x(20);b->mutable_size_meters()->set_y(10);b->mutable_size_meters()->set_z(12);
+            for(const auto& p:std::vector<Vector>{{-3000,0,0},{-2980,0,0},{-2980,10,0},{-3000,10,0}}){auto* v=b->rings_size()?b->mutable_rings(0)->add_points_enu_meters():b->add_rings()->add_points_enu_meters();v->set_x(p.x);v->set_y(p.y);}
+            {grpc::ClientContext c;api::CreateFlightRequest bad=campus;bad.mutable_buildings(0)->mutable_rings(0)->mutable_points_enu_meters(0)->set_x(std::nan(""));
+                require(flight->CreateFlight(&c,bad,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Non-finite building footprint accepted");}
+            {grpc::ClientContext c;api::CreateFlightRequest bad=campus;bad.mutable_buildings(0)->clear_rings();require(flight->CreateFlight(&c,bad,&s).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"Building without footprint accepted");}
+            {grpc::ClientContext c;require(flight->CreateFlight(&c,campus,&s).ok(),"Polygon-only drawn scenery rejected");}
+            const auto snap=bridge.snapshot();const auto site=std::find_if(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="site";});
+            require(site!=snap->objects.end()&&site->scenery&&site->scenery->bars.empty()&&site->scenery->buildings.size()==1&&site->scenery->buildings[0].rings[0].size()==4&&site->scenery->buildings[0].osm==123,"Building scenery lost in RPC transfer or became contact bars");}
         {grpc::ClientContext c;const auto st=flight->CreateFlight(&c,create,&s);if(!st.ok())std::cerr<<st.error_message()<<"\n";require(st.ok(),"CreateFlight failed");}
         require(s.clamped()&&s.tick()==0&&std::abs(s.specific_force_meters_per_second2().x()-9.79)<.02&&s.stages()==2,"Pad sample");
         {const auto snap=bridge.snapshot();require(snap&&std::any_of(snap->objects.begin(),snap->objects.end(),[](const auto& o){return o.id=="flight";}),"Vehicle not in the scene");}

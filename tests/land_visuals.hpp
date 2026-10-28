@@ -1,9 +1,10 @@
 #pragma once
 #ifdef ALBERT_TEST_RPC
-void landCaptures(const std::string& directory){
+void landCaptures(const std::string& directory,bool production=false){
     std::filesystem::create_directories(directory);
     namespace ex=albert::example::starship;namespace api=albert::v1;
     api::CreateFlightRequest request;ex::addTower(request,true);auto scenery=std::make_shared<albert::core::Scenery>();scenery->latitude=ex::towerLatitude*ex::deg;scenery->longitude=ex::towerLongitude*ex::deg;
+    scenery->buildings=productionBuildings(request);
     auto cv=[](const api::Vector3& v){return albert::core::Vector{v.x(),v.y(),v.z()};};
     for(const auto& p:request.scenery()){albert::core::SceneryPart q;q.name=p.name();q.centre=cv(p.centre_enu_meters());q.size=cv(p.size_meters());q.heading=p.heading_degrees()*ex::deg;q.tilt=p.tilt_degrees()*ex::deg;
         q.shape=static_cast<albert::core::SceneryPart::Shape>(p.shape());q.inner=p.inner_diameter_meters();q.color=p.color();q.structure=p.structure();scenery->parts.push_back(q);}
@@ -17,6 +18,7 @@ void landCaptures(const std::string& directory){
     for(const auto& b:request.structures()){albert::core::SceneryBar q;q.from=cv(b.start_enu_meters());q.to=cv(b.end_enu_meters());q.radius=b.has_drawn()&&!b.drawn()?0:b.radius_meters();q.hinged=b.has_hinge_enu_meters();q.pivot=cv(b.hinge_enu_meters());q.axis=b.has_hinge_axis()?cv(b.hinge_axis()):albert::core::Vector{0,0,1};scenery->bars.push_back(q);}
     albert::core::Scene registry;albert::core::Object object;object.id="site";object.name="Starbase";object.scenery=scenery;object.samples.emplace_back();registry.create(object);albert::Roads roads;roads.sync(registry);
     std::cout<<"Ways "<<scenery->roads.size()<<", segments "<<roads.segments()<<", maximum tile candidates "<<roads.candidates()<<"\n";
+    std::cout<<"Production buildings/tanks "<<scenery->buildings.size()<<"\n";
     constexpr double a=6378137,e2=6.69437999014e-3;const double phi=scenery->latitude,n=a/std::sqrt(1-e2*std::pow(std::sin(phi),2)),mx=n*std::cos(phi),my=a*(1-e2)/std::pow(1-e2*std::pow(std::sin(phi),2),1.5);
     constexpr double west=-8608,east=2656,south=-6272,north=4992;albert::GeoRegion region{ex::towerLongitude+west/mx/ex::deg,ex::towerLatitude+south/my/ex::deg,ex::towerLongitude+east/mx/ex::deg,ex::towerLatitude+north/my/ex::deg};
     albert::DownloadProgress progress;albert::AssetPack pack("build/linux/imagery/visuals.pak");auto image=pack.image("earth-day",region,2048,progress);
@@ -28,6 +30,9 @@ void landCaptures(const std::string& directory){
     geometry->setAttribute("uv2",FloatBufferAttribute::create(std::move(global),2));geometry->setAttribute("geoResidual",FloatBufferAttribute::create(std::move(residual),2));
     auto ground=Mesh::create(geometry,roads.material(base,1));ground->receiveShadow=true;ground->frustumCulled=false;auto world=Scene::create();world->background=Color(0x7998b4);world->add(ground);
     albert::Site site(*scenery);site.node()->visible=true;world->add(site.node());
+    if(production)for(const char* name:{"production near","production distant"}){auto* level=site.node()->getObjectByName(name);unsigned triangles=0;
+        for(auto* child:level->children){auto* mesh=child->as<Mesh>();triangles+=mesh->geometry()->getAttribute<float>("position")->count()/3;}
+        std::cout<<name<<": "<<level->children.size()<<" draws, "<<triangles<<" triangles\n";}
     std::vector<float> angles;for(const auto& b:request.structures())angles.push_back(b.start_radians());site.animate(&angles);
     const auto definition=ex::stack();const auto& stage=definition.stages(0);const auto& appearance=stage.appearance();
     albert::core::VehicleLook look;look.length=ex::shipLength+ex::boosterLength;look.diameter=9;
@@ -48,13 +53,26 @@ void landCaptures(const std::string& directory){
     constexpr unsigned width=1280,height=960,row=width*4;WGPUTextureDescriptor td{};td.size={width,height,1};td.format=context.format();td.dimension=WGPUTextureDimension_2D;td.mipLevelCount=td.sampleCount=1;td.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_CopySrc;
     auto target=wgpuDeviceCreateTexture(context.device(),&td);auto view=wgpuTextureCreateView(target,nullptr);std::shared_ptr<Camera> camera=OrthographicCamera::create(-560,560,420,-420,.1,30000);
     Vector3 aim(-75,100,0);
-    auto shot=[&](const std::string& name){camera->lookAt(aim);auto encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);renderer.render(*world,*camera,view,width,height,encoder);auto cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);renderer.submitted();wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);
+    auto shot=[&](const std::string& name){camera->lookAt(aim);site.view(*camera);auto encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);renderer.render(*world,*camera,view,width,height,encoder);auto cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);renderer.submitted();wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);
         WGPUBufferDescriptor bd{};bd.size=row*height;bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;auto buffer=wgpuDeviceCreateBuffer(context.device(),&bd);encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=target;WGPUTexelCopyBufferInfo dst{};dst.buffer=buffer;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=height;WGPUExtent3D size{width,height,1};wgpuCommandEncoderCopyTextureToBuffer(encoder,&src,&dst,&size);cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);
         bool ready=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&ready;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};wgpuBufferMapAsync(buffer,WGPUMapMode_Read,0,bd.size,cb);while(!ready)wgpuInstanceProcessEvents(context.instance());
         const auto* pixels=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(buffer,0,bd.size));std::vector<unsigned char> rgba(pixels,pixels+bd.size);if(context.format()==WGPUTextureFormat_BGRA8Unorm)for(std::size_t i=0;i<rgba.size();i+=4)std::swap(rgba[i],rgba[i+2]);
         std::ofstream output(directory+"/"+name+".ppm",std::ios::binary);output<<"P6\n"<<width<<' '<<height<<"\n255\n";
         for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)output.write(reinterpret_cast<const char*>(rgba.data()+y*row+x*4),3);wgpuBufferUnmap(buffer);wgpuBufferRelease(buffer);wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);std::cout<<name<<"\n";};
     auto frame=[&](Vector3 at,Vector3 eye,float fov){aim=at;auto c=PerspectiveCamera::create(fov,4.f/3,.1,30000);c->up.set(0,0,1);if(eye.x==at.x&&eye.y==at.y)c->up.set(0,1,0);c->position.copy(eye);camera=c;};
+    if(production){
+        productionData();
+        frame({-3330,-1040,42},{-150,-200,20},42);shot("production-pad-west");
+        frame({-1900,-400,0},{-1900,-900,1600},84);shot("production-ascent-1600m");
+        frame({-3190,-1050,35},{-2840,-1360,45},62);shot("production-starfactory-close");
+        site.quality(0);ground->setMaterial(roads.material(base,0));shot("production-starfactory-low");
+        site.quality(1);ground->setMaterial(roads.material(base,1));
+        frame({-3500,-1000,0},{-3500,-1000,1800},65);shot("production-plan-1800m");
+        frame({-3580,-1145,32},{-3660,-1250,35},55);shot("production-rocket-garden");
+        frame({-3330,-1040,42},{-150,-200,20},42);light->position.set(-10000,1000,2500);shot("production-pad-west-sunset");
+        std::cout<<"Adapter "<<context.adapter()<<", validation errors "<<albert::gpu::errors()<<"\n";
+        wgpuTextureViewRelease(view);wgpuTextureRelease(target);require(albert::gpu::errors()==0,"Production captures produced GPU validation errors");return;
+    }
     frame({-1700,0,0},{-1700,-2600,6500},65);shot("boca-chica-ascent");
     frame({-1700,0,0},{-1700,0,7000},75);shot("boca-chica-plan");
     ground->setMaterial(base);shot("boca-chica-imagery");ground->setMaterial(roads.material(base,1));

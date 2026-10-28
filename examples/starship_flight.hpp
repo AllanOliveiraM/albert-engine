@@ -8,6 +8,7 @@
 #include "navigation.hpp"
 #include "ship_return.hpp"
 #include "starbase_osm.hpp"
+#include "starbase_production.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -58,6 +59,13 @@ inline void addStarbase(api::CreateFlightRequest& create){
     for(const auto& row:starbaseRoads){auto* road=create.add_roads();road->set_osm_way(row.id);road->set_width_meters(row.width);
         road->set_surface(static_cast<api::SceneryRoad::Surface>(row.surface));road->set_highway(row.highway);road->set_stop_start(row.stopStart);road->set_stop_end(row.stopEnd);
         for(unsigned i=0;i<row.count;++i){const auto& p=starbaseRoadPoints[row.first+i];put(road->add_points_enu_meters(),{p.x,p.y,0});}}
+    for(const auto& row:productionRoads){if(std::any_of(std::begin(starbaseRoads),std::end(starbaseRoads),[&](const auto& r){return r.id==row.id;}))continue;
+        auto* road=create.add_roads();road->set_osm_way(row.id);road->set_width_meters(row.width);road->set_surface(static_cast<api::SceneryRoad::Surface>(row.surface));road->set_highway(row.highway);
+        for(unsigned i=0;i<row.count;++i){const auto& p=productionRoadPoints[row.first+i];put(road->add_points_enu_meters(),{p.x,p.y,0});}}
+    for(const auto& row:productionBuildings){auto* b=create.add_buildings();b->set_name(row.name);b->set_osm_way(row.id);b->set_style(static_cast<api::SceneryBuilding::Style>(row.style));
+        put(b->mutable_centre_enu_meters(),{row.x,row.y,0});put(b->mutable_size_meters(),{row.width,row.length,row.height});b->set_heading_degrees(row.heading);
+        for(unsigned j=0;j<row.count;++j){auto* ring=b->add_rings();const auto& outline=productionRings[row.first+j];
+            for(unsigned i=0;i<outline.count;++i){const auto& p=productionPoints[outline.first+i];put(ring->add_points_enu_meters(),{p.x,p.y,0});}}}
     constexpr double beam=3.2,depth=4;
     const double trench=33,s=std::sin(trench*deg),c=std::cos(trench*deg);
     auto place=[&](double across,double along,double z){return Vec{across*c+along*s,-across*s+along*c,z};}; // Keep the exhaust axis clear of the tower.
