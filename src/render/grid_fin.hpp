@@ -14,13 +14,12 @@ struct GridFin {
 inline GridFin gridFin(float width,float span,float thickness,int tier){
     using namespace threepp;constexpr float rt=.70710678118f,pi=3.14159265359f;
     const float pitch=.48f,gauge=.022f;const int segments=tier==0?10:1;
-    // V3's fin, symmetric about its spindle and longer out from the hull than wide along it: from its root at the hinge, short
-    // shoulders opening out, long sides near parallel to its widest at three fifths, long chamfers closing on a straight outer
-    // edge; seven sides showing beside the root. Each corner as (out along the spindle, across), in the fin's length; inside the
-    // declared envelope with the walls' cut ends' gauge and bow. A rim straight from wall to wall closes every cell it cuts.
-    const float bottom=-span/2+.08f,top=span/2-.08f,across=(width/2-.08f)/.41f;
-    constexpr std::array<std::array<float,2>,8> corners8{{{0,-.22f},{0,.22f},{.22f,.36f},{.59f,.41f},{1,.2f},{1,-.2f},{.59f,-.41f},{.22f,-.36f}}};
-    std::vector<Vector2> outline;for(const auto& c:corners8)outline.push_back({c[1]*across,bottom+c[0]*(top-bottom)});
+    // V3's fin: an octagon, a square stretched a little out from the hull (4.6 m out, 4 m across) with long parallel sides and a
+    // long straight outer edge, its outer corners cut small; the side at the hinge short (three tenths of the width), reached by
+    // longer 45-degree cuts from the parallel sides. Inside the declared envelope with the walls' cut ends' gauge and bow; a rim
+    // straight from wall to wall closes every cell it cuts.
+    const float bottom=-span/2+.08f,top=span/2-.08f,half=width/2-.08f,root=.15f*width,outer=.15f*width,low=half-root;
+    const std::vector<Vector2> outline{{-root,bottom},{root,bottom},{half,bottom+low},{half,top-outer},{half-outer,top},{-half+outer,top},{-half,top-outer},{-half,bottom+low}};
     const int corners=static_cast<int>(outline.size());
     auto distance=[&](const Vector3& p,int e){const auto& u=outline[e];const auto& v=outline[(e+1)%corners];const float dx=v.x-u.x,dz=v.y-u.y;
         return (dx*(p.z-u.y)-dz*(p.x-u.x))/std::hypot(dx,dz);}; // Inside > 0 (counterclockwise).
