@@ -30,7 +30,7 @@ std::vector<unsigned char> bake(const std::vector<Block>& blocks,unsigned size,f
     return pixels;
 }
 }
-std::shared_ptr<ShaderMaterial> contactField(const core::Scenery& s,std::shared_ptr<DataTexture>& texture){
+std::shared_ptr<ShaderMaterial> contactField(const core::Scenery& s,std::shared_ptr<DataTexture>& texture,const std::vector<SitePool>& pools){
     std::vector<Block> blocks;
     auto add=[&](float x,float y,float bottom,float top,float w,float d,double heading,bool round=false){if(w>.05f&&d>.05f&&top>bottom+.2f)
         blocks.push_back({x,y,bottom,top,w/2,d/2,float(std::sin(heading)),float(std::cos(heading)),round});};
@@ -54,7 +54,15 @@ std::shared_ptr<ShaderMaterial> contactField(const core::Scenery& s,std::shared_
     std::vector<unsigned char> pixels(1536*1024*4,255);
     for(unsigned y=0;y<1024;++y){std::copy_n(near.data()+y*1024*4,1024*4,pixels.data()+y*1536*4);
         if(y<512)std::copy_n(far.data()+y*512*4,512*4,pixels.data()+(y*1536+1024)*4);}
+    // RGB irradiance in two previously unused 256² tiles: 4 m/texel at the
+    // pads, 24 m/texel at production. No extra texture, binding or draw.
+    for(unsigned level=0;level<2;++level){const float span=level?6144:1024,west=level?-5632:-512,south=level?-3072:-384;
+        for(unsigned y=0;y<256;++y)for(unsigned x=0;x<256;++x){const float px=west+(x+.5f)*span/256,py=south+(y+.5f)*span/256;Color sum(0,0,0);
+            for(const auto& p:pools){const float dx=(px-p.centre.x)/p.radius,dy=(py-p.centre.y)/p.radius,d2=dx*dx+dy*dy;if(d2>4)continue;
+                Color c=p.colour;c.multiplyScalar(p.strength*std::exp(-2*d2));sum.add(c);}
+            const auto at=((y+512)*1536+x+1024+level*256)*4;
+            pixels[at]=static_cast<unsigned char>(std::clamp(sum.r,0.f,1.f)*255);pixels[at+1]=static_cast<unsigned char>(std::clamp(sum.g,0.f,1.f)*255);pixels[at+2]=static_cast<unsigned char>(std::clamp(sum.b,0.f,1.f)*255);pixels[at+3]=255;}}
     texture=DataTexture::create(ImageData(std::move(pixels)),1536,1024);texture->minFilter=Filter::LinearMipmapLinear;texture->magFilter=Filter::Linear;texture->generateMipmaps=true;
-    m->uniforms={{"contactMap",Uniform(static_cast<Texture*>(texture.get()))},{"strength",Uniform(1.f)}};return m;
+    m->uniforms={{"contactMap",Uniform(static_cast<Texture*>(texture.get()))},{"strength",Uniform(1.f)},{"night",Uniform(0.f)}};return m;
 }
 }

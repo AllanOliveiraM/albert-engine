@@ -17,3 +17,5 @@ float albert::lunarAdaptation(double phase,double earthward,double earthPhase,do
     const double shine=.434*std::pow(10.,.4*earthPhase*(1.060e-3-2.054e-4*earthPhase))/(earthDistance*earthDistance);
     return static_cast<float>(std::clamp(moon(90)/(moon(phase)+shine*moon(earthward)),1.,1000.));
 }
+float albert::siteNight(float sunHeight){const float t=std::clamp((.052336f-sunHeight)/.122092f,0.f,1.f);return t*t*(3-2*t);}
+float albert::earthNightExposure(float sunHeight){return 1+1.4f*siteNight(sunHeight);}

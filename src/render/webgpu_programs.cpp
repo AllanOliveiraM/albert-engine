@@ -238,6 +238,8 @@ fn steamField(q: vec3f) -> f32 {
     let inside = frame.projection[3][3] < 0.5 && dot(eye, eye) < 1.0;
     if (front == inside) { discard; } // Count each ray once, including when the camera enters the cloud.
     if (frame.projection[3][3] > 0.5) { delta = transpose(mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz)) * vec3f(0, 0, 1); }
+    let incident = airLight(v.world, normalize(z));
+    let illumination = min(vec3f(1.4), (incident.sun * frame.sunColor.rgb + incident.sky * frame.sunColor.rgb + frame.ambient.rgb) * 0.35 + localIrradiance(v.world) * 0.65);
     if (material.hull.x > 0.0) {
         let point = v.local * material.size + vec3f(0, 0, material.hull.y);
         if (length(point.xz) < material.hull.x || point.y < material.hull.z || point.y > material.hull.w) { discard; }
@@ -248,7 +250,7 @@ fn steamField(q: vec3f) -> f32 {
         let edge = (1.0 - smoothstep(0.2, 1.0, dot(v.local.xy, v.local.xy))) * exp(-8.0 * max(0.0, length(point.xz) - material.hull.x));
         let frost = smoothstep(material.hull.z, material.hull.z + 0.15, point.y) * (1.0 - smoothstep(material.hull.w - 0.15, material.hull.w, point.y));
         let alpha = 1.0 - exp(-2.5 * material.density * grazing * streak * edge * frost);
-        return vec4f(linearToSrgb(vec3f(0.98, 0.99, 1.0)) * alpha, alpha);
+        return vec4f(finish(vec3f(0.98, 0.99, 1.0) * illumination) * alpha, alpha);
     }
     let view = normalize(vec3f(dot(delta, x) / dot(x, x), dot(delta, y) / dot(y, y), dot(delta, z) / dot(z, z)));
     let middle = v.local - view * dot(v.local, view);
@@ -260,7 +262,7 @@ fn steamField(q: vec3f) -> f32 {
         let edge = pow(max(0.0, 1.0 - dot(middle, middle)), 1.5);
         let ground = select(1.0, smoothstep(-0.15, 0.4, steamHeight(middle)), material.cloud.w > 0.5);
         let alpha = 1.0 - exp(-material.density * path * edge * (0.65 + 0.35 * grain) * ground);
-        return vec4f(linearToSrgb(vec3f(1.0, 0.99, 0.97)) * alpha, alpha);
+        return vec4f(finish(vec3f(1.0, 0.99, 0.97) * illumination) * alpha, alpha);
     }
     if (material.cloud.w > 0.5) {
         let basis = mat3x3f(normalize(x), normalize(y), normalize(z));
@@ -289,7 +291,7 @@ fn steamField(q: vec3f) -> f32 {
             if (transmission < 0.008) { break; } // Hidden interiors need no more samples.
         }
         let alpha = 1.0 - transmission;
-        return vec4f(linearToSrgb(scattered / max(alpha, 0.00001)) * alpha, alpha);
+        return vec4f(finish(scattered / max(alpha, 0.00001) * illumination) * alpha, alpha);
     }
     let up = normalize(x * material.up.x + y * material.up.y + z * material.up.z);
     var sun = up; if (frame.sun.w > 0.0) { sun = frame.sun.xyz; }
@@ -310,7 +312,7 @@ fn steamField(q: vec3f) -> f32 {
         scattered += transmission * alpha * colour; transmission *= 1.0 - alpha;
     }
     let alpha = 1.0 - transmission;
-    return vec4f(linearToSrgb(scattered / max(alpha, 0.00001)) * alpha, alpha);
+    return vec4f(finish(scattered / max(alpha, 0.00001) * illumination) * alpha, alpha);
 }
 )";
     albert::gpu::define("albert:steam",steam);
@@ -900,6 +902,42 @@ void objects(){
     albedo *= panels;
 )");albert::gpu::define("albert:production",std::move(production));
     albert::gpu::define("albert:site-detail",std::move(detail));
+
+    auto emission=p;emission.attributes.emplace_back("color",3);emission.uniforms.emplace_back("night",Uniform::f32);emission.wgsl=assisted(false,false);
+    auto& e=emission.wgsl;
+    at=e.find("rockScale: f32 }");e.replace(at,std::string("rockScale: f32 }").size(),"rockScale: f32, night: f32 }");
+    at=e.find("worldNormal: vec3f }");e.replace(at,std::string("worldNormal: vec3f }").size(),"worldNormal: vec3f, @location(5) colour: vec3f }");
+    at=e.find("@location(1) normal: vec3f)");e.replace(at,std::string("@location(1) normal: vec3f)").size(),"@location(1) normal: vec3f, @location(2) colour: vec3f)");
+    at=e.find("o.local = position;");e.insert(at+std::string("o.local = position;").size()," o.colour = colour;");
+    at=e.find("var albedo = material.diffuse;");e.replace(at,std::string("var albedo = material.diffuse;").size(),"var albedo = v.colour * 0.25;");
+    at=e.find("+ material.emissive;");e.replace(at,std::string("+ material.emissive;").size(),"+ v.colour * material.night * 1.8;");
+    albert::gpu::define("albert:site-emission",std::move(emission));
+    Program glow;glow.attributes={{"corner",2},{"color",3},{"radius",1}};glow.uniforms={{"night",Uniform::f32},{"seconds",Uniform::f32},{"quality",Uniform::f32}};
+    glow.wgsl=R"(
+struct Material { night: f32, seconds: f32, quality: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+struct Varyings { @builtin(position) clip: vec4f, @location(0) corner: vec2f, @location(1) colour: vec3f, @location(2) strength: f32 };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) corner: vec2f, @location(2) colour: vec3f, @location(3) radius: f32) -> Varyings {
+    var o: Varyings;let eye=object.modelView*vec4f(position,1.0);var clip=frame.projection*eye;
+    let scale=length(object.model[0].xyz);let orthographic=frame.projection[3][3]>0.5;
+    let physical=radius*scale*abs(frame.projection[1][1])*frame.viewport.y/select(max(-eye.z,0.001),1.0,orthographic);
+    let red=radius<0.2 && colour.r>colour.g*4.0 && colour.r>colour.b*4.0;
+    let minimum=select(1.2,2.4,red);let pixels=clamp(physical,minimum,select(9.0,5.0,red));
+    o.strength=select(min(1.0,physical*physical/(minimum*minimum)),1.0,red);
+    // Steady physical beacon plus a UTC-synchronised double pulse in its halo.
+    let phase=fract(material.seconds*0.5);let pulse=select(0.25,1.0,phase<0.10 || (phase>0.18 && phase<0.28));
+    o.strength*=material.night*select(1.0,pulse,red);o.colour=colour;o.corner=corner;
+    clip=vec4f(clip.xy+corner*pixels*2.0/frame.viewport.xy*clip.w,clip.zw);
+    o.clip=select(clip,vec4f(2.0,2.0,2.0,1.0),eye.z>-frame.viewport.z);return o;
+}
+@fragment fn fs_main(v: Varyings) -> @location(0) vec4f {
+    let r2=dot(v.corner,v.corner);if(r2>1.0){discard;}
+    let core=exp(-r2*8.0);let halo=select(0.0,0.13*exp(-r2*4.0),material.quality>0.5);
+    var ink=finish(v.colour*1.8);
+    if(v.colour.r>v.colour.g*4.0 && v.colour.r>v.colour.b*4.0){ink=vec3f(ink.r,ink.r*0.015,ink.r*0.002);} // Preserve red lamp hue under night exposure.
+    return vec4f(ink,(core+halo)*v.strength*0.7);
+}
+)";albert::gpu::define("albert:site-glow",std::move(glow));
 
     Program debris;debris.points=true;debris.uniforms={{"opacity",Uniform::f32},{"ink",Uniform::vec3}};
     debris.wgsl=std::string(quadCorner)+R"(

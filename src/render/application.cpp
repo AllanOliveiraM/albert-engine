@@ -2730,8 +2730,11 @@ int albert::runRenderer(int argc, char** argv) {
                 auto angle=[](Vector3 a,Vector3 b){return std::acos(std::clamp(static_cast<double>(a.normalize().dot(b.normalize())),-1.,1.))*180/PI;};
                 adaptation=albert::lunarAdaptation(angle(sunPosition.clone().sub(m),camera->position.clone().sub(m)),angle(e.clone().sub(m),camera->position.clone().sub(m)),
                     angle(sunPosition.clone().sub(e),m.clone().sub(e)),m.distanceTo(e)/planets.earth->scale.x);}
+            const float inAir=planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f));
+            const Vector3 earthUp=Vector3(camera->position).sub(planets.earth->position).normalize(),earthSun=Vector3(sunPosition).sub(camera->position).normalize();
+            const float nightExposure=albert::earthNightExposure(earthUp.dot(earthSun));
             const float photographicExposure=(exposed==targets::Moon?2.1f*adaptation:solids.contains(exposed)?std::clamp(1.05f*bodyAu*bodyAu,.25f,1200.f):1.05f)
-                *(1.f+planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f)));
+                *(1.f+inAir)*(1.f+inAir*(nightExposure-1.f));
             graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
             // The body whose regional detail the view wants: the focus, or the body under a focused vehicle near
             // its ground with the camera (its site: the Cape, a lunar or Martian lander).

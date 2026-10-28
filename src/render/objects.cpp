@@ -125,7 +125,7 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
 
 void albert::SceneObjects::updateLighting(Camera& camera,const Vector3& sun,const AuxiliaryLights& settings,float seconds){
     camera.updateMatrixWorld();
-    for(auto& [id,site]:sites_)site->view(camera);
+    for(auto& [id,site]:sites_){site->view(camera);site->lighting(sun);}
     for(const auto& [id,instance]:instances_){(void)instance;const auto configured=settings.find(id);const bool enabled=configured!=settings.end()&&configured->second.enabled;
         if(!enabled&&!displayedFill_.contains(id))continue;
         auto& strength=displayedFill_[id];strength=animateValue(strength,enabled?std::clamp(configured->second.intensity,0.f,1.5f):0.f,seconds);

@@ -161,12 +161,13 @@ void furnishing(Pieces& out,const core::SceneryPart& p,const Matrix4& m){
 }
 }
 Site::Site(const core::Scenery& s){
-    root_=Mesh::create(BufferGeometry::create(),contactField(s,contactTexture_));root_->frustumCulled=false;
+    lighting_=std::make_unique<SiteLighting>(s);
+    root_=Mesh::create(BufferGeometry::create(),contactField(s,contactTexture_,lighting_->pools()));root_->frustumCulled=false;root_->add(lighting_->node());
     if(!s.buildings.empty()){production_=std::make_unique<ProductionSite>(s.buildings);root_->add(production_->node());}
     const std::size_t n=s.bars.size();hinges_.resize(n);
     for(std::size_t k=0;k<n;++k)if(s.bars[k].hinged){auto& h=hinges_[k];h.pivot=Object3D::create();h.pivot->position.copy(vec(s.bars[k].pivot));h.axis=vec(s.bars[k].axis).normalize();root_->add(h.pivot);}
     // By what carries them (0: the ground, k: the k-th structure's pivot) and colour, about that pivot.
-    std::map<std::pair<std::size_t,std::uint32_t>,Pieces> by;Pieces details,industrialPaint,industrialMetal,industrialFine;constexpr std::uint32_t steel=0x1000000,concrete=0x1000001,beacon=0x1000002; // Past any colour: shared materials.
+    std::map<std::pair<std::size_t,std::uint32_t>,Pieces> by;Pieces details,industrialPaint,industrialMetal,industrialFine;constexpr std::uint32_t steel=0x1000000,concrete=0x1000001,beacon=0x1000002,lamp=0x1000003,window=0x1000004; // Past any colour: shared materials.
     std::map<std::size_t,Pieces> towerSteel,towerFine;
     std::array<Vector4,2> pads{Vector4(0,0,0,1),Vector4(1e6f,1e6f,0.f,1.f)};unsigned pad=0;
     for(const auto& p:s.parts)if(p.name=="trench floor"&&pad<2)pads[pad++]=Vector4(float(p.centre.x),float(p.centre.y),float(std::sin(p.heading)),float(std::cos(p.heading)));
@@ -212,7 +213,8 @@ Site::Site(const core::Scenery& s){
             for(auto& g:local){g->rotateX(pi/2);g->scale(w/2,d/2,1);}break;}
         case core::SceneryPart::Shape::Truss:truss(local,w,d,l,p.bar>0?static_cast<float>(p.bar):.08f*std::min(w,d));break;
         }
-        for(auto& g:local){g->applyMatrix4(m);by[{k,concretePart(p.name)?concrete:p.name=="tower aviation beacon"?beacon:p.color}].push_back(relative(k,std::move(g)));}
+        const auto colour=concretePart(p.name)?concrete:p.name=="tower aviation beacon"?beacon:p.name=="pad floodlight"||p.name=="tower floodlight lens"?lamp:p.name=="service building window"?window:p.color;
+        for(auto& g:local){g->applyMatrix4(m);by[{k,colour}].push_back(relative(k,std::move(g)));}
     }
     for(std::size_t i=0;i<n;++i){const auto& b=s.bars[i];const Vector3 a=vec(b.from),e=vec(b.to);Vector3 dir=Vector3(e).sub(a);const float l=dir.length();if(l<1e-4f||!(b.radius>0))continue; // Round steel bars (radius 0: not drawn).
         auto g=CylinderGeometry::create(static_cast<float>(b.radius),static_cast<float>(b.radius),l,24);Quaternion q;q.setFromUnitVectors(Vector3(0,1,0),dir.normalize());
@@ -220,7 +222,8 @@ Site::Site(const core::Scenery& s){
     for(const auto& [key,pieces]:by){
         auto material=key.second==steel?assistedMaterial(Color(0x9c9c9a),.8f,.35f):assistedMaterial(Color(key.second),.25f,.7f);
         if(key.second==concrete){concrete_=assistedMaterial(Color(0xffffff),0,.92f);concrete_->name="albert:concrete";concrete_->uniforms["padOne"].setValue(pads[0]);concrete_->uniforms["padTwo"].setValue(pads[1]);concrete_->uniforms["concreteQuality"].setValue(Vector4(1,0,0,0));material=concrete_;}
-        if(key.second==beacon){material=assistedMaterial(Color(0x9a1005),.1f,.5f);material->uniforms.at("emissive").setValue(Color(0xff1505));}
+        if(key.second==beacon){material=assistedMaterial(Color(0x9a1005),.1f,.5f);material->uniforms.at("emissive").setValue(Color(.15f,.0002f,.00002f));}
+        if(key.second==lamp||key.second==window){material=assistedMaterial(Color(key.second==lamp?0xfff4d2:0x344e60),.05f,.55f);lamps_.push_back(material);}
         auto x=Mesh::create(mergeBufferGeometries(pieces),material);
         x->castShadow=x->receiveShadow=key.second!=beacon;if(key.second==beacon)x->name="tower aviation beacons";(key.first?hinges_[key.first-1].pivot:root_)->add(x);}
     auto towerMaterial=assistedMaterial(Color(0xffffff),.65f,.53f);towerMaterial->name="albert:site-detail";
@@ -241,7 +244,13 @@ Site::Site(const core::Scenery& s){
         m->uniforms={{"density",Uniform(0.f)},{"seed",Uniform(0.f)},{"time",Uniform(0.f)},{"up",Uniform(Vector3(0,0,1))},{"kind",Uniform(0.f)},{"size",Uniform(Vector3(1,1,1))},{"cloud",Uniform(Vector4(0,0,0,0))}};p.mesh=Mesh::create(g,m);p.mesh->visible=false;root_->add(p.mesh);}};
         if(!vents_.empty()){pool(steam_);pool(spray_);}if(!tankVents_.empty())pool(boiloff_);} // Reserve water slots so the launch cannot starve the deluge; 256 shared-geometry shells total.
 }
-void Site::quality(int value){root_->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(value>0?1.f:0.f);if(production_)production_->quality(value);if(detail_)detail_->visible=value>0;if(industrialFine_)industrialFine_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
+void Site::quality(int value){quality_=value;auto& u=root_->material()->as<ShaderMaterial>()->uniforms;u.at("strength").setValue(value>0?1.f:0.f);lighting_->update(night_,ventUtc_,value);if(production_)production_->quality(value);if(detail_)detail_->visible=value>0;if(industrialFine_)industrialFine_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
+void Site::lighting(const Vector3& sun){
+    root_->updateWorldMatrix(true,false);Matrix4 inverse;inverse.copy(*root_->matrixWorld).invert();Vector3 toward=sun;toward.applyMatrix4(inverse).normalize();
+    night_=siteNight(toward.z);lighting_->update(night_,ventUtc_,quality_);root_->material()->as<ShaderMaterial>()->uniforms.at("night").setValue(night_);
+    for(auto& m:lamps_)m->uniforms.at("emissive").setValue(Color(1.5f*night_,1.14f*night_,.68f*night_));
+    if(production_)production_->night(night_);
+}
 void Site::animate(const std::vector<float>* angles){
     for(std::size_t k=0;k<hinges_.size();++k)if(auto& h=hinges_[k];h.pivot)h.pivot->quaternion.setFromAxisAngle(h.axis,angles&&k<angles->size()?(*angles)[k]:0.f);
 }

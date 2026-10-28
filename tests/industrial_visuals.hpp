@@ -29,8 +29,8 @@ void industrialGraphics(Target& renderer){
     auto sun=DirectionalLight::create(Color(0xffffff),3);sun->position.set(-80,-100,200);world->add(sun);
     auto camera=PerspectiveCamera::create(55,1,.1,500);camera->up.set(0,0,1);camera->position.set(37,-48,30);camera->lookAt(Vector3(1,-3,3));
     auto* shells=site.node()->getObjectByName("tank farm shells");auto* steel=site.node()->getObjectByName("tank farm steel");auto* fine=site.node()->getObjectByName("tank farm fittings");
-    require(shells&&steel&&fine&&site.node()->children.size()==3,"Industrial scenery is not merged into three draws");
-    for(auto* child:site.node()->children){auto* positions=child->as<Mesh>()->geometry()->getAttribute<float>("position");
+    require(shells&&steel&&fine&&site.node()->children.size()==4&&site.node()->getObjectByName("site night lighting"),"Industrial scenery is not merged into three draws");
+    for(auto* child:{shells,steel,fine}){auto* positions=child->as<Mesh>()->geometry()->getAttribute<float>("position");
         for(int i=0;i<positions->count();++i)require(std::isfinite(positions->getX(i))&&std::isfinite(positions->getY(i))&&std::isfinite(positions->getZ(i)),"Industrial mesh contains a nonfinite vertex");}
     renderer.render(*world,*camera);const auto lit=renderer.readRGBPixels();
     require(std::count_if(lit.begin(),lit.end(),[](auto x){return x>35;})>1200,"Industrial tanks/buildings are not visible under sunlight");

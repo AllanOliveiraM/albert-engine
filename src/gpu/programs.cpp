@@ -34,7 +34,7 @@ struct Frame {
     shadowLevels: array<mat4x4f, 3>,
     shadowScale: vec4f, // Level count, metres/world unit, depth span, caster level.
     contactMatrix: mat4x4f, // World to site-local metres.
-    contact: vec4f, // Baked ambient field strength (zero without a site or at low quality).
+    contact: vec4f, // Baked ambient strength (zero at low quality), site night factor, reserved.
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -111,6 +111,22 @@ fn contactAmbient(position: vec3f) -> f32 {
     if (p.z<8.0) { return mix(field.g,field.b,(p.z-2.0)/6.0); }
     if (p.z<24.0) { return mix(field.b,field.a,(p.z-8.0)/16.0); }
     return mix(field.a,1.0,clamp((p.z-24.0)/24.0,0.0,1.0));
+}
+fn siteIrradiance(world: vec3f) -> vec3f {
+    if (frame.contact.y < 0.001) { return vec3f(0.0); }
+    let p = (frame.contactMatrix * vec4f(world,1.0)).xyz;
+    let near = (p.xy-vec2f(-512.0,-384.0))/1024.0;
+    let far = (p.xy-vec2f(-5632.0,-3072.0))/6144.0;
+    var uv = vec2f(0.0); var valid = false;
+    if (all(near>vec2f(0.01)) && all(near<vec2f(0.99))) {
+        uv = near*vec2f(1.0/6.0,0.25)+vec2f(2.0/3.0,0.5); valid = true;
+    } else if (all(far>vec2f(0.01)) && all(far<vec2f(0.99))) {
+        uv = far*vec2f(1.0/6.0,0.25)+vec2f(5.0/6.0,0.5); valid = true;
+    }
+    if (!valid) { return vec3f(0.0); }
+    // One bounded bilinear fetch, including low quality. Explicit LOD avoids
+    // bleeding neighbouring AO tiles into the irradiance at long distances.
+    return textureSampleLevel(contactMap,contactSampler,uv,0.0).rgb * frame.contact.y * (1.0-smoothstep(6.0,32.0,p.z));
 }
 fn srgbToLinear(c: vec3f) -> vec3f { return select(pow(max((c + 0.055) / 1.055, vec3f(0.0)), vec3f(2.4)), c / 12.92, c <= vec3f(0.04045)); }
 fn linearToSrgb(c: vec3f) -> vec3f { return select(pow(max(c, vec3f(0.0)), vec3f(0.41666)) * 1.055 - 0.055, c * 12.92, c <= vec3f(0.0031308)); }
@@ -333,6 +349,15 @@ fn localLight(n: vec3f, position: vec3f, albedo: vec3f, f0: vec3f, roughness: f3
     }
     return colour;
 }
+fn localIrradiance(world: vec3f) -> vec3f { // Isotropic vapour scattering, evaluated once per shell fragment.
+    var colour = siteIrradiance(world);
+    for (var i=0u;i<4u;i++) {
+        let source=frame.localPosition[i];if(source.w<=0.0){continue;}
+        let delta=(source.xyz-world)/source.w;let d=length(delta);if(d>=1.0){continue;}
+        colour+=frame.localColour[i].rgb*(1.0-smoothstep(0.6,1.0,d))/max(d*d,0.0025);
+    }
+    return colour;
+}
 // MeshStandardMaterial: direct sun, ambient and extra irradiance (light maps) on a dielectric/metal.
 // `sun`: the sun's light reaching the point, as a factor of frame.sunColor (shadow, air).
 fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geometryNormal: vec3f, position: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
@@ -341,11 +366,14 @@ fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geom
     let diffuse = albedo * (1.0 - metalness); let f0 = mix(vec3f(0.04), albedo, metalness);
     let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
     // The ambient light also mirrored, as by an even sky (f0 of it, less when rough): metal in the shade is not black.
-    return localLight(n, position, diffuse, f0, roughness) + nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + contactAmbient(position) * (frame.ambient.rgb + extra) * (diffuse + f0 * (1.0 - 0.5 * roughness)) / PI_L;
+    let world = transpose(mat3x3f(frame.view[0].xyz,frame.view[1].xyz,frame.view[2].xyz))*(position-frame.view[3].xyz);
+    let spill = siteIrradiance(world) * (diffuse + f0 * 0.65) / PI_L;
+    return spill + localLight(n, position, diffuse, f0, roughness) + nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + contactAmbient(position) * (frame.ambient.rgb + extra) * (diffuse + f0 * (1.0 - 0.5 * roughness)) / PI_L;
 }
 fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
     let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
-    return localLight(n, position, albedo, specular, 0.6) + nl * frame.sunColor.rgb * sun * (albedo / PI_L + blinnPhong(n, l, v, specular, shininess)) + (frame.ambient.rgb + extra) * albedo / PI_L;
+    let world = transpose(mat3x3f(frame.view[0].xyz,frame.view[1].xyz,frame.view[2].xyz))*(position-frame.view[3].xyz);
+    return siteIrradiance(world) * albedo / PI_L + localLight(n, position, albedo, specular, 0.6) + nl * frame.sunColor.rgb * sun * (albedo / PI_L + blinnPhong(n, l, v, specular, shininess)) + (frame.ambient.rgb + extra) * albedo / PI_L;
 }
 // three.js perturbNormalArb with dHdxy_fwd (invariant under WebGPU's flipped framebuffer y).
 fn bumpNormal(position: vec3f, normal: vec3f, dBx: f32, dBy: f32, face: f32) -> vec3f {

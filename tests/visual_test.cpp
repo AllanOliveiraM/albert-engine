@@ -414,7 +414,9 @@ void towerGraphics(Target& renderer){
     site.node()->getObjectByName("tower aviation beacons")->visible=false;renderer.render(*world,*camera);const auto unlit=renderer.readRGBPixels();
     require(std::count_if(unlit.begin(),unlit.end(),[](auto c){return c>20;})==0,"Tower steel emits light without the sun");
 }
+#include "night_visuals.hpp"
 void graphics(Target& renderer) {
+    nightGraphics(renderer);
     vehicleGraphics(renderer);
     plumeGraphics(renderer);
     roadGraphics(renderer);
@@ -849,6 +851,7 @@ void lunarAdaptationLevels(){
 int main(int argc,char** argv) {
     try {
 #ifdef ALBERT_TEST_RPC
+        if(argc>2&&std::string_view(argv[1])=="night-captures"){landCaptures(argv[2],false,false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="shadow-captures"){landCaptures(argv[2],false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="land-captures"){landCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="tank-farm-captures"){landCaptures(argv[2],false,true);return 0;}

@@ -583,6 +583,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     std::stable_sort(blended.begin(),blended.end(),[](const Item& a,const Item& b){return a.order!=b.order?a.order<b.order:a.z>b.z;});
     // Frame uniforms.
     float f[232]{};std::memcpy(f,camera.matrixWorldInverse.elements.data(),64);std::memcpy(f+16,projection.elements.data(),64);
+    if(contactField&&contactField->material()->as<ShaderMaterial>()->uniforms.at("night").value<float>()>=.999f)shadowLight=nullptr; // Sun is below the local horizon; lamps have no shadow passes.
     const bool shadowing=shadowLight&&!casters.empty()&&dynamic_cast<OrthographicCamera*>(shadowLight->shadow->camera.get());
     const unsigned levels=shadowMetersPerUnit>0&&shadowHigh?4:1;
     if(shadowing){ // threepp places the light camera; the projection maps its depth to 0-1 for WebGPU.
@@ -633,7 +634,8 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     }
     WGPUTextureView contactMap=g.white;std::uint64_t contactKey=0;
     if(contactField){auto& u=contactField->material()->as<ShaderMaterial>()->uniforms;
-        if(u.at("strength").value<float>()>.5f){Matrix4 local;local.copy(*contactField->matrixWorld).invert();std::memcpy(f+212,local.elements.data(),64);f[228]=1;
+        f[228]=u.at("strength").value<float>();f[229]=u.at("night").value<float>();
+        if(f[228]>.5f||f[229]>.001f){Matrix4 local;local.copy(*contactField->matrixWorld).invert();std::memcpy(f+212,local.elements.data(),64);
             contactMap=g.view(u.at("contactMap").value<Texture*>(),false,contactKey);}}
     g.bindFrame(shadowing?g.shadowView:g.dummyShadowView,airTables,cloudView,cloudSerial,ocean,contactMap,contactKey);
     Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);f[32]=eye.x;f[33]=eye.y;f[34]=eye.z;f[35]=1;

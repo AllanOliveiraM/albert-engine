@@ -12,4 +12,6 @@ std::shared_ptr<threepp::ShaderMaterial> assistedMaterial(threepp::Color color,f
 // Mallama and Hilton's phase curve). Degrees: the sun-Moon-camera and Earth-Moon-camera angles and the sun-Earth-Moon angle;
 // the Earth-Moon distance in Earth radii.
 float lunarAdaptation(double phase,double earthward,double earthPhase,double earthDistance);
+float siteNight(float sunHeight); // Sine of the local solar elevation: lamps fade on from +3 to -4 degrees.
+float earthNightExposure(float sunHeight); // Bounded photographic adaptation, shared with offscreen captures.
 }

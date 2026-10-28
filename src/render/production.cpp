@@ -25,7 +25,7 @@ void piece(Pieces& out,std::shared_ptr<BufferGeometry> g,const Matrix4& frame,Ve
     const Color c(colour);g->setAttribute("color",FloatBufferAttribute::create(std::vector<float>(g->getAttribute<float>("position")->count()*3),3));
     auto* ink=g->getAttribute<float>("color");for(int i=0;i<ink->count();++i)ink->setXYZ(i,c.r,c.g,c.b);out.push_back(g);
 }
-void building(const core::SceneryBuilding& b,bool high,std::array<Pieces,3>& out){
+void building(const core::SceneryBuilding& b,bool high,std::array<Pieces,4>& out){
     const float sn=std::sin(b.heading),cs=std::cos(b.heading),w=b.size.x,d=b.size.y,h=b.size.z;
     const Vector3 centre(float(b.centre.x),float(b.centre.y),float(b.centre.z));Matrix4 frame;frame.makeBasis({cs,-sn,0},{sn,cs,0},{0,0,1});frame.setPosition(centre);
     auto box=[&](Vector3 at,Vector3 size,std::uint32_t colour,int group=0){piece(out[group],BoxGeometry::create(size.x,size.y,size.z),frame,at,colour);};
@@ -64,7 +64,8 @@ void building(const core::SceneryBuilding& b,bool high,std::array<Pieces,3>& out
             const std::uint32_t wall=bay?0xb0b8bd:house?0xd2cec0:0xc3c6c5;
             face(walls,0,length,-1,h,0,wall);
             if(factory){face(windows,0,length,.9f,h-2.f,.035f,glass);face(walls,0,length,h-2.f,h,.05f,0x727d84);}
-            if(bay&&length>25){ // Broad dark rolling doors survive the distant/low LOD.
+            if(bay&&length>25){
+                face(windows,2,length-2,h*.79f,h*.88f,.06f,glass); // Broad dark rolling doors survive the distant/low LOD.
                 const float dw=std::min(length-8.f, b.name=="Gigabay"?length*.72f:27.f),left=(length-dw)/2,top=h*.76f;
                 face(walls,left,left+dw,.2f,top,.04f,door);face(walls,left-.8f,left,0,top+1.5f,.08f,edge);face(walls,left+dw,left+dw+.8f,0,top+1.5f,.08f,edge);
                 if(high)for(float z=4;z<top;z+=4)face(trim,left,left+dw,z,z+.10f,.10f,0x5b656d);}
@@ -85,7 +86,7 @@ void building(const core::SceneryBuilding& b,bool high,std::array<Pieces,3>& out
             auto p=[&](float x,float z){return world({c.x+tangent.x*x+normal.x*.16f,c.y+tangent.y*x+normal.y*.16f},z);};
             for(float side:{-1.f,1.f})walls.quad(p(-6.f,8.f-side*4.f-.5f),p(6.f,8.f+side*4.f-.5f),p(6.f,8.f+side*4.f+.5f),p(-6.f,8.f-side*4.f+.5f),white);
         }}
-    walls.flush(out[0]);windows.flush(out[1]);trim.flush(out[2]);
+    walls.flush(out[0]);windows.flush(out[3]);trim.flush(out[2]);
     if(high&&house&&contour.size()==4&&b.name!="static_caravan"){ // Gables only on rectangular homes; complex halls keep their polygon roof.
         const float area=std::abs(shapeutils::area(contour));if(std::abs(area-w*d)<.03f*area){Surface roofMesh;
             const Vector3 a(-w/2,-d/2,h),c(w/2,-d/2,h),e(w/2,d/2,h),f(-w/2,d/2,h),r(0,-d/2,h+1.4f),s(0,d/2,h+1.4f);
@@ -98,12 +99,14 @@ ProductionSite::ProductionSite(const std::vector<core::SceneryBuilding>& buildin
     for(const auto& b:buildings)centre_.add({float(b.centre.x),float(b.centre.y),float(b.centre.z)});
     centre_.multiplyScalar(1.f/buildings.size());
     for(unsigned level=0;level<2;++level){auto& node=levels_[level];node=Object3D::create();node->name=level?"production near":"production distant";root_->add(node);
-        std::array<Pieces,3> groups;for(const auto& b:buildings)building(b,level>0,groups);
+        std::array<Pieces,4> groups;for(const auto& b:buildings)building(b,level>0,groups);
         for(unsigned i=0;i<groups.size();++i)if(!groups[i].empty()){auto material=assistedMaterial(Color(0xffffff),i==1?.7f:.15f,i==1?.28f:.78f);material->name="albert:production";
-            auto mesh=Mesh::create(mergeBufferGeometries(groups[i]),material);mesh->name=i==0?"production shells":i==1?"production glass and steel":"production fittings";
+            if(i==3){material->uniforms.at("metalness").setValue(.05f);windows_.push_back(material);}
+            auto mesh=Mesh::create(mergeBufferGeometries(groups[i]),material);mesh->name=i==0?"production shells":i==1?"production glass and steel":i==2?"production fittings":"production windows";
             mesh->castShadow=mesh->receiveShadow=true;node->add(mesh);}}
     select();
 }
+void ProductionSite::night(float strength){for(auto& m:windows_)m->uniforms.at("emissive").setValue(Color(.65f*strength,.45f*strength,.24f*strength));}
 void ProductionSite::select(){for(unsigned i=0;i<2;++i)if(levels_[i])levels_[i]->visible=(i==unsigned(high_&&quality_>0));}
 void ProductionSite::quality(int value){quality_=value;select();}
 void ProductionSite::view(Camera& camera){if(!levels_[0])return;

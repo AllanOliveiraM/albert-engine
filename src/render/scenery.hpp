@@ -4,6 +4,7 @@
 // by the structures' angles (a sample's parts).
 #include "core/scene.hpp"
 #include "production.hpp"
+#include "site_lighting.hpp"
 #include "threepp/threepp.hpp"
 #include "threepp/materials/ShaderMaterial.hpp"
 #include "threepp/textures/DataTexture.hpp"
@@ -19,6 +20,8 @@ public:
     void quality(int value); // Small furnishings and tower fittings are optional; the structural silhouettes survive.
     void view(threepp::Camera& camera){if(production_)production_->view(camera);}
     void venting(double utc); // Simulated UTC keeps tank vapour on the acoustic schedule.
+    void lighting(const threepp::Vector3& sun); // World position, from the scene's own sun; local +z is up.
+    float night()const{return night_;}
     void exhaust(float thrust,float above,float seconds,float waterFlow,const threepp::Vector3& wind=threepp::Vector3(2,-.8f,0)); // Water: m³/s, 0 off, -1 ignition-only fallback; wind: site ENU m/s. Call while idle to age clouds.
 private:
     struct Hinge {std::shared_ptr<threepp::Object3D> pivot;threepp::Vector3 axis;};
@@ -27,6 +30,9 @@ private:
     std::shared_ptr<threepp::DataTexture> contactTexture_;
     std::shared_ptr<threepp::Mesh> root_;std::vector<Hinge> hinges_; // By structure; no pivot when fixed.
     std::unique_ptr<ProductionSite> production_;
+    std::unique_ptr<SiteLighting> lighting_;
+    std::vector<std::shared_ptr<threepp::ShaderMaterial>> lamps_;
+    float night_=0;int quality_=1;
     std::shared_ptr<threepp::Mesh> detail_,industrialFine_;std::shared_ptr<threepp::ShaderMaterial> concrete_;
     std::vector<std::shared_ptr<threepp::Mesh>> towerDetails_;
     std::vector<Vent> vents_,tankVents_,sprays_,pools_;std::array<Puff,160> steam_;std::array<Puff,72> spray_;std::array<Puff,24> boiloff_;std::uint32_t seed_=0x73a91b5du,tankSeed_=0xd19bc273u;std::size_t tankCursor_=0,sprayCursor_=0,poolCursor_=0,deckCursor_=0,runoffCursor_=0;float sprayPending_=0,mistPending_=0,deckPending_=1,runoffPending_=0;

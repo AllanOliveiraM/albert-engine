@@ -175,6 +175,8 @@ inline const char* vehicleSurfaceFragment=R"(
     let sun = shadowFactor(v.world, v.worldNormal) * air.sun * frame.sunColor.rgb * frame.sun.w * max(dot(n, l), 0.0);
     let brush = 0.9 * (1.0 - tile) * select(0.0, 1.0, kind == 0.0) * quality;
     var colour = sun * (diffuse / PI_L + vehicleSpecular(n, tangent, bitangent, l, eye, f0, rough, brush));
+    colour += localLight(n, v.position, diffuse, f0, rough);
+    colour += siteIrradiance(v.world) * (diffuse + f0 * 0.65) / PI_L;
     colour += contactAmbient(v.position) * (frame.ambient.rgb + air.sky * frame.sunColor.rgb) * diffuse / PI_L;
     colour += contactAmbient(v.position) * environment * fresnel * (1.0 - 0.45 * rough);
     colour += material.emissive * select(1.0, tile, abs(material.vehicleHull.x) > 0.0 && (kind == 0.0 || kind == 1.0));
