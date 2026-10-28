@@ -17,9 +17,12 @@ void gridFinCaptures(const std::string& directory){
     close({8,11,6.324555f},"fin-close-15m"); // Exactly 15 m from the pivot, looking down through the sculpted lips.
     camera->position.copy(Vector3(0,10,0).applyQuaternion(fin->quaternion).add(fin->position));camera->up.set(0,0,1).applyQuaternion(fin->quaternion);camera->lookAt(fin->position);camera->fov=40;camera->updateProjectionMatrix();save("fin-face-10m",*world,*camera);
     close({11,5,8.888194f},"fin-grazing-15m");
+    // From below too: the spikes under the lattice, the rim's teeth, the hinge box and its bearing plate.
+    close({0,-10,.5f},"fin-below-10m");close({7,-9,5},"fin-below-3q");close({12,-5,2},"fin-side-below");close({1.5f,-2,13},"fin-from-tip");
     booster.quality(0);close({8,11,6.324555f},"fin-close-low");booster.quality(1);
     // From above the remaining 180 degree gap, all three declared fins project outside the hull.
     const Vector3 aim(0,float(look.length/2)-4,0);camera->up.set(0,1,0);camera->position.copy(aim).add(Vector3(0,51.961525f,-30));camera->lookAt(aim);camera->fov=30;camera->updateProjectionMatrix();save("booster-top-60m",*world,*camera);
+    {const Vector3 at(0,float(look.length/2)-8,0);camera->up.set(0,1,0);camera->position.copy(at).add(Vector3(18,-22,26));camera->lookAt(at);camera->fov=34;camera->updateProjectionMatrix();save("booster-fins-below",*world,*camera);}
     auto* lod=booster.node()->getObjectByName("vehicle detail LOD")->as<LOD>();
     for(int tier=0;tier<2;++tier){const auto g=albert::gridFin(4.f,4.7f,.6f,tier);manifest<<"tier "<<tier<<": "<<g.cells<<" complete interior cells, "<<g.walls<<" sheet spans, "<<g.ends<<" rounded boundary ends, "<<g.joints<<" rounded boundary welds, "<<g.segments<<" segments per span, "<<g.geometry->getAttribute<float>("position")->count()/3<<" lattice triangles per fin, "<<lod->getLevels()[tier].object->geometry()->getIndex()->count()/3<<" total booster hardware triangles\n";}
     CameraFixture f;*f.look=look;f.utc=310;f.vehicle();f.place({800,0,3000},{160,0,-170});

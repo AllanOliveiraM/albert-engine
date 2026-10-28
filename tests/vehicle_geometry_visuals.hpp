@@ -41,7 +41,7 @@ void vehicleGeometryControls(){
     const auto& spec=*std::find_if(look.parts.begin(),look.parts.end(),[](const auto& p){return p.grid;});
     auto hits=[&](float x,float z=0){Vector3 q(x,0,z),normal(0,1,0);q.applyQuaternion(fin->quaternion).add(fin->position);normal.applyQuaternion(fin->quaternion);
         Raycaster ray(Vector3(q).add(Vector3(normal).multiplyScalar(1)),Vector3(normal).negate());ray.farPlane=2;return !ray.intersectObject(*posedNear).empty();};
-    require(!hits(.42f*.70710678f)&&hits(0)&&hits(0,-float(spec.span)/2+.1f),"Diamond cells or thick grid root are missing");
+    require(!hits(.30f*.70710678f)&&hits(0)&&hits(0,-float(spec.span)/2+.1f),"Diamond cells or thick grid root are missing");
     require(!hits(float(spec.width)*.49f,float(spec.span)*.49f),"Grid fin retained a rectangular corner");
     // The white actuator hoods must stay on the hull while their adjacent steel sheets turn.
     const auto* finish=near->geometry()->getAttribute<float>("finish");const auto posed=posedHardware(*near);sample=geometrySample(look,-.3f);booster.animate(&sample,2);const auto turned=posedHardware(*near);unsigned fixed=0;
@@ -53,7 +53,7 @@ void vehicleGeometryControls(){
     // A lateral ray above the concave lip passes at mid-cell, where the straight LOD sheet still blocks it.
     auto sheet=MeshBasicMaterial::create();sheet->side=Side::Double;
     for(int tier=0;tier<2;++tier){const auto grid=albert::gridFin(float(spec.width),float(spec.span),float(spec.thickness),tier);auto mesh=Mesh::create(grid.geometry,sheet);mesh->updateMatrixWorld();
-        const Vector3 across(-.70710678f,0,.70710678f);auto lip=[&](float y){const Vector3 centre(.42f*.35355339f,y,.42f*.35355339f);Raycaster ray(Vector3(centre).addScaledVector(across,.08f),Vector3(across).negate());ray.farPlane=.16f;return !ray.intersectObject(*mesh).empty();};
+        const Vector3 across(-.70710678f,0,.70710678f);auto lip=[&](float y){const Vector3 centre(.30f*.35355339f,y,.30f*.35355339f);Raycaster ray(Vector3(centre).addScaledVector(across,.08f),Vector3(across).negate());ray.farPlane=.16f;return !ray.intersectObject(*mesh).empty();};
         require(lip(0)&&lip(.24f)==(tier==1),"Grid sheets lost their open concave lip or straight LOD");
         const auto* vertices=grid.geometry->getAttribute<float>("position");for(int i=0;i<vertices->count();++i)
             require(std::abs(vertices->getX(i))<=spec.width/2+.0001&&std::abs(vertices->getY(i))<=spec.thickness/2+.0001&&std::abs(vertices->getZ(i))<=spec.span/2+.0001,"Grid sheets exceed the declared fin envelope");}
