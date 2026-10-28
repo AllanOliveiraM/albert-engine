@@ -17,9 +17,9 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
     const float pitch=.48f,gauge=.022f;const int segments=tier==0?10:1;
     // V3's fin: an octagon, a square stretched a little out from the hull (4.6 m out, 4 m across) with long parallel sides and a
     // long straight outer edge, its outer corners cut small; the side at the hinge short (a seventh of the width), reached by
-    // longer 45-degree cuts from the parallel sides. Inside the declared envelope with the walls' cut ends' gauge and bow; a rim
+    // longer, steeper cuts from the parallel sides. Inside the declared envelope with the walls' cut ends' gauge and bow; a rim
     // straight from wall to wall closes every cell it cuts.
-    const float bottom=-span/2+.08f,top=span/2-.08f,half=width/2-.08f,root=.07f*width,outer=.22f*width,low=half-root;
+    const float bottom=-span/2+.08f,top=span/2-.08f,half=width/2-.08f,root=.07f*width,outer=.22f*width,low=1.25f*(half-root);
     const std::vector<Vector2> outline{{-root,bottom},{root,bottom},{half,bottom+low},{half,top-outer},{half-outer,top},{-half+outer,top},{-half,top-outer},{-half,bottom+low}};
     const int corners=static_cast<int>(outline.size());
     auto distance=[&](const Vector3& p,int e){const auto& u=outline[e];const auto& v=outline[(e+1)%corners];const float dx=v.x-u.x,dz=v.y-u.y;
@@ -42,10 +42,12 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
     std::map<std::pair<int,int>,unsigned> welds;std::vector<float> junctions(perimeter.begin(),perimeter.end()-1); // The corners, then where walls meet the rim.
     auto point=[](float u,float v){return Vector3((u+v)*rt,0,(u-v)*rt);};
     auto well=[](float v){return .24f+1.56f*std::clamp(1-std::min(v,1-v)/.14f,0.f,1.f);};
-    // Inside the V at the hinge (from the root's ends to the base beam's middle) no lattice: the walls stop at its arms.
-    const Vector3 vLeft(outline[0].x,0,outline[0].y),vRight(outline[1].x,0,outline[1].y),vTip=Vector3(outline[corners-1].x,0,outline[corners-1].y).lerp(Vector3(outline[2].x,0,outline[2].y),.5f);
-    const std::array<Vector3,3> hole{vLeft,vRight,vTip};
-    auto holeSide=[&](const Vector3& p,int e){const auto& u=hole[e];const auto& v=hole[(e+1)%3];const float dx=v.x-u.x,dz=v.z-u.z;return (dx*(p.z-u.z)-dz*(p.x-u.x))/std::hypot(dx,dz);};
+    // At the hinge, a box of thick steel from the root out over half way to the base beam, and a V from its far corners to the
+    // beam's middle: no lattice inside either, the walls stopping at them.
+    const float rootHalf=outline[1].x,beamZ=outline[2].y,boxTop=bottom+.55f*(beamZ-bottom),boxHalf=.8f*rootHalf;
+    const Vector3 vTip(0,0,beamZ);
+    const std::array<Vector3,5> hole{{{-rootHalf,0,bottom},{rootHalf,0,bottom},{boxHalf,0,boxTop},vTip,{-boxHalf,0,boxTop}}};
+    auto holeSide=[&](const Vector3& p,int e){const auto& u=hole[e];const auto& v=hole[(e+1)%5];const float dx=v.x-u.x,dz=v.z-u.z;return (dx*(p.z-u.z)-dz*(p.x-u.x))/std::hypot(dx,dz);};
     for(int i=-count;i<=count;++i)for(int j=-count;j<count;++j){
         if(clearance(point((i+.5f)*pitch,(j+.5f)*pitch))>.34f)++result.cells;
         for(int family=0;family<2;++family){const auto a=family==0?point(i*pitch,j*pitch):point(j*pitch,i*pitch);
@@ -55,7 +57,7 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
                 if(da<0&&db<0){hi=-1;break;}if(da<0)lo=std::max(lo,da/(da-db));if(db<0)hi=std::min(hi,da/(da-db));}
             if((hi-lo)*pitch<.03f)continue;
             float in0=0,in1=1; // The part inside the V.
-            for(int e=0;e<3;++e){const float da=holeSide(a,e),db=holeSide(b,e);
+            for(int e=0;e<5;++e){const float da=holeSide(a,e),db=holeSide(b,e);
                 if(da<0&&db<0){in1=-1;break;}if(da<0)in0=std::max(in0,da/(da-db));if(db<0)in1=std::min(in1,da/(da-db));}
             std::vector<std::array<float,2>> pieces;
             if(in1<=in0||in1<=lo||in0>=hi)pieces.push_back({lo,hi});else{if(in0-lo>.03f/pitch)pieces.push_back({lo,in0});if(hi-in1>.03f/pitch)pieces.push_back({in1,hi});}
@@ -103,21 +105,20 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
                     const Vector3 a0=Vector3(c0).addScaledVector(n0,rim/2).setY(y*e0),b0=Vector3(c0).addScaledVector(n0,-rim/2).setY(y*e0);
                     const Vector3 a1=Vector3(c1).addScaledVector(n1,rim/2).setY(y*e1),b1=Vector3(c1).addScaledVector(n1,-rim/2).setY(y*e1);
                     triangle({a0,up,1.8f},{a1,up,1.8f},{b1,up,1.8f});triangle({a0,up,1.8f},{b1,up,1.8f},{b0,up,1.8f});}}}}
-    // Straight steel bars through the fin's depth: the beam across the base, and a V from its middle opening onto the root at the
-    // hinge.
+    // Straight steel bars through the fin's depth: the beam across the base, the V from its middle, the hinge box.
     auto bar=[&](const Vector3& p0,const Vector3& p1,float gauge){const Vector3 along=Vector3(p1).sub(p0).normalize(),side(along.z,0,-along.x);const float h=thickness/2;
         for(const float d:{1.f,-1.f}){const Vector3 n=Vector3(side).multiplyScalar(d),a=Vector3(p0).addScaledVector(side,d*gauge/2),b=Vector3(p1).addScaledVector(side,d*gauge/2);
             triangle({Vector3(a).setY(-h),n,1.f},{Vector3(b).setY(-h),n,1.f},{Vector3(b).setY(h),n,1.f});triangle({Vector3(a).setY(-h),n,1.f},{Vector3(b).setY(h),n,1.f},{Vector3(a).setY(h),n,1.f});}
         for(const float y:{1.f,-1.f}){const Vector3 up(0,y,0),a0=Vector3(p0).addScaledVector(side,gauge/2).setY(y*h),b0=Vector3(p0).addScaledVector(side,-gauge/2).setY(y*h);
             const Vector3 a1=Vector3(p1).addScaledVector(side,gauge/2).setY(y*h),b1=Vector3(p1).addScaledVector(side,-gauge/2).setY(y*h);
             triangle({a0,up,1.8f},{a1,up,1.8f},{b1,up,1.8f});triangle({a0,up,1.8f},{b1,up,1.8f},{b0,up,1.8f});}};
-    {const Vector3 left(outline[corners-1].x,0,outline[corners-1].y),right(outline[2].x,0,outline[2].y),middle=Vector3(left).lerp(right,.5f);
-        bar(left,right,.09f);bar(middle,Vector3(outline[0].x,0,outline[0].y),.07f);bar(middle,Vector3(outline[1].x,0,outline[1].y),.07f);}
-    // The bearing plate inside the V, nearer its opening: across the V from arm to arm, through the fin's depth and half a metre
+    {const Vector3 left(outline[corners-1].x,0,outline[corners-1].y),right(outline[2].x,0,outline[2].y);bar(left,right,.09f);
+        for(const float x:{-1.f,1.f}){bar(vTip,{x*boxHalf,0,boxTop},.07f);bar({x*rootHalf,0,bottom},{x*boxHalf,0,boxTop},.08f);}bar({-boxHalf,0,boxTop},{boxHalf,0,boxTop},.08f);}
+    // The bearing plate inside the hinge box, nearer the root: across the box from side to side, through the fin's depth and half a metre
     // out below it (where V3 rests on the tower's arms), bored on the spindle for the hinge's pin from the booster.
     {std::vector<float> pp,pn,pc;auto put=[&](const Vector3& a,Vector3 b,Vector3 c,const Vector3& n){const auto cross=Vector3(b).sub(a).cross(Vector3(c).sub(a));if(cross.dot(n)<0)std::swap(b,c);
             for(const auto& v:{a,b,c}){pp.insert(pp.end(),{v.x,v.y,v.z});pn.insert(pn.end(),{n.x,n.y,n.z});pc.insert(pc.end(),{1,1,1});}};
-        const float z=vLeft.z+.35f*(vTip.z-vLeft.z),half=vRight.x*(1-.35f),up=thickness/2,down=-thickness/2-.5f,bore=.12f,plate=.08f;
+        const float z=bottom+.35f*(boxTop-bottom),half=rootHalf+(boxHalf-rootHalf)*.35f-.04f,up=thickness/2,down=-thickness/2-.5f,bore=.12f,plate=.08f;
         std::vector<float> angles;const int sides=tier==0?24:12;for(int k=0;k<sides;++k)angles.push_back(2*pi*k/sides);
         for(const auto& c:std::array<Vector2,4>{{{half,up},{-half,up},{-half,down},{half,down}}})angles.push_back(std::atan2(c.y,c.x)<0?std::atan2(c.y,c.x)+2*pi:std::atan2(c.y,c.x));
         std::sort(angles.begin(),angles.end());
