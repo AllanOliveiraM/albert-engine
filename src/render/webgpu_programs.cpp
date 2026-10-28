@@ -373,20 +373,26 @@ struct Material { diffuse: vec3f, opacity: f32, emissive: vec3f, roughness: f32,
 }
 )";
     albert::gpu::define("albert:bell",bell);
-    // Rigid vehicle hardware is CPU posed once per changed sample, then one indexed draw.
-    // Per-vertex heat keeps each bell independent, including unlit neighbours.
-    Program hardware;hardware.attributes={{"normal",3},{"color",3},{"emission",3},{"finish",2}};
-    hardware.uniforms={{"waterPlane",Uniform::vec4}};
+    // Rigid vehicle hardware posed on the GPU: each vertex's piece reads its pose (three rows) and its bell's heat from the
+    // poses texture (VehicleGeometry), one indexed draw. Per-vertex weights keep each bell's glow independent, unlit neighbours too.
+    Program hardware;hardware.attributes={{"normal",3},{"color",3},{"finish",2},{"weights",2},{"piece",1}};
+    hardware.uniforms={{"waterPlane",Uniform::vec4}};hardware.textures={"poses"};hardware.exactTextures={"poses"};
     hardware.wgsl=R"(
 struct Material { waterPlane: vec4f };
 @group(2) @binding(0) var<uniform> material: Material;
+@group(2) @binding(1) var poses: texture_2d<f32>;
+@group(2) @binding(2) var posesSampler: sampler;
 struct Hardware { @builtin(position) clip: vec4f, @location(0) world: vec3f, @location(1) normal: vec3f,
     @location(2) colour: vec3f, @location(3) emission: vec3f, @location(4) finish: vec2f, @location(5) water: f32 };
 @vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) colour: vec3f,
-    @location(3) emission: vec3f, @location(4) finish: vec2f) -> Hardware {
-    var o: Hardware; let world=object.model*vec4f(position,1.0);o.world=world.xyz;
-    o.clip=frame.projection*frame.view*world;o.normal=normalize(object.normalWorld*normal);
-    o.colour=colour;o.emission=emission;o.finish=finish;o.water=dot(material.waterPlane,vec4f(position,1.0));return o;
+    @location(3) finish: vec2f, @location(4) weights: vec2f, @location(5) piece: f32) -> Hardware {
+    let k=i32(piece+0.5);let r0=textureLoad(poses,vec2i(0,k),0);let r1=textureLoad(poses,vec2i(1,k),0);let r2=textureLoad(poses,vec2i(2,k),0);
+    let local=vec3f(dot(r0,vec4f(position,1.0)),dot(r1,vec4f(position,1.0)),dot(r2,vec4f(position,1.0)));
+    let turned=normalize(vec3f(dot(r0.xyz,normal),dot(r1.xyz,normal),dot(r2.xyz,normal)));
+    let burn=textureLoad(poses,vec2i(3,k),0).xyz;let lip=textureLoad(poses,vec2i(4,k),0).xyz;let ambient=textureLoad(poses,vec2i(5,k),0).xyz;
+    var o: Hardware; let world=object.model*vec4f(local,1.0);o.world=world.xyz;
+    o.clip=frame.projection*frame.view*world;o.normal=normalize(object.normalWorld*turned);
+    o.colour=colour;o.emission=mix(burn,lip,weights.y)*weights.x+ambient;o.finish=finish;o.water=dot(material.waterPlane,vec4f(local,1.0));return o;
 }
 @fragment fn fs_main(v: Hardware, @builtin(front_facing) front: bool) -> @location(0) vec4f {
     let submerged=dot(material.waterPlane.xyz,material.waterPlane.xyz)>0.000001;

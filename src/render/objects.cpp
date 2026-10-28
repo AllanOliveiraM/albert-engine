@@ -17,12 +17,12 @@ threepp::Vector3 albert::renderPosition(core::Vector p,core::Vector origin){
 std::array<double,3> albert::renderPositionExact(core::Vector p,core::Vector origin){p=p-origin;return {p.x/core::earthRadiusMeters,p.z/core::earthRadiusMeters,-p.y/core::earthRadiusMeters};}
 albert::SceneObjects::~SceneObjects(){for(auto& [id,model]:models_){(void)id;for(auto& g:model.geometry)g->dispose();for(auto& m:model.materials)m->dispose();}}
 void albert::SceneObjects::bind(const core::ObjectId& id,std::shared_ptr<Mesh> mesh,std::shared_ptr<const BVH> picker){nodes_.emplace(id,std::move(mesh));if(picker)pickers_[id]=std::move(picker);}
-std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Scene& registry,Raycaster& ray) const {
+std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Scene& registry,Raycaster& ray,const std::function<bool(const core::ObjectId&)>& only) const {
     std::optional<core::ObjectId> picked;
     float nearest=ray.farPlane;
     for(const auto& [id,node]:nodes_){
         const auto& object=registry.get(id);
-        if(!node->visible||!object.visible)continue;
+        if(!node->visible||!object.visible||(only&&!only(id)))continue;
         float distance=std::numeric_limits<float>::infinity();
         if(const auto picker=pickers_.find(id);picker!=pickers_.end()){
             node->updateWorldMatrix(true,false);Matrix4 inverse;inverse.copy(*node->matrixWorld).invert();const auto localRay=ray.ray.clone().applyMatrix4(inverse);

@@ -7,6 +7,19 @@ std::vector<float> geometrySample(const albert::core::VehicleLook& look,float an
     for(unsigned i=0;i<surfaces;++i)sample[look.engines.size()*3+i]=i%2?-angle:angle;
     sample[sample.size()-7]=101325;sample.back()=-1;return sample;
 }
+// The hardware batch as the GPU poses it: each vertex by its piece's rows in the poses texture (VehicleGeometry).
+std::vector<float> posedHardware(threepp::Mesh& mesh){using namespace threepp;const auto& g=*mesh.geometry();const auto* p=g.getAttribute<float>("position");const auto* k=g.getAttribute<float>("piece");
+    auto* poses=mesh.material()->as<ShaderMaterial>()->uniforms.at("poses").value<Texture*>();const auto& d=poses->image().data<float>();const unsigned row=4*albert::VehicleGeometry::texels;std::vector<float> out(3*p->count());
+    for(int i=0;i<p->count();++i){const float* m=d.data()+row*static_cast<unsigned>(k->getX(i)+.5f);const float x=p->getX(i),y=p->getY(i),z=p->getZ(i);
+        for(int r=0;r<3;++r)out[3*i+r]=m[4*r]*x+m[4*r+1]*y+m[4*r+2]*z+m[4*r+3];}
+    return out;
+}
+// Each vertex's red glow as the GPU lights it: its piece's bell burn and lip blended by its weights, over the ambient glow.
+std::vector<float> glowingHardware(threepp::Mesh& mesh){using namespace threepp;const auto& g=*mesh.geometry();const auto* w=g.getAttribute<float>("weights");const auto* k=g.getAttribute<float>("piece");
+    auto* poses=mesh.material()->as<ShaderMaterial>()->uniforms.at("poses").value<Texture*>();const auto& d=poses->image().data<float>();const unsigned row=4*albert::VehicleGeometry::texels;std::vector<float> out(w->count());
+    for(int i=0;i<w->count();++i){const float* m=d.data()+row*static_cast<unsigned>(k->getX(i)+.5f);out[i]=(m[12]+(m[16]-m[12])*w->getY(i))*w->getX(i)+m[20];}
+    return out;
+}
 void vehicleGeometryControls(){
     namespace ex=albert::example::starship;const auto look=captureLook(ex::superHeavy());albert::Vehicle booster(look);
     require(booster.engineCount()==33&&std::count_if(look.parts.begin(),look.parts.end(),[](const auto& p){return p.grid;})==3,"V3 drawn engine or fin count");
@@ -15,20 +28,24 @@ void vehicleGeometryControls(){
     auto* lod=booster.node()->getObjectByName("vehicle detail LOD")->as<LOD>();require(lod&&lod->getLevels().size()==2,"Vehicle geometry LOD missing");
     auto* near=lod->getLevels()[0].object->as<Mesh>();auto* far=lod->getLevels()[1].object->as<Mesh>();
     require(near->geometry()->getIndex()->count()>far->geometry()->getIndex()->count()*2,"Coarse vehicle geometry did not reduce triangles");
-    auto sample=geometrySample(look);booster.animate(&sample,0);auto* positions=near->geometry()->getAttribute<float>("position");const auto neutral=positions->array();
+    auto sample=geometrySample(look);booster.animate(&sample,0);auto* poses=near->material()->as<ShaderMaterial>()->uniforms.at("poses").value<Texture*>();const auto neutral=posedHardware(*near);
     sample=geometrySample(look,.43f);sample[1]=.07f;sample[2]=-.05f;booster.animate(&sample,1);
-    require(positions->array()!=neutral&&albert::Vehicle::gimballing(*booster.node(),look)>.08f,"Reported fins and nozzle gimbals did not pose geometry");
-    const auto version=positions->version;booster.animate(&sample,1);require(positions->version==version,"Frozen geometry uploaded unchanged joint positions");
+    require(posedHardware(*near)!=neutral&&albert::Vehicle::gimballing(*booster.node(),look)>.08f,"Reported fins and nozzle gimbals did not pose geometry");
+    const auto version=poses->version();booster.animate(&sample,1);require(poses->version()==version,"Frozen geometry uploaded unchanged joint poses");
+    const auto* rest=near->geometry()->getAttribute<float>("position");const auto restVersion=rest->version;booster.animate(&sample,2);
+    require(rest->version==restVersion,"Posing the hardware rewrote its vertices");
+    auto posedNear=Mesh::create(BufferGeometry::create(),near->material());posedNear->geometry()->setIndex(near->geometry()->getIndex()->array());
+    posedNear->geometry()->setAttribute("position",FloatBufferAttribute::create(posedHardware(*near),3));posedNear->updateMatrixWorld();
     // A ray through a fin cell must pass; the adjacent steel blade must occlude it.
     auto* fin=booster.node()->getObjectByName("grid fin");booster.node()->updateMatrixWorld();
     const auto& spec=*std::find_if(look.parts.begin(),look.parts.end(),[](const auto& p){return p.grid;});
     auto hits=[&](float x,float z=0){Vector3 q(x,0,z),normal(0,1,0);q.applyQuaternion(fin->quaternion).add(fin->position);normal.applyQuaternion(fin->quaternion);
-        Raycaster ray(Vector3(q).add(Vector3(normal).multiplyScalar(1)),Vector3(normal).negate());ray.farPlane=2;return !ray.intersectObject(*near).empty();};
+        Raycaster ray(Vector3(q).add(Vector3(normal).multiplyScalar(1)),Vector3(normal).negate());ray.farPlane=2;return !ray.intersectObject(*posedNear).empty();};
     require(!hits(.48f*.70710678f)&&hits(0)&&hits(0,-float(spec.span)/2+.1f),"Diamond cells or thick grid root are missing");
     require(!hits(float(spec.width)*.49f,float(spec.span)*.49f),"Grid fin retained a rectangular corner");
     // The white actuator hoods must stay on the hull while their adjacent steel sheets turn.
-    const auto* finish=near->geometry()->getAttribute<float>("finish");const auto posed=positions->array();sample=geometrySample(look,-.3f);booster.animate(&sample,2);unsigned fixed=0;
-    for(int i=0;i<finish->count();++i)if(std::abs(finish->getY(i)-.12f)<1e-5f){++fixed;for(int j=0;j<3;++j)require(posed[3*i+j]==positions->array()[3*i+j],"Grid actuator hood turned with the spindle");}
+    const auto* finish=near->geometry()->getAttribute<float>("finish");const auto posed=posedHardware(*near);sample=geometrySample(look,-.3f);booster.animate(&sample,2);const auto turned=posedHardware(*near);unsigned fixed=0;
+    for(int i=0;i<finish->count();++i)if(std::abs(finish->getY(i)-.12f)<1e-5f){++fixed;for(int j=0;j<3;++j)require(posed[3*i+j]==turned[3*i+j],"Grid actuator hood turned with the spindle");}
     require(fixed>100,"Grid root lost its fixed white hood");
     const auto* colour=near->geometry()->getAttribute<float>("color");unsigned lips=0,wells=0;
     for(int i=0;i<finish->count();++i)if(std::abs(finish->getX(i)-.29f)<1e-5f&&std::abs(finish->getY(i)-.92f)<1e-5f){lips+=colour->getX(i)>.17f;wells+=colour->getX(i)<.03f;}
@@ -59,9 +76,9 @@ void vehicleGeometryGraphics(GpuTarget& target){
     sample=geometrySample(look,.45f);booster.animate(&sample,1);target.render(*world,*camera);const auto turned=target.readRGBPixels();require(turned!=straight,"Fin deflection did not reach the WebGPU image");
     target.render(*world,*camera);require(target.readRGBPixels()==turned,"Frozen detailed geometry changed between frames");
     auto* lod=booster.node()->getObjectByName("vehicle detail LOD")->as<LOD>();require(lod->getCurrentLevel()==0,"Close vehicle selected far geometry");
-    sample[0]=1;booster.animate(&sample,1.01);const auto* emission=lod->getLevels()[0].object->geometry()->getAttribute<float>("emission");unsigned glowing=0;
-    for(int i=0;i<emission->count();++i)if(emission->getX(i)>.01f)++glowing;
-    require(glowing>10&&glowing<static_cast<unsigned>(emission->count()/10),"Individual bell heat leaked to unlit neighbours in the batch");
+    sample[0]=1;booster.animate(&sample,1.01);const auto glow=glowingHardware(*lod->getLevels()[0].object->as<Mesh>());unsigned glowing=0;
+    for(const float e:glow)if(e>.01f)++glowing;
+    require(glowing>10&&glowing<static_cast<unsigned>(glow.size()/10),"Individual bell heat leaked to unlit neighbours in the batch");
     camera->position.set(0,0,2000);camera->lookAt(Vector3());target.render(*world,*camera);target.readRGBPixels();require(lod->getCurrentLevel()==1,"2 km vehicle retained full geometry");
     const float scale=1.f/6378137;booster.node()->scale.setScalar(scale);camera->position.multiplyScalar(scale);camera->nearPlane*=scale;camera->updateProjectionMatrix();target.render(*world,*camera);target.readRGBPixels();require(lod->getCurrentLevel()==1,"Earth-unit scale changed vehicle LOD");
     camera->position.set(30*scale,35*scale,50*scale);camera->lookAt(Vector3(0,28*scale,0));target.render(*world,*camera);target.readRGBPixels();require(lod->getCurrentLevel()==0,"Earth-unit close geometry failed to restore");

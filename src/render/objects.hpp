@@ -8,6 +8,7 @@
 #include "threepp/utils/BVH.hpp"
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <map>
 namespace albert {
 threepp::Vector3 renderPosition(core::Vector position,core::Vector origin={});
@@ -30,7 +31,8 @@ public:
     void count(const core::ObjectId& flight,double seconds,bool scrubbed,bool launch=true){count_[flight]={seconds,scrubbed,launch};} // Its count time (T, s) and whether it scrubbed.
     void terrain(const Terrain* terrain,const threepp::Object3D* earth){terrain_=terrain;earth_=earth;}
     void updateLighting(threepp::Camera&,const threepp::Vector3& sun,const AuxiliaryLights&,float seconds);
-    std::optional<core::ObjectId> pick(const core::Scene&,threepp::Raycaster&) const;
+    // only: those it may pick (empty: all), left out before any ray is cast at them.
+    std::optional<core::ObjectId> pick(const core::Scene&,threepp::Raycaster&,const std::function<bool(const core::ObjectId&)>& only={}) const;
     const std::map<core::ObjectId,std::shared_ptr<threepp::Mesh>>& nodes() const{return nodes_;}
     const Vehicle* vehicle(const core::ObjectId& id)const{const auto it=vehicles_.find(id);return it==vehicles_.end()?nullptr:it->second.get();}
     const std::array<double,3>* exact(const core::ObjectId& id)const{const auto it=exact_.find(id);return it==exact_.end()?nullptr:&it->second;} // Its node's position at the last sync, in double precision.

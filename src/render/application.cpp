@@ -1125,6 +1125,7 @@ int albert::runRenderer(int argc, char** argv) {
 #ifdef ALBERT_HAS_RPC
         std::unique_ptr<albert::rpc::Server> rpc;
         bool broadcasting=false; // The broadcast's panels were shown last frame: the corner views make room for them.
+        std::optional<albert::core::ObjectId> hovered;std::chrono::steady_clock::time_point hoverAt{}; // The object under the mouse, as last tested.
         // The flight's sound at the camera: muted until "Som do voo" is ticked (the device opens then); its emissions over
         // the last ten minutes and the listener's last place.
         bool soundOn=true;std::unique_ptr<albert::Sound> sound; // On unless unticked (ALBERT_AUDIO=0 keeps a run silent).
@@ -1976,17 +1977,18 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::PopStyleVar();
             }
 
-            // Hover and click use the same nearest visible object.
+            // Hover and click use the same nearest visible object: the hover at most ten times a second, a click at once (a ray
+            // through a site's every mesh and triangle each frame took most of a core).
             if(!ImGui::GetIO().WantCaptureMouse && !transition.active&&!covered(ImGui::GetMousePos(),ImGui::GetMousePos())){
-                const auto mouse=ImGui::GetMousePos();Raycaster ray;ray.setFromCamera(Vector2(mouse.x/display.x*2.f-1.f,1.f-mouse.y/display.y*2.f),*camera);
-                ray.nearPlane=camera->nearPlane;ray.farPlane=camera->farPlane;
-                // During a mission (its flights on the broadcast) only its vehicles answer a click: a stray one on the Moon or a planet
-                // took the camera off the flight.
-                if(const auto picked=objects.pick(registry,ray);picked&&(!broadcasting||*picked=="flight"||picked->rfind("flight.",0)==0)){
-                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-                    if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(*picked,*picked==focus);
-                }
-            }
+                const bool click=ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f;
+                if(click||std::chrono::steady_clock::now()-hoverAt>std::chrono::milliseconds(100)){hoverAt=std::chrono::steady_clock::now();
+                    const auto mouse=ImGui::GetMousePos();Raycaster ray;ray.setFromCamera(Vector2(mouse.x/display.x*2.f-1.f,1.f-mouse.y/display.y*2.f),*camera);
+                    ray.nearPlane=camera->nearPlane;ray.farPlane=camera->farPlane;
+                    // During a mission (its flights on the broadcast) only its vehicles answer a click: a stray one on the Moon or a
+                    // planet took the camera off the flight. Only they are tested then.
+                    hovered=broadcasting?objects.pick(registry,ray,[](const albert::core::ObjectId& id){return id=="flight"||id.rfind("flight.",0)==0;}):objects.pick(registry,ray);}
+                if(hovered){ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);if(click)setFocus(*hovered,*hovered==focus);}
+            }else hovered.reset();
             if (systemView(focus) || focus == targets::EarthMoon) {
                 if(showOrbits&&!covered(ImVec2(display.x*.5f-130.f,display.y-36.f),ImVec2(display.x*.5f+130.f,display.y-16.f))) {
                     auto* legend=ImGui::GetBackgroundDrawList();

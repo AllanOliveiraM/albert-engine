@@ -284,11 +284,17 @@ struct SceneRenderer::Impl {
     void release(Attribute& a){if(a.buffer.buffer)wgpuBufferRelease(a.buffer.buffer);}
     // The GPU copy of a float attribute, one per threepp attribute however many geometries share it
     // (the border chunks share theirs and differ in draw range); nullptr when absent or of another size.
+    // ALBERT_UPLOAD_STATS: what goes up to the GPU every two seconds, by geometry attribute and texture (the largest ten).
+    std::map<std::string,std::size_t> uploaded;std::chrono::steady_clock::time_point uploadedAt=std::chrono::steady_clock::now();
+    void count(const std::string& what,std::size_t bytes){static const bool on=std::getenv("ALBERT_UPLOAD_STATS")!=nullptr;if(!on)return;uploaded[what]+=bytes;const auto now=std::chrono::steady_clock::now();
+        if(now-uploadedAt>std::chrono::seconds(2)){std::vector<std::pair<std::size_t,std::string>> v;std::size_t all=0;for(auto&[k,b]:uploaded){v.push_back({b,k});all+=b;}std::sort(v.rbegin(),v.rend());
+            std::fprintf(stderr,"UPLOAD 2s %.1fMB:",all/1e6);for(std::size_t i=0;i<v.size()&&i<10;++i)std::fprintf(stderr," [%s] %.2fMB",v[i].second.c_str(),v[i].first/1e6);std::fprintf(stderr,"\n");uploaded.clear();uploadedAt=now;}}
     WGPUBuffer vertices(BufferGeometry& geometry,const std::string& name,int components){
         const auto& all=geometry.getAttributes();const auto it=all.find(name);if(it==all.end())return nullptr;
         const auto* a=dynamic_cast<const TypedBufferAttribute<float>*>(it->second.get());if(!a||a->itemSize()!=components)return nullptr;
         auto& slot=attributes[it->second.get()];
         if(slot.owner.lock()!=it->second){release(slot);slot=Attribute{};slot.owner=it->second;} // New, or another attribute at a reused address.
+        if(slot.buffer.version!=a->version||!slot.buffer.buffer)count(geometry.name+"/"+name+"#"+std::to_string(a->array().size()),a->array().size()*4);
         slot.used=frame;upload(slot.buffer,a->array().data(),a->array().size()*4,WGPUBufferUsage_Vertex,a->version);return slot.buffer.buffer;
     }
     void release(Texture& t){if(t.view)wgpuTextureViewRelease(t.view);if(t.texture)wgpuTextureRelease(t.texture);if(t.sampler)wgpuSamplerRelease(t.sampler);if(t.pending)wgpuTextureRelease(t.pending);}
@@ -406,7 +412,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
             if(!rows&&!whole&&streamBudget==streamLimit)rows=1; // A row larger than the whole budget.
             if(!rows)return t.view;
             WGPUTexelCopyTextureInfo dst{};dst.texture=t.pending;dst.origin={0,t.row,0};WGPUTexelCopyBufferLayout l{};l.bytesPerRow=static_cast<std::uint32_t>(rowBytes);l.rowsPerImage=static_cast<std::uint32_t>(rows);
-            const WGPUExtent3D e{t.width,static_cast<std::uint32_t>(rows),1};wgpuQueueWriteTexture(queue,&dst,data+rowBytes*t.row,rowBytes*rows,&l,&e);
+            const WGPUExtent3D e{t.width,static_cast<std::uint32_t>(rows),1};wgpuQueueWriteTexture(queue,&dst,data+rowBytes*t.row,rowBytes*rows,&l,&e);count("tex:"+source->name+"#"+std::to_string(t.width)+"x"+std::to_string(t.height),rowBytes*rows);
             t.row+=static_cast<unsigned>(rows);if(!whole)streamBudget-=std::min(streamBudget,rowBytes*rows);
         }
         mipmaps(t.pending,f,t.levels);
