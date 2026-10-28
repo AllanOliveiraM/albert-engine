@@ -18,7 +18,7 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
     // long straight outer edge, its outer corners cut small; the side at the hinge short (three tenths of the width), reached by
     // longer 45-degree cuts from the parallel sides. Inside the declared envelope with the walls' cut ends' gauge and bow; a rim
     // straight from wall to wall closes every cell it cuts.
-    const float bottom=-span/2+.08f,top=span/2-.08f,half=width/2-.08f,root=.15f*width,outer=.15f*width,low=half-root;
+    const float bottom=-span/2+.08f,top=span/2-.08f,half=width/2-.08f,root=.15f*width,outer=.22f*width,low=half-root;
     const std::vector<Vector2> outline{{-root,bottom},{root,bottom},{half,bottom+low},{half,top-outer},{half-outer,top},{-half+outer,top},{-half,top-outer},{-half,bottom+low}};
     const int corners=static_cast<int>(outline.size());
     auto distance=[&](const Vector3& p,int e){const auto& u=outline[e];const auto& v=outline[(e+1)%corners];const float dx=v.x-u.x,dz=v.y-u.y;
@@ -71,13 +71,15 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
     // those dips, front and back, are the crown.
     std::sort(junctions.begin(),junctions.end());
     {std::vector<float> kept;for(const float s:junctions)if(kept.empty()||s-kept.back()>.02f)kept.push_back(s);junctions.swap(kept);}
-    {const float rim=.035f;const int steps=tier==0?8:2;
+    // The base, where V3 rests on the tower's arms, reinforced: its rim (the root and the two cuts from it) twice as thick and
+    // straight through its depth, and a steel beam across between the cuts' outer corners.
+    {const int steps=tier==0?8:2;
         for(std::size_t k=0;k<junctions.size();++k){const float s0=junctions[k],s1=k+1<junctions.size()?junctions[k+1]:junctions.front()+perimeter.back();
-            const bool root=s1<=perimeter[1]+1e-4f;const Vector3 p0=rimAt(s0),p1=rimAt(s1);Vector3 chord=Vector3(p1).sub(p0);const float length=chord.length();
+            const bool root=s1<=perimeter[2]+1e-4f||s0>=perimeter[corners-1]-1e-4f;const float rim=root?.08f:.035f;const Vector3 p0=rimAt(s0),p1=rimAt(s1);Vector3 chord=Vector3(p1).sub(p0);const float length=chord.length();
             if(length<1e-4f)continue;chord.divideScalar(length);const Vector3 out(chord.z,0,-chord.x);const float bulge=0; // Straight in the plane: the crown is the depth's scallops, not the outline's.
             auto at=[&](float t,Vector3& centre,Vector3& normal,float& h){centre=Vector3(p0).lerp(p1,t).addScaledVector(out,bulge*std::sin(pi*t));
                 const Vector3 tangent=Vector3(chord).multiplyScalar(length).addScaledVector(out,bulge*pi*std::cos(pi*t)).normalize();normal.set(tangent.z,0,-tangent.x);
-                h=thickness/2-(tier==0&&!root?.10f*std::sin(pi*t):0.f);};
+                h=thickness/2-(tier==0&&!root?.10f*std::sin(pi*t):0.f);}; // The base's rim straight through its depth.
             for(int step=0;step<steps;++step){Vector3 c0,n0,c1,n1;float h0,h1;at(float(step)/steps,c0,n0,h0);at(float(step+1)/steps,c1,n1,h1);
                 for(const float side:{1.f,-1.f}){ // The outer face, and the inner a well's dark.
                     const Vector3 o0=Vector3(c0).addScaledVector(n0,side*rim/2),o1=Vector3(c1).addScaledVector(n1,side*rim/2),m0=Vector3(n0).multiplyScalar(side),m1=Vector3(n1).multiplyScalar(side);
@@ -88,6 +90,16 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
                     const Vector3 a0=Vector3(c0).addScaledVector(n0,rim/2).setY(y*h0),b0=Vector3(c0).addScaledVector(n0,-rim/2).setY(y*h0);
                     const Vector3 a1=Vector3(c1).addScaledVector(n1,rim/2).setY(y*h1),b1=Vector3(c1).addScaledVector(n1,-rim/2).setY(y*h1);
                     triangle({a0,up,1.8f},{a1,up,1.8f},{b1,up,1.8f});triangle({a0,up,1.8f},{b1,up,1.8f},{b0,up,1.8f});}}}}
+    // Straight steel bars through the fin's depth: the beam across the base, and a V from its middle opening onto the root at the
+    // hinge.
+    auto bar=[&](const Vector3& p0,const Vector3& p1,float gauge){const Vector3 along=Vector3(p1).sub(p0).normalize(),side(along.z,0,-along.x);const float h=thickness/2;
+        for(const float d:{1.f,-1.f}){const Vector3 n=Vector3(side).multiplyScalar(d),a=Vector3(p0).addScaledVector(side,d*gauge/2),b=Vector3(p1).addScaledVector(side,d*gauge/2);
+            triangle({Vector3(a).setY(-h),n,1.f},{Vector3(b).setY(-h),n,1.f},{Vector3(b).setY(h),n,1.f});triangle({Vector3(a).setY(-h),n,1.f},{Vector3(b).setY(h),n,1.f},{Vector3(a).setY(h),n,1.f});}
+        for(const float y:{1.f,-1.f}){const Vector3 up(0,y,0),a0=Vector3(p0).addScaledVector(side,gauge/2).setY(y*h),b0=Vector3(p0).addScaledVector(side,-gauge/2).setY(y*h);
+            const Vector3 a1=Vector3(p1).addScaledVector(side,gauge/2).setY(y*h),b1=Vector3(p1).addScaledVector(side,-gauge/2).setY(y*h);
+            triangle({a0,up,1.8f},{a1,up,1.8f},{b1,up,1.8f});triangle({a0,up,1.8f},{b1,up,1.8f},{b0,up,1.8f});}};
+    {const Vector3 left(outline[corners-1].x,0,outline[corners-1].y),right(outline[2].x,0,outline[2].y),middle=Vector3(left).lerp(right,.5f);
+        bar(left,right,.09f);bar(middle,Vector3(outline[0].x,0,outline[0].y),.07f);bar(middle,Vector3(outline[1].x,0,outline[1].y),.07f);}
     // The last welded V also needs a fillet: rounding only cut ends leaves needle-shaped full-cell crests.
     for(const auto& [node,degree]:welds)if(degree<4){++result.joints;const auto centre=point(node.first*pitch,node.second*pitch);const float h=thickness/2-.055f;
         const int sides=tier==0?16:8;struct Ring {float r,y,ny,shade;};
