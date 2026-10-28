@@ -19,6 +19,7 @@ public:
     SceneRenderer(const SceneRenderer&)=delete;SceneRenderer& operator=(const SceneRenderer&)=delete;
     float exposure=1;
     bool toneMapping=true; // ACES filmic (threepp's ACESFilmic); false: none, as threepp's default.
+    bool fisheye=false; // Equidistant 150 degree diagonal lens; supply a 145 degree vertical perspective camera.
     bool shadows=false; // Sun shadow map for castShadow meshes on receiveShadow ones.
     // Four fixed, camera-centred light-space levels; metres/world unit (0: the light's legacy map).
     float shadowMetersPerUnit=0;bool shadowHigh=true;

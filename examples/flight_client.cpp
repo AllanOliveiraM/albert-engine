@@ -15,7 +15,7 @@
 // real time (default 1000); --landings[=N]: every phase but the booster's and the ship's landings N times faster (30); --ship-return: the ship's way home alone, from orbit; --fail: engine failures to inject
 // (flight@time-or-phase:engine, starship_flight.hpp).
 // Camera commands to a running Albert, in order, then out (for pictures while another client flies): --focus=ID,
-// --orbit=AZIMUTH,ELEVATION[,DISTANCE_SCALE] (degrees), --shot=NAME.png (the next frame saved under its capture directory).
+// --orbit=AZIMUTH,ELEVATION[,DISTANCE_SCALE] (degrees), --camera=NAME (broadcast rig), --shot=NAME.png (the next frame saved under its capture directory).
 #include "albert/v1/engine.grpc.pb.h"
 #include "gravity_turn.hpp"
 #include "saturn_v.hpp"
@@ -68,7 +68,7 @@ int apollo11(api::FlightService::Stub& flight,bool fast){
 int main(int argc,char** argv){try{
     std::setvbuf(stdout,nullptr,_IOLBF,0);std::string address="127.0.0.1:50051",world="earth",exported,definition,failures;double hurry=1;bool fast=false,binary=false,apollo=false,starship=false,follow=false,homeOnly=false,pad=false;std::vector<std::string> camera;double utc=0,warp=1000;bool chosen=false;
     for(int i=1;i<argc;++i){const std::string a=argv[i];if(a=="--fast")fast=true;else if(a=="--wire")binary=true;else if(a=="--apollo11")apollo=true;else if(a=="--starship")starship=true;else if(a=="--follow-booster")follow=true;else if(a=="--ship-return")homeOnly=true;else if(a=="--pad")pad=true;else if(a.rfind("--fail=",0)==0)failures=a.substr(7);else if(a.rfind("--warp=",0)==0)warp=std::stod(a.substr(7));else if(a.rfind("--landings",0)==0)hurry=a.size()>11?std::stod(a.substr(11)):30;else if(a.rfind("--utc=",0)==0){utc=std::stod(a.substr(6));chosen=true;}
-        else if(a.rfind("--focus=",0)==0||a.rfind("--orbit=",0)==0||a.rfind("--shot=",0)==0)camera.push_back(a);
+        else if(a.rfind("--focus=",0)==0||a.rfind("--orbit=",0)==0||a.rfind("--shot=",0)==0||a.rfind("--camera=",0)==0)camera.push_back(a);
         else if(a.rfind("--body=",0)==0)world=a.substr(7);else if(a.rfind("--export-vehicle=",0)==0)exported=a.substr(17);else if(a.rfind("--definition=",0)==0)definition=a.substr(13);else address=a;}
     if(world!="earth"&&world!="moon"&&world!="mars")throw std::invalid_argument("--body: earth, moon or mars");
     if(binary&&world!="earth")throw std::invalid_argument("--wire flies the Earth case");
@@ -78,6 +78,7 @@ int main(int argc,char** argv){try{
     if(!camera.empty()){auto c=api::CameraService::NewStub(channel);api::Applied done; // In order: each applied before the next.
         for(const auto& a:camera){const std::string v=a.substr(a.find('=')+1);
             if(a.rfind("--focus=",0)==0){api::FocusRequest r;r.set_id(v);ex::call([&](grpc::ClientContext& x){return c->Focus(&x,r,&done);});}
+            else if(a.rfind("--camera=",0)==0){api::CameraModeRequest r;r.set_name(v);ex::call([&](grpc::ClientContext& x){return c->SetMode(&x,r,&done);});}
             else if(a.rfind("--orbit=",0)==0){double az=0,el=0,scale=0;const int n=std::sscanf(v.c_str(),"%lf,%lf,%lf",&az,&el,&scale);api::OrbitRequest r;r.set_azimuth_radians(az*std::numbers::pi/180);r.set_elevation_radians(el*std::numbers::pi/180);if(n>=3)r.set_distance_scale(scale);
                 ex::call([&](grpc::ClientContext& x){return c->Orbit(&x,r,&done);});}
             else{api::CaptureRequest r;r.set_file_name(v);ex::call([&](grpc::ClientContext& x){return c->Capture(&x,r,&done);});}}

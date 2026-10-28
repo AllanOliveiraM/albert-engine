@@ -207,7 +207,7 @@ Vehicle::Vehicle(const core::VehicleLook& look){
     { // Condensation at Mach 1: a white collar flaring aft from where the nose meets the body (a fifth of the way down).
         const float r=static_cast<float>(look.diameter/2),l=static_cast<float>(look.length);auto g=CylinderGeometry::create(r*1.02f,r*2.3f,.22f*l,48,1,true);
         g->translate(0,static_cast<float>(half)-.31f*l,0);auto m=MeshBasicMaterial::create();m->color=Color(0xf4f6f8);m->transparent=true;m->opacity=0;m->depthWrite=false;m->side=Side::Double;
-        vapour_=Mesh::create(g,m);vapour_->visible=false;vapour_->renderOrder=8;root_->add(vapour_);}
+        vapour_=Mesh::create(g,m);vapour_->name="transonic condensation";vapour_->visible=false;vapour_->renderOrder=8;root_->add(vapour_);}
     { // Conforming hull curtain plus a bounded, analytic volume downstream along the air-relative flow.
         plasma_=curtainMesh(std::move(sheathPositions),std::move(sheathNormals),static_cast<float>(look.length));root_->add(plasma_);sheaths_.push_back(plasma_);
         wake_=Mesh::create(SphereGeometry::create(1,32,16),plasmaMaterial(1));wake_->name="entry wake";wake_->visible=false;wake_->renderOrder=12;wake_->frustumCulled=false;root_->add(wake_);sheaths_.push_back(wake_);}

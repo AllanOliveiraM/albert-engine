@@ -64,6 +64,9 @@ message FocusRequest { string id=1; bool reset_zoom=2; }
 // A bare file name ending in .png (letters, digits, '.', '_', '-'; at most 80 characters).
 message CaptureRequest { string file_name=1; }
 message OrbitRequest { double azimuth_radians=1; double elevation_radians=2; optional double distance_scale=3; }
+// orbit, tracking, drone, tower, onboard, engine, hotstage, flap, auto;
+// append -fisheye to tower or any onboard variant for the wide distorted lens.
+message CameraModeRequest { string name=1; }
 message StreamSummary { uint64 applied_batches=1; uint64 revision=2; }
 message Capabilities { repeated ReferenceFrame frames=1; uint32 max_objects=2; uint32 max_samples_per_batch=3; repeated Geometry.Shape shapes=4; bool catalog_available=5; uint32 max_model_bytes=6; uint32 max_layers=7; uint32 max_layer_input_points=8; }
 service SceneService {
@@ -85,6 +88,7 @@ service CameraService {
   // The next frame after it is applied is saved as PNG under the capture directory.
   rpc Capture(CaptureRequest) returns (Applied);
   rpc Orbit(OrbitRequest) returns (Applied);
+  rpc SetMode(CameraModeRequest) returns (Applied);
   rpc GetCamera(Empty) returns (Camera);
 }
 

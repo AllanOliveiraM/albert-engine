@@ -31,6 +31,7 @@ public:
     unsigned long long renderInset(threepp::Scene& scene,threepp::Camera& camera,unsigned width,unsigned height);
     void ui();                                     // In work, after the scene.
     void setExposure(float value);
+    void setFisheye(bool enabled);
     void setShadowScale(float metersPerUnit,bool high);
     void setShadows(bool enabled); // Sun shadow map, every frame.
     [[nodiscard]] float exposure()const;

@@ -140,6 +140,7 @@ public:
         return apply(c,core::Capture{name},out);
     }
     grpc::Status Orbit(grpc::ServerContext* c,const api::OrbitRequest* r,api::Applied* out) override{return apply(c,core::Orbit{r->azimuth_radians(),r->elevation_radians(),r->has_distance_scale()?r->distance_scale():1.},out);}
+    grpc::Status SetMode(grpc::ServerContext* c,const api::CameraModeRequest* r,api::Applied* out) override{return apply(c,core::SetCamera{r->name()},out);}
     grpc::Status GetCamera(grpc::ServerContext*,const api::Empty*,api::Camera* out) override{auto s=bridge_.snapshot();if(!s)return {grpc::StatusCode::UNAVAILABLE,"Scene is initializing"};camera(s->camera,out);return grpc::Status::OK;}
     static void catalogJob(const catalog::Job& job,api::CatalogJob* out){
         out->set_id(job.id);out->set_catalog_id(job.catalogId);out->set_object_id(job.objectId);out->set_stage(static_cast<api::CatalogJob::Stage>(job.stage));

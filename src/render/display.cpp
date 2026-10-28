@@ -56,6 +56,7 @@ void albert::Display::onResize(std::function<void(WindowSize)> f){impl_->window-
 void albert::Display::setShadowScale(float metersPerUnit,bool high){impl_->scene->shadowMetersPerUnit=metersPerUnit;impl_->scene->shadowHigh=high;}
 void albert::Display::setShadows(bool enabled){impl_->scene->shadows=enabled;}
 void albert::Display::setExposure(float value){impl_->scene->exposure=value;}
+void albert::Display::setFisheye(bool enabled){impl_->scene->fisheye=enabled;}
 void albert::Display::setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio){
     auto& d=*impl_;auto& a=d.scene->air;a.clouds=clouds;a.cloudKm=cloudKm;a.cloudShadow=clouds?cloudOpacity:0.f;a.surfaceWind=surfaceWind;a.polarRatio=polarRatio;}
 void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength,float groundKm,bool mars){
@@ -124,9 +125,9 @@ unsigned long long albert::Display::renderInset(Scene& scene,Camera& camera,unsi
         if(d.inset)d.retired.emplace_back(d.inset,d.insetView);
         WGPUTextureDescriptor t{};t.size={width,height,1};t.format=d.context->format();t.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_TextureBinding;t.mipLevelCount=1;t.sampleCount=1;t.dimension=WGPUTextureDimension_2D;
         d.inset=wgpuDeviceCreateTexture(d.context->device(),&t);d.insetView=wgpuTextureCreateView(d.inset,nullptr);d.insetWidth=width;d.insetHeight=height;}
-    auto& r=*d.scene;const bool clouds=r.volume.enabled,sea=r.sea.enabled;r.volume.enabled=false;r.sea.enabled=false;r.measured=false;
+    auto& r=*d.scene;const bool clouds=r.volume.enabled,sea=r.sea.enabled,lens=r.fisheye;r.volume.enabled=false;r.sea.enabled=false;r.fisheye=false;r.measured=false;
     WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(d.context->device(),nullptr);r.render(scene,camera,d.insetView,width,height,e);
-    r.volume.enabled=clouds;r.sea.enabled=sea;r.measured=true;
+    r.volume.enabled=clouds;r.sea.enabled=sea;r.fisheye=lens;r.measured=true;
     WGPUCommandBuffer commands=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(d.context->queue(),1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(e);
     return static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(d.insetView));
 }

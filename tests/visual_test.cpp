@@ -1,4 +1,6 @@
 #include "animation.hpp"
+#include "broadcast_camera.hpp"
+#include "physics/atmosphere.hpp"
 #include "borders.hpp"
 #include "paths.hpp"
 #include "visuals.hpp"
@@ -323,6 +325,7 @@ void shadowGraphics(GpuTarget& renderer){
     site.quality(1);ambient->intensity=0;renderer.render(*world,*camera);const auto night=renderer.readRGBPixels();require(std::count_if(night.begin(),night.end(),[](auto v){return v>1;})==0,"Contact shading emits light at night");
     renderer.scene.shadowMetersPerUnit=0;renderer.scene.shadows=false;
 }
+#include "camera_visuals.hpp"
 #include "vehicle_visuals.hpp"
 #include "vehicle_geometry_visuals.hpp"
 #include "entry_visuals.hpp"
@@ -428,6 +431,7 @@ void towerGraphics(Target& renderer){
     require(std::count_if(unlit.begin(),unlit.end(),[](auto c){return c>20;})==0,"Tower steel emits light without the sun");
 }
 #include "night_visuals.hpp"
+#include "camera_captures.hpp"
 void graphics(Target& renderer) {
     nightGraphics(renderer);
     vehicleGraphics(renderer);entryGraphics(renderer);
@@ -865,6 +869,8 @@ void lunarAdaptationLevels(){
 int main(int argc,char** argv) {
     try {
 #ifdef ALBERT_TEST_RPC
+        if(argc>2&&std::string_view(argv[1])=="camera-diagnostics"){cameraCaptures(argv[2],true);return 0;}
+        if(argc>2&&std::string_view(argv[1])=="camera-captures"){cameraCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="coastal-captures"){landCaptures(argv[2],false,false,false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="night-captures"){landCaptures(argv[2],false,false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="shadow-captures"){landCaptures(argv[2],false,false,true);return 0;}
@@ -878,13 +884,13 @@ int main(int argc,char** argv) {
         if(argc>2&&std::string_view(argv[1])=="geometry-captures"){vehicleGeometryCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
 #endif
-        shadowStability();controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();splashdownControls();
+        shadowStability();cameraControls();controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();splashdownControls();
 #ifdef ALBERT_TEST_RPC
-        productionData();industrialData();vehicleGeometryControls();
+        productionData();industrialData();vehicleGeometryControls();cameraCaptureControls();
 #endif
         if(argc>1){
             std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';return 77;}
-            if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";shadowGraphics(*gpu);graphics(*gpu);
+            if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";shadowGraphics(*gpu);cameraGraphics(*gpu);graphics(*gpu);
 #ifdef ALBERT_TEST_RPC
                 vehicleGeometryGraphics(*gpu);
 #endif

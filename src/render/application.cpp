@@ -28,6 +28,7 @@
 #include "eclipses.hpp"
 #include "window_icon.hpp"
 #include "broadcast.hpp"
+#include "broadcast_camera.hpp"
 #ifdef ALBERT_HAS_RPC
 #include "playground.hpp"
 #endif
@@ -1276,6 +1277,13 @@ int albert::runRenderer(int argc, char** argv) {
         // Free camera (Ajustes, or F): flies from the current view; dragging looks, W/A/S/D, Space/E and Ctrl/Q move, Shift is
         // five times faster, the wheel scales the speed, which follows the height over the nearest surface.
         bool freeCamera=false;float freeSpeed=1.f;
+        float zoomTarget = 3.5f, zoomDisplayed = 3.5f;
+        albert::BroadcastCamera broadcastCamera;bool broadcastActive=false;
+        auto selectCamera=[&](albert::core::CameraMode mode){
+            broadcastCamera.select(mode);freeCamera=false;transition.active=false;automaticOrbit=false;controls.autoRotate=false;
+            controls.dampingFactor=1;controls.update();camera->up.set(0,1,0);camera->fov=preferences.fov;
+            zoomTarget=zoomDisplayed=camera->position.distanceTo(controls.target);registry.cameraChanged();
+        };
         // Wind waves: the wind they follow (m/s toward east and north), their clock, and the tangent frame they are drawn in.
         // cloudShare: the volumetric layer's share of the clouds, animated; cloudVolume: as drawn.
         float seaWindEast=-7.f,seaWindNorth=0,cloudShare=0,cloudVolume=0;double seaClock=0;struct SeaFrame {albert::physics::V3 position,east,north;};std::optional<SeaFrame> seaOrigin;
@@ -1316,7 +1324,7 @@ int albert::runRenderer(int argc, char** argv) {
         // Into the free camera from the current view; out of it, a flight back to the focus from where the eye is.
         auto toggleFreeCamera=[&](bool on){
             if(on==freeCamera)return;
-            if(on){transition.active=false;automaticOrbit=false;automaticOrbitAge=0.f;controls.autoRotate=false;freeCamera=true;return;}
+            if(on){broadcastCamera.select(albert::core::CameraMode::Orbit);transition.active=false;automaticOrbit=false;automaticOrbitAge=0.f;controls.autoRotate=false;freeCamera=true;return;}
             freeCamera=false;camera->up.set(0,1,0);Vector3 back=camera->position;back.sub(targetFor(focus));setFocus(focus,false,back);
         };
 
@@ -1346,7 +1354,6 @@ int albert::runRenderer(int argc, char** argv) {
         int menuPage = 0;
 
         std::array<char,96> focusSearch{};bool uiPopupWasOpen=false;
-        float zoomTarget = 3.5f, zoomDisplayed = 3.5f;
         // Start with the day/terminator visible, independent of UTC season.
         Vector3 initialSun = graphical(interpolate(ephemerides.sun, simulatedTDB()));
         initialSun.normalize();
@@ -1378,10 +1385,15 @@ int albert::runRenderer(int argc, char** argv) {
             if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !uiPopupWasOpen) {
                 if (menuOpen) menuOpen = false;
             }
+            if(!input.WantCaptureKeyboard&&ImGui::IsKeyPressed(ImGuiKey_C,false)){
+                constexpr std::array cycle{albert::core::CameraMode::Orbit,albert::core::CameraMode::Tracking,albert::core::CameraMode::Drone,albert::core::CameraMode::Tower,albert::core::CameraMode::Onboard,albert::core::CameraMode::Auto};
+                auto at=std::find(cycle.begin(),cycle.end(),broadcastCamera.mode());selectCamera(at==cycle.end()||++at==cycle.end()?cycle.front():*at);
+            }
+            const bool vehicleFocus=focus.front()!='@'&&registry.get(focus).look!=nullptr;
             const float margin = 16.f;
             const float barWidth = std::min(420.f, display.x - margin * 2);
             ImGui::SetNextWindowPos(ImVec2(margin, margin), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(barWidth, 58));
+            ImGui::SetNextWindowSize(ImVec2(barWidth, vehicleFocus?94.f:58.f));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
             ImGui::Begin("Navegacao", nullptr, flags | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
             protectPanel();
@@ -1457,6 +1469,14 @@ int albert::runRenderer(int argc, char** argv) {
                 if(ImGui::Button("Internos",ImVec2(width,34))){setFocus(targets::Inner);ImGui::CloseCurrentPopup();}ImGui::SameLine();
                 if(ImGui::Button("Tudo",ImVec2(width,34))){setFocus(targets::Overview);ImGui::CloseCurrentPopup();}
                 ImGui::EndPopup();
+            }
+            if(vehicleFocus){
+                ImGui::SetNextItemWidth(-1);
+                if(ImGui::BeginCombo("##Camera do voo",("Camera (C): "+std::string(albert::core::cameraName(broadcastCamera.mode()))).c_str())){
+                    for(std::size_t i=0;i<albert::core::cameraModes.size();++i){const auto mode=static_cast<albert::core::CameraMode>(i);
+                        if(ImGui::Selectable(albert::core::cameraModes[i].data(),mode==broadcastCamera.mode()))selectCamera(mode);}
+                    ImGui::EndCombo();
+                }
             }
             ImGui::End();
             ImGui::PopStyleVar();
@@ -2312,9 +2332,14 @@ int albert::runRenderer(int argc, char** argv) {
                         else if(value.hold&&value.utcSeconds&&value.rate){simulation.follow(*value.utcSeconds,*value.rate);followed={*value.utcSeconds,SteadyClock::now()};} // A running flight.
                         else if(value.hold&&value.utcSeconds)simulation.stall(*value.utcSeconds);else simulation.choose(value.utcSeconds,value.rate);}
                     else if constexpr(std::is_same_v<T,albert::core::FlightTelemetry>) {if(value.active){flightTelemetry=std::move(value);flightTelemetryAt=steadyNow;}else flightTelemetry.reset();}
+                    else if constexpr(std::is_same_v<T,albert::core::SetCamera>){
+                        const auto mode=albert::core::cameraMode(value.name);if(!mode)throw std::invalid_argument("Unknown camera mode; use orbit, tracking, drone, tower, onboard, engine, hotstage, flap, auto, or a -fisheye variant");
+                        selectCamera(*mode);
+                    }
                     else if constexpr(std::is_same_v<T,albert::core::Orbit>) {
                         if(!std::isfinite(value.azimuthRadians)||!std::isfinite(value.elevationRadians)||!std::isfinite(value.distanceScale)||value.distanceScale<=0||value.distanceScale>1000||std::abs(value.azimuthRadians)>2*PI||std::abs(value.elevationRadians)>PI)
                             throw std::invalid_argument("Invalid orbit parameters");
+                        broadcastCamera.select(albert::core::CameraMode::Orbit);camera->fov=preferences.fov;
                         automaticOrbit=false;automaticOrbitAge=0.f;controls.autoRotate=false;
                         controls.dampingFactor=1;controls.update();transition.active=false;
                         Vector3 offset=camera->position;offset.sub(controls.target);Spherical orbit;orbit.setFromVector3(offset);
@@ -2469,9 +2494,17 @@ int albert::runRenderer(int argc, char** argv) {
             for(const auto& [id,path]:bodyOrbits)path->visible=orbitVisibility>0.f&&(focus==id||systemView(focus)||focus==targets::Sun);
 
             // Camera segue o objeto sem acumular erro
+            if(const auto next=broadcastCamera.nextFocus(registry,objects,focus,simulatedUtc))setFocus(*next);
             Vector3 target = targetFor(focus);
 
-            if (transition.active) {
+            const auto broadcastView=freeCamera?std::optional<albert::BroadcastView>{}:broadcastCamera.update(registry,objects,focus,simulatedUtc,elapsed);
+            broadcastActive=broadcastView.has_value();graphics.setFisheye(broadcastActive&&broadcastView->fisheye);
+            if(broadcastActive){
+                transition.active=false;automaticOrbit=false;controls.autoRotate=false;
+                camera->position.copy(broadcastView->eye);controls.target.copy(broadcastView->aim);camera->up.copy(broadcastView->up);
+                camera->fov=broadcastView->fov;camera->lookAt(controls.target);
+                zoomTarget=zoomDisplayed=camera->position.distanceTo(controls.target);
+            }else if (transition.active) {
                 // A slow upload/shader frame must not skip a chunk of the flight.
                 // Astronomical time continues independently of this presentation clock.
                 transition.elapsed += std::min(elapsed,.1f);
@@ -2567,21 +2600,21 @@ int albert::runRenderer(int argc, char** argv) {
             // Damping de rotacao e zoom do mouse
             controls.enabled =
                 introductionElapsed >= introductionDuration &&
-                !transition.active && !freeCamera &&
+                !transition.active && !freeCamera && !broadcastActive &&
                 !ImGui::GetIO().WantCaptureMouse;
 
             const float interactionRadius=radiusFor(focus);
             const float relativeAltitude=interactionRadius>0 ? std::max(0.f,camera->position.distanceTo(controls.target)-interactionRadius)/interactionRadius : 1.f;
             controls.rotateSpeed=.75f*std::clamp(relativeAltitude,.025f,1.f)*preferences.sensitivity;
-            if(camera->fov!=preferences.fov){camera->fov=preferences.fov;camera->updateProjectionMatrix();}
+            if(!broadcastActive&&camera->fov!=preferences.fov){camera->fov=preferences.fov;camera->updateProjectionMatrix();}
             controls.zoomSpeed=std::clamp(relativeAltitude,.18f,1.f);
             automaticOrbitAge=automaticOrbit ? automaticOrbitAge+dt : 0.f;
             controls.autoRotate=automaticOrbit&&controls.enabled;
             // OrbitControls uses frame-based increments: compensate for actual dt.
             controls.autoRotateSpeed=.12f*dt*60.f*albert::flightEase(automaticOrbitAge);
             controls.dampingFactor = 1.f - std::exp(-8.f * dt);
-            if(!freeCamera)controls.update();
-            if (freeCamera) {
+            if(!freeCamera&&!broadcastActive)controls.update();
+            if (freeCamera||broadcastActive) {
                 zoomTarget = zoomDisplayed = camera->position.distanceTo(controls.target);
             } else if (transition.active) {
                 // Flush old drag inertia so it cannot alter a programmed flight.
@@ -2601,7 +2634,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
             // An external target near a solid surface: keep the eye above the ground under it, and above the vehicle's foot
             // while it stands on (or just over) the ground (the orbit offset can point below a pad); in flight, free to look up at it.
-            if(!transition.active&&!freeCamera&&focus.front()!='@'&&objects.nodes().contains(focus)&&!registry.get(focus).builtin){
+            if(!transition.active&&!freeCamera&&!broadcastActive&&focus.front()!='@'&&objects.nodes().contains(focus)&&!registry.get(focus).builtin){
                 const float base=static_cast<float>(registry.get(focus).radiusMeters/albert::core::earthRadiusMeters),margin=static_cast<float>(10./albert::core::earthRadiusMeters);
                 auto keepAbove=[&](Object3D& body,float radius,const albert::Terrain* terrain){
                     body.updateMatrixWorld();Vector3 eye=camera->position,aim=controls.target;body.worldToLocal(eye);body.worldToLocal(aim);
@@ -2634,7 +2667,7 @@ int albert::runRenderer(int argc, char** argv) {
             over(*earth,1.f,planets.earthTerrain());over(*moon,static_cast<float>(1737.4/6378.137),planets.moonTerrain());
             for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id))over(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters),solids.terrain(id));
             const float clearance = std::max(1e-8f, std::min(distance - bodyRadius, ground));
-            camera->nearPlane = std::clamp(std::min(distance * .02f, clearance * .25f), 1e-9f, 100.f);
+            camera->nearPlane = broadcastActive?float(.05/albert::core::earthRadiusMeters):std::clamp(std::min(distance * .02f, clearance * .25f), 1e-9f, 100.f);
             camera->updateProjectionMatrix();
             const auto display=ImGui::GetIO().DisplaySize;
             camera->updateMatrixWorld();
@@ -2906,6 +2939,8 @@ int albert::runRenderer(int argc, char** argv) {
                     coastal=albert::coastalLight(coastalStrength,humidity,cover);
                 }
                 graphics.setCoastalLight(coastal);
+                broadcastCamera.cloudLayer(graphics.cloudsShown()?1000*(coastal.cover>=0?coastal.baseKm:1.5f):0,
+                    graphics.cloudsShown()?1000*(coastal.cover>=0?coastal.topKm:5.5f):0);
                 if(here.height<30e3&&here.height>-100){
                     if(!seaOrigin||ph::norm(eye-seaOrigin->position)>200e3){const double sl=std::sin(here.latitude),cl=std::cos(here.latitude),so=std::sin(here.longitude),co=std::cos(here.longitude);
                         seaOrigin=SeaFrame{ph::fixedPosition(ph::earth,{here.latitude,here.longitude,ph::geoidHeight(here.latitude,here.longitude)}),{-so,co,0},{-sl*co,-sl*so,cl}};} // On the mean sea (the geoid): the shader keeps the waves to what lies at its level.
@@ -3047,7 +3082,7 @@ int albert::runRenderer(int argc, char** argv) {
                     Vector3 up=target;if(const auto earthNode=objects.nodes().find("earth");earthNode!=objects.nodes().end())up.sub(earthNode->second->position);up.normalize();
                     if(std::abs(up.dot(Vector3(side).normalize()))>.98f)up.copy(axis);
                     insetCamera->position.copy(target).add(side);insetCamera->up.copy(up);insetCamera->lookAt(target);
-                    insetCamera->fov=camera->fov;insetCamera->nearPlane=std::clamp(distance*.02f,1e-9f,100.f);
+                    insetCamera->fov=broadcastActive?60.f:camera->fov;insetCamera->nearPlane=std::clamp(distance*.02f,1e-9f,100.f);
                     }
                     insetCamera->aspect=static_cast<float>(w)/static_cast<float>(h);
                     insetCamera->updateProjectionMatrix();insetCamera->updateMatrixWorld();
