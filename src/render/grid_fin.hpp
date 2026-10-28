@@ -9,16 +9,17 @@
 namespace albert {
 struct GridFin {
     std::shared_ptr<threepp::BufferGeometry> geometry;
+    std::shared_ptr<threepp::BufferGeometry> mount; // The bearing plate inside the V, below the fin: drawn beside it, outside its envelope.
     unsigned walls=0,cells=0,ends=0,joints=0;int segments=0;
 };
 inline GridFin gridFin(float width,float span,float thickness,int tier){
     using namespace threepp;constexpr float rt=.70710678118f,pi=3.14159265359f;
     const float pitch=.48f,gauge=.022f;const int segments=tier==0?10:1;
     // V3's fin: an octagon, a square stretched a little out from the hull (4.6 m out, 4 m across) with long parallel sides and a
-    // long straight outer edge, its outer corners cut small; the side at the hinge short (three tenths of the width), reached by
+    // long straight outer edge, its outer corners cut small; the side at the hinge short (a seventh of the width), reached by
     // longer 45-degree cuts from the parallel sides. Inside the declared envelope with the walls' cut ends' gauge and bow; a rim
     // straight from wall to wall closes every cell it cuts.
-    const float bottom=-span/2+.08f,top=span/2-.08f,half=width/2-.08f,root=.15f*width,outer=.22f*width,low=half-root;
+    const float bottom=-span/2+.08f,top=span/2-.08f,half=width/2-.08f,root=.07f*width,outer=.22f*width,low=half-root;
     const std::vector<Vector2> outline{{-root,bottom},{root,bottom},{half,bottom+low},{half,top-outer},{half-outer,top},{-half+outer,top},{-half,top-outer},{-half,bottom+low}};
     const int corners=static_cast<int>(outline.size());
     auto distance=[&](const Vector3& p,int e){const auto& u=outline[e];const auto& v=outline[(e+1)%corners];const float dx=v.x-u.x,dz=v.y-u.y;
@@ -112,6 +113,24 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
             triangle({a0,up,1.8f},{a1,up,1.8f},{b1,up,1.8f});triangle({a0,up,1.8f},{b1,up,1.8f},{b0,up,1.8f});}};
     {const Vector3 left(outline[corners-1].x,0,outline[corners-1].y),right(outline[2].x,0,outline[2].y),middle=Vector3(left).lerp(right,.5f);
         bar(left,right,.09f);bar(middle,Vector3(outline[0].x,0,outline[0].y),.07f);bar(middle,Vector3(outline[1].x,0,outline[1].y),.07f);}
+    // The bearing plate inside the V, nearer its opening: across the V from arm to arm, through the fin's depth and half a metre
+    // out below it (where V3 rests on the tower's arms), bored on the spindle for the hinge's pin from the booster.
+    {std::vector<float> pp,pn,pc;auto put=[&](const Vector3& a,Vector3 b,Vector3 c,const Vector3& n){const auto cross=Vector3(b).sub(a).cross(Vector3(c).sub(a));if(cross.dot(n)<0)std::swap(b,c);
+            for(const auto& v:{a,b,c}){pp.insert(pp.end(),{v.x,v.y,v.z});pn.insert(pn.end(),{n.x,n.y,n.z});pc.insert(pc.end(),{1,1,1});}};
+        const float z=vLeft.z+.35f*(vTip.z-vLeft.z),half=vRight.x*(1-.35f),up=thickness/2,down=-thickness/2-.5f,bore=.12f,plate=.08f;
+        std::vector<float> angles;const int sides=tier==0?24:12;for(int k=0;k<sides;++k)angles.push_back(2*pi*k/sides);
+        for(const auto& c:std::array<Vector2,4>{{{half,up},{-half,up},{-half,down},{half,down}}})angles.push_back(std::atan2(c.y,c.x)<0?std::atan2(c.y,c.x)+2*pi:std::atan2(c.y,c.x));
+        std::sort(angles.begin(),angles.end());
+        auto edge=[&](float t){const float dx=std::cos(t),dy=std::sin(t);float r=1e9f;if(std::abs(dx)>1e-6f)r=std::min(r,(dx>0?half:-half)/dx);if(std::abs(dy)>1e-6f)r=std::min(r,(dy>0?up:down)/dy);return Vector2(r*dx,r*dy);};
+        for(std::size_t k=0;k<angles.size();++k){const float t0=angles[k],t1=angles[(k+1)%angles.size()];const Vector2 o0=edge(t0),o1=edge(t1),i0(bore*std::cos(t0),bore*std::sin(t0)),i1(bore*std::cos(t1),bore*std::sin(t1));
+            for(const float d:{1.f,-1.f}){const float zz=z+d*plate/2;const Vector3 n(0,0,d); // Its two faces.
+                put({i0.x,i0.y,zz},{i1.x,i1.y,zz},{o1.x,o1.y,zz},n);put({i0.x,i0.y,zz},{o1.x,o1.y,zz},{o0.x,o0.y,zz},n);}
+            const Vector3 in(-std::cos((t0+t1)/2),-std::sin((t0+t1)/2),0); // The bore.
+            put({i0.x,i0.y,z-plate/2},{i1.x,i1.y,z-plate/2},{i1.x,i1.y,z+plate/2},in);put({i0.x,i0.y,z-plate/2},{i1.x,i1.y,z+plate/2},{i0.x,i0.y,z+plate/2},in);
+            const Vector3 rim=Vector3(o1.y-o0.y,-(o1.x-o0.x),0).normalize(),outward=Vector3(rim).dot(Vector3((o0.x+o1.x)/2,(o0.y+o1.y)/2,0))<0?Vector3(rim).negate():rim; // Its edges.
+            put({o0.x,o0.y,z-plate/2},{o1.x,o1.y,z-plate/2},{o1.x,o1.y,z+plate/2},outward);put({o0.x,o0.y,z-plate/2},{o1.x,o1.y,z+plate/2},{o0.x,o0.y,z+plate/2},outward);}
+        auto m=BufferGeometry::create();m->setAttribute("position",FloatBufferAttribute::create(std::move(pp),3));m->setAttribute("normal",FloatBufferAttribute::create(std::move(pn),3));
+        m->setAttribute("color",FloatBufferAttribute::create(std::move(pc),3));result.mount=m;}
     // The last welded V also needs a fillet: rounding only cut ends leaves needle-shaped full-cell crests.
     for(const auto& [node,degree]:welds)if(degree<4){++result.joints;const auto centre=point(node.first*pitch,node.second*pitch);const float h=thickness/2-.055f;
         const int sides=tier==0?16:8;struct Ring {float r,y,ny,shade;};

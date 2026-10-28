@@ -148,7 +148,8 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         }else{ // The radial spindle, root plate and knuckle turn; the buried actuator and smooth hood do not.
             auto [it,fresh]=grids.try_emplace({w,span,t});if(fresh)for(int tier=0;tier<2;++tier)it->second[tier]=gridFin(w,span,t,tier);
             for(int tier=0;tier<2;++tier)hardware(it->second[tier].geometry,x.pivot.get(),Color(.105f,.11f,.12f),.29f,.92f,tier);
-            auto frame=BoxGeometry::create(.40f*w,t,.22f);frame->translate(0,0,-span/2+.11f);
+            for(int tier=0;tier<2;++tier)hardware(it->second[tier].mount,x.pivot.get(),Color(.62f,.64f,.66f),.32f,.9f,tier); // The bearing plate the catch rests on.
+            auto frame=BoxGeometry::create(.16f*w,t,.22f);frame->translate(0,0,-span/2+.11f); // The short root at the hinge.
             hardware(frame,x.pivot.get(),Color(.12f,.125f,.13f),.36f,.88f);
             hardware(bar({0,0,-span/2-.35f},{0,0,-span/2+.48f},.22f,16),x.pivot.get(),steel,.28f,.92f);
             hardware(bar({0,0,-span/2-.08f},{0,0,-span/2+.36f},.38f,16),x.pivot.get(),dark,.36f,.85f);
