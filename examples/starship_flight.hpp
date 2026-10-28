@@ -429,7 +429,9 @@ inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pac
         {const bool shut=back.closeArms()||back.phase()==ShipReturn::Phase::caught; // As its guidance asks (shutting round it as it settles: shutting()).
             if(shut==open){arms(q,!shut);open=!shut;}}
         call([&](grpc::ClientContext& ctx){return flight.Step(&ctx,q,&ship);});nav.update(ship);
-        for(const auto& u:ship.uplinks())if(u=="SKIP_ENTRY"&&!skip&&(back.phase()==ShipReturn::Phase::glide||back.phase()==ShipReturn::Phase::entry)&&!back.falling()){skip=true;
+        // ALBERT_SKIP_ENTRY: as if the operator asked it the moment the entry begins (a live run that only wants the landing).
+        static const bool autoSkip=std::getenv("ALBERT_SKIP_ENTRY")!=nullptr;auto uplinks=ship.uplinks();std::vector<std::string> asked(uplinks.begin(),uplinks.end());if(autoSkip)asked.push_back("SKIP_ENTRY");
+        for(const auto& u:asked)if(u=="SKIP_ENTRY"&&!skip&&(back.phase()==ShipReturn::Phase::glide||back.phase()==ShipReturn::Phase::entry)&&!back.falling()){skip=true;
             std::printf("%9.1f s  nave: reentrada acelerada até a queda de barriga\n",ship.elapsed_seconds()-zero);pending={"reentrada acelerada","pedido do operador: até a queda de barriga"};}
         for(const auto& u:ship.uplinks())if(u=="ABORT"&&!back.gaveUp()){back.abort(nav.state(ship));std::printf("%9.1f s  nave: ABORTAR recebido\n",ship.elapsed_seconds()-zero);pending={"ABORTAR recebido","ABORT"};}
         for(const auto& w:nav.reports){std::printf("%9.1f s  nave: FDIR: %s\n",(ship.elapsed_seconds()-zero),w.c_str());pending={"FDIR",w};}nav.reports.clear();
@@ -711,12 +713,12 @@ inline void onPad(api::FlightService::Stub& flight,api::CameraService::Stub& cam
 // The ship alone, started in a 205 km circular orbit at the inclination a launch from Starbase toward `heading` gives, `ahead`
 // degrees of orbit before the point over the tower: its way home without the day in orbit (its propellant: what the mission
 // leaves it, ~189 t, unless given).
-inline Home homecoming(api::FlightService::Stub& flight,bool fast,double warp=1000,double ahead=560,std::vector<Fault> faults={},double propellant=189e3){
+inline Home homecoming(api::FlightService::Stub& flight,bool fast,double warp=1000,double ahead=560,std::vector<Fault> faults={},double propellant=189e3,double utc=0){ // utc: when it starts (0: now).
     const double inc=std::acos(std::cos(towerLatitude*deg)*std::sin(heading*deg)),us=std::asin(std::min(std::sin(towerLatitude*deg)/std::sin(inc),1.)),u0=us-ahead*deg;
     const double r=6378137+205e3,speed=std::sqrt(earth.mu/r),period=2*pi*r/speed,turn=7.292115e-5*ahead/360*period;
     auto along=[&](double u){return std::atan2(std::cos(inc)*std::sin(u),std::cos(u));};double gone=along(us)-along(u0);while(gone<=0)gone+=2*pi;while(gone<ahead*deg-pi)gone+=2*pi;
     const double la=std::asin(std::sin(inc)*std::sin(u0)),lo=towerLongitude*deg+turn-gone,az=std::atan2(std::cos(inc),std::sin(inc)*std::cos(u0));
-    api::CreateFlightRequest create;create.set_vehicle(api::CUSTOM);*create.mutable_definition()=shipAlone();create.set_focus_camera(true);
+    api::CreateFlightRequest create;create.set_vehicle(api::CUSTOM);*create.mutable_definition()=shipAlone();create.set_focus_camera(true);if(utc>0)create.set_utc_unix_seconds(utc);
     create.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);addTower(create);
     auto* w=create.mutable_start();w->set_stage(0);w->set_propellant_kilograms(propellant);auto* l=w->mutable_local();
     l->mutable_position()->set_latitude_degrees(la/deg);l->mutable_position()->set_longitude_degrees(std::remainder(lo,2*pi)/deg);l->mutable_position()->set_height_meters(205e3);

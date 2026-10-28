@@ -116,7 +116,9 @@ bool albert::Display::frame(const std::function<void()>& work){
 void albert::Display::clear(){auto& d=*impl_;if(d.encoder)d.pass(WGPULoadOp_Clear);}
 void albert::Display::render(Scene& scene,Camera& camera){
     auto& d=*impl_;if(!d.encoder)return;
-    unsigned w,h;d.framebuffer(w,h);const auto t0=std::chrono::steady_clock::now();d.scene->render(scene,camera,d.target,w,h,d.encoder);d.drawnTarget=true;
+    // The image acquired this frame's size, not the window's: on a resize (a maximize) the window is already the new size while
+    // the image is still the old one until reconfigured, and passes of both sizes failed validation (the app aborted).
+    const unsigned w=d.context->imageWidth(),h=d.context->imageHeight();const auto t0=std::chrono::steady_clock::now();d.scene->render(scene,camera,d.target,w,h,d.encoder);d.drawnTarget=true;
     static const bool debug=std::getenv("ALBERT_TERRAIN_DEBUG")!=nullptr;
     if(debug){static int n=0;static double sum=0;sum+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();if(++n%60==0){std::fprintf(stderr,"scene render cpu %.2f ms, %u draws\n",sum/60,d.scene->drawn());sum=0;}}
 }
