@@ -14,10 +14,12 @@ struct GridFin {
 inline GridFin gridFin(float width,float span,float thickness,int tier){
     using namespace threepp;constexpr float rt=.70710678118f,pi=3.14159265359f;
     const float pitch=.48f,gauge=.022f;const int segments=tier==0?10:1;
-    // A short root, 32 degree shoulders and parallel long sides. Bevel the two outer corners of the main hexagon.
-    const float shoulder=-span/2+.30f*width*std::tan(32*pi/180),bevel=.55f;
-    const std::array<Vector2,8> outline{{{-.20f*width,-span/2},{.20f*width,-span/2},{width/2,shoulder},{width/2,span/2-bevel},
-        {width/2-bevel,span/2},{-width/2+bevel,span/2},{-width/2,span/2-bevel},{-width/2,shoulder}}};
+    // V3's rounded fin: an ellipse across the whole width and out to the tip, cut straight at the root (the hinge's quarter of the
+    // width each side). Its arc in edges about a diagonal cell long, each one scallop of the crown.
+    const float a=width/2,root=.25f*width,q=std::sqrt(1-root*root/(a*a)),centre=-span/2*(1-q)/(1+q),b=span/2-centre;
+    const float from=std::asin((-span/2-centre)/b),to=pi-from;std::vector<Vector2> outline{{-root,-span/2},{root,-span/2}};
+    const int arcs=std::max(8,int(std::round(pi*(a+b)*(to-from)/(2*pi)/(pitch*1.41421356f))));
+    for(int k=1;k<arcs;++k){const float t=from+(to-from)*k/arcs;outline.push_back({a*std::cos(t),centre+b*std::sin(t)});}
     auto distance=[&](const Vector3& p,int edge,bool scallop=true){const auto& a=outline[edge];const auto& b=outline[(edge+1)%outline.size()];
         const float dx=b.x-a.x,dz=b.y-a.y,len=std::hypot(dx,dz),s=((p.x-a.x)*dx+(p.z-a.y)*dz)/len;
         const int teeth=std::max(1,int(std::round(len/(pitch*1.41421356f))));const float step=len/teeth;
