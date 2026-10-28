@@ -512,11 +512,13 @@ protected:
     // The same law onto any point (to: from it to the vehicle, horizontal), its gains within a third of the attitude's bandwidth
     // (one or two engines turn the body slowly: a faster loop across beats it): toward it at the speed it can still brake to rest
     // there, a third of what leaning against its way (within `most` and the hull's swing clear of the tower) gives, from where its
-    // velocity loop's lag (1/kv) leaves it; at most `fastest` m/s and 0.375 kv of the distance a second.
-    Vec onto(const State& s,Vec to,double kv=-1,double fastest=8,double most=12*deg)const{
+    // velocity loop's lag (1/kv) leaves it; at most `fastest` m/s and `gain` kv of the distance a second. hard: braking at that
+    // (m/s²) while farther than `mouth` m, the gentle braking only within it.
+    Vec onto(const State& s,Vec to,double kv=-1,double fastest=8,double most=12*deg,double hard=0,double mouth=0,double gain=.375)const{
         if(kv<0)kv=std::min(.4,bandwidth(s)/3);const double d=norm(to);const Vec across=s.velocity+up_*-dot(s.velocity,up_);if(!(d>0))return across*-kv;
         const Vec u=to*(1/d);const double toward=std::max(-dot(across,u),0.),brake=norm(gravity(s.position))*std::tan(lean(s,s.position+site_*-1.+up_*-dot(s.position+site_*-1.,up_),u,most))/3;
-        const double speed=std::min({fastest,.375*kv*d,std::sqrt(2*brake*std::max(d-toward/kv,0.))});return (u*-speed+across*-1)*kv;
+        const double left=std::max(d-toward/kv,0.),near=hard>0?std::min(left,mouth):left;
+        const double speed=std::min({fastest,gain*kv*d,std::sqrt(2*brake*near+2*hard*(left-near))});return (u*-speed+across*-1)*kv;
     }
     // From where to head across (an offset from it, like flat): the arms open eastward into a V and the hull must not cross
     // them, so off their line (more than 4 m to the side) first onto it at the corridor point (corridor m east of the axis),
@@ -579,9 +581,10 @@ protected:
         // And a slow integral of how far it sits off that point (10 s against the position loop's own gain, 0.375 kv²; at most
         // 0.5 m/s² of push): the steady error a lag or an unmodelled push leaves (a PD attitude loop under the wind's moment on the
         // hull leans the thrust a little short of what is asked). Begun afresh each time it comes over the arms; gathered only
-        // within two seconds' slide of that point (the ship's hover begins in front of the V, tens of metres out).
+        // within two seconds' slide of that point (the ship's hover begins in front of the V, tens of metres out); the
+        // booster's within 1.5 m (gathered on its quicker way in, it held the pins half a metre off the line half a minute in a gust).
         const double kv=std::min(.5,bandwidth(s,-1,fineAim)/hoverSplit),ki=.375*kv*kv/10;if(clock_-settleAt_>.1)settle_={};settleAt_=clock_;
-        if(const Vec off=at+up_*-dot(at,up_);norm(off)<std::max(3.,2*slide)){settle_=settle_+off*dt_;const double most=.5/ki;if(norm(settle_)>most)settle_=settle_*(most/norm(settle_));} // Only within 2 s of it at its slide: not wound up on the way there.
+        if(const Vec off=at+up_*-dot(at,up_);norm(off)<(holdAlong?1.5:std::max(3.,2*slide))){settle_=settle_+off*dt_;const double most=.5/ki;if(norm(settle_)>most)settle_=settle_*(most/norm(settle_));} // Only within 2 s of it at its slide: not wound up on the way there.
         // And the acceleration across it really gets (the IMU's, its lean and the air's push together) held to what it asks, by an
         // integral of the shortfall at 0.15/s (at most 1 m/s²; within the attitude's lag): a PD attitude under the wind's moment on the hull leans the thrust
         // short of what is asked, which the slow integral above takes half a minute to make up (a hover in an 8 m/s wind spent its
@@ -893,7 +896,7 @@ public:
             const double kv=std::min(.6,bandwidth(s)/3);Vec side;
             const bool line=catch_&&(std::abs(dot(flat,north_))<=4||in_);const double T=std::max(2*std::max(above,0.)/std::max(1-vz,1.),std::sqrt(6.)*3/bandwidth(s)); // At least what keeps it within a third of its attitude's bandwidth.
             if(above<-5)side=across*-std::max(kv,.4);
-            else if(line){const double n=dot(to,north_),vn=dot(across,north_);side=onto(s,to+north_*-n,kv,30,20*deg);side=side+north_*(-dot(side,north_)-6*n/(T*T)-4*vn/T);}
+            else if(line){const double n=dot(to,north_),vn=dot(across,north_);side=onto(s,to+north_*-n,kv,30,20*deg,finalBrake,finalMouth,finalGain);side=side+north_*(-dot(side,north_)-6*n/(T*T)-4*vn/T);}
             else side=onto(s,to,kv,30,20*deg);
             side=side+push_*-1.;{const double most=limit*std::tan(lean(s,flat,side,20*deg))/std::tan(20*deg);if(norm(side)>most)side=side*(most/norm(side));} // The observer's push netted.
             {const Vec a=up_*up+side;if(set_.wanted()==5&&s.mass*norm(a)<.42*5*raptorSea)set_.use(c,s,3); // Then to 3 once 5 at their least would lift too much.
@@ -993,9 +996,14 @@ public:
     // normalForce: the body's normal force coefficient a radian off the flow, engines first, as flights measure it (the IMU
     // across the flow; the tables read near 3.5).
     static constexpr double gateSpeed=80,plan=.7,residual=20e3,boostbackThrottle=.8,boostbackG=5*g0,normalForce=.8,landingShare=140e3;
-    // lead: the coast's aim moved upstream along the arms' line by the stopping distance of what it reaches the gate moving along it, braked at this (m/s²: about what the collision monitor credits; 2-3 on the bench);
-    // the final approach then carrying it in at up to 30 m/s (a short burn kept retrograde leaves 20-30 m/s across).
-    static constexpr double leadBrake=2.5;
+    // lead: the coast's aim moved upstream along the arms' line by the stopping distance of what it reaches the gate moving along it, braked at this (m/s²: the
+    // final's braking out in front of the V, finalBrake; 2.5–6 on the bench, 4 the quickest that every wind rides out); the final approach then carrying it in at up
+    // to 30 m/s (a short burn kept retrograde leaves 20-30 m/s across).
+    static constexpr double leadBrake=4;
+    // The final along the arms' line as Flight 7's: braking hard (finalBrake m/s²) out in front of the V, then entering it no faster than the gentle braking
+    // from finalMouth m out allows (the speed an escape that takes ~3 s to brake can still stop from before the arms' roots), within finalGain kv of the
+    // distance a second. Harder, or a shorter mouth, and its escapes run into the arms (2.5–3 m/s², 40–60 m, .55–.7 on the bench).
+    static constexpr double finalBrake=2.5,finalMouth=60,finalGain=.55;
     double dt=.02,boostbackPitch=5*deg; // boostbackPitch: above the horizon (negative: below): up a little, as the flights' (apogee 83-99 km, the landing burn ~4 min after staging).
     // The boostback and the fall aim this far east of the tower (over the sea, away from the tower's side), the landing
     // burn then bringing it onto the arms' axis from there while still high (m); without the catch, onto the sea this far east.
