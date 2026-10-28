@@ -809,7 +809,8 @@ public:
             // crossflow lift (away from the nose's tilt) carries the impact onto the aim; the landing burn when the stop needs it.
             if(catch_&&over<divert)aim_=east_*front; // Low enough: the fins carry it from off the coast onto the approach.
             if(age_--<=0){aimed_=landing(s,&seconds_,catch_?leadBrake:0.);age_=25;miss_=norm(aimed_);if(over<15e3&&reach(s)>3e3)giveUp(s,"pouso previsto fora do alcance da torre");}
-            const Vec e=aimed_;const double seconds=seconds_;const Vec vhat=unit(s.velocity);
+            const Vec e=aimed_;const double seconds=seconds_;const Vec vhat=unit(s.velocity);double burn=0;
+            const double margin=over<40e3?gateHeight(s,set_.working(s,13)*plan*raptorSea/s.mass,&burn)-(top(s)+gate(s.mass,set_.working(s,3))+50):1e9; // Lit at 0.
             if(s.q<2e3){if(!(norm(slewed_)>.5))slewed_=bodyX(s); // Engines first slowly (1.5°/s, the RCS's gentle turn after the boostback), faster only as the
                 // air nears (what is left of the turn by 45 km, 30% to spare, up to 6°/s), held right at the entry attitude within 20 s of
                 // the air; the fins take it over from where it then is.
@@ -821,10 +822,13 @@ public:
                 const double a=norm(want),model=normalForce*s.q*pi*radius*radius/s.mass;if(!(lift_>0))lift_=model;
                 {const Vec side=unit(want),f=tmul(s.toBody,s.specific);const double held=-dot(bodyX(s),side);
                     if(a>0&&std::abs(held)>std::sin(.3*deg))lift_+=.05*(std::clamp(dot(f,side)/held,.2*model,3*model)-lift_);else lift_+=.05*(model-lift_);}
-                const double tilt=std::min(a/std::max(lift_,1e-3),std::sin(12*deg));
-                const Vec dd=a>0?unit(vhat*-std::sqrt(1-tilt*tilt)+unit(want)*-tilt):vhat*-1;if(!(norm(pointed_)>.5))pointed_=bodyX(s);pointed_=turned(pointed_,dd,3*deg*dt_);steer(c,s,pointed_);} // Turning at most 3°/s (from where it is, taken up in the air).
-            double burn=0;
-            if(over<40e3&&gateHeight(s,set_.working(s,13)*plan*raptorSea/s.mass,&burn)<=top(s)+gate(s.mass,set_.working(s,3))+50){
+                // Across the arms' line first (the final slides along it but only creeps across it: its lean answers ~2 s late), along
+                // with what is left; upright by the burn (the tilt that lifts it toward the line would push it the other way once
+                // 13 engines thrust along it), from 5 s before it to 1 s, at the 3°/s it turns.
+                const double cap=std::sin(12*deg)*std::clamp((margin/std::max(-vz,1.)-1)/4,0.,1.),l=std::max(lift_,1e-3);const Vec side=unit(north_+vhat*-dot(north_,vhat)),rest=want+side*-dot(want,side);
+                const double tn=std::clamp(dot(want,side)/l,-cap,cap);const Vec tw=side*tn+(norm(rest)>0?unit(rest)*std::min(norm(rest)/l,std::sqrt(cap*cap-tn*tn)):Vec{});const double tilt=norm(tw);
+                const Vec dd=tilt>0?unit(vhat*-std::sqrt(1-tilt*tilt)+tw*-1.):vhat*-1;if(!(norm(pointed_)>.5))pointed_=bodyX(s);pointed_=turned(pointed_,dd,3*deg*dt_);steer(c,s,pointed_);if(std::getenv("ALBERT_COAST")&&std::fmod(clock_+1e-9,1.)<dt_)std::printf("COAST %.1f h %.0f t %.1f miss e %.1f n %.1f at n %.1f vn %.2f want e %.3f n %.3f tilt %.3f lift %.2f model %.2f\n",clock_,over,seconds,dot(e,east_),dot(e,north_),dot(flat,north_),dot(across,north_),dot(want,east_),dot(want,north_),tilt,lift_,model);} // Turning at most 3°/s (from where it is, taken up in the air).
+            if(margin<=0){
                 if(catch_){if(set_.working(s,13)<5)giveUp(s,balanceWhy);
                     else if(s.propellant-residual<need(s,burn))giveUp(s,"propelante insuficiente para a captura");else if(reach(s)>400)giveUp(s,"pouso previsto fora do alcance da torre");}
                 if(phase_==Phase::divert)break;
@@ -842,7 +846,7 @@ public:
             if(above<=floor&&fast)accel_=std::max(set_.count(),1)*raptorSea/s.mass;
             if(-vz<=gateSpeed||(above<=floor&&!fast)||above<=0){
                 if(catch_&&s.propellant-residual<need(s,0)+around(s,flat,over))giveUp(s,"propelante insuficiente para a captura daqui");
-                if(phase_==Phase::landing){set_.use(c,s,5);phase_=Phase::final;}else set_.use(c,s,3);} // Down-selected to 5 for the fine-tuning (Flight 14's 13, 5, 3).
+                if(phase_==Phase::landing){set_.use(c,s,5);phase_=Phase::final;if(std::getenv("ALBERT_COAST"))std::printf("FINAL %.1f h %.0f e %.1f n %.1f ve %.1f vn %.2f vz %.1f\n",clock_,over,dot(flat,east_),dot(flat,north_),dot(across,east_),dot(across,north_),vz);}else set_.use(c,s,3);} // Down-selected to 5 for the fine-tuning (Flight 14's 13, 5, 3).
             const double most=std::max(set_.count(),1)*raptorSea/s.mass;
             if(age_--<=0&&!(above<=floor&&fast)){age_=10;const double aim=top(s)+floor,a1=std::clamp(accel_>0?accel_:plan*most,.4*most,most),a2=a1*.9;
                 auto run=[&](double a,Vec& end,Vec& u,double& secs){Vec r=s.position,v=s.velocity;int n=0;
