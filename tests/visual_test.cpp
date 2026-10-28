@@ -15,6 +15,7 @@
 #include "model_fixture.hpp"
 #include "gpu/context.hpp"
 #include "gpu/scene.hpp"
+#include "gpu/atmosphere.hpp"
 #include "lighting.hpp"
 #include "sound.hpp"
 #include "webgpu_programs.hpp"
@@ -30,6 +31,12 @@
 #include <thread>
 #include <chrono>
 #include <vector>
+#include <filesystem>
+#include <fstream>
+#include <cstdlib>
+#ifdef ALBERT_TEST_RPC
+#include "../examples/starship_flight.hpp"
+#endif
 
 using namespace threepp;
 namespace {
@@ -231,26 +238,28 @@ struct Target {
 };
 struct GpuTarget final:Target {
     albert::gpu::Context context;albert::gpu::SceneRenderer scene{context};WGPUTexture texture=nullptr;WGPUTextureView view=nullptr;
-    GpuTarget(){albert::defineWebGpuPrograms();scene.toneMapping=false;scene.samples=1;
-        WGPUTextureDescriptor d{};d.size={192,192,1};d.format=context.format();d.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_CopySrc;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
+    unsigned width,height;
+    explicit GpuTarget(unsigned w=192,unsigned h=192):width(w),height(h){albert::defineWebGpuPrograms();scene.toneMapping=false;scene.samples=1;
+        WGPUTextureDescriptor d{};d.size={width,height,1};d.format=context.format();d.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_CopySrc;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
         texture=wgpuDeviceCreateTexture(context.device(),&d);view=wgpuTextureCreateView(texture,nullptr);}
     ~GpuTarget() override{wgpuTextureViewRelease(view);wgpuTextureRelease(texture);}
     void render(Scene& s,Camera& c) override{
-        WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);scene.render(s,c,view,192,192,e);
+        WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);scene.render(s,c,view,width,height,e);
         WGPUCommandBuffer b=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(context.queue(),1,&b);scene.submitted();wgpuCommandBufferRelease(b);wgpuCommandEncoderRelease(e);
     }
     std::vector<unsigned char> readRGBPixels() override{
-        constexpr unsigned row=192*4; // A multiple of 256 bytes, as copies require.
-        WGPUBufferDescriptor bd{};bd.size=row*192;bd.usage=WGPUBufferUsage_CopyDst|WGPUBufferUsage_MapRead;WGPUBuffer b=wgpuDeviceCreateBuffer(context.device(),&bd);
-        WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=texture;WGPUTexelCopyBufferInfo dst{};dst.buffer=b;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=192;
-        const WGPUExtent3D size{192,192,1};wgpuCommandEncoderCopyTextureToBuffer(e,&src,&dst,&size);WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(context.queue(),1,&c);
+        const unsigned row=(width*4+255)/256*256;
+        WGPUBufferDescriptor bd{};bd.size=row*height;bd.usage=WGPUBufferUsage_CopyDst|WGPUBufferUsage_MapRead;WGPUBuffer b=wgpuDeviceCreateBuffer(context.device(),&bd);
+        WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=texture;WGPUTexelCopyBufferInfo dst{};dst.buffer=b;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=height;
+        const WGPUExtent3D size{width,height,1};wgpuCommandEncoderCopyTextureToBuffer(e,&src,&dst,&size);WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(context.queue(),1,&c);
         bool done=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&done;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
         wgpuBufferMapAsync(b,WGPUMapMode_Read,0,bd.size,cb);while(!done)wgpuInstanceProcessEvents(context.instance());
-        const auto* p=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(b,0,bd.size));std::vector<unsigned char> out(192*192*3);const bool bgra=context.format()==WGPUTextureFormat_BGRA8Unorm;
-        for(unsigned y=0;y<192;++y)for(unsigned x=0;x<192;++x){const auto* s=p+(191-y)*row+x*4;auto* d=&out[(y*192+x)*3];d[0]=bgra?s[2]:s[0];d[1]=s[1];d[2]=bgra?s[0]:s[2];}
+        const auto* p=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(b,0,bd.size));std::vector<unsigned char> out(width*height*3);const bool bgra=context.format()==WGPUTextureFormat_BGRA8Unorm;
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){const auto* s=p+(height-1-y)*row+x*4;auto* d=&out[(y*width+x)*3];d[0]=bgra?s[2]:s[0];d[1]=s[1];d[2]=bgra?s[0]:s[2];}
         wgpuBufferUnmap(b);wgpuBufferRelease(b);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);return out;
     }
 };
+#include "vehicle_visuals.hpp"
 void roadGraphics(Target& renderer){
     auto site=std::make_shared<albert::core::Scenery>();site->latitude=25.996128*3.141592653589793/180;site->longitude=-97.154517*3.141592653589793/180;
     albert::core::SceneryRoad highway;highway.surface=albert::core::SceneryRoad::Surface::Asphalt;highway.width=10.5;highway.highway=true;highway.points={{-30,0,0},{0,0,0},{30,0,0}};site->roads.push_back(highway);
@@ -329,6 +338,7 @@ void towerGraphics(Target& renderer){
     require(std::count_if(unlit.begin(),unlit.end(),[](auto c){return c>20;})==0,"Tower steel emits light without the sun");
 }
 void graphics(Target& renderer) {
+    vehicleGraphics(renderer);
     roadGraphics(renderer);
     padGraphics(renderer);
     towerGraphics(renderer);
@@ -758,6 +768,9 @@ void lunarAdaptationLevels(){
 }
 int main(int argc,char** argv) {
     try {
+#ifdef ALBERT_TEST_RPC
+        if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
+#endif
         controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();
         if(argc>1){
             std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';return 77;}

@@ -1,6 +1,7 @@
 #include "webgpu_programs.hpp"
 #include "gpu/programs.hpp"
 #include "roads.hpp"
+#include "vehicle_surface.hpp"
 using albert::gpu::Program;using albert::gpu::Uniform;
 namespace {
 // Points: one quad per vertex; `corner` spans [-1, 1]² and replaces gl_PointCoord.
@@ -312,8 +313,12 @@ struct Material { diffuse: vec3f, opacity: f32, emissive: vec3f, roughness: f32,
     let position = (frame.view * vec4f(v.world, 1.0)).xyz;
     let along = clamp(-v.local.y / material.bellLength, 0.0, 1.0);
     let heat = mix(material.burn, material.lip, smoothstep(0.87, 0.99, along)) * smoothstep(0.35, 0.78, along);
+    let ribPixel = fwidth(v.uv.x) * 251.3274; let bandPixel = fwidth(v.local.y) * 90.0;
+    let ribs = cos(v.uv.x * 251.3274) * exp(-ribPixel * ribPixel);
+    let bands = cos(v.local.y * 90.0) * exp(-bandPixel * bandPixel);
+    let alloy = material.diffuse * (0.94 + 0.06 * ribs + 0.03 * bands);
     let air = airLight(v.world, worldNormal);
-    var colour = standardLight(material.diffuse, material.roughness, material.metalness, n, n, position, air.sky * frame.sunColor.rgb, shadowFactor(v.world, worldNormal) * air.sun) + material.emissive + heat;
+    var colour = standardLight(alloy, material.roughness, material.metalness, n, n, position, air.sky * frame.sunColor.rgb, shadowFactor(v.world, worldNormal) * air.sun) + material.emissive + heat;
     colour += material.diffuse * material.auxiliaryStrength * (1.0 - smoothstep(-0.10, 0.0, dot(n, normalize(material.auxiliarySolarDirection))));
     return vec4f(finish(airApply(v.world, colour)), material.opacity);
 }
@@ -824,6 +829,21 @@ void objects(){
     p.wgsl=assisted(false,false);albert::gpu::define("albert:assisted",p);
     p.wgsl=assisted(true,false);albert::gpu::define("albert:assisted-flat",p);
     p.wgsl=assisted(false,true);albert::gpu::define("albert:rock",p);
+    auto vehicle=p;vehicle.wgsl=assisted(false,false);
+    vehicle.uniforms.insert(vehicle.uniforms.end(),{{"vehicleHull",Uniform::vec4},{"vehicleSurface",Uniform::vec4},{"vehicleQuality",Uniform::f32},{"vehicleSoot",Uniform::f32},{"frostHeight",Uniform::f32}});
+    auto& v=vehicle.wgsl;auto field=v.find("rockScale: f32 }");v.replace(field,std::string("rockScale: f32 }").size(),
+        "rockScale: f32, vehicleHull: vec4f, vehicleSurface: vec4f, vehicleQuality: f32, vehicleSoot: f32, frostHeight: f32 }");
+    field=v.find("worldNormal: vec3f }");v.replace(field,std::string("worldNormal: vec3f }").size(),"worldNormal: vec3f, @location(5) environment: vec3f }");
+    v.insert(v.find("return o;"),R"(
+    o.environment = vec3f(0.0);
+    if (material.vehicleQuality > 0.5 && material.metalness > 0.05) {
+        let reflected = reflect(-viewDirection(o.position), normalize(o.normal));
+        let worldRay = transpose(mat3x3f(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz)) * reflected;
+        o.environment = vehicleEnvironment(o.world, worldRay);
+    }
+    )"); // The frame's atmosphere tables already support vertex-stage reads; no new resources or passes.
+    const auto shade=v.find("    let air = airLight");v.replace(shade,v.size()-shade,std::string(albert::vehicleSurfaceFragment)+"}\n");
+    v.insert(v.find("@fragment fn fs_main"),albert::vehicleSurfaceFunctions);albert::gpu::define("albert:vehicle",std::move(vehicle));
     auto concrete=p;concrete.wgsl=assisted(false,false);
     for(const char* name:{"padOne","padTwo","concreteQuality"})concrete.uniforms.emplace_back(name,Uniform::vec4);
     auto& c=concrete.wgsl;auto at=c.find("rockScale: f32 }");c.replace(at,std::string("rockScale: f32 }").size(),"rockScale: f32, padOne: vec4f, padTwo: vec4f, concreteQuality: vec4f }");

@@ -21,7 +21,7 @@ public:
     void sync(const core::Scene& registry,double utcSeconds,core::Vector origin);
     void deluge(const core::ObjectId& site,float cubicMetres){deluge_[site]=cubicMetres;}
     void delugeEffects(bool on){delugeEffects_=on;} // The pads' spray and launch steam (Ajustes).
-    void quality(int value){for(auto& [id,site]:sites_)site->quality(value);}
+    void quality(int value){for(auto& [id,site]:sites_)site->quality(value);for(auto& [id,vehicle]:vehicles_)vehicle->quality(value);}
     void count(const core::ObjectId& flight,double seconds,bool scrubbed){count_[flight]={seconds,scrubbed};} // Its count time (T, s) and whether it scrubbed.
     void updateLighting(threepp::Camera&,const threepp::Vector3& sun,const AuxiliaryLights&,float seconds);
     std::optional<core::ObjectId> pick(const core::Scene&,threepp::Raycaster&) const;
