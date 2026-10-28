@@ -23,9 +23,10 @@ public:
     void sync(const core::Scene& registry,double utcSeconds,core::Vector origin);
     void deluge(const core::ObjectId& site,float cubicMetres){deluge_[site]=cubicMetres;}
     void wind(const core::ObjectId& site,const threepp::Vector3& enu){winds_[site]=enu;}
-    void cloudQuality(int value){splashQuality_=std::clamp(value,0,2);for(auto& [id,site]:sites_)site->cloudQuality(value);for(auto& [id,water]:water_)water->quality(quality_<=0?0:splashQuality_);}
+    void humidity(float value,core::Vector centre={}){humidity_=value;weatherCentre_=centre;}
+    void cloudQuality(int value){splashQuality_=std::clamp(value,0,2);for(auto& [id,site]:sites_)site->cloudQuality(value);for(auto& [id,water]:water_)water->quality(quality_<=0?0:splashQuality_);for(auto& [id,vehicle]:vehicles_)vehicle->gasQuality(quality_<=0?0:splashQuality_);}
     void delugeEffects(bool on){delugeEffects_=on;} // The pads' spray and launch steam (Ajustes).
-    void quality(int value){quality_=value;for(auto& [id,water]:water_)water->quality(value<=0?0:splashQuality_);for(auto& [id,site]:sites_)site->quality(value);for(auto& [id,vehicle]:vehicles_)vehicle->quality(value);}
+    void quality(int value){quality_=value;for(auto& [id,water]:water_)water->quality(value<=0?0:splashQuality_);for(auto& [id,site]:sites_)site->quality(value);for(auto& [id,vehicle]:vehicles_){vehicle->quality(value);vehicle->gasQuality(value<=0?0:splashQuality_);}}
     void count(const core::ObjectId& flight,double seconds,bool scrubbed,bool launch=true){count_[flight]={seconds,scrubbed,launch};} // Its count time (T, s) and whether it scrubbed.
     void terrain(const Terrain* terrain,const threepp::Object3D* earth){terrain_=terrain;earth_=earth;}
     void updateLighting(threepp::Camera&,const threepp::Vector3& sun,const AuxiliaryLights&,float seconds);
@@ -51,5 +52,6 @@ private:
     std::map<core::ObjectId,threepp::Vector3> winds_;
     std::map<core::ObjectId,std::unique_ptr<Splashdown>> water_;int quality_=1,splashQuality_=1;
     double cloudUtc_=0;bool cloudTimed_=false;
+    float humidity_=-1;core::Vector weatherCentre_;
 };
 }

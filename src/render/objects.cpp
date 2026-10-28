@@ -63,7 +63,7 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             if(o.scenery){ // A site's: its parts and structures, in metres.
                 auto v=std::make_unique<Site>(*o.scenery);v->quality(quality_);auto mesh=v->node();mesh->scale.setScalar(static_cast<float>(1/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);sites_[id]=std::move(v);
             }else if(o.look){ // A vehicle: its body, parts, bells, plumes and jets, in metres.
-                auto v=std::make_unique<Vehicle>(*o.look);auto mesh=v->node();mesh->scale.setScalar(static_cast<float>(1/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);vehicles_[id]=std::move(v);
+                auto v=std::make_unique<Vehicle>(*o.look);v->quality(quality_);v->gasQuality(quality_<=0?0:splashQuality_);auto mesh=v->node();mesh->scale.setScalar(static_cast<float>(1/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);vehicles_[id]=std::move(v);
             }else if(artisticRock(id)){
                 auto mesh=makeArtisticRock(*core::localOrbit(id));
                 mesh->scale.setScalar(float(o.radiusMeters*2/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);
@@ -98,7 +98,11 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             Quaternion basis;basis.setFromAxisAngle(Vector3(1,0,0),-std::numbers::pi_v<float>/2.f);
             basis.multiply(Quaternion(static_cast<float>(q.x),static_cast<float>(q.y),static_cast<float>(q.z),static_cast<float>(q.w)));
             mesh->quaternion.copy(basis);mesh->visible=o.visible;
-            if(const auto v=vehicles_.find(id);v!=vehicles_.end())v->second->animate(state.parts.get(),now,state.positionMeters,state.velocityMetersPerSecond);
+            if(const auto v=vehicles_.find(id);v!=vehicles_.end()){
+                const auto p=state.positionMeters;const double r=std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z),w=std::sqrt(weatherCentre_.x*weatherCentre_.x+weatherCentre_.y*weatherCentre_.y+weatherCentre_.z*weatherCentre_.z);
+                const auto d=r>0&&w>0?p*(w/r)-weatherCentre_:core::Vector{1e9,0,0};
+                v->second->humidity(d.x*d.x+d.y*d.y+d.z*d.z<50e3*50e3?humidity_:-1.f);
+                v->second->animate(state.parts.get(),now,state.positionMeters,state.velocityMetersPerSecond);}
             if(const auto v=sites_.find(id);v!=sites_.end())v->second->animate(state.parts.get());
         }
     }

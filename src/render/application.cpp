@@ -2448,6 +2448,11 @@ int albert::runRenderer(int argc, char** argv) {
             if(rpc)for(const auto& g:rpc->flightGauges())objects.count(g.id,g.countState=="HOLD"?g.countTime:simulatedUtc-g.zero,g.countState=="SCRUB",std::abs(g.zero-g.start)>.001||!g.countState.empty()); // The vents' pressurisation closing.
 #endif
             objects.delugeEffects(preferences.deluge);
+            objects.humidity(-1.f);
+            if(flightTelemetry&&flightTelemetry->active&&steadyNow-flightTelemetryAt<std::chrono::seconds(10)){
+                const auto& w=*flightTelemetry;const auto p=albert::physics::fixedPosition(albert::physics::earth,{w.weatherLatitude,w.weatherLongitude,0});
+                objects.humidity(albert::relativeHumidity(w.specificHumidity,w.airTemperature,w.airPressure),
+                    {c2t[0][0]*p.x+c2t[1][0]*p.y+c2t[2][0]*p.z,c2t[0][1]*p.x+c2t[1][1]*p.y+c2t[2][1]*p.z,c2t[0][2]*p.x+c2t[1][2]*p.y+c2t[2][2]*p.z});}
             objects.sync(registry,simulatedUtc,sceneOrigin);objects.cloudQuality(visualSettings.quality?preferences.launchCloudQuality:0);
             earthPosition.copy(earth->position);
             sunPosition.copy(sun->position);

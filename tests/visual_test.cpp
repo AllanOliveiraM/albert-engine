@@ -332,6 +332,7 @@ void shadowGraphics(GpuTarget& renderer){
 #include "vehicle_geometry_visuals.hpp"
 #include "entry_visuals.hpp"
 #include "plume_visuals.hpp"
+#include "return_visuals.hpp"
 #include "production_visuals.hpp"
 #include "crowd_visuals.hpp"
 #include "land_visuals.hpp"
@@ -439,7 +440,7 @@ void towerGraphics(Target& renderer){
 void graphics(Target& renderer) {
     nightGraphics(renderer);
     vehicleGraphics(renderer);entryGraphics(renderer);
-    plumeGraphics(renderer);
+    plumeGraphics(renderer);returnGraphics(renderer);
     launchCloudGraphics(renderer);splashdownGraphics(renderer);
     roadGraphics(renderer);
     padGraphics(renderer);
@@ -884,6 +885,7 @@ int main(int argc,char** argv) {
         if(argc>2&&std::string_view(argv[1])=="production-captures"){landCaptures(argv[2],true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="splashdown-captures"){splashdownCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="launch-cloud-captures"){launchCloudCaptures(argv[2]);return 0;}
+        if(argc>2&&std::string_view(argv[1])=="return-captures"){returnCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="plume-captures"){plumeCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="entry-captures"){entryCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="grid-fin-captures"){gridFinCaptures(argv[2]);return 0;}

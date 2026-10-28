@@ -3,6 +3,7 @@
 #include "roads.hpp"
 #include "vehicle_surface.hpp"
 #include "entry_plasma.hpp"
+#include "return_gas_shader.hpp"
 #include "launch_cloud_shader.hpp"
 #include "splashdown_shader.hpp"
 using albert::gpu::Program;using albert::gpu::Uniform;
@@ -214,6 +215,11 @@ struct Material { density: f32, time: f32, seed: f32, flame: f32 };
 }
 )";
     albert::gpu::define("albert:engine-cloud",engineCloud);
+    Program returning;returning.attributes=surfaceAttributes;returning.uniforms={{"kind",Uniform::f32},{"extent",Uniform::vec3},{"state",Uniform::vec4},{"body",Uniform::vec4},{"offset",Uniform::vec3},
+        {"wind",Uniform::vec3},{"source",Uniform::vec3},{"seconds",Uniform::f32},{"samples",Uniform::f32},
+        {"tip0",Uniform::vec4},{"tip1",Uniform::vec4},{"tip2",Uniform::vec4},{"tip3",Uniform::vec4},{"tip4",Uniform::vec4},{"tip5",Uniform::vec4}};
+    for(unsigned k=0;k<4;++k)returning.uniforms.emplace_back("vent"+std::to_string(k),Uniform::vec4);
+    returning.wgsl=std::string(surface)+albert::returnGasShader;albert::gpu::define("albert:return-gas",returning);
     // Integrate inside the existing depth-tested shells so density stays attached to the vapour.
     Program steam;steam.attributes=surfaceAttributes;steam.uniforms={{"density",Uniform::f32},{"seed",Uniform::f32},{"time",Uniform::f32},{"up",Uniform::vec3},{"hull",Uniform::vec4},{"size",Uniform::vec3},{"kind",Uniform::f32},{"cloud",Uniform::vec4}};
     steam.wgsl=std::string(surface)+R"(
