@@ -1,6 +1,6 @@
 #pragma once
 #ifdef ALBERT_TEST_RPC
-void landCaptures(const std::string& directory,bool production=false,bool industrial=false){
+void landCaptures(const std::string& directory,bool production=false,bool industrial=false,bool shadowCheck=false){
     std::filesystem::create_directories(directory);
     namespace ex=albert::example::starship;namespace api=albert::v1;
     api::CreateFlightRequest request;ex::addTower(request,true);auto scenery=std::make_shared<albert::core::Scenery>();scenery->latitude=ex::towerLatitude*ex::deg;scenery->longitude=ex::towerLongitude*ex::deg;
@@ -53,13 +53,37 @@ void landCaptures(const std::string& directory,bool production=false,bool indust
     constexpr unsigned width=1280,height=960,row=width*4;WGPUTextureDescriptor td{};td.size={width,height,1};td.format=context.format();td.dimension=WGPUTextureDimension_2D;td.mipLevelCount=td.sampleCount=1;td.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_CopySrc;
     auto target=wgpuDeviceCreateTexture(context.device(),&td);auto view=wgpuTextureCreateView(target,nullptr);std::shared_ptr<Camera> camera=OrthographicCamera::create(-560,560,420,-420,.1,30000);
     Vector3 aim(-75,100,0);
-    auto shot=[&](const std::string& name){camera->lookAt(aim);site.view(*camera);auto encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);renderer.render(*world,*camera,view,width,height,encoder);auto cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);renderer.submitted();wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);
+    auto shot=[&](const std::string& name){std::vector<double> milliseconds,gpuTimes;for(int repeat=0;repeat<(shadowCheck?6:1);++repeat){const auto start=std::chrono::steady_clock::now();if(shadowCheck&&std::getenv("ALBERT_SHADOW_BASELINE"))site.node()->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(0.f);camera->lookAt(aim);site.view(*camera);auto encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);renderer.render(*world,*camera,view,width,height,encoder);auto cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);renderer.submitted();wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);
         WGPUBufferDescriptor bd{};bd.size=row*height;bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;auto buffer=wgpuDeviceCreateBuffer(context.device(),&bd);encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=target;WGPUTexelCopyBufferInfo dst{};dst.buffer=buffer;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=height;WGPUExtent3D size{width,height,1};wgpuCommandEncoderCopyTextureToBuffer(encoder,&src,&dst,&size);cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);
         bool ready=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&ready;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};wgpuBufferMapAsync(buffer,WGPUMapMode_Read,0,bd.size,cb);while(!ready)wgpuInstanceProcessEvents(context.instance());
         const auto* pixels=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(buffer,0,bd.size));std::vector<unsigned char> rgba(pixels,pixels+bd.size);if(context.format()==WGPUTextureFormat_BGRA8Unorm)for(std::size_t i=0;i<rgba.size();i+=4)std::swap(rgba[i],rgba[i+2]);
-        std::ofstream output(directory+"/"+name+".ppm",std::ios::binary);output<<"P6\n"<<width<<' '<<height<<"\n255\n";
-        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)output.write(reinterpret_cast<const char*>(rgba.data()+y*row+x*4),3);wgpuBufferUnmap(buffer);wgpuBufferRelease(buffer);wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);std::cout<<name<<"\n";};
+        if(repeat>0&&renderer.gpuMilliseconds()>=0)gpuTimes.push_back(renderer.gpuMilliseconds());
+        milliseconds.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
+        if(repeat==(shadowCheck?5:0)){std::ofstream output(directory+"/"+name+".ppm",std::ios::binary);output<<"P6\n"<<width<<' '<<height<<"\n255\n";
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)output.write(reinterpret_cast<const char*>(rgba.data()+y*row+x*4),3);}
+        wgpuBufferUnmap(buffer);wgpuBufferRelease(buffer);wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);}std::sort(gpuTimes.begin(),gpuTimes.end());std::sort(milliseconds.begin()+(shadowCheck?1:0),milliseconds.end());std::cout<<name<<" synchronized frame ms "<<milliseconds[milliseconds.size()/2]<<", draws "<<renderer.drawn()<<", shadow draws "<<renderer.shadowDrawn()<<", shadow bytes "<<renderer.shadowBytes()<<", GPU ms "<<(gpuTimes.empty()?renderer.gpuMilliseconds():gpuTimes[gpuTimes.size()/2])<<"\n";};
     auto frame=[&](Vector3 at,Vector3 eye,float fov){aim=at;auto c=PerspectiveCamera::create(fov,4.f/3,.1,30000);c->up.set(0,0,1);if(eye.x==at.x&&eye.y==at.y)c->up.set(0,1,0);c->position.copy(eye);camera=c;};
+    if(shadowCheck){
+        renderer.shadowMetersPerUnit=std::getenv("ALBERT_SHADOW_BASELINE")?0:1;
+        light->position.set(-6000,-8000,9000);
+        frame({0,0,30},{65,-100,1.7f},64);shot("pad-eye");
+        frame({-80,124,2},{-26,68,1.7f},66);shot("tank-eye");
+        frame({-45,65,0},{45,-65,165},70);shot("tower-top");
+        frame({-65,100,0},{160,-190,300},62);shot("oblique-300m");
+        renderer.shadowHigh=false;site.quality(0);ground->setMaterial(roads.material(base,0));light->shadow->mapSize.set(1024,1024);shot("oblique-300m-low");
+        renderer.shadowHigh=true;site.quality(1);ground->setMaterial(roads.material(base,1));light->shadow->mapSize.set(2048,2048);
+        frame({-700,0,0},{100,-400,2000},70);shot("altitude-2km");
+        light->position.set(-10000,-4000,1800);frame({-20,30,10},{90,-150,55},65);shot("low-sun");
+        light->position.set(-6000,-8000,9000);frame({-65,100,0},{160,-190,300},62);
+        site.node()->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(0.f);shot("contact-disabled");
+        site.quality(1);renderer.shadows=false;shot("sun-shadows-disabled");renderer.shadows=true;
+        light->intensity=0;world->remove(*sky);world->background=Color(0);renderer.air.strength=0;
+        // No sky illumination: baked visibility must never add light.
+        std::vector<Object3D*> ambientLights;world->traverse([&](Object3D& o){if(dynamic_cast<AmbientLight*>(&o))ambientLights.push_back(&o);});for(auto* o:ambientLights)world->remove(*o);
+        shot("night");
+        std::cout<<renderer.memory()<<"\nAdapter "<<context.adapter()<<", validation errors "<<albert::gpu::errors()<<"\n";
+        wgpuTextureViewRelease(view);wgpuTextureRelease(target);require(albert::gpu::errors()==0,"Shadow captures produced GPU validation errors");return;
+    }
     if(industrial){
         light->position.set(-6000,-8000,9000);
         for(const char* name:{"tank farm shells","tank farm steel","tank farm fittings"}){auto* mesh=site.node()->getObjectByName(name)->as<Mesh>();

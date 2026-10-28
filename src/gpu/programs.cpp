@@ -30,6 +30,11 @@ struct Frame {
     oceanSlopes: vec4f,      // Mean square slope in each cascade's band (512, 128, 32 m).
     localPosition: array<vec4f, 4>, // World position and range; zero range disables the slot.
     localColour: array<vec4f, 4>,   // Radiance divided by range squared.
+    reserved: vec4f, // Preserve the original 640-byte frame block.
+    shadowLevels: array<mat4x4f, 3>,
+    shadowScale: vec4f, // Level count, metres/world unit, depth span, caster level.
+    contactMatrix: mat4x4f, // World to site-local metres.
+    contact: vec4f, // Baked ambient field strength (zero without a site or at low quality).
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -40,18 +45,75 @@ fn viewDirection(position: vec3f) -> vec3f { // Towards the eye from a view-spac
     if (frame.projection[3][3] > 0.5) { return vec3f(0.0, 0.0, 1.0); }
     return normalize(-position);
 }
-// threepp's PCF directional shadow: normal bias in world space, depth bias, 3x3 comparisons.
-fn shadowFactor(world: vec3f, normal: vec3f) -> f32 {
-    if (frame.shadow.x < 0.5 || object.flags.x < 0.5) { return 1.0; }
-    let p = frame.shadowViewProj * vec4f(world + normal * frame.shadow.z, 1.0);
-    let uv = vec2f(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5); let depth = p.z + frame.shadow.y;
-    if (any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) || depth > 1.0) { return 1.0; }
-    var sum = 0.0;
-    for (var y = -1; y <= 1; y++) { for (var x = -1; x <= 1; x++) { sum += textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(f32(x), f32(y)) * frame.shadow.w, depth); } }
-    return sum / 9.0;
+// Fixed-size light-space clip levels. Blend only in a level's outer 15%; the
+// atlas guard clamps each PCF tap inside its own tile, including at the border.
+fn shadowProjection(world: vec3f, normal: vec3f, level: u32) -> vec3f {
+    var matrix = frame.shadowViewProj;
+    if (level > 0u) { matrix = frame.shadowLevels[level-1u]; }
+    let extent = array<f32,4>(100.0,350.0,1100.0,3400.0)[level];
+    let texel = 2.0 * extent / (max(frame.shadowScale.y,1e-12) * 2048.0);
+    let slope = 1.0-clamp(dot(normal,frame.sun.xyz),0.0,1.0);
+    let offset = select(frame.shadow.z, texel * (0.12+0.65*slope), frame.shadowScale.x>1.0);
+    return (matrix * vec4f(world+normal*offset,1.0)).xyz;
 }
-fn srgbToLinear(c: vec3f) -> vec3f { return select(pow((c + 0.055) / 1.055, vec3f(2.4)), c / 12.92, c <= vec3f(0.04045)); }
-fn linearToSrgb(c: vec3f) -> vec3f { return select(pow(c, vec3f(0.41666)) * 1.055 - 0.055, c * 12.92, c <= vec3f(0.0031308)); }
+fn shadowCompare(p: vec3f, level: u32, normal: vec3f) -> f32 {
+    let local = vec2f(p.x*0.5+0.5,0.5-p.y*0.5);
+    if (any(local<vec2f(0.0)) || any(local>vec2f(1.0)) || p.z<0.0 || p.z>1.0) { return 1.0; }
+    let tiled = frame.shadowScale.x>1.0;let scale = select(1.0,0.5,tiled);
+    let origin = vec2f(f32(level%2u),f32(level/2u))*scale;
+    let uv = origin+local*scale;let guard = frame.shadow.w*0.5;
+    var matrix = frame.shadowViewProj;if(level>0u){matrix=frame.shadowLevels[level-1u];}
+    let axisX = normalize(vec3f(matrix[0].x,matrix[1].x,matrix[2].x));
+    let axisY = normalize(vec3f(matrix[0].y,matrix[1].y,matrix[2].y));
+    let slope = vec2f(dot(normal,axisX),-dot(normal,axisY))/max(abs(dot(normal,frame.sun.xyz)),0.08);
+    let extent = array<f32,4>(100.0,350.0,1100.0,3400.0)[level];
+    let gradient = select(vec2f(0.0),slope*(4.0*extent/frame.shadowScale.z),tiled);
+    // Correct each PCF tap to the receiver plane. Only the bilinear half-texel
+    // footprint needs extra slope bias; it cannot detach a close tank by metres.
+    let planeBias = (0.018+0.55*(2.0*extent/2048.0)*(abs(slope.x)+abs(slope.y)))/frame.shadowScale.z;
+    let bias = select(frame.shadow.y,-planeBias,tiled);
+    var sum = 0.0;
+    for (var y=-1;y<=1;y++) { for (var x=-1;x<=1;x++) {
+        let tap = clamp(uv+vec2f(f32(x),f32(y))*frame.shadow.w,origin+guard,origin+scale-guard);
+        sum += textureSampleCompareLevel(shadowMap,shadowSampler,tap,p.z+bias+dot(gradient,tap-uv));
+    } }
+    return sum/9.0;
+}
+fn shadowFactor(world: vec3f, normal: vec3f) -> f32 {
+    if (frame.shadow.x<0.5 || object.flags.x<0.5) { return 1.0; }
+    if (frame.shadowScale.x<1.5) { return shadowCompare(shadowProjection(world,normal,0u),0u,normal); }
+    for (var level=0u;level<4u;level++) {
+        let p = shadowProjection(world,normal,level);let edge = max(abs(p.x),abs(p.y));
+        if (edge<1.0 && p.z>0.0 && p.z<1.0) {
+            let value = shadowCompare(p,level,normal);let blend = smoothstep(0.85,1.0,edge);
+            if (blend>0.0 && level<3u) { return mix(value,shadowCompare(shadowProjection(world,normal,level+1u),level+1u,normal),blend); }
+            return mix(value,1.0,select(0.0,blend,level==3u));
+        }
+    }
+    return 1.0;
+}
+@group(0) @binding(14) var contactMap: texture_2d<f32>;
+@group(0) @binding(15) var contactSampler: sampler;
+fn contactAmbient(position: vec3f) -> f32 {
+    if (frame.contact.x<0.5) { return 1.0; }
+    let world = transpose(mat3x3f(frame.view[0].xyz,frame.view[1].xyz,frame.view[2].xyz))*(position-frame.view[3].xyz);
+    let p = (frame.contactMatrix*vec4f(world,1.0)).xyz;
+    let pixel = max(length(dpdx(p.xy)),length(dpdy(p.xy)));
+    let nearUV = (p.xy-vec2f(-512.0,-384.0))/1024.0;
+    let farUV = (p.xy-vec2f(-5632.0,-3072.0))/6144.0;
+    var field = vec4f(1.0);
+    if (all(nearUV>vec2f(0.005)) && all(nearUV<vec2f(0.995))) {
+        field = textureSampleLevel(contactMap,contactSampler,nearUV*vec2f(2.0/3.0,1.0),max(log2(max(pixel,1.0)),0.0));
+    } else if (all(farUV>vec2f(0.0)) && all(farUV<vec2f(1.0))) {
+        field = textureSampleLevel(contactMap,contactSampler,farUV*vec2f(1.0/3.0,0.5)+vec2f(2.0/3.0,0.0),max(log2(max(pixel/12.0,1.0)),0.0));
+    }
+    if (p.z<2.0) { return mix(field.r,field.g,clamp(p.z/2.0,0.0,1.0)); }
+    if (p.z<8.0) { return mix(field.g,field.b,(p.z-2.0)/6.0); }
+    if (p.z<24.0) { return mix(field.b,field.a,(p.z-8.0)/16.0); }
+    return mix(field.a,1.0,clamp((p.z-24.0)/24.0,0.0,1.0));
+}
+fn srgbToLinear(c: vec3f) -> vec3f { return select(pow(max((c + 0.055) / 1.055, vec3f(0.0)), vec3f(2.4)), c / 12.92, c <= vec3f(0.04045)); }
+fn linearToSrgb(c: vec3f) -> vec3f { return select(pow(max(c, vec3f(0.0)), vec3f(0.41666)) * 1.055 - 0.055, c * 12.92, c <= vec3f(0.0031308)); }
 fn aces(colour: vec3f) -> vec3f {
     let input = mat3x3f(vec3f(0.59719, 0.07600, 0.02840), vec3f(0.35458, 0.90834, 0.13383), vec3f(0.04823, 0.01566, 0.83777));
     let output = mat3x3f(vec3f(1.60475, -0.10208, -0.00327), vec3f(-0.53108, 1.10813, -0.07276), vec3f(-0.07367, -0.00605, 1.07602));
@@ -279,7 +341,7 @@ fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geom
     let diffuse = albedo * (1.0 - metalness); let f0 = mix(vec3f(0.04), albedo, metalness);
     let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
     // The ambient light also mirrored, as by an even sky (f0 of it, less when rough): metal in the shade is not black.
-    return localLight(n, position, diffuse, f0, roughness) + nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * (diffuse + f0 * (1.0 - 0.5 * roughness)) / PI_L;
+    return localLight(n, position, diffuse, f0, roughness) + nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + contactAmbient(position) * (frame.ambient.rgb + extra) * (diffuse + f0 * (1.0 - 0.5 * roughness)) / PI_L;
 }
 fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
     let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;

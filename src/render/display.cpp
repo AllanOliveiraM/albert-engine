@@ -53,6 +53,7 @@ bool albert::Display::isOpen()const{return impl_->window->isOpen();}
 void albert::Display::close(){impl_->window->close();}
 float albert::Display::aspect()const{return impl_->window->aspect();}
 void albert::Display::onResize(std::function<void(WindowSize)> f){impl_->window->onResize(std::move(f));}
+void albert::Display::setShadowScale(float metersPerUnit,bool high){impl_->scene->shadowMetersPerUnit=metersPerUnit;impl_->scene->shadowHigh=high;}
 void albert::Display::setShadows(bool enabled){impl_->scene->shadows=enabled;}
 void albert::Display::setExposure(float value){impl_->scene->exposure=value;}
 void albert::Display::setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio){

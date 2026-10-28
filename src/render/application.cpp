@@ -2752,7 +2752,8 @@ int albert::runRenderer(int argc, char** argv) {
                 sunlight->shadow->mapSize.set(visualSettings.quality ? 2048.f : 1024.f, visualSettings.quality ? 2048.f : 1024.f);
                 appliedQuality = visualSettings.quality;
             }
-            graphics.setShadows(visualSettings.shadows && (focus == targets::Earth || focus == targets::Moon));
+            graphics.setShadowScale(6378137.f,visualSettings.quality>0);
+            graphics.setShadows(visualSettings.shadows);
             static auto lastShadow = steadyNow - std::chrono::seconds(1);
             if (steadyNow - lastShadow >= std::chrono::milliseconds(100)) {
                 auto& shadowCamera = static_cast<OrthographicCamera&>(*sunlight->shadow->camera);

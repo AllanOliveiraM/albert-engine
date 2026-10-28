@@ -15,6 +15,7 @@
 #include "model_fixture.hpp"
 #include "gpu/context.hpp"
 #include "gpu/scene.hpp"
+#include "gpu/shadows.hpp"
 #include "gpu/atmosphere.hpp"
 #include "gpu/ocean.hpp"
 #include <numbers>
@@ -44,6 +45,16 @@ using namespace threepp;
 namespace {
 void require(bool condition,const char* message) {
     if(!condition) throw std::runtime_error(message);
+}
+void shadowStability(){
+    const Vector3 sun=Vector3(-6,-8,9).normalize(),eye(0,0,0),anchor(0,0,0);
+    const auto fixed=albert::gpu::sunShadowLevels(eye,sun,anchor,1);
+    const auto moved=albert::gpu::sunShadowLevels(Vector3(.001f,.001f,.001f),sun,anchor,1);
+    for(unsigned level=0;level<4;++level)require(fixed[level].elements==moved[level].elements,"Subtexel movement changed a shadow projection");
+    const Vector3 shift(24,-37,11),point(15,-8,2);
+    const auto rebased=albert::gpu::sunShadowLevels(Vector3(eye).sub(shift),sun,Vector3(anchor).sub(shift),1);
+    for(unsigned level=0;level<4;++level){const Vector3 a=Vector3(point).applyMatrix4(fixed[level]),b=Vector3(point).sub(shift).applyMatrix4(rebased[level]);
+        require(Vector3(a).sub(b).length()<1e-5f,"Floating origin moved the shadow texel grid");}
 }
 void engineTransitions(){
     albert::EngineCycle a,b;a.step(0,0);b.step(0,0);a.step(.1f,1);require(a.ignition&&a.torching(),"Main stage did not start with the first flow");
@@ -261,6 +272,48 @@ struct GpuTarget final:Target {
         wgpuBufferUnmap(b);wgpuBufferRelease(b);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);return out;
     }
 };
+void shadowGraphics(GpuTarget& renderer){
+    auto world=Scene::create();world->background=Color(0);auto light=DirectionalLight::create(Color(0xffffff),3);light->position.set(-6000,-8000,9000);light->castShadow=true;world->add(light);
+    auto material=MeshStandardMaterial::create();material->color=Color(.5f,.5f,.5f);material->roughness=1;
+    auto ground=Mesh::create(PlaneGeometry::create(7000,7000),material);ground->receiveShadow=ground->castShadow=true;world->add(ground);
+    auto blocker=Mesh::create(BoxGeometry::create(5,5,8),material);blocker->position.z=4;blocker->castShadow=true;world->add(blocker);
+    auto camera=OrthographicCamera::create(-20,20,20,-20,.1,10000);camera->position.set(0,0,50);camera->lookAt(Vector3());
+    renderer.scene.shadows=true;renderer.scene.shadowHigh=true;renderer.scene.shadowMetersPerUnit=1;
+    renderer.render(*world,*camera);const auto shadow=renderer.readRGBPixels();const auto shadowDraws=renderer.scene.shadowDrawn();
+    camera->position.x=.001f;camera->lookAt(Vector3(.001f,0,0));renderer.render(*world,*camera);const auto moving=renderer.readRGBPixels();int unstable=0;
+    for(std::size_t i=0;i<shadow.size();i+=3)unstable+=std::abs(int(shadow[i])-moving[i])>10;
+    require(unstable<100,"Subtexel camera movement destabilized the shadow");
+    constexpr float units=6378137;world->scale.setScalar(1/units);camera->position.set(0,0,50/units);camera->lookAt(Vector3());camera->nearPlane=.1f/units;
+    camera->left=camera->bottom=-20/units;camera->right=camera->top=20/units;camera->updateProjectionMatrix();renderer.scene.shadowMetersPerUnit=units;
+    renderer.render(*world,*camera);const auto scaled=renderer.readRGBPixels();int changed=0;for(std::size_t i=0;i<shadow.size();i+=3)changed+=std::abs(int(shadow[i])-scaled[i])>15;
+    require(changed<150,"Earth-radius world units changed metre-scale shadows");
+    world->scale.setScalar(1);camera->position.set(0,0,50);camera->nearPlane=.1f;camera->left=camera->bottom=-20;camera->right=camera->top=20;camera->updateProjectionMatrix();renderer.scene.shadowMetersPerUnit=1;
+    renderer.scene.shadows=false;renderer.render(*world,*camera);const auto clear=renderer.readRGBPixels();
+    int dark=0,lit=0;for(std::size_t i=0;i<shadow.size();i+=3){dark+=int(clear[i])-shadow[i]>70;lit+=std::abs(int(clear[i])-shadow[i])<3;}
+    std::cout<<"Local shadow pixels "<<dark<<", unchanged concrete "<<lit<<", shadow draws "<<shadowDraws<<", unstable pixels "<<unstable<<", scaled changes "<<changed<<"\n";
+    require(dark>300&&lit>30000,"Sharp local shadow or acne-free concrete missing");
+    // The depth pass uses the members themselves, retaining the open centre.
+    world->remove(*blocker);auto truss=Group::create();world->add(truss);
+    for(float side:{-4.f,4.f}){auto a=Mesh::create(BoxGeometry::create(.28f,8,.28f),material),b=Mesh::create(BoxGeometry::create(8,.28f,.28f),material);
+        a->position.set(side,0,5);b->position.set(0,side,5);a->castShadow=b->castShadow=true;truss->add(a);truss->add(b);}
+    renderer.scene.shadows=true;renderer.render(*world,*camera);const auto lattice=renderer.readRGBPixels();
+    auto brightness=[&](float x,float y){const int px=int((x+20)/40*192),py=int((y+20)/40*192);return int(lattice[3*(py*192+px)]);};
+    require(brightness(3.33f,4.44f)>brightness(-.67f,4.44f)+25,"Open truss lost its member shadow or filled its opening");
+    world->remove(*truss);world->add(blocker);
+    renderer.scene.shadows=true;blocker->scale.set(20,20,20);blocker->position.set(1200,0,80);camera->position.set(1200,0,2000);camera->lookAt(Vector3(1200,0,0));camera->left=camera->bottom=-500;camera->right=camera->top=500;camera->updateProjectionMatrix();
+    renderer.render(*world,*camera);const auto distant=renderer.readRGBPixels();renderer.scene.shadows=false;renderer.render(*world,*camera);const auto distantClear=renderer.readRGBPixels();
+    int farShadow=0;for(std::size_t i=0;i<distant.size();i+=3)farShadow+=int(distantClear[i])-distant[i]>50;
+    std::cout<<"Distant shadow pixels "<<farShadow<<"\n";require(farShadow>100,"Outer shadow level disappeared at 2 km altitude");
+    // Ambient-only contact remains independent of the sunlight's map.
+    albert::core::Scenery scenery;albert::core::SceneryPart tank;tank.shape=albert::core::SceneryPart::Shape::Cylinder;tank.centre={0,0,4};tank.size={4,4,8};scenery.parts.push_back(tank);
+    albert::Site site(scenery);site.node()->visible=true;world->add(site.node());world->remove(*blocker);light->intensity=0;auto ambient=AmbientLight::create(Color(0xffffff),1);world->add(ambient);
+    camera->position.set(0,0,50);camera->lookAt(Vector3());camera->left=camera->bottom=-10;camera->right=camera->top=10;camera->updateProjectionMatrix();renderer.render(*world,*camera);const auto contact=renderer.readRGBPixels();
+    site.quality(0);renderer.render(*world,*camera);const auto noContact=renderer.readRGBPixels();int occluded=0;
+    for(std::size_t i=0;i<contact.size();i+=3)occluded+=int(noContact[i])-contact[i]>12;
+    std::cout<<"Ambient contact pixels "<<occluded<<"\n";require(occluded>100,"Baked contact field did not darken ambient illumination");
+    site.quality(1);ambient->intensity=0;renderer.render(*world,*camera);const auto night=renderer.readRGBPixels();require(std::count_if(night.begin(),night.end(),[](auto v){return v>1;})==0,"Contact shading emits light at night");
+    renderer.scene.shadowMetersPerUnit=0;renderer.scene.shadows=false;
+}
 #include "vehicle_visuals.hpp"
 #include "plume_visuals.hpp"
 #include "production_visuals.hpp"
@@ -796,19 +849,20 @@ void lunarAdaptationLevels(){
 int main(int argc,char** argv) {
     try {
 #ifdef ALBERT_TEST_RPC
+        if(argc>2&&std::string_view(argv[1])=="shadow-captures"){landCaptures(argv[2],false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="land-captures"){landCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="tank-farm-captures"){landCaptures(argv[2],false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="production-captures"){landCaptures(argv[2],true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="plume-captures"){plumeCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
 #endif
-        controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();
+        shadowStability();controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();
 #ifdef ALBERT_TEST_RPC
         productionData();industrialData();
 #endif
         if(argc>1){
             std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';return 77;}
-            if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";graphics(*gpu);require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}
+            if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";shadowGraphics(*gpu);graphics(*gpu);require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}
         }
         return 0;
     }

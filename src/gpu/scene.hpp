@@ -20,6 +20,8 @@ public:
     float exposure=1;
     bool toneMapping=true; // ACES filmic (threepp's ACESFilmic); false: none, as threepp's default.
     bool shadows=false; // Sun shadow map for castShadow meshes on receiveShadow ones.
+    // Four fixed, camera-centred light-space levels; metres/world unit (0: the light's legacy map).
+    float shadowMetersPerUnit=0;bool shadowHigh=true;
     unsigned samples=4; // Multisampling: 4 (resolved into the target) or 1.
     bool measured=true; // GPU timing of the render (off for a second view).
     // The air this frame: aerial perspective, sunlight and sky light through `atmosphere` around
@@ -49,6 +51,8 @@ public:
     // Clears target (scene background) and depth, then draws, recording into encoder. Uniforms are
     // written through the queue: submit this encoder before the next render().
     void render(threepp::Scene& scene,threepp::Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder);
+    [[nodiscard]] unsigned shadowDrawn()const;
+    [[nodiscard]] std::size_t shadowBytes()const;
     [[nodiscard]] unsigned drawn()const; // Draw calls in the last render.
     [[nodiscard]] std::string memory()const; // What the GPU copies hold: counts and MB of index buffers, attributes, textures and materials.
     [[nodiscard]] std::size_t vertexBytes()const; // Vertex buffers resident on the GPU.
