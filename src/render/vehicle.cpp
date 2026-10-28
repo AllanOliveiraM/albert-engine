@@ -1,5 +1,6 @@
 #include "vehicle.hpp"
 #include "lighting.hpp"
+#include "grid_fin.hpp"
 #include "core/vents.hpp"
 #include <algorithm>
 #include <array>
@@ -127,7 +128,8 @@ Vehicle::Vehicle(const core::VehicleLook& look){
     }
     for(auto& [key,geometries]:hulls){auto mesh=part(joined(geometries),hullMaterials.at(key));mesh->name="vehicle hull";root_->add(mesh);}
 
-    for(const auto& p:look.parts){ // A plate out from its hinge line; a grid fin's as a lattice of bars.
+    std::map<std::tuple<float,float,float>,std::array<GridFin,2>> grids;
+    for(const auto& p:look.parts){ // A plate out from its hinge line; grid sheets share one generated source per size.
         if(p.name=="vent")continue; // The band supplies real apertures and their steel ligaments.
         Part x;x.pivot=Object3D::create();x.pivot->position.copy(point(p.hinge));x.axis=axisOf(p.axis).normalize();x.gain=p.gain;x.offset=p.offset;x.surface=p.surface;
         Vector3 out=axisOf(p.outward);out.sub(Vector3(x.axis).multiplyScalar(out.dot(x.axis)));if(out.lengthSq()<1e-12f)out.set(1,0,0);out.normalize();
@@ -142,16 +144,18 @@ Vehicle::Vehicle(const core::VehicleLook& look){
             else{const float along=Vector3(static_cast<float>(-p.axis.y),static_cast<float>(-p.axis.x),static_cast<float>(p.axis.z)).dot(x.axis)<0?-1.f:1.f;
                 g=plate(w,t,span,static_cast<float>(p.tipSpan<0?p.span:p.tipSpan),along*static_cast<float>(p.tipShift),static_cast<float>(p.tipThickness<0?p.thickness:p.tipThickness));}
             if(flap)x.pivot->add(part(g,m));else hardware(g,x.pivot.get(),Color(p.color).multiplyScalar(.65f));
-        }else{ // Blade depth follows flow through the lattice; radial spindle is local z.
-            for(int tier=0;tier<2;++tier){const int nx=tier==0?16:6,nz=tier==0?10:4;const float blade=tier==0?.045f:.085f;
-                std::vector<std::shared_ptr<BufferGeometry>> grid;
-                for(int i=0;i<=nz;++i){const bool edge=i==0||i==nz;auto g=BoxGeometry::create(w,t,edge?.12f:blade);g->translate(0,0,span*(float(i)/nz-.5f));grid.push_back(g);}
-                for(int i=0;i<=nx;++i){const bool edge=i==0||i==nx;auto g=BoxGeometry::create(edge?.12f:blade,t,span);g->translate(w*(float(i)/nx-.5f),0,0);grid.push_back(g);}
-                hardware(joined(grid),x.pivot.get(),Color(.22f,.235f,.25f),.42f,.85f,tier);}
-            hardware(bar({0,0,-span/2-.18f},{0,0,-span/2+.42f},.23f,16),x.pivot.get(),steel);
-            // Bearing housing on the vehicle frame, not on the turning grid.
-            Vector3 a=Vector3(x.pivot->position).sub(Vector3(x.axis).multiplyScalar(span/2)),b=a;
-            const Vector3 d=Vector3(x.axis).multiplyScalar(.28f);a.sub(d);b.add(d);hardware(bar(a,b,.31f,16),nullptr,dark);
+        }else{ // The radial spindle, root plate and knuckle turn; the buried actuator and smooth hood do not.
+            auto [it,fresh]=grids.try_emplace({w,span,t});if(fresh)for(int tier=0;tier<2;++tier)it->second[tier]=gridFin(w,span,t,tier);
+            for(int tier=0;tier<2;++tier)hardware(it->second[tier].geometry,x.pivot.get(),Color(.105f,.11f,.12f),.29f,.92f,tier);
+            auto frame=BoxGeometry::create(.40f*w,t,.22f);frame->translate(0,0,-span/2+.11f);
+            hardware(frame,x.pivot.get(),Color(.12f,.125f,.13f),.36f,.88f);
+            hardware(bar({0,0,-span/2-.35f},{0,0,-span/2+.48f},.22f,16),x.pivot.get(),steel,.28f,.92f);
+            hardware(bar({0,0,-span/2-.08f},{0,0,-span/2+.36f},.38f,16),x.pivot.get(),dark,.36f,.85f);
+            auto fixed=[&](const std::shared_ptr<BufferGeometry>& g,Color colour,float rough,float metal){Matrix4 m;m.makeRotationFromQuaternion(x.base);g->applyMatrix4(m);
+                g->translate(x.pivot->position.x,x.pivot->position.y,x.pivot->position.z);hardware(g,nullptr,colour,rough,metal);};
+            auto actuator=BoxGeometry::create(1.35f,.65f,.8f);actuator->translate(0,0,-span/2-.43f);fixed(actuator,dark,.5f,.65f);
+            for(int tier=0;tier<2;++tier){auto hood=SphereGeometry::create(1,tier==0?24:12,tier==0?12:6);hood->scale(.94f,.35f,.65f);hood->translate(0,.66f,-span/2-.28f);
+                Matrix4 m;m.makeRotationFromQuaternion(x.base);hood->applyMatrix4(m);hood->translate(x.pivot->position.x,x.pivot->position.y,x.pivot->position.z);hardware(hood,nullptr,Color(.82f,.84f,.85f),.32f,.12f,tier);}
         }
         if(flap){ // Knuckles and actuator bosses turn with the flap; an aerocover stays on the hull.
             for(int i=0;i<5;++i){const float z=span*(float(i)/4-.5f);hardware(bar({0,0,z-.17f},{0,0,z+.17f},.19f,12),x.pivot.get(),steel);

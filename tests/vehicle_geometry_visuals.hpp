@@ -22,9 +22,24 @@ void vehicleGeometryControls(){
     // A ray through a fin cell must pass; the adjacent steel blade must occlude it.
     auto* fin=booster.node()->getObjectByName("grid fin");booster.node()->updateMatrixWorld();
     const auto& spec=*std::find_if(look.parts.begin(),look.parts.end(),[](const auto& p){return p.grid;});
-    auto hits=[&](float x){Vector3 q(x,0,float(spec.span)*.35f),normal(0,1,0);q.applyQuaternion(fin->quaternion).add(fin->position);normal.applyQuaternion(fin->quaternion);
+    auto hits=[&](float x,float z=0){Vector3 q(x,0,z),normal(0,1,0);q.applyQuaternion(fin->quaternion).add(fin->position);normal.applyQuaternion(fin->quaternion);
         Raycaster ray(Vector3(q).add(Vector3(normal).multiplyScalar(1)),Vector3(normal).negate());ray.farPlane=2;return !ray.intersectObject(*near).empty();};
-    require(!hits(float(spec.width)*(.5f/16))&&hits(0),"Grid fin cells are filled or their steel blades are missing");
+    require(!hits(.48f*.70710678f)&&hits(0)&&hits(0,-float(spec.span)/2+.1f),"Diamond cells or thick grid root are missing");
+    require(!hits(float(spec.width)*.49f,float(spec.span)*.49f),"Grid fin retained a rectangular corner");
+    // The white actuator hoods must stay on the hull while their adjacent steel sheets turn.
+    const auto* finish=near->geometry()->getAttribute<float>("finish");const auto posed=positions->array();sample=geometrySample(look,-.3f);booster.animate(&sample,2);unsigned fixed=0;
+    for(int i=0;i<finish->count();++i)if(std::abs(finish->getY(i)-.12f)<1e-5f){++fixed;for(int j=0;j<3;++j)require(posed[3*i+j]==positions->array()[3*i+j],"Grid actuator hood turned with the spindle");}
+    require(fixed>100,"Grid root lost its fixed white hood");
+    const auto* colour=near->geometry()->getAttribute<float>("color");unsigned lips=0,wells=0;
+    for(int i=0;i<finish->count();++i)if(std::abs(finish->getX(i)-.29f)<1e-5f&&std::abs(finish->getY(i)-.92f)<1e-5f){lips+=colour->getX(i)>.17f;wells+=colour->getX(i)<.03f;}
+    require(lips>100&&wells>100,"Batched grid fins lost their bright lips or dark inner wells");
+    // A lateral ray above the concave lip passes at mid-cell, where the straight LOD sheet still blocks it.
+    auto sheet=MeshBasicMaterial::create();sheet->side=Side::Double;
+    for(int tier=0;tier<2;++tier){const auto grid=albert::gridFin(float(spec.width),float(spec.span),float(spec.thickness),tier);auto mesh=Mesh::create(grid.geometry,sheet);mesh->updateMatrixWorld();
+        const Vector3 across(-.70710678f,0,.70710678f);auto lip=[&](float y){const Vector3 centre(.48f*.35355339f,y,.48f*.35355339f);Raycaster ray(Vector3(centre).addScaledVector(across,.08f),Vector3(across).negate());ray.farPlane=.16f;return !ray.intersectObject(*mesh).empty();};
+        require(lip(0)&&lip(.24f)==(tier==1),"Grid sheets lost their open concave lip or straight LOD");
+        const auto* vertices=grid.geometry->getAttribute<float>("position");for(int i=0;i<vertices->count();++i)
+            require(std::abs(vertices->getX(i))<=spec.width/2+.0001&&std::abs(vertices->getY(i))<=spec.thickness/2+.0001&&std::abs(vertices->getZ(i))<=spec.span/2+.0001,"Grid sheets exceed the declared fin envelope");}
     // Radial rays cross an opening above the dome, then hit its neighbouring ligament.
     const auto& ring=look.sections.front();const float y=float(look.length/2-ring.from-.45),r=float(look.diameter/2);
     auto radial=[&](float angle){Vector3 d(std::sin(angle),0,std::cos(angle));Raycaster ray(Vector3(d).multiplyScalar(r+1).setY(y),Vector3(d).negate());ray.farPlane=1.5f;return !ray.intersectObject(*near).empty();};

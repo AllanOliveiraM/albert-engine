@@ -18,11 +18,11 @@ public:
     void add(const std::shared_ptr<threepp::BufferGeometry>& g,threepp::Object3D* frame,
              threepp::Color colour,float rough=.45f,float metal=.8f,
              std::shared_ptr<threepp::ShaderMaterial> bell={}){
-        const auto* p=g->getAttribute<float>("position");const auto* n=g->getAttribute<float>("normal");
+        const auto* p=g->getAttribute<float>("position");const auto* n=g->getAttribute<float>("normal");const auto* c=g->getAttribute<float>("color");
         const unsigned first=static_cast<unsigned>(positions_.size()/3);pieces_.push_back({frame,first,static_cast<std::size_t>(p->count()),{},bell,{},{},{},false});
         const float length=bell&&bell->uniforms.contains("bellLength")?bell->uniforms.at("bellLength").value<float>():1.f;
         for(int i=0;i<p->count();++i){positions_.insert(positions_.end(),{p->getX(i),p->getY(i),p->getZ(i)});
-            normals_.insert(normals_.end(),{n->getX(i),n->getY(i),n->getZ(i)});colours_.insert(colours_.end(),{colour.r,colour.g,colour.b});finish_.insert(finish_.end(),{rough,metal});
+            normals_.insert(normals_.end(),{n->getX(i),n->getY(i),n->getZ(i)});colours_.insert(colours_.end(),{colour.r*(c?c->getX(i):1.f),colour.g*(c?c->getY(i):1.f),colour.b*(c?c->getZ(i):1.f)});finish_.insert(finish_.end(),{rough,metal});
             const float t=std::clamp(-p->getY(i)/length,0.f,1.f);auto smooth=[](float a,float b,float x){const float t=std::clamp((x-a)/(b-a),0.f,1.f);return t*t*(3-2*t);};
             weights_.insert(weights_.end(),{smooth(.35f,.78f,t),smooth(.87f,.99f,t)});}
         if(const auto* ix=g->getIndex())for(int i=0;i<ix->count();++i)indices_.push_back(first+static_cast<unsigned>(ix->getX(i)));

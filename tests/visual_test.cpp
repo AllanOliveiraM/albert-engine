@@ -1,4 +1,5 @@
 #include "animation.hpp"
+#include "grid_fin.hpp"
 #include "broadcast_camera.hpp"
 #include "physics/atmosphere.hpp"
 #include "borders.hpp"
@@ -434,6 +435,7 @@ void towerGraphics(Target& renderer){
 }
 #include "night_visuals.hpp"
 #include "camera_captures.hpp"
+#include "grid_fin_captures.hpp"
 void graphics(Target& renderer) {
     nightGraphics(renderer);
     vehicleGraphics(renderer);entryGraphics(renderer);
@@ -884,6 +886,7 @@ int main(int argc,char** argv) {
         if(argc>2&&std::string_view(argv[1])=="launch-cloud-captures"){launchCloudCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="plume-captures"){plumeCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="entry-captures"){entryCaptures(argv[2]);return 0;}
+        if(argc>2&&std::string_view(argv[1])=="grid-fin-captures"){gridFinCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="geometry-captures"){vehicleGeometryCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
 #endif
