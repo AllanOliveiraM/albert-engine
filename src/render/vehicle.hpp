@@ -37,6 +37,7 @@ private:
     struct Piece {std::shared_ptr<threepp::Mesh> mesh;threepp::Vector3 velocity,spin;};
     std::shared_ptr<threepp::Mesh> root_;std::vector<Engine> engines_;std::vector<Part> parts_;std::vector<Jet> jets_;
     double length_=1;std::shared_ptr<threepp::Mesh> fire_,smoke_;std::vector<Piece> pieces_; // The breakup's, made when it comes.
+    std::shared_ptr<threepp::PointLight> exhaustLight_; // One bounded warm source per stage, weighted by the lit bells.
     float obstruction_=0,impingement_=0,thrust_=0;
     std::vector<std::shared_ptr<threepp::ShaderMaterial>> surfaces_;float soot_=0;double surfaceUtc_=0;bool surfaceTimed_=false;
     std::array<EngineSound,256> engineSounds_{};std::uint64_t soundSerial_=0;

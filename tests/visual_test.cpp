@@ -262,6 +262,7 @@ struct GpuTarget final:Target {
     }
 };
 #include "vehicle_visuals.hpp"
+#include "plume_visuals.hpp"
 #include "land_visuals.hpp"
 void roadGraphics(Target& renderer){
     auto site=std::make_shared<albert::core::Scenery>();site->latitude=25.996128*3.141592653589793/180;site->longitude=-97.154517*3.141592653589793/180;
@@ -360,6 +361,7 @@ void towerGraphics(Target& renderer){
 }
 void graphics(Target& renderer) {
     vehicleGraphics(renderer);
+    plumeGraphics(renderer);
     roadGraphics(renderer);
     padGraphics(renderer);
     towerGraphics(renderer);
@@ -791,6 +793,7 @@ int main(int argc,char** argv) {
     try {
 #ifdef ALBERT_TEST_RPC
         if(argc>2&&std::string_view(argv[1])=="land-captures"){landCaptures(argv[2]);return 0;}
+        if(argc>2&&std::string_view(argv[1])=="plume-captures"){plumeCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
 #endif
         controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();

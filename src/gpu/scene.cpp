@@ -202,7 +202,7 @@ struct SceneRenderer::Impl {
             e[13].binding=13;e[13].visibility=both;e[13].sampler.type=WGPUSamplerBindingType_Filtering;
             WGPUBindGroupLayoutDescriptor d{};d.entryCount=14;d.entries=e;frameLayout=wgpuDeviceCreateBindGroupLayout(device,&d);
         }
-        frameBuffer=buffer(512,WGPUBufferUsage_Uniform);
+        frameBuffer=buffer(640,WGPUBufferUsage_Uniform);
         {WGPUTextureDescriptor d{};d.size={1,1,1};d.format=WGPUTextureFormat_Depth32Float;d.usage=WGPUTextureUsage_TextureBinding;d.mipLevelCount=1;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;
          dummyShadow=wgpuDeviceCreateTexture(device,&d);dummyShadowView=wgpuTextureCreateView(dummyShadow,nullptr);
          WGPUSamplerDescriptor sd{};sd.addressModeU=sd.addressModeV=sd.addressModeW=WGPUAddressMode_ClampToEdge;sd.magFilter=sd.minFilter=WGPUFilterMode_Linear;sd.mipmapFilter=WGPUMipmapFilterMode_Nearest;
@@ -245,7 +245,7 @@ struct SceneRenderer::Impl {
         for(auto& t:slots){if(t.depthView)wgpuTextureViewRelease(t.depthView);if(t.depth)wgpuTextureRelease(t.depth);if(t.colourView)wgpuTextureViewRelease(t.colourView);if(t.colour)wgpuTextureRelease(t.colour);}
     }
     WGPUBindGroup frameWith(WGPUTextureView shadow,const Atmosphere* a,WGPUTextureView clouds,const Ocean* ocean){ // a: ready tables, or null for placeholders.
-        WGPUBindGroupEntry e[14]{};e[0].binding=0;e[0].buffer=frameBuffer;e[0].size=512;e[1].binding=1;e[1].textureView=shadow;e[2].binding=2;e[2].sampler=shadowSampler;
+        WGPUBindGroupEntry e[14]{};e[0].binding=0;e[0].buffer=frameBuffer;e[0].size=640;e[1].binding=1;e[1].textureView=shadow;e[2].binding=2;e[2].sampler=shadowSampler;
         e[3].binding=3;e[3].buffer=a?a->parameters():noAir;e[3].size=Atmosphere::parameterBytes;
         const WGPUTextureView tables[4]{a?a->transmittance():white,a?a->scattering():noVolumeView,a?a->mie():noVolumeView,a?a->irradiance():white};
         for(std::uint32_t i=0;i<4;++i){e[4+i].binding=4+i;e[4+i].textureView=tables[i];}
@@ -553,10 +553,11 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     Frustum frustum;Matrix4 screen;screen.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);frustum.setFromProjectionMatrix(screen);
     struct Item {Object3D* object;Material* material;BufferGeometry* geometry;const Impl::Compiled* program;float z;int order;bool points;};
     std::vector<Item> background,opaque,blended;Vector3 sun;float sunOn=0;Color sunColor(0,0,0),ambient(0,0,0);
-    DirectionalLight* shadowLight=nullptr;std::vector<Mesh*> casters;
+    DirectionalLight* shadowLight=nullptr;std::vector<Mesh*> casters;std::vector<PointLight*> localLights;
     scene.traverseVisible([&](Object3D& o){
         if(auto* light=dynamic_cast<DirectionalLight*>(&o)){Vector3 p,t;p.setFromMatrixPosition(*light->matrixWorld);t.setFromMatrixPosition(*light->target().matrixWorld);sun=p.sub(t).normalize();sunOn=1;sunColor=light->color;sunColor.multiplyScalar(light->intensity);
             if(shadows&&light->castShadow&&light->shadow)shadowLight=light;return;}
+        if(auto* light=dynamic_cast<PointLight*>(&o)){if(light->intensity>0&&light->distance>0)localLights.push_back(light);return;}
         if(auto* mesh=dynamic_cast<Mesh*>(&o);mesh&&o.castShadow&&mesh->material()&&mesh->material()->visible&&mesh->geometry())casters.push_back(mesh);
         if(auto* light=dynamic_cast<AmbientLight*>(&o)){Color c=light->color;c.multiplyScalar(light->intensity);ambient.add(c);return;}
         const bool points=dynamic_cast<Points*>(&o)!=nullptr;if(!points&&!dynamic_cast<Mesh*>(&o))return;
@@ -571,7 +572,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     std::stable_sort(opaque.begin(),opaque.end(),[](const Item& a,const Item& b){return a.order!=b.order?a.order<b.order:a.z<b.z;});
     std::stable_sort(blended.begin(),blended.end(),[](const Item& a,const Item& b){return a.order!=b.order?a.order<b.order:a.z>b.z;});
     // Frame uniforms.
-    float f[128]{};std::memcpy(f,camera.matrixWorldInverse.elements.data(),64);std::memcpy(f+16,projection.elements.data(),64);
+    float f[160]{};std::memcpy(f,camera.matrixWorldInverse.elements.data(),64);std::memcpy(f+16,projection.elements.data(),64);
     const bool shadowing=shadowLight&&!casters.empty()&&dynamic_cast<OrthographicCamera*>(shadowLight->shadow->camera.get());
     if(shadowing){ // threepp places the light camera; the projection maps its depth to 0-1 for WebGPU.
         auto& sh=*shadowLight->shadow;sh.updateMatrices(*shadowLight);const auto& oc=static_cast<OrthographicCamera&>(*sh.camera);
@@ -616,6 +617,15 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     Vector3 eye;eye.setFromMatrixPosition(*camera.matrixWorld);f[32]=eye.x;f[33]=eye.y;f[34]=eye.z;f[35]=1;
     f[36]=static_cast<float>(width);f[37]=static_cast<float>(height);f[38]=camera.nearPlane;
     f[40]=sun.x;f[41]=sun.y;f[42]=sun.z;f[43]=sunOn;f[44]=sunColor.r;f[45]=sunColor.g;f[46]=sunColor.b;f[48]=ambient.r;f[49]=ambient.g;f[50]=ambient.b;f[52]=exposure;f[53]=toneMapping?1.f:0.f;
+    // At most four bounded local lights, selected by their contribution at the eye. Keep all distances
+    // relative to their range: vehicle nodes use metres locally and Earth radii in the live scene.
+    auto lightScore=[&](PointLight* light){Vector3 p;p.setFromMatrixPosition(*light->matrixWorld);const float scale=Vector3().setFromMatrixColumn(*light->matrixWorld,0).length();
+        return light->intensity/(1+p.distanceToSquared(eye)/std::max(scale*scale,1e-20f));};
+    std::stable_sort(localLights.begin(),localLights.end(),[&](auto* a,auto* b){return lightScore(a)>lightScore(b);});
+    for(std::size_t i=0;i<std::min<std::size_t>(4,localLights.size());++i){auto* light=localLights[i];Vector3 p;p.setFromMatrixPosition(*light->matrixWorld);
+        const float scale=Vector3().setFromMatrixColumn(*light->matrixWorld,0).length(),range=light->distance;
+        f[124+4*i]=p.x;f[125+4*i]=p.y;f[126+4*i]=p.z;f[127+4*i]=range*scale;
+        const float strength=light->intensity/(range*range);f[140+4*i]=light->color.r*strength;f[141+4*i]=light->color.g*strength;f[142+4*i]=light->color.b*strength;}
     wgpuQueueWriteBuffer(g.queue,g.frameBuffer,0,f,sizeof f);
     // Volumetric clouds: marched now, laid over the opaque objects in the pass. Their noise drifts with the wind along east and
     // north at the eye (planet frame: y polar, the map's u growing east), wrapped to its period, so it never jumps.

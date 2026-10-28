@@ -109,9 +109,9 @@ void earthLayers(){
     albert::gpu::define("albert:corona",corona);
     // vehicle.cpp: one density contribution per ray through an open cone, or a soft nozzle disc to fill the axial opening.
     Program plume;plume.attributes=surfaceAttributes;plume.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32},{"diamonds",Uniform::f32},
-        {"time",Uniform::f32},{"radii",Uniform::vec2},{"falloff",Uniform::f32},{"rarefied",Uniform::f32},{"disc",Uniform::f32},{"metres",Uniform::f32},{"vacuum",Uniform::f32},{"impingement",Uniform::f32},{"flash",Uniform::f32}};
+        {"time",Uniform::f32},{"radii",Uniform::vec2},{"falloff",Uniform::f32},{"rarefied",Uniform::f32},{"disc",Uniform::f32},{"metres",Uniform::f32},{"vacuum",Uniform::f32},{"impingement",Uniform::f32},{"flash",Uniform::f32},{"inner",Uniform::f32},{"quality",Uniform::f32},{"spacing",Uniform::f32}};
     plume.wgsl=R"(
-struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32, time: f32, radii: vec2f, falloff: f32, rarefied: f32, disc: f32, metres: f32, vacuum: f32, impingement: f32, flash: f32 };
+struct Material { core: vec3f, edge: vec3f, strength: f32, diamonds: f32, time: f32, radii: vec2f, falloff: f32, rarefied: f32, disc: f32, metres: f32, vacuum: f32, impingement: f32, flash: f32, inner: f32, quality: f32, spacing: f32 };
 @group(2) @binding(0) var<uniform> material: Material;
 struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @location(1) local: vec3f, @location(2) localNormal: vec3f, @location(3) worldNormal: vec3f, @location(4) world: vec3f };
 @vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f) -> Surface {
@@ -157,21 +157,35 @@ struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @locati
     let path = min(sideDistance, endDistance);
     let metres = length(x * inward.x + y * inward.y + z * inward.z) / length(x);
     let middle = v.local + inward * path * 0.5;
-    let down = clamp(-mix(v.local.y, middle.y, material.rarefied), 0.0, 1.0); // Sample the gas along the chord, including through the open downstream end.
+    let down = clamp(-middle.y, 0.0, 1.0); // Sample the gas along the chord, including through the open downstream end.
     let sampleRadius = material.radii.x + slope * down;
     let column = min(5.0, path * metres / (2.0 * mix(material.radii.x, sampleRadius, material.rarefied))); // Dilution keeps the broad bloom translucent and brightest along its axis.
     let distance = down * material.metres; // Keep diamonds within the first twenty metres despite the growing envelope.
     let wave = sin(v.uv.x * 18.84956 + down * 47.0 - material.time * 11.0);
     let flicker = 0.94 + 0.04 * wave + 0.02 * sin(down * 91.0 - material.time * 29.0);
-    let phase = distance * 1.9635 + 0.06 * wave;
-    let bands = pow(0.5 + 0.5 * cos(phase), 8.0) * exp(-distance * 0.09) * (1.0 - smoothstep(15.0, 24.0, distance));
+    let phase = distance * 6.283185 / max(material.spacing, 0.01) + 0.06 * wave;
+    let bands = pow(max(0.0, 0.5 + 0.5 * cos(phase)), 8.0) * exp(-distance * 0.09) * (1.0 - smoothstep(15.0, 24.0, distance));
     let wall = material.impingement * smoothstep(0.55, 1.0, down);
     let tail = mix(1.0 - smoothstep(0.65, 1.0, down), 1.0, wall);
     let faint = mix(1.0, (0.015 + 0.985 * exp(-distance * 0.045)) * (1.0 - smoothstep(25.0, 100.0, distance)), material.vacuum);
-    let density = exp(-down * material.falloff) * tail * faint + 1.4 * wall; // Rarefied wings stay visible; stalled gas remains dense right up to the surface.
-    let alpha = 1.0 - exp(-column * density * flicker * material.strength * (1.0 + 2.2 * material.diamonds * bands));
-    let colour = mix(mix(material.edge, material.core, clamp(exp(-distance * 0.25) + 0.3 * material.diamonds * bands, 0.0, 1.0)), mix(vec3f(1.0, 0.75, 0.3), vec3f(1.0, 0.55, 0.15), down), wall);
-    return vec4f(linearToSrgb((colour + vec3f(material.flash) * exp(-distance * 0.8)) * airFilter(v.world)) * alpha, alpha * mix(mix(1.0, 0.04, material.rarefied), 1.0, wall)); // Recirculating gas absorbs even in thin air.
+    // A soft radial density along the finite cone chord gives both side and axial views a volume.
+    // Three samples resolve a grazing ray; low quality uses its midpoint. No particles or ray march.
+    var radial = 0.0;
+    let samples = select(1u, 3u, material.quality > 0.5);
+    for (var i = 0u; i < samples; i++) {
+        let at = v.local + inward * path * (f32(i) + 0.5) / f32(samples);
+        let r = max(0.001, material.radii.x - slope * at.y);
+        let cell = mix(1.0, 0.72 + 0.28 * (0.5 + 0.5 * cos(phase)), material.inner * material.diamonds);
+        let axis = clamp(length(at.xz) / (r * cell), 0.0, 1.0);
+        radial += (1.0 - smoothstep(0.15, 1.0, axis)) / f32(samples);
+    }
+    let density = radial * exp(-down * material.falloff) * tail * faint + 1.4 * wall; // Rarefied wings stay visible; stalled gas remains dense right up to the surface.
+    let alpha = 1.0 - exp(-column * density * flicker * material.strength * (1.0 + 2.2 * material.inner * material.diamonds * bands));
+    let hot = clamp(exp(-down * mix(4.5, 1.2, material.inner)) + 0.6 * material.inner * material.diamonds * bands, 0.0, 1.0);
+    let rim = (1.0 - material.inner) * (1.0 - material.rarefied) * (1.0 - smoothstep(0.1, 0.6, radial));
+    let edge = mix(material.edge, vec3f(0.5, 0.18, 0.85), rim);
+    let colour = mix(mix(edge, material.core * (1.0 + material.inner * material.diamonds * bands), hot), mix(vec3f(1.0, 0.75, 0.3), vec3f(1.0, 0.55, 0.15), down), wall);
+    return vec4f(linearToSrgb((colour + vec3f(material.flash) * exp(-distance * 0.8)) * airFilter(v.world)) * alpha, alpha * mix(mix(mix(0.24, 0.85, material.inner), 0.04, material.rarefied), 1.0, wall)); // Recirculating gas absorbs even in thin air.
 }
 )";
     albert::gpu::define("albert:plume",plume);

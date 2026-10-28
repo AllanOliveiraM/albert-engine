@@ -8,7 +8,7 @@ namespace albert::gpu {
 class Atmosphere;class Ocean;class Clouds;
 // Draws a threepp scene with WebGPU, as threepp's GLRenderer would: frustum culling, opaque then
 // transparent objects sorted by renderOrder and depth, threepp blending, depth and face state,
-// one directional and one ambient light. Reversed Z on depth32float: infinite for perspective
+// one directional, one ambient and up to four bounded point lights. Reversed Z on depth32float: infinite for perspective
 // cameras (their far plane is unused), near-to-far for orthographic ones. Meshes and Points (instanced quads) with built-in Basic,
 // Standard and Phong materials or ShaderMaterials named after a defined Program; anything else
 // is skipped and reported once.

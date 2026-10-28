@@ -142,10 +142,10 @@ int main(){
             WGPUSamplerDescriptor sd{};sd.addressModeU=sd.addressModeV=sd.addressModeW=WGPUAddressMode_ClampToEdge;sd.magFilter=sd.minFilter=WGPUFilterMode_Linear;sd.lodMaxClamp=1;sd.maxAnisotropy=1;
             WGPUSampler sampler=wgpuDeviceCreateSampler(gpu->device(),&sd);
             // The frame (far module only): camera at the world origin, the planet frame's origin ~1.4e8 km away.
-            float frame[128]{};frame[76]=frame[81]=frame[86]=frame[91]=1;frame[88]=frame[92]=1.21e8f;frame[89]=frame[93]=3.4e7f;frame[90]=frame[94]=-6.3e7f;frame[95]=1;frame[96]=.57f;frame[98]=.82f;frame[35]=1;
+            float frame[160]{};frame[76]=frame[81]=frame[86]=frame[91]=1;frame[88]=frame[92]=1.21e8f;frame[89]=frame[93]=3.4e7f;frame[90]=frame[94]=-6.3e7f;frame[95]=1;frame[96]=.57f;frame[98]=.82f;frame[35]=1;
             WGPUBufferDescriptor fd{};fd.size=sizeof frame;fd.usage=WGPUBufferUsage_Uniform|WGPUBufferUsage_CopyDst;WGPUBuffer frameBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),frameBuffer,0,frame,sizeof frame);
             // A frame at the Earth whose air ground is lowered 27 m (the Cape's terrain): identity planet frame.
-            float lowered[128]{};lowered[76]=lowered[81]=lowered[86]=lowered[91]=1;lowered[95]=1;lowered[96]=.57f;lowered[98]=.82f;lowered[99]=-.027f;lowered[35]=1;
+            float lowered[160]{};lowered[76]=lowered[81]=lowered[86]=lowered[91]=1;lowered[95]=1;lowered[96]=.57f;lowered[98]=.82f;lowered[99]=-.027f;lowered[35]=1;
             WGPUBuffer loweredBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),loweredBuffer,0,lowered,sizeof lowered);
             auto run=[&](const std::string& source,WGPUBuffer frameIn,const Atmosphere* tables=nullptr,WGPUTextureView cloudMap=nullptr,WGPUSampler cloudSampler=nullptr){ // One dispatch (with a frame, if given); the 64 floats of its probes.
                 const Atmosphere& air=tables?*tables:earth;
@@ -195,7 +195,7 @@ int main(){
 )";
             // Cloud shadows read the layer's map in geodetic latitude (as its shell): a map whose density is v,
             // a body of axis ratio 0.5, a point at parametric latitude 45 degrees under the layer, the sun overhead.
-            float shadowFrame[128]{};shadowFrame[76]=shadowFrame[81]=shadowFrame[86]=shadowFrame[91]=1;shadowFrame[95]=1;shadowFrame[96]=shadowFrame[97]=std::sqrt(.5f);
+            float shadowFrame[160]{};shadowFrame[76]=shadowFrame[81]=shadowFrame[86]=shadowFrame[91]=1;shadowFrame[95]=1;shadowFrame[96]=shadowFrame[97]=std::sqrt(.5f);
             shadowFrame[100]=12;shadowFrame[101]=1;shadowFrame[103]=.5f;
             WGPUBuffer shadowBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),shadowBuffer,0,shadowFrame,sizeof shadowFrame);
             constexpr unsigned rows=256;std::vector<unsigned char> gradient(4*rows*4);for(unsigned r=0;r<rows;++r)for(unsigned c=0;c<4;++c){auto* t=&gradient[4*(r*4+c)];t[0]=t[2]=0;t[1]=static_cast<unsigned char>(std::lround((r+.5)/rows*255));t[3]=255;}
@@ -240,7 +240,7 @@ int main(){
             { // Lunar photometry (McEwen's lunar-Lambert) summed over the disc in the shader against the Moon's measured phase curve,
               // normalised at 30 degrees: ROLO (Kieffer and Stone 2005, 553.8 nm, zero libration, from rimopy's coefficients) and
               // Lane and Irvine (1973, Table V, V band); and earthshine from the Earth 384,400 km away (60.27 radii).
-                float shine[128]{};shine[0]=shine[5]=shine[10]=shine[15]=1;shine[40]=1;shine[43]=1;shine[107]=1; // View identity, the sun towards +x, the Earth at the origin.
+                float shine[160]{};shine[0]=shine[5]=shine[10]=shine[15]=1;shine[40]=1;shine[43]=1;shine[107]=1; // View identity, the sun towards +x, the Earth at the origin.
                 WGPUBuffer shineBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),shineBuffer,0,shine,sizeof shine);
                 const std::string lunarCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+albert::gpu::photometry+R"(
 @group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;

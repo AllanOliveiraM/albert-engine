@@ -28,6 +28,8 @@ struct Frame {
     oceanEast: vec4f,        // East at the anchor (world, unit); w: metres per world unit.
     oceanNorth: vec4f,       // North at the anchor (world, unit).
     oceanSlopes: vec4f,      // Mean square slope in each cascade's band (512, 128, 32 m).
+    localPosition: array<vec4f, 4>, // World position and range; zero range disables the slot.
+    localColour: array<vec4f, 4>,   // Radiance divided by range squared.
 };
 struct Object { model: mat4x4f, modelView: mat4x4f, normalWorld: mat3x3f, normalView: mat3x3f, flags: vec4f }; // flags.x: receives shadows.
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -255,6 +257,20 @@ fn blinnPhong(n: vec3f, l: vec3f, v: vec3f, specular: vec3f, shininess: f32) -> 
     let h = normalize(l + v); let vh = clamp(dot(v, h), 0.0, 1.0); let fresnel = pow(1.0 - vh, 5.0);
     return (specular * (1.0 - fresnel) + fresnel) * 0.25 * (shininess * 0.5 + 1.0) / PI_L * pow(clamp(dot(n, h), 0.0, 1.0), shininess);
 }
+fn localLight(n: vec3f, position: vec3f, albedo: vec3f, f0: vec3f, roughness: f32) -> vec3f {
+    var colour = vec3f(0.0); let v = viewDirection(position);
+    for (var i = 0u; i < 4u; i++) {
+        let source = frame.localPosition[i];
+        if (source.w <= 0.0) { continue; }
+        let delta = ((frame.view * vec4f(source.xyz, 1.0)).xyz - position) / source.w;
+        let d2 = dot(delta, delta);
+        if (d2 >= 1.0) { continue; }
+        let l = delta / max(sqrt(d2), 0.00001);
+        let attenuation = (1.0 - smoothstep(0.6, 1.0, sqrt(d2))) / max(d2, 0.0025);
+        colour += frame.localColour[i].rgb * attenuation * max(dot(n, l), 0.0) * (albedo / PI_L + specularGGX(n, l, v, f0, roughness));
+    }
+    return colour;
+}
 // MeshStandardMaterial: direct sun, ambient and extra irradiance (light maps) on a dielectric/metal.
 // `sun`: the sun's light reaching the point, as a factor of frame.sunColor (shadow, air).
 fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geometryNormal: vec3f, position: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
@@ -263,11 +279,11 @@ fn standardLight(albedo: vec3f, roughnessIn: f32, metalness: f32, n: vec3f, geom
     let diffuse = albedo * (1.0 - metalness); let f0 = mix(vec3f(0.04), albedo, metalness);
     let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
     // The ambient light also mirrored, as by an even sky (f0 of it, less when rough): metal in the shade is not black.
-    return nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * (diffuse + f0 * (1.0 - 0.5 * roughness)) / PI_L;
+    return localLight(n, position, diffuse, f0, roughness) + nl * frame.sunColor.rgb * sun * (diffuse / PI_L + specularGGX(n, l, v, f0, roughness)) + (frame.ambient.rgb + extra) * (diffuse + f0 * (1.0 - 0.5 * roughness)) / PI_L;
 }
 fn phongLight(albedo: vec3f, specular: vec3f, shininess: f32, n: vec3f, position: vec3f, extra: vec3f, sun: vec3f) -> vec3f {
     let l = sunView(); let v = viewDirection(position); let nl = clamp(dot(n, l), 0.0, 1.0) * frame.sun.w;
-    return nl * frame.sunColor.rgb * sun * (albedo / PI_L + blinnPhong(n, l, v, specular, shininess)) + (frame.ambient.rgb + extra) * albedo / PI_L;
+    return localLight(n, position, albedo, specular, 0.6) + nl * frame.sunColor.rgb * sun * (albedo / PI_L + blinnPhong(n, l, v, specular, shininess)) + (frame.ambient.rgb + extra) * albedo / PI_L;
 }
 // three.js perturbNormalArb with dHdxy_fwd (invariant under WebGPU's flipped framebuffer y).
 fn bumpNormal(position: vec3f, normal: vec3f, dBx: f32, dBy: f32, face: f32) -> vec3f {
