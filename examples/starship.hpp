@@ -130,7 +130,7 @@ inline void shipSystems(api::StageDefinition* s){
 // (catch fittings) 9 m below the top, 5.5 m off the axis, under the ±y fins.
 struct Fin {double y,z;}; // The spindle's direction (body y, z).
 constexpr Fin fins[]{{1,0},{-1,0},{0,-1}};
-constexpr double finAt=7.5,pinAt=finAt+.8,finSpan=3.7,finWidth=6.1,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.2;
+constexpr double finAt=7.5,pinAt=finAt+.8,finSpan=4.4,finWidth=5.4,finLimit=30*deg,finSlope=27*2.5/(pi*radius*radius),finDrag=.2;
 // How they look (the scene only), from each one's nose `at` m along its stage: stainless steel; the ship's nose a tangent ogive
 // (11 m) in sections, black tiles on its windward half (+z), four flaps (hinged on its sides along x: +45° square to the
 // flow, -45° folded to the lee) turning with surfaces 1-4 when `moving`, else straight out, square to the hull (riding up the stack, as flown); the booster's vented hot-staging ring
