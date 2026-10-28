@@ -40,6 +40,7 @@ albert::Display::Display(const std::string& title,WindowSize size,const std::fil
     d.context=std::make_unique<gpu::Context>(d.window->handle());d.scene=std::make_unique<gpu::SceneRenderer>(*d.context);d.scene->exposure=1.05f;
     std::printf("WebGPU: %s\n",d.context->adapter().c_str());
     d.window->onResize([this](WindowSize){unsigned w,h;impl_->framebuffer(w,h);impl_->context->resize(static_cast<int>(w),static_cast<int>(h));});
+    if(const char* m=std::getenv("ALBERT_MAXIMIZED");m&&*m&&*m!='0')glfwMaximizeWindow(d.window->handle()); // ALBERT_MAXIMIZED=1: the window opened maximized.
     ImGui::CreateContext();ImGui_ImplGlfw_InitForOther(d.window->handle(),true);
     ImGui_ImplWGPU_InitInfo info;info.Device=d.context->device();info.RenderTargetFormat=d.context->format();info.DepthStencilFormat=WGPUTextureFormat_Undefined;ImGui_ImplWGPU_Init(&info);
     d.dpi=monitor::contentScale().first;
