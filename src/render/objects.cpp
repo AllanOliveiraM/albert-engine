@@ -111,13 +111,14 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             if(gap>-2&&gap<80&&across<5+.2*gap){metres=static_cast<float>(std::max(gap,.3));glow=static_cast<float>(std::clamp(1-(gap-10)/70,0.,1.));break;}}
         v->impinge(metres,glow);}
     // A pad's trench steams while its flight's engines burn over it ("site" with "flight", "site.<id>" with "flight.<id>").
-    const auto wall=std::chrono::steady_clock::now();const float seconds=std::min(.1f,std::chrono::duration<float>(wall-steamed_).count());steamed_=wall;
+    const bool rewind=cloudTimed_&&now<cloudUtc_;const float seconds=cloudTimed_&&!rewind?static_cast<float>(now-cloudUtc_):0.f;cloudUtc_=now;cloudTimed_=true;
     std::map<core::ObjectId,float> vents; // Fuelled on its pad: venting boil-off and shedding cryogenic mist, fading as it climbs away (gone by ~170 m).
     for(auto& [id,site]:sites_){const auto v=vehicles_.find("flight"+id.substr(4));float thrust=0,above=1e9f;
         if(v!=vehicles_.end()&&nodes_.at(v->first)->visible){const auto& p=exact_.at(v->first);const auto& o=exact_.at(id);Vector3 up(0,0,1),aft(0,-1,0);up.applyQuaternion(nodes_.at(id)->quaternion);aft.applyQuaternion(nodes_.at(v->first)->quaternion);
             const double m=core::earthRadiusMeters,dx=p[0]-o[0],dy=p[1]-o[1],dz=p[2]-o[2],h=(dx*up.x+dy*up.y+dz*up.z)*m+v->second->length()/2*aft.dot(up);
             if(std::sqrt(dx*dx+dy*dy+dz*dz)*m<2e3){thrust=v->second->thrust();above=static_cast<float>(h);vents[v->first]=std::clamp(1-(above-20)/150,0.f,1.f);}} // Over its pad only (in orbit, beyond the Earth's limb, the height along the pad's up went negative: it vented and steamed there).
-        const auto water=deluge_.find(id);site->exhaust(delugeEffects_?thrust:0.f,above,seconds,delugeEffects_&&water!=deluge_.end()?water->second:0.f);site->venting(now);}
+        if(rewind)site->resetExhaust();const auto water=deluge_.find(id);const auto wind=winds_.find(id);
+        site->exhaust(thrust,above,seconds,water!=deluge_.end()?water->second:0.f,wind!=winds_.end()?wind->second:Vector3(2,-.8f,0),delugeEffects_);site->venting(now);}
     // The stack's vents shut for tank pressurisation from T-40 s to liftoff (a hold keeps its count time), open again after a scrub.
     for(auto& [id,v]:vehicles_){const auto it=vents.find(id);const auto c=count_.find(id);const bool closed=c!=count_.end()&&c->second.first>=-40&&!c->second.second;
         v->venting(it!=vents.end()?it->second:0.f,now,closed);}

@@ -242,9 +242,13 @@ Site::Site(const core::Scenery& s){
     if(!vents_.empty()||!tankVents_.empty()){auto g=SphereGeometry::create(1,20,12);auto pool=[&](auto& puffs){for(auto& p:puffs){
         auto m=ShaderMaterial::create();m->name="albert:steam";m->transparent=true;m->depthTest=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::OneMinusSrcAlpha;
         m->uniforms={{"density",Uniform(0.f)},{"seed",Uniform(0.f)},{"time",Uniform(0.f)},{"up",Uniform(Vector3(0,0,1))},{"kind",Uniform(0.f)},{"size",Uniform(Vector3(1,1,1))},{"cloud",Uniform(Vector4(0,0,0,0))}};p.mesh=Mesh::create(g,m);p.mesh->visible=false;root_->add(p.mesh);}};
-        if(!vents_.empty()){pool(steam_);pool(spray_);}if(!tankVents_.empty())pool(boiloff_);} // Reserve water slots so the launch cannot starve the deluge; 256 shared-geometry shells total.
+        if(!vents_.empty()){pool(spray_);}if(!tankVents_.empty())pool(boiloff_);} // Water and tank vapour keep separate quotas.
+    if(!vents_.empty()){Vector3 centre;float ground=vents_.front().centre.z-.5f*vents_.front().height;
+        for(const auto& v:vents_){centre.add(v.centre);ground=std::min(ground,v.centre.z-.5f*v.height);}
+        centre.multiplyScalar(1.f/static_cast<float>(vents_.size()));centre.z=ground;
+        launchCloud_=std::make_unique<LaunchCloud>(centre,vents_.front().ahead);root_->add(launchCloud_->node());}
 }
-void Site::quality(int value){quality_=value;auto& u=root_->material()->as<ShaderMaterial>()->uniforms;u.at("strength").setValue(value>0?1.f:0.f);lighting_->update(night_,ventUtc_,value);if(production_)production_->quality(value);if(detail_)detail_->visible=value>0;if(industrialFine_)industrialFine_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
+void Site::quality(int value){quality_=value;cloudQuality(cloudQuality_);auto& u=root_->material()->as<ShaderMaterial>()->uniforms;u.at("strength").setValue(value>0?1.f:0.f);lighting_->update(night_,ventUtc_,value);if(production_)production_->quality(value);if(detail_)detail_->visible=value>0;if(industrialFine_)industrialFine_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
 void Site::lighting(const Vector3& sun){
     root_->updateWorldMatrix(true,false);Matrix4 inverse;inverse.copy(*root_->matrixWorld).invert();Vector3 toward=sun;toward.applyMatrix4(inverse).normalize();
     night_=siteNight(toward.z);lighting_->update(night_,ventUtc_,quality_);root_->material()->as<ShaderMaterial>()->uniforms.at("night").setValue(night_);
@@ -271,42 +275,30 @@ void Site::venting(double utc){
         m.scale.set(p.width+(2.8f+p.seed)*grow,p.width+(2.4f+p.seed)*grow,p.height+(2.2f+p.seed)*grow);m.position.copy(p.origin).add(Vector3(p.drift).multiplyScalar(a)).add(Vector3(p.velocity).multiplyScalar(2.2f*(1-std::exp(-a/2.2f))));m.position.z+=.18f*a;
         m.visible=true;auto& u=m.material()->as<ShaderMaterial>()->uniforms;u.at("density").setValue(p.strength*std::min(1.f,.2f+a/.3f)*std::exp(-a/5.f)*tail*tail);u.at("seed").setValue(p.seed*97.f);u.at("time").setValue(a);}
 }
-void Site::exhaust(float thrust,float above,float seconds,float waterFlow,const Vector3& wind){
-    if(!std::isfinite(seconds)||seconds<=0)return;if(vents_.empty())return;
+void Site::resetExhaust(){
+    if(launchCloud_)launchCloud_->reset();
+    for(auto& p:spray_){p.life=0;if(p.mesh)p.mesh->visible=false;}
+    sprayPending_=mistPending_=runoffPending_=0;for(auto& v:vents_)v.pending=1;
+}
+void Site::exhaust(float thrust,float above,float seconds,float waterFlow,const Vector3& wind,bool enabled){
+    if(!std::isfinite(seconds)||seconds<0||vents_.empty())return;
     const float share=std::isfinite(thrust)?std::clamp(thrust,0.f,1.f):0.f,water=std::isfinite(waterFlow)?(waterFlow<0?(share>0?41.f:0.f):std::clamp(waterFlow,0.f,60.f)):0.f;
-    const float height=std::isfinite(above)?std::clamp((above-40.f)/110.f,0.f,1.f):1.f,heat=above>=-5?std::sqrt(share)*(1-height*height*(3-2*height)):0.f,drive=heat*std::sqrt(std::min(1.f,water/41.f));
+    const float height=std::isfinite(above)?std::clamp((above-40.f)/110.f,0.f,1.f):1.f,heat=above>=-5?std::sqrt(share)*(1-height*height*(3-2*height)):0.f;
+    if(launchCloud_)launchCloud_->update(heat,water,seconds,wind,enabled);
     Vector3 air=wind;if(!std::isfinite(air.x)||!std::isfinite(air.y)||!std::isfinite(air.z))air.set(2,-.8f,0);
     auto random=[&]{seed_^=seed_<<13;seed_^=seed_>>17;seed_^=seed_<<5;return static_cast<float>(seed_>>8)/16777216.f;};
     auto fade=[](float x){x=std::clamp(x,0.f,1.f);return x*x*(3-2*x);};
-    auto age=[&](auto& pool){for(auto& p:pool)if(p.life>0){p.age+=seconds;if(p.age>=p.life){p.life=0;p.mesh->visible=false;}}};age(steam_);age(spray_);
+    auto age=[&](auto& pool){for(auto& p:pool)if(p.life>0){p.age+=seconds;if(p.age>=p.life){p.life=0;p.mesh->visible=false;}}};age(spray_);
     auto source=[&](const Vent& v,Vector3& origin,Vector3& ahead,Vector3& across,Vector3& up){origin=v.centre;ahead=v.ahead;across=v.across;up=v.up;
         if(v.structure){const auto& pivot=*hinges_[v.structure-1].pivot;origin.sub(pivot.position).applyQuaternion(pivot.quaternion).add(pivot.position);ahead.applyQuaternion(pivot.quaternion);across.applyQuaternion(pivot.quaternion);up.applyQuaternion(pivot.quaternion);}}; // A released puff no longer follows a hinge.
-    auto free=[](auto& pool)->Puff*{for(auto& p:pool)if(p.life<=0)return &p;return nullptr;};
     float ground=vents_.front().centre.z-.5f*vents_.front().height;for(const auto& v:vents_)ground=std::min(ground,v.centre.z-.5f*v.height);
-    auto hot=[&](const Vent& v,bool deck,float backlog,float rate){auto* slot=free(steam_);if(!slot)return false;auto& p=*slot;Vector3 ahead,across,up;source(v,p.origin,ahead,across,up);
-        p.origin.add(Vector3(across).multiplyScalar((random()-.5f)*v.width*.7f));
-        const float speed=(80+70*random())*(.65f+.35f*std::sqrt(share));
-        p.velocity.copy(ahead).multiplyScalar(deck?8+10*random():speed).add(Vector3(across).multiplyScalar((random()-.5f)*(deck?16.f:32.f))).add(Vector3(up).multiplyScalar(deck?12+12*random():2+5*random()));
-        p.drift.copy(air).add(Vector3((random()-.5f)*1.2f,(random()-.5f)*1.2f,0));p.age=std::min(seconds,backlog/rate);p.life=95+30*random();
-        p.width=12+8*random();p.height=10+8*random();p.seed=random();p.strength=drive;p.ground=ground;p.kind=3;
-        p.mesh->rotation.set(0,0,std::atan2(-ahead.x,ahead.y));p.mesh->visible=true;return true;};
-    const float rate=18*drive/static_cast<float>(vents_.size()); // Closely spaced parcels keep both outlets joined to the boiling deck.
-    for(auto& v:vents_){
-        if(!(rate>0)){v.pending=1;continue;}
-        v.pending=std::min(4.f,v.pending+seconds*rate);
-        while(v.pending>=1){v.pending-=1;if(!hot(v,false,v.pending,rate)){v.pending=std::fmod(v.pending,1.f);break;}}
-    }
-    const float deckRate=8*drive;if(!(deckRate>0))deckPending_=1;
-    else{deckPending_=std::min(4.f,deckPending_+seconds*deckRate);while(deckPending_>=1){const Vent* rim=nullptr;
-        for(std::size_t i=0;i<sprays_.size();++i){const auto& v=sprays_[deckCursor_++%sprays_.size()];if(v.height>0){rim=&v;break;}}
-        if(!rim){deckPending_=0;break;}deckPending_-=1;if(!hot(*rim,true,deckPending_,deckRate)){deckPending_=std::fmod(deckPending_,1.f);break;}}} // Recirculation through the opening hides the mount before the vehicle clears it.
-    const float wet=std::sqrt(std::min(1.f,water/16.f));
+    const float wet=enabled?std::sqrt(std::min(1.f,water/16.f)):0.f;
     auto waterBirth=[&](unsigned kind){auto& sources=kind==1?sprays_:kind==2?pools_:vents_;auto& pending=kind==1?sprayPending_:kind==2?mistPending_:runoffPending_;auto& cursor=kind==1?sprayCursor_:kind==2?poolCursor_:runoffCursor_;const float r=(kind==1?18.f:kind==2?2.f:2.8f)*wet;
         if(sources.empty()||!(r>0)){pending=0;return;}pending=std::min(4.f,pending+seconds*r);
         const std::size_t first=kind==1?0:kind==2?48:64,last=kind==1?48:kind==2?64:72;
         while(pending>=1){pending-=1;Puff* slot=nullptr;for(std::size_t i=first;i<last;++i)if(spray_[i].life<=0){slot=&spray_[i];break;}if(!slot){pending=std::fmod(pending,1.f);break;}
             const auto& v=sources[cursor++%sources.size()];auto& p=*slot;Vector3 ahead,across,up;source(v,p.origin,ahead,across,up);
-            p.age=std::min(seconds,pending/r);p.seed=random();p.kind=kind;p.ground=ground;p.drift.copy(air);p.strength=wet;p.mesh->visible=true;
+            p.age=std::min(seconds,pending/r);p.seed=random();p.kind=kind;p.ground=ground;p.drift.copy(air);p.strength=wet;p.mesh->visible=enabled;
             if(kind==2){p.origin.add(Vector3(across).multiplyScalar((random()-.5f)*v.width*.8f)).add(Vector3(ahead).multiplyScalar((random()-.5f)*v.height));
                 p.velocity.copy(ahead).multiplyScalar((random()-.5f)*5);p.life=7+2*random();p.width=6+6*random();p.height=1.3f+random();p.mesh->rotation.set(0,0,std::atan2(-ahead.x,ahead.y));}
             else if(kind==4){p.origin.z=ground+.9f;p.origin.add(Vector3(across).multiplyScalar((random()-.5f)*v.width*.6f));
@@ -326,14 +318,6 @@ void Site::exhaust(float thrust,float above,float seconds,float waterFlow,const 
             m.scale.set(p.width+2*a,7+4*a,p.height+.2f*a);density=3.5f*p.strength*fade(a/.15f)*fade((p.life-a)/.8f);}
         else{m.position.copy(p.origin).add(Vector3(p.velocity).multiplyScalar(a)).add(Vector3(p.drift).multiplyScalar(.2f*a));m.position.z+=.07f*a;
             m.scale.set(p.width+1.8f*a,1.6f*p.width+2.2f*a,p.height+.35f*a);density=1.8f*p.strength*fade(a/.35f)*fade((p.life-a)/2.f);}
-        uniforms(p,density);}
-    for(auto& p:steam_)if(p.life>0){
-        const float a=p.age,grow=(.65f+.35f*p.strength)*(1-std::exp(-a/3.8f)),jet=1.65f*(1-std::exp(-a/1.65f)),rise=(10+12*p.seed)*(1-std::exp(-a/5.f));
-        auto& m=*p.mesh;m.scale.set(p.width+(60+30*p.seed)*grow,p.width+(75+25*p.seed)*grow,p.height+(56+22*p.seed)*grow);
-        m.position.copy(p.origin).add(Vector3(p.velocity).multiplyScalar(jet)).add(Vector3(p.drift).multiplyScalar(a-jet));m.position.z+=rise;
-        m.position.z=std::max(m.position.z,p.ground+.5f*m.scale.z+.35f*rise); // Keep the dense interior on the apron while the billows rise.
-        const float density=8*p.strength*fade(a/.16f)*(1-.35f*fade(a/70.f))*fade((p.life-a)/28.f);
-        uniforms(p,density); // Stored heat keeps the cloud dense after the vehicle climbs away.
-    }
+        m.visible=enabled;uniforms(p,density);}
 }
 }

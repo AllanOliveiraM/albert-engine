@@ -24,7 +24,7 @@ public:
     grpc::Status StopRealtime(grpc::ServerContext*,const ::albert::v1::FlightRequest*,::albert::v1::RealtimeStatus*) override;
     // Each flight on the Earth as a sound source (its rotating frame, the plume along -body x, d_e of its exit area, its flow
     // and booms), by its scene object's id; none off the Earth (the acoustics are Earth air's).
-    struct Sound {std::string id;double utc=0;physics::acoustics::Emission emission;physics::Planet planet;std::shared_ptr<const physics::AirModel> air;};
+    struct Sound {std::string id;double utc=0;physics::acoustics::Emission emission;physics::Planet planet;std::shared_ptr<const physics::AirModel> air;core::Vector windEnu;};
     std::vector<Sound> sounds()const;
     // Each flight as the broadcast shows it: its stage's name, its first instant and now (UTC), speed over the ground (m/s),
     // height (m), the share of the stage's propellant left, each engine (where its nozzle is off the axis and how wide, body

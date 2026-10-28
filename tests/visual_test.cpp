@@ -318,6 +318,7 @@ void shadowGraphics(GpuTarget& renderer){
 #include "plume_visuals.hpp"
 #include "production_visuals.hpp"
 #include "land_visuals.hpp"
+#include "launch_cloud_visuals.hpp"
 #include "industrial_visuals.hpp"
 void roadGraphics(Target& renderer){
     auto site=std::make_shared<albert::core::Scenery>();site->latitude=25.996128*3.141592653589793/180;site->longitude=-97.154517*3.141592653589793/180;
@@ -419,6 +420,7 @@ void graphics(Target& renderer) {
     nightGraphics(renderer);
     vehicleGraphics(renderer);
     plumeGraphics(renderer);
+    launchCloudGraphics(renderer);
     roadGraphics(renderer);
     padGraphics(renderer);
     towerGraphics(renderer);
@@ -856,6 +858,7 @@ int main(int argc,char** argv) {
         if(argc>2&&std::string_view(argv[1])=="land-captures"){landCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="tank-farm-captures"){landCaptures(argv[2],false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="production-captures"){landCaptures(argv[2],true);return 0;}
+        if(argc>2&&std::string_view(argv[1])=="launch-cloud-captures"){launchCloudCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="plume-captures"){plumeCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
 #endif

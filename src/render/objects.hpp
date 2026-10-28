@@ -6,7 +6,6 @@
 #include "threepp/threepp.hpp"
 #include "threepp/utils/BVH.hpp"
 #include <array>
-#include <chrono>
 #include <map>
 namespace albert {
 threepp::Vector3 renderPosition(core::Vector position,core::Vector origin={});
@@ -20,6 +19,8 @@ public:
     void bind(const core::ObjectId& id,std::shared_ptr<threepp::Mesh> mesh,std::shared_ptr<const threepp::BVH> picker={});
     void sync(const core::Scene& registry,double utcSeconds,core::Vector origin);
     void deluge(const core::ObjectId& site,float cubicMetres){deluge_[site]=cubicMetres;}
+    void wind(const core::ObjectId& site,const threepp::Vector3& enu){winds_[site]=enu;}
+    void cloudQuality(int value){for(auto& [id,site]:sites_)site->cloudQuality(value);}
     void delugeEffects(bool on){delugeEffects_=on;} // The pads' spray and launch steam (Ajustes).
     void quality(int value){for(auto& [id,site]:sites_)site->quality(value);for(auto& [id,vehicle]:vehicles_)vehicle->quality(value);}
     void count(const core::ObjectId& flight,double seconds,bool scrubbed){count_[flight]={seconds,scrubbed};} // Its count time (T, s) and whether it scrubbed.
@@ -41,6 +42,7 @@ private:
     std::map<core::ObjectId,std::unique_ptr<Site>> sites_;       // With scenery.
     std::map<core::ObjectId,float> deluge_; // Each site's deluge water now (m³/s), from its pad's sound source.
     std::map<core::ObjectId,std::pair<double,bool>> count_;bool delugeEffects_=true;
-    std::chrono::steady_clock::time_point steamed_=std::chrono::steady_clock::now();
+    std::map<core::ObjectId,threepp::Vector3> winds_;
+    double cloudUtc_=0;bool cloudTimed_=false;
 };
 }

@@ -1243,12 +1243,13 @@ int albert::runRenderer(int argc, char** argv) {
 
         // Ajustes, kept in settings.json across runs (the sound always starts muted). The volumetric clouds and the ocean's
         // waves are the costly effects: on by default, a weaker machine turns them off.
-        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false,inset=true,broadcast=true,playground=true,deluge=true;int frameCap=60;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
+        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false,inset=true,broadcast=true,playground=true,deluge=true;int frameCap=60,launchCloudQuality=1;float fov=60,uiScale=1,sensitivity=1,volume=.8f;
             bool thirdBodies=true,relativity=true,flightAir=true,wind=true,solarPressure=true;float turbulence=0;} preferences; // The last six: the Fisica page's defaults for new flights.
         const auto preferencesFile=albert::dataDirectory()/"settings.json";
         try{std::ifstream in(preferencesFile);if(in){const auto j=json::parse(in);auto& p=preferences;auto& v=visualSettings;
             p.volumetricClouds=j.value("volumetric_clouds",p.volumetricClouds);p.oceanWaves=j.value("ocean_waves",p.oceanWaves);p.antialias=j.value("antialias",p.antialias);
             p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);p.inset=j.value("flight_inset",p.inset);p.deluge=j.value("deluge_effects",p.deluge);p.broadcast=j.value("broadcast_panels",p.broadcast);p.playground=j.value("interference_panel",p.playground);p.frameCap=std::clamp(j.value("frame_cap",p.frameCap),0,240);
+            p.launchCloudQuality=std::clamp(j.value("launch_cloud_quality",p.launchCloudQuality),0,2);
             p.fov=std::clamp(j.value("field_of_view",p.fov),35.f,90.f);p.uiScale=std::clamp(j.value("interface_scale",p.uiScale),.8f,1.6f);
             p.sensitivity=std::clamp(j.value("mouse_sensitivity",p.sensitivity),.25f,3.f);p.volume=std::clamp(j.value("volume",p.volume),0.f,1.f);
             p.thirdBodies=j.value("physics_third_bodies",p.thirdBodies);p.relativity=j.value("physics_relativity",p.relativity);p.flightAir=j.value("physics_atmosphere",p.flightAir);
@@ -1259,7 +1260,7 @@ int albert::runRenderer(int argc, char** argv) {
         catch(const std::exception&){} // A damaged preference never prevents startup.
         auto savePreferences=[&]{try{const auto& p=preferences;const auto& v=visualSettings;std::filesystem::create_directories(preferencesFile.parent_path());std::ofstream out(preferencesFile);
             out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},{"flight_inset",p.inset},{"deluge_effects",p.deluge},{"broadcast_panels",p.broadcast},{"interference_panel",p.playground},{"frame_cap",p.frameCap},
-                {"field_of_view",p.fov},{"interface_scale",p.uiScale},{"mouse_sensitivity",p.sensitivity},{"volume",p.volume},{"quality",v.quality},{"shadows",v.shadows},
+                {"launch_cloud_quality",p.launchCloudQuality},{"field_of_view",p.fov},{"interface_scale",p.uiScale},{"mouse_sensitivity",p.sensitivity},{"volume",p.volume},{"quality",v.quality},{"shadows",v.shadows},
                 {"atmosphere",v.atmosphere},{"terrain",v.terrain},{"live_clouds",v.clouds},{"city_lights",v.nightLights},{"borders",v.borders},{"orbits",showOrbits},{"debris",showDebris},
                 {"physics_third_bodies",p.thirdBodies},{"physics_relativity",p.relativity},{"physics_atmosphere",p.flightAir},{"physics_wind",p.wind},{"physics_solar_pressure",p.solarPressure},{"physics_turbulence",p.turbulence}}.dump(2)<<'\n';}
             catch(const std::exception&){}};
@@ -1673,6 +1674,7 @@ int albert::runRenderer(int argc, char** argv) {
                     check("Girar devagar ao chegar",preferences.autoRotate);
                     check("Segunda vista dos voos",preferences.inset,"Com dois voos ou mais, um quadro no canto mostra o outro; clique nele para trocar.");
                     check("Efeitos do dilúvio",preferences.deluge,"O spray de água do pad na contagem e as nuvens de vapor da decolagem (pesam na placa de vídeo).");
+                    ImGui::SetNextItemWidth(-1);if(ImGui::Combo("##Nuvem de lancamento",&preferences.launchCloudQuality,"Nuvem do lancamento: leve\0Nuvem do lancamento: media\0Nuvem do lancamento: alta\0"))savePreferences();
                     slider("##Escala da interface",preferences.uiScale,.8f,1.6f,"Interface: %.1fx");
                     ImGui::Spacing();ImGui::TextDisabled("CAMERA");
                     bool free=freeCamera;if(ImGui::Checkbox("Camera livre (F)",&free))toggleFreeCamera(free);
@@ -2417,11 +2419,11 @@ int albert::runRenderer(int argc, char** argv) {
             if(transition.active)transition.startTarget.add(shift);
             sceneOrigin=nextOrigin;
 #ifdef ALBERT_HAS_RPC
-            if(rpc)for(const auto& x:rpc->flightSounds())if(x.id.rfind("site",0)==0&&x.id.find('/')==std::string::npos)objects.deluge(x.id,static_cast<float>(x.emission.pad.waterFlow/1000)); // Its pad's deluge (kg/s) as the trench's spray.
+            if(rpc)for(const auto& x:rpc->flightSounds())if(x.id.rfind("site",0)==0&&x.id.find('/')==std::string::npos){objects.deluge(x.id,static_cast<float>(x.emission.pad.waterFlow/1000));objects.wind(x.id,Vector3(static_cast<float>(x.windEnu.x),static_cast<float>(x.windEnu.y),0));} // Its pad's deluge (kg/s) as the trench's spray.
             if(rpc)for(const auto& g:rpc->flightGauges())objects.count(g.id,g.countState=="HOLD"?g.countTime:simulatedUtc-g.zero,g.countState=="SCRUB"); // The vents' pressurisation closing.
 #endif
             objects.delugeEffects(preferences.deluge);
-            objects.sync(registry,simulatedUtc,sceneOrigin);
+            objects.sync(registry,simulatedUtc,sceneOrigin);objects.cloudQuality(visualSettings.quality?preferences.launchCloudQuality:0);
             earthPosition.copy(earth->position);
             sunPosition.copy(sun->position);
             moonPosition.copy(moon->position);

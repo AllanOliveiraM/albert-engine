@@ -517,6 +517,10 @@ struct Slot {
     Sound padSound(){
         Sound s;s.id=siteId;s.utc=ph::utcFromTt(flight->state().time);s.planet=flight->environment().planet;s.air=flight->environment().air;auto& e=s.emission;
         e.time=s.utc;e.position=*padAt;e.velocity={};e.plume={0,0,1};const auto& st=flight->state();
+        ph::V3 wind;const auto& env=flight->environment();
+        if(anemometer&&windReading.valid)wind=windReading.wind;
+        else{const auto here=ph::geodetic(s.planet,*padAt);if(env.atmosphere&&env.wind&&s.air)wind=s.air->at(flight->state().time,here.latitude,here.longitude,here.height).wind;if(env.atmosphere)wind=wind+flight->gust();}
+        s.windEnu={wind.y,wind.x,0}; // The pad mast (or its ground air model), never the vehicle's wind aloft.
         if(!st.clamped&&!released)released=s.utc;const double after=released?s.utc-*released:0;
         if(st.clamped&&st.propellant>0&&st.stage==0){e.pad.ventFlow=1;e.pad.ventSpeed=80;} // Plumbing stays quiet beside the actual outlets.
         if(st.clamped&&st.propellant>0&&!stopped&&zero&&s.utc>=*zero-9&&s.utc<*zero-7&&std::any_of(flight->environment().structures.begin(),flight->environment().structures.end(),[](const auto& x){return x.name=="ship quick disconnect";})){

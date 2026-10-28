@@ -2,6 +2,7 @@
 #include "gpu/programs.hpp"
 #include "roads.hpp"
 #include "vehicle_surface.hpp"
+#include "launch_cloud_shader.hpp"
 using albert::gpu::Program;using albert::gpu::Uniform;
 namespace {
 // Points: one quad per vertex; `corner` spans [-1, 1]² and replaces gl_PointCoord.
@@ -316,6 +317,8 @@ fn steamField(q: vec3f) -> f32 {
 }
 )";
     albert::gpu::define("albert:steam",steam);
+    Program launch;launch.attributes=surfaceAttributes;launch.uniforms={{"bank",Uniform::vec4},{"extent",Uniform::vec3},{"source",Uniform::vec3},{"samples",Uniform::f32}};
+    launch.wgsl=std::string(surface)+launchCloudShader;albert::gpu::define("albert:launch-cloud",launch);
     // vehicle.cpp: axial heat bands on the existing metal bell avoid another shell and draw call per engine.
     Program bell;bell.attributes=surfaceAttributes;bell.uniforms={{"diffuse",Uniform::vec3},{"opacity",Uniform::f32},{"emissive",Uniform::vec3},{"roughness",Uniform::f32},{"metalness",Uniform::f32},
         {"auxiliaryStrength",Uniform::f32},{"auxiliarySolarDirection",Uniform::vec3},{"doubleSided",Uniform::f32},{"burn",Uniform::vec3},{"lip",Uniform::vec3},{"bellLength",Uniform::f32}};
