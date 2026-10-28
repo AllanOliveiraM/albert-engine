@@ -14,12 +14,12 @@ struct GridFin {
 };
 inline GridFin gridFin(float width,float span,float thickness,int tier){
     using namespace threepp;constexpr float rt=.70710678118f,pi=3.14159265359f;
-    const float pitch=.48f,gauge=.022f;const int segments=tier==0?10:1;
-    // V3's fin: an octagon, a square stretched a little out from the hull (4.6 m out, 4 m across) with long parallel sides and a
+    const float pitch=.42f,gauge=.022f;const int segments=tier==0?10:1;
+    // V3's fin: an octagon, a square stretched a little out from the hull (4.7 m out, 4 m across) with long parallel sides and a
     // long straight outer edge, its outer corners cut small; the side at the hinge short (a seventh of the width), reached by
     // longer, steeper cuts from the parallel sides. Inside the declared envelope with the walls' cut ends' gauge and bow; a rim
     // straight from wall to wall closes every cell it cuts.
-    const float bottom=-span/2+.08f,top=span/2-.08f,half=width/2-.08f,root=.07f*width,outer=.22f*width,low=1.25f*(half-root);
+    const float bottom=-span/2+.08f,top=span/2-.08f,half=width/2-.08f,root=.07f*width,outer=.22f*width,low=1.1f*(half-root);
     const std::vector<Vector2> outline{{-root,bottom},{root,bottom},{half,bottom+low},{half,top-outer},{half-outer,top},{-half+outer,top},{-half,top-outer},{-half,bottom+low}};
     const int corners=static_cast<int>(outline.size());
     auto distance=[&](const Vector3& p,int e){const auto& u=outline[e];const auto& v=outline[(e+1)%corners];const float dx=v.x-u.x,dz=v.y-u.y;
