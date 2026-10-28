@@ -36,6 +36,12 @@ inline Vec towerSite(){ // WGS 84 (ECEF, m).
     const double a=6378137,e2=6.69437999014e-3,phi=towerLatitude*deg,lam=towerLongitude*deg,n=a/std::sqrt(1-e2*std::sin(phi)*std::sin(phi));
     return{(n+towerGround)*std::cos(phi)*std::cos(lam),(n+towerGround)*std::cos(phi)*std::sin(lam),(n*(1-e2)+towerGround)*std::sin(phi)};
 }
+// The tower's crown (its column 22 m west of the catch's axis, 146 m up): the anemometer and the radio beacon. towerNed: the
+// site's north, east and down rows (ECEF).
+inline Mat towerNed(){const double phi=towerLatitude*deg,lam=towerLongitude*deg;
+    return{{-std::sin(phi)*std::cos(lam),-std::sin(phi)*std::sin(lam),std::cos(phi)},{-std::sin(lam),std::cos(lam),0},{-std::cos(phi)*std::cos(lam),-std::cos(phi)*std::sin(lam),-std::sin(phi)}};}
+constexpr double crownEast=-22,crownHeight=146;
+inline Vec towerCrown(){const Mat n=towerNed();return towerSite()+n.r1*crownEast+n.r2*-crownHeight;}
 inline double pinRest(){return std::sqrt(armRadius*armRadius-armLip*armLip);} // The pins over the bars' axes in the groove (m).
 // The arms hinge on the carriage at the tower's east face (east of the tower's centre at towerX, its half width half) and swing
 // at 8°/s, open 30° apart from the closed catch (the north one to the north) while a vehicle goes up or comes down past them.
@@ -279,6 +285,8 @@ inline void addTower(api::CreateFlightRequest& create,bool mounted=false){ // mo
 inline void avionics(api::CreateFlightRequest& create,std::uint64_t seed=1){
     create.mutable_imu()->set_grade(api::ImuSettings::NAVIGATION);create.mutable_imu()->set_seed(seed);create.mutable_imu()->set_count(3);auto* q=create.mutable_sensors();q->set_seed(seed*7919+1);
     q->mutable_gnss()->set_enabled(true);q->mutable_gnss()->set_rtk_range_meters(30e3);q->mutable_star_tracker()->set_enabled(true);q->mutable_propellant_gauge()->set_enabled(true);
+    q->mutable_anemometer()->set_enabled(true);q->mutable_anemometer()->set_east_meters(crownEast);q->mutable_anemometer()->set_height_meters(crownHeight);
+    q->mutable_beacon()->set_enabled(true);q->mutable_beacon()->set_east_meters(crownEast);q->mutable_beacon()->set_height_meters(crownHeight);
 }
 // The truth from a sample (for the test's checks and the alignment, never the guidance): ECEF state, body rates and the
 // attitude as ECEF to body (Bᵀ N, N the geodetic NED).
@@ -496,7 +504,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
     create.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);addTower(create,true);if(utc>0)create.set_utc_unix_seconds(utc); // Unset: the scene's instant.
     create.set_hold_down(true); // The clamps let go on the count's command only.
     avionics(create);api::FlightSample ship,boost;call([&](grpc::ClientContext& c){return flight.CreateFlight(&c,create,&ship);});
-    Navigator nav,bnav;nav.base=towerSite();nav.design(create.definition());nav.align(ship,7); // The stack's computer, aligned on the pad; the booster's from it at separation.
+    Navigator nav,bnav;nav.base=towerSite();nav.beacon=towerCrown();nav.beaconNed=towerNed();nav.design(create.definition());nav.align(ship,7); // The stack's computer, aligned on the pad; the booster's from it at separation.
     std::printf("%s de Starbase, %s\n",ship.vehicle().c_str(),fast?"o mais rápido possível":"tempo real");
     BoosterReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());siteWorks(back);GravityTurn ascent(heading*deg,kickAngle);ascent.kickRate=.6*deg;ascent.pitch=flownPitch();ascent.insertion=true; // A small kick: lofted, so the booster's way back stays short.
     ascent.slewRate=1*deg; // The ship's nose eased onto its insertion guidance after staging, not swung there.
@@ -653,7 +661,7 @@ inline Mission landing(api::FlightService::Stub& flight,const Gate& g,std::vecto
     l->set_heading_degrees(std::atan2(-g.ve,-g.vn)/deg);l->set_pitch_degrees(std::atan2(g.vd,std::hypot(g.vn,g.ve))/deg); // Engines first: its nose against the way it falls.
     api::FlightSample boost;call([&](grpc::ClientContext& c){return flight.CreateFlight(&c,create,&boost);});
     if(norm(g.wind)>0){api::StepRequest q;q.set_ticks(1);put(q.add_commands()->mutable_gust_ned_meters_per_second(),g.wind.x,g.wind.y,g.wind.z);call([&](grpc::ClientContext& c){return flight.Step(&c,q,&boost);});}
-    Navigator nav;nav.base=towerSite();nav.design(superHeavy());nav.align(boost,g.seed);
+    Navigator nav;nav.base=towerSite();nav.beacon=towerCrown();nav.beaconNed=towerNed();nav.design(superHeavy());nav.align(boost,g.seed);
     BoosterReturn back(towerSite(),towerLatitude*deg,towerLongitude*deg,armHeight,pinRest());siteWorks(back);back.enter(BoosterReturn::Phase::coast);
     static const char* names[]{"wait","flip","boostback","coast","landing","final","hover","descend","caught","divert","down"};
     bool shut=false;double caughtAt=-1;auto last=back.phase();
@@ -714,7 +722,7 @@ inline Home homecoming(api::FlightService::Stub& flight,bool fast,double warp=10
     put(l->mutable_velocity_ned_meters_per_second(),speed*std::cos(az),speed*std::sin(az)-7.292115e-5*r*std::cos(la),0);l->set_heading_degrees(az/deg);
     avionics(create,11);api::FlightSample ship;call([&](grpc::ClientContext& c){return flight.CreateFlight(&c,create,&ship);});
     std::printf("%s em órbita, %.0f° antes de passar sobre Starbase, %s\n",ship.vehicle().c_str(),ahead,fast?"o mais rápido possível":"tempo real");
-    Navigator nav;nav.base=towerSite();nav.design(create.definition());nav.align(ship,11); // As if it had been navigating since launch.
+    Navigator nav;nav.base=towerSite();nav.beacon=towerCrown();nav.beaconNed=towerNed();nav.design(create.definition());nav.align(ship,11); // As if it had been navigating since launch.
     Pacer pace;pace.fast=fast;pace.last=ship.elapsed_seconds();return flyHome(flight,ship,pace,warp,nav,std::move(faults));
 }
 // The ship alone from where its belly flop begins (the bench for the way down from there: seconds a run): over the tower's
@@ -729,7 +737,7 @@ inline Home falling(api::FlightService::Stub& flight,const ShipGate& g,std::vect
     l->mutable_position()->set_height_meters(towerGround+g.height);put(l->mutable_velocity_ned_meters_per_second(),g.vn,g.ve,g.vd);
     l->set_heading_degrees(std::atan2(g.ve,g.vn)/deg);l->set_pitch_degrees(g.alpha-std::atan2(g.vd,std::hypot(g.vn,g.ve))/deg);l->set_roll_degrees(0); // Its nose alpha above its way, belly down.
     api::FlightSample ship;call([&](grpc::ClientContext& c){return flight.CreateFlight(&c,create,&ship);});
-    Navigator nav;nav.base=towerSite();nav.design(create.definition());nav.align(ship,g.seed);
+    Navigator nav;nav.base=towerSite();nav.beacon=towerCrown();nav.beaconNed=towerNed();nav.design(create.definition());nav.align(ship,g.seed);
     Pacer pace;pace.fast=true;pace.last=ship.elapsed_seconds();return flyHome(flight,ship,pace,1,nav,std::move(faults),0,ShipReturn::Phase::entry);
 }
 }

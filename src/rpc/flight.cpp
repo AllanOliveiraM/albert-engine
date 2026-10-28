@@ -236,6 +236,8 @@ struct Slot {
     std::optional<ph::Gnss> gnss;std::optional<ph::RadarAltimeter> radar;std::optional<ph::StarTracker> tracker;std::optional<ph::PropellantGauge> level;
     ph::Gnss::Reading gnssReading;ph::RadarAltimeter::Reading radarReading;ph::StarTracker::Reading trackerReading;ph::PropellantGauge::Reading gaugeReading;
     double gnssLast=0,radarLast=0,trackerLast=0,gaugeLast=0;
+    std::optional<ph::Anemometer> anemometer;std::optional<ph::Beacon> beacon;ph::Anemometer::Reading windReading;ph::Beacon::Reading beaconReading;double windLast=0,beaconLast=0;
+    ph::Geodetic mast;ph::V3 beaconAt;ph::M3 beaconNed; // The anemometer (geodetic) and the beacon (ECEF, its NED rows) as placed at the site.
     // Sensors made to fail or lie (SensorFault): by sensor (accelerometer, gyroscope, GNSS, radar, star tracker, gauge) and
     // IMU unit; the redundant IMU units past the first; uplinks for the flight software; commands the operator injects.
     struct Lie {int mode=0;ph::V3 value,offset;};std::array<std::array<Lie,3>,6> lies{};std::optional<ph::Noise> lieNoise;
@@ -259,8 +261,12 @@ struct Slot {
     }
     void sense(){
         const double now=elapsed();const auto& s=flight->state();auto due=[&](const auto& d,double last){return d&&now-last>=d->model().period-1e-9;};
-        if(!due(gnss,gnssLast)&&!due(radar,radarLast)&&!due(tracker,trackerLast)&&!due(level,gaugeLast))return;
+        if(!due(gnss,gnssLast)&&!due(radar,radarLast)&&!due(tracker,trackerLast)&&!due(level,gaugeLast)&&!due(anemometer,windLast)&&!due(beacon,beaconLast))return;
         const ph::Sample x=flight->sample();
+        if(due(anemometer,windLast)){const auto& e=flight->environment();ph::V3 w; // The air at the mast as the vehicle's flight has it (its added wind too), not the turbulence round the vehicle.
+            if(e.atmosphere&&e.wind&&e.air)w=e.air->at(s.time,mast.latitude,mast.longitude,mast.height).wind;if(e.atmosphere)w=w+flight->gust();
+            windReading=anemometer->measure(now,w);windLast=now;}
+        if(due(beacon,beaconLast)){beaconReading=beacon->measure(now,beaconNed*(x.fixedPosition-beaconAt));beaconLast=now;}
         if(due(level,gaugeLast)){const auto held=gaugeReading;const double dt=std::min(now-gaugeLast,1e3);gaugeReading=level->measure(now,s.propellant);gaugeLast=now;
             if(auto& l=lies[5][0];l.mode){ph::V3 v{gaugeReading.propellant,0,0};bool valid=true;lie(l,v,nullptr,{held.propellant,0,0},{},dt,valid);gaugeReading.valid=valid;gaugeReading.propellant=std::max(0.,v.x);}}
         if(due(gnss,gnssLast)){const auto held=gnssReading;const double dt=std::min(now-gnssLast,1e3);const ph::M3 ned=ph::nedFromFixed(x.geodetic.latitude,x.geodetic.longitude);
@@ -680,6 +686,8 @@ struct Slot {
         if(level){auto* g=o->mutable_propellant_gauge();g->set_valid(gaugeReading.valid);g->set_elapsed_seconds(gaugeReading.time);g->set_propellant_kilograms(gaugeReading.propellant);}
         if(radar){auto* g=o->mutable_radar_altimeter();g->set_valid(radarReading.valid);g->set_elapsed_seconds(radarReading.time);g->set_range_meters(radarReading.range);}
         if(tracker){auto* g=o->mutable_star_tracker();g->set_valid(trackerReading.valid);g->set_elapsed_seconds(trackerReading.time);put(trackerReading.attitude,g->mutable_attitude());}
+        if(anemometer){auto* g=o->mutable_anemometer();g->set_valid(windReading.valid);g->set_elapsed_seconds(windReading.time);g->set_wind_north_meters_per_second(windReading.wind.x);g->set_wind_east_meters_per_second(windReading.wind.y);}
+        if(beacon){auto* g=o->mutable_beacon();g->set_valid(beaconReading.valid);g->set_elapsed_seconds(beaconReading.time);g->set_range_meters(beaconReading.range);g->set_azimuth_radians(beaconReading.azimuth);g->set_elevation_radians(beaconReading.elevation);}
         o->set_state_hash(flight->hash());o->set_vehicle(v.name);o->set_step_seconds(ph::secondsSinceJ2000(step));o->set_atmosphere(atmosphere);put(x.air.wind,o->mutable_wind_ned_meters_per_second());put(x.contactForce,o->mutable_contact_force_newtons());o->set_data_port(data?data->port():0);
         put(reading.specificForce,o->mutable_measured_specific_force_meters_per_second2());put(reading.rate,o->mutable_measured_angular_rate_radians_per_second());
         put(reading.deltaVelocity,o->mutable_delta_velocity_meters_per_second());put(reading.deltaAngle,o->mutable_delta_angle_radians());o->set_measured_static_pressure_pascals(reading.pressure);
@@ -802,7 +810,7 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
         lies={};unitValid={true,true,true};lieNoise.emplace(r.imu().seed()^0x6c696573ull);uplinks.clear();{std::lock_guard i(inbox);injected.clear();}
     }
     { // Navigation sensors, from the request (seeded apart from the IMU), measuring once at the pad.
-        const auto& q=r.sensors();const std::uint64_t seed=q.seed();gnss.reset();radar.reset();tracker.reset();level.reset();gnssLast=radarLast=trackerLast=gaugeLast=-1e300;
+        const auto& q=r.sensors();const std::uint64_t seed=q.seed();gnss.reset();radar.reset();tracker.reset();level.reset();anemometer.reset();beacon.reset();gnssLast=radarLast=trackerLast=gaugeLast=windLast=beaconLast=-1e300;
         auto v=[](bool has,double value,double fallback){return has?value:fallback;};
         if(q.gnss().enabled()){const auto& g=q.gnss();ph::GnssModel m;m.horizontal=v(g.has_horizontal_sigma_meters(),g.horizontal_sigma_meters(),m.horizontal);m.vertical=v(g.has_vertical_sigma_meters(),g.vertical_sigma_meters(),m.vertical);
             m.velocity=v(g.has_velocity_sigma_meters_per_second(),g.velocity_sigma_meters_per_second(),m.velocity);m.drift=v(g.has_drift_sigma_meters(),g.drift_sigma_meters(),m.drift);
@@ -822,6 +830,17 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
             m.roll=v(g.has_roll_sigma_radians(),g.roll_sigma_radians(),m.roll);m.sunExclusion=v(g.has_sun_exclusion_radians(),g.sun_exclusion_radians(),m.sunExclusion);
             m.bodyMargin=v(g.has_body_margin_radians(),g.body_margin_radians(),m.bodyMargin);m.maxRate=v(g.has_max_rate_radians_per_second(),g.max_rate_radians_per_second(),m.maxRate);
             m.period=v(g.has_period_seconds(),g.period_seconds(),m.period);tracker.emplace(m,seed^0x73746172ull);}
+        // Where the site's own instruments stand: east, north and up from the site on its ground (a tower's crown unset).
+        const double la=r.site().latitude_degrees()*deg,lo=r.site().longitude_degrees()*deg,ground=flight->environment().ground;const ph::M3 ned=ph::nedFromFixed(la,lo);
+        auto placed=[&](bool he,double e,bool hn,double n,bool hh,double h){return ph::fixedPosition(flight->environment().planet,{la,lo,ground})+ph::transpose(ned)*ph::V3{hn?n:0,he?e:0,-(hh?h:145)};};
+        if(q.anemometer().enabled()&&center==ph::Center::earth){const auto& g=q.anemometer();ph::AnemometerModel m;m.sigma=v(g.has_sigma_meters_per_second(),g.sigma_meters_per_second(),m.sigma);
+            m.period=v(g.has_period_seconds(),g.period_seconds(),m.period);mast=ph::geodetic(flight->environment().planet,placed(g.has_east_meters(),g.east_meters(),g.has_north_meters(),g.north_meters(),g.has_height_meters(),g.height_meters()));
+            anemometer.emplace(m,seed^0x77696e64ull);}
+        if(q.beacon().enabled()&&center==ph::Center::earth){const auto& g=q.beacon();ph::BeaconModel m;m.range=v(g.has_range_sigma_meters(),g.range_sigma_meters(),m.range);
+            m.rangePpm=v(g.has_range_ppm(),g.range_ppm(),m.rangePpm);m.angle=v(g.has_angle_sigma_radians(),g.angle_sigma_radians(),m.angle);m.maxRange=v(g.has_max_range_meters(),g.max_range_meters(),m.maxRange);
+            m.dropout=v(g.has_dropout(),g.dropout(),m.dropout);m.period=v(g.has_period_seconds(),g.period_seconds(),m.period);
+            beaconAt=placed(g.has_east_meters(),g.east_meters(),g.has_north_meters(),g.north_meters(),g.has_height_meters(),g.height_meters());
+            const ph::Geodetic b=ph::geodetic(flight->environment().planet,beaconAt);beaconNed=ph::nedFromFixed(b.latitude,b.longitude);beacon.emplace(m,seed^0x6265616eull);}
         sense();
     }
     log=api::FlightLog{};record.clear();children.clear();overheated.clear();lastRecord=std::string::npos;truncated=false;log.set_engine("Albert Engine "+std::string(ALBERT_VERSION));*log.mutable_request()=r;log.mutable_request()->set_utc_unix_seconds(p.utc);log.set_atmosphere(atmosphere);

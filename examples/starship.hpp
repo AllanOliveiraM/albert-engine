@@ -222,7 +222,7 @@ inline Mat bodyToNed(double w,double x,double y,double z){ // Rows of the body-t
 // surfaces: their deflections (rad); failed: by engine (0-based), as the engines report it.
 // navSigma: the navigation's position uncertainty (m, 1σ; 0: truth).
 // thrustBody: the engines' thrust as they read it, gimballed as their actuators report (body axes, N).
-struct State {Vec position,velocity,rate,contact,specific,thrustBody;Mat toBody;double mass=0,propellant=0,thrust=0,height=0,q=0,navSigma=0;std::vector<double> surfaces;std::vector<bool> failed;};
+struct State {Vec position,velocity,rate,contact,specific,thrustBody,wind;Mat toBody;double mass=0,propellant=0,thrust=0,height=0,q=0,navSigma=0,windAge=1e9;std::vector<double> surfaces;std::vector<bool> failed;}; // wind: the tower's anemometer's (ECEF, horizontal), windAge s old (1e9: none).
 // surfaces: deflections (rad) by surface, in the stage's order; none sent when empty.
 // gimbals: engines given their own deflection (rad) past the common one, after it (a roll by differential gimbal).
 struct Command {std::vector<int> ignite,cutoff;double throttle=-1,gimbalPitch=0,gimbalYaw=0,vent=-1;std::vector<double> surfaces;Vec torque;bool torqueOn=false,terminate=false; // vent: kg/s (negative: unchanged).
@@ -769,6 +769,7 @@ public:
     const char* termination()const{return termination_.empty()?nullptr:termination_.c_str();}
     Command step(double t,const State& s){
         if(termination()){Command c;c.terminate=true;return c;} // Latched: a rejected command cannot disarm AFTS.
+        if(s.windAge<5)wind_=s.wind; // The tower's wind as its link last sent it (kept when the link drops).
         observe(s,t-seen_,(phase_>=Phase::final&&phase_<=Phase::descend)||phase_==Phase::divert);seen_=t;Command c;c.surfaces={0.,0.,0.};set_.keep(c,s);const Vec rel=s.position+site_*-1; // keep: a lit engine that failed, the next working one in its place.
         grip(s,rel+up_*-dot(rel,up_));
         const double over=dot(rel,up_),vz=dot(s.velocity,up_);const Vec flat=rel+up_*-over,across=s.velocity+up_*-vz;route(flat);
@@ -1159,13 +1160,18 @@ private:
     // The drag coefficient engines first (the stage's base table and the fins').
     static double baseDrag(double v,double h){const double m=v/sound(h);const auto& x=dragMach;const auto& y=baseDragTable;
         constexpr double k=descentDrag;for(int i=0;i<4;++i)if(m<=x[i+1])return 3*finDrag+k*(y[i]+(y[i+1]-y[i])*(m-x[i])/(x[i+1]-x[i]));return k*y[4]+3*finDrag;}
-    double drag(const State& s)const{const double h=norm(s.position)-norm(site_),v=norm(s.velocity);return .5*density(h)*baseDrag(v,h)*pi*radius*radius*v*v/s.mass;}
+    double drag(const State& s)const{const double h=norm(s.position)-norm(site_),v=norm(s.velocity+windAt(h)*-1.);return .5*density(h)*baseDrag(v,h)*pi*radius*radius*v*v/s.mass;}
+    // The wind it reckons with at a height over the site: the tower's anemometer's (146 m up) to 1.5 km, faded out by 4 km (aloft
+    // its own air, which the tower cannot tell).
+    Vec windAt(double h)const{return wind_*std::clamp((4e3-h)/2.5e3,0.,1.);}
+    Vec wind_;
     // RK4 in ECEF (gravity, the Earth's turning, drag engines first, thrust against the air) until done.
     // upright: within that many m/s of falling at gateSpeed, the thrust straight up (the landing burn's last seconds).
     template<class Done> void fly(Vec& r,Vec& v,double m,double accel,double h,Done done,double dragShare=1,double upright=0)const{
         const Vec w{0,0,7.292115e-5};const double area=pi*radius*radius*dragShare;
         auto acc=[&](Vec p,Vec u){const double rn=norm(p),ht=rn-norm(site_),speed=norm(u);const bool up=upright>0&&-dot(u,up_)-gateSpeed<upright;
-            return p*(-earth.mu/(rn*rn*rn))+cross(w,u)*-2.+cross(w,cross(w,p))*-1.+u*(-.5*density(ht)*baseDrag(speed,ht)*area*speed/m)+(up?up_*accel:speed>0?u*(-accel/speed):Vec{});};
+            const Vec air=u+windAt(ht)*-1.;const double airspeed=norm(air); // Its drag through the air the tower's anemometer measures (its wind faded out aloft).
+            return p*(-earth.mu/(rn*rn*rn))+cross(w,u)*-2.+cross(w,cross(w,p))*-1.+air*(-.5*density(ht)*baseDrag(airspeed,ht)*area*airspeed/m)+(up?up_*accel:speed>0?u*(-accel/speed):Vec{});};
         for(int i=0;i<6000&&!done();++i){
             const Vec a1=acc(r,v),v1=v+a1*(h/2),r1=r+v*(h/2),a2=acc(r1,v1),v2=v+a2*(h/2),r2=r+v1*(h/2),a3=acc(r2,v2),v3=v+a3*h,r3=r+v2*h,a4=acc(r3,v3);
             r=r+(v+v1*2+v2*2+v3)*(h/6);v=v+(a1+a2*2+a3*2+a4)*(h/6);}

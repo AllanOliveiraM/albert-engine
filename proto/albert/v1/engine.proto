@@ -369,7 +369,18 @@ message LocalStart { Geodetic position=1; Vector3 velocity_ned_meters_per_second
 message InertialStart { Vector3 position_meters=1; Vector3 velocity_meters_per_second=2; Quaternion attitude=3; Vector3 angular_rate_radians_per_second=4; } // Body to inertial; body rates.
 // Navigation sensors (docs/PHYSICS.md), reproducible from the seed; unset values: the defaults noted.
 message SensorSettings { GnssSettings gnss=1; RadarAltimeterSettings radar_altimeter=2; StarTrackerSettings star_tracker=3; uint64 seed=4;
-  PropellantGaugeSettings propellant_gauge=5; }
+  PropellantGaugeSettings propellant_gauge=5; AnemometerSettings anemometer=6; BeaconSettings beacon=7; }
+// An anemometer on a mast at the site (east, north of it and height over its ground; unset: on the site 145 m up, a tower's
+// crown): the horizontal wind there with white noise σ a horizontal axis (0.3 m/s), a reading a period (1 s), sent to the
+// vehicle over the site's link. Earth flights.
+message AnemometerSettings { bool enabled=1; optional double east_meters=2; optional double north_meters=3; optional double height_meters=4;
+  optional double sigma_meters_per_second=5; optional double period_seconds=6; }
+// A radio beacon at the site (placed as the anemometer): the vehicle's range from it (σ 0.05 m + 10 ppm), its azimuth (from
+// north toward east) and elevation as the beacon sees them (σ 0.5 mrad), within 20 km, 10 Hz, 1% of the replies lost.
+// Independent of the satellites.
+message BeaconSettings { bool enabled=1; optional double east_meters=2; optional double north_meters=3; optional double height_meters=4;
+  optional double range_sigma_meters=5; optional double range_ppm=6; optional double angle_sigma_radians=7; optional double max_range_meters=8;
+  optional double dropout=9; optional double period_seconds=10; }
 // White noise 1.5 m horizontal, 3 m vertical, 0.05 m/s; Gauss-Markov drift 1 m over 300 s; 10 Hz; below 3000 km, no speed
 // limit (a space receiver; 18000 m and 515 m/s make a civil one). Earth flights only.
 message GnssSettings { bool enabled=1; optional double horizontal_sigma_meters=2; optional double vertical_sigma_meters=3;
@@ -513,6 +524,7 @@ message FlightSample {
   Breakup breakup=60;                       // Unset cause: whole. Once broken up the engines are out and commands do nothing.
   double thruster_gas_kilograms=61;         // The thrusters' own gas left (with StageDefinition.thruster_gas_kilograms).
   PropellantGaugeReading propellant_gauge=62; // With SensorSettings.propellant_gauge.
+  AnemometerReading anemometer=65; BeaconReading beacon=66; // With SensorSettings.anemometer, .beacon.
   repeated ImuReading imus=63;              // Each IMU unit over the last Step (the first as fields 37-40).
   repeated string uplinks=64;               // Messages for the flight software since the last Step (FlightCommand.uplink).
 }
@@ -523,6 +535,8 @@ message WheelSample { string name=1; double brake=2; double steer_radians=3; }
 message ThermalSample { string name=1; double temperature_kelvin=2; double heat_flux_watts_per_meter2=3; bool over_limit=4; }
 message GnssReading { bool valid=1; double elapsed_seconds=2; Vector3 position_ecef_meters=3; Vector3 velocity_ecef_meters_per_second=4; bool rtk=5; } // rtk: corrected by the site's base.
 message RadarAltimeterReading { bool valid=1; double elapsed_seconds=2; double range_meters=3; }
+message AnemometerReading { bool valid=1; double elapsed_seconds=2; double wind_north_meters_per_second=3; double wind_east_meters_per_second=4; }
+message BeaconReading { bool valid=1; double elapsed_seconds=2; double range_meters=3; double azimuth_radians=4; double elevation_radians=5; }
 message StarTrackerReading { bool valid=1; double elapsed_seconds=2; Quaternion attitude=3; }
 message SurfaceSample { string name=1; double deflection_radians=2; double command_radians=3; }
 // One engine now: gimbal as moved (rate-limited toward its command); thrust after the ambient pressure.

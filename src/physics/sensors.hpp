@@ -80,6 +80,31 @@ public:
 private:
     GaugeModel model_;Noise noise_;double bias_=0;
 };
+// Anemometer (a cup or sonic one on the tower's crown): the air's horizontal velocity there with white noise σ a horizontal
+// axis (m/s), a reading a period; sent to the vehicles over the site's link.
+struct AnemometerModel {double sigma=.3,period=1;};
+class Anemometer {
+public:
+    struct Reading {bool valid=false;double time=0;V3 wind;}; // NED (m/s), down nought.
+    Anemometer(const AnemometerModel& model,std::uint64_t seed);
+    Reading measure(double time,V3 windNed);
+    const AnemometerModel& model()const{return model_;}
+private:
+    AnemometerModel model_;Noise noise_;
+};
+// Radio beacon on the tower (a ranging transponder with an interferometer): the vehicle's range from it (σ range + rangePpm ×
+// it) and its azimuth (from north, toward east) and elevation as the beacon sees them (σ angle), a reading a period within
+// maxRange; the reply lost with probability dropout. Independent of the satellites: the last metres held when GNSS is not.
+struct BeaconModel {double range=.05,rangePpm=1e-5,angle=5e-4,maxRange=2e4,dropout=.01,period=.1;};
+class Beacon {
+public:
+    struct Reading {bool valid=false;double time=0,range=0,azimuth=0,elevation=0;}; // m, rad.
+    Beacon(const BeaconModel& model,std::uint64_t seed);
+    Reading measure(double time,V3 fromBeaconNed); // The vehicle from the beacon, in the beacon's NED (m).
+    const BeaconModel& model()const{return model_;}
+private:
+    BeaconModel model_;Noise noise_;
+};
 class Imu {
 public:
     struct Reading {V3 specificForce,rate,deltaVelocity,deltaAngle;double pressure=0;};

@@ -102,6 +102,7 @@ public:
             const Vec d=st<engineDirection.size()&&k<engineDirection[st].size()?engineDirection[st][k]:Vec{1,0,0};const double p=e.gimbal().pitch_radians(),y=e.gimbal().yaw_radians();
             const Vec w{d.x*std::cos(y)+d.y*std::sin(y),-d.x*std::sin(y)+d.y*std::cos(y),d.z};x.thrustBody=x.thrustBody+Vec{w.x*std::cos(p)-w.z*std::sin(p),w.y,w.x*std::sin(p)+w.z*std::cos(p)}*e.thrust_newtons();}
         x.navSigma=std::sqrt(std::max({axes_[0].pp,axes_[1].pp,axes_[2].pp}));
+        if(const auto& w=s.anemometer();w.valid()){x.wind=mul(transposed(beaconNed),Vec{w.wind_north_meters_per_second(),w.wind_east_meters_per_second(),0});x.windAge=s.elapsed_seconds()-w.elapsed_seconds();} // The tower's wind as its link sends it.
         for(const auto& f:s.surfaces())x.surfaces.push_back(f.deflection_radians());
         x.height=ellipsoidHeight(position);x.q=.5*density(x.height)*dot(velocity,velocity);return x;
     }
@@ -116,7 +117,7 @@ public:
     }
     int refused()const{return refused_;} // GNSS fixes refused so far (out of line with the estimate).
     int refusedStars()const{return refusedStars_;} // Star tracker attitudes refused (beyond 2°).
-    Vec position,velocity,base;Quat attitude; // ECEF; body to ECEF; base: the RTK base station's place (its error grows with the range).
+    Vec position,velocity,base,beacon;Quat attitude;Mat beaconNed{{1,0,0},{0,1,0},{0,0,1}}; // ECEF; body to ECEF; base: the RTK base station's place (its error grows with the range); beacon: the tower's radio beacon's, beaconNed its north, east and down rows.
 private:
     struct Axis {double pp=1,pv=0,vv=1;};
     static const api::GnssReading& gnss(const api::FlightSample& s){return s.gnss();}
@@ -158,6 +159,15 @@ private:
                 for(int i=0;i<3;++i){Axis& a=axes_[i];double y=p[i]-r[i],S=a.pp+sp*sp,kp=a.pp/S,kv=a.pv/S;r[i]+=kp*y;v[i]+=kv*y;a.vv-=kv*a.pv;a.pv-=kp*a.pv;a.pp-=kp*a.pp;
                     y=u[i]-v[i];S=a.vv+sv*sv;kp=a.pv/S;kv=a.vv/S;r[i]+=kp*y;v[i]+=kv*y;a.pp-=kp*a.pv;a.pv-=kp*a.vv;a.vv-=kv*a.vv;}
                 position={r[0],r[1],r[2]};velocity={v[0],v[1],v[2]};}}
+        // The tower's radio beacon: where it sees the vehicle (range, azimuth, elevation) as a fix of its own, σ its range's
+        // and its angles' over that range on each axis, refused as a GNSS fix out of line with the inertial: the last
+        // kilometres held to the tower whatever the satellites do.
+        if(const auto& b=s.beacon();b.valid()&&b.elapsed_seconds()>ping_){ping_=b.elapsed_seconds();const double r=b.range_meters(),ce=std::cos(b.elevation_radians());
+            const Vec z=beacon+mul(transposed(beaconNed),Vec{r*ce*std::cos(b.azimuth_radians()),r*ce*std::sin(b.azimuth_radians()),-r*std::sin(b.elevation_radians())});
+            const double sr=.05+1e-5*r,sa=5e-4*r,sp=std::sqrt(sr*sr+sa*sa);double p[3]{position.x,position.y,position.z},v[3]{velocity.x,velocity.y,velocity.z};const double y0[3]{z.x,z.y,z.z};
+            bool out=false;for(int i=0;i<3;++i){const double y=y0[i]-p[i];if(y*y>25*(axes_[i].pp+sp*sp))out=true;}
+            if(out)++refusedBeacon_;else for(int i=0;i<3;++i){Axis& a=axes_[i];const double y=y0[i]-p[i],S=a.pp+sp*sp,kp=a.pp/S,kv=a.pv/S;p[i]+=kp*y;v[i]+=kv*y;a.vv-=kv*a.pv;a.pv-=kp*a.pv;a.pp-=kp*a.pp;}
+            position={p[0],p[1],p[2]};velocity={v[0],v[1],v[2]};}
         if(const auto& t=s.star_tracker();t.valid()&&t.elapsed_seconds()>star_){star_=t.elapsed_seconds();
             const Quat m=quatOf(times(earthFromInertial(s.utc_unix_seconds()),matrix(Quat{t.attitude().w(),t.attitude().x(),t.attitude().y(),t.attitude().z()})));
             const Vec e=angleOf(m*conj(attitude));if(norm(e)<.2*deg){attitude=normalize(turn(e*.2)*attitude);starHeld_=0;}
@@ -204,6 +214,7 @@ private:
         for(int u:ok){auto& k=strikes_[static_cast<std::size_t>(u)]; // Off the vote: accelerometers 0.02 m/s², gyroscopes 2e-5 rad/s (4°/h) past their noise.
             if(norm(get(u,false)+dv*-1.)>.02*dt+2e-4||norm(get(u,true)+da*-1.)>2e-5*dt+2e-6){if(++k>25){out_[static_cast<std::size_t>(u)]=true;report("IMU "+std::to_string(u+1)+" fora do voto: isolada");}}else k=0;}
     }
+    int refusedBeacon_=0;double ping_=-1;
     std::array<Axis,3> axes_{};double last_=0,fix_=-1,star_=-1,rtkAt_=-1e9,propellant_=0,model_=0;double anchor_=-1,residual_=0;std::vector<bool> lit_;int refused_=0,held_=0,refusedStars_=0,starHeld_=0,gaugeHeld_=0,stage_=0;bool rtk_=false,gaugeOut_=false;
     std::uint64_t seed_=1;Vec rate_,specific_;std::array<bool,3> out_{};std::array<int,3> strikes_{};std::vector<int> quiet_;std::vector<bool> silent_;
 };

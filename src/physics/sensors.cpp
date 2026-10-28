@@ -69,6 +69,17 @@ PropellantGauge::PropellantGauge(const GaugeModel& m,std::uint64_t seed):model_(
 PropellantGauge::Reading PropellantGauge::measure(double time,double p){
     Reading r;r.time=time;r.valid=true;r.propellant=std::max(0.,p*(1+bias_)+(model_.fraction*p+model_.floor)*noise_.gaussian());return r;
 }
+Anemometer::Anemometer(const AnemometerModel& m,std::uint64_t seed):model_(m),noise_(seed){}
+Anemometer::Reading Anemometer::measure(double time,V3 w){
+    Reading r;r.time=time;r.valid=true;r.wind={w.x+model_.sigma*noise_.gaussian(),w.y+model_.sigma*noise_.gaussian(),0};return r;
+}
+Beacon::Beacon(const BeaconModel& m,std::uint64_t seed):model_(m),noise_(seed){}
+Beacon::Reading Beacon::measure(double time,V3 p){
+    Reading r;r.time=time;const double a=noise_.gaussian(),b=noise_.gaussian(),c=noise_.gaussian(),lost=noise_.uniform(),range=norm(p); // Drawn whether or not it answers.
+    if(!(range>0)||range>model_.maxRange||lost<model_.dropout)return r;
+    r.valid=true;r.range=std::max(0.,range+(model_.range+model_.rangePpm*range)*a);r.azimuth=std::atan2(p.y,p.x)+model_.angle*b;
+    r.elevation=std::atan2(-p.z,std::hypot(p.x,p.y))+model_.angle*c;return r;
+}
 RadarAltimeter::RadarAltimeter(const RadarModel& m,std::uint64_t seed):model_(m),noise_(seed){}
 RadarAltimeter::Reading RadarAltimeter::measure(double time,double height,V3 b){
     Reading r;r.time=time;const double n=noise_.gaussian(),c=b.z; // Cosine to the downward vertical.
