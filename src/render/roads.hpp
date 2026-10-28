@@ -4,6 +4,7 @@
 #include "threepp/textures/DataTexture.hpp"
 #include "threepp/materials/ShaderMaterial.hpp"
 #include <map>
+#include <array>
 #include <string_view>
 namespace albert {
 std::string_view concreteWgsl(); // Shared by terrain roads and solid concrete; coordinates are metres.
@@ -17,10 +18,13 @@ public:
     unsigned candidates()const{return slots_;}
 private:
     void build(const core::Scenery& site);
+    void cover(int quality);
     std::shared_ptr<const core::Scenery> source_;
     std::shared_ptr<threepp::DataTexture> index_,data_;
+    std::array<std::shared_ptr<threepp::DataTexture>,2> cover_;
     std::map<unsigned,std::shared_ptr<threepp::ShaderMaterial>> materials_;
     threepp::Vector4 origin_,grid_,geo_;
+    threepp::Vector4 coverGrid_;
     std::size_t segments_=0;unsigned slots_=0;
 };
 }

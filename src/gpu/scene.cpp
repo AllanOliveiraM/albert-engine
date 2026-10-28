@@ -601,6 +601,11 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     if(earthshine.earth&&earthshine.radius>0){Vector3 e;e.setFromMatrixPosition(*earthshine.earth->matrixWorld);f[104]=e.x;f[105]=e.y;f[106]=e.z;f[107]=earthshine.radius;}
     // Wind waves: this instant's fields before the pass, the pattern's frame and each band's slope variance.
     const Ocean* ocean=nullptr;
+    // The drawn coastal water level also needs this frame when FFT waves are disabled.
+    if(sea.eastAxis.lengthSq()>.5f&&sea.northAxis.lengthSq()>.5f){
+        f[108]=sea.anchor.x;f[109]=sea.anchor.y;f[110]=sea.anchor.z;f[112]=sea.eastAxis.x;f[113]=sea.eastAxis.y;f[114]=sea.eastAxis.z;f[115]=sea.metersPerUnit;
+        f[116]=sea.northAxis.x;f[117]=sea.northAxis.y;f[118]=sea.northAxis.z;
+    }
     if(sea.ocean&&sea.enabled&&airTables){
         sea.ocean->update(encoder,sea.seconds,sea.east,sea.north);ocean=sea.ocean;const float wind=std::hypot(sea.east,sea.north);
         if(std::abs(wind-g.slopeWind)>.1f){for(unsigned c=0;c<3;++c)g.slopes[c]=static_cast<float>(Ocean::bandSlope(wind,c));g.slopeWind=wind;}

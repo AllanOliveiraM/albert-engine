@@ -1,5 +1,8 @@
 #include "roads.hpp"
 #include "gpu/programs.hpp"
+#include "starbase_cover.hpp"
+#include <stb_image.h>
+#include <stdexcept>
 #include <algorithm>
 #include <cmath>
 using namespace threepp;
@@ -32,7 +35,7 @@ void Roads::sync(const core::Scene& scene){
     std::shared_ptr<const core::Scenery> next;
     for(const auto& [id,o]:scene.objects())if(o.visible&&o.scenery&&!o.scenery->roads.empty()){next=o.scenery;break;}
     if(next==source_)return;
-    source_=std::move(next);materials_.clear();index_.reset();data_.reset();segments_=0;slots_=0;if(source_)build(*source_);
+    source_=std::move(next);materials_.clear();for(auto& t:cover_)t.reset();index_.reset();data_.reset();segments_=0;slots_=0;if(source_)build(*source_);
 }
 void Roads::build(const core::Scenery& s){
     std::vector<Primitive> primitives;
@@ -65,13 +68,42 @@ void Roads::build(const core::Scenery& s){
     const double sn=std::sin(s.latitude),a=6378137.,e2=6.69437999014e-3,n=a/std::sqrt(1-e2*sn*sn);
     // UVs are geodetic, as in the OSM converter. Subtract the origin before scaling to retain centimetres in local coordinates.
     origin_=four((s.longitude+pi)/(2*pi),s.latitude/pi+.5,2*pi*n*std::cos(s.latitude),pi*a*(1-e2)/std::pow(1-e2*sn*sn,1.5));
-    grid_=four(minx,miny,nx,ny);geo_=four(cell,groups,slots_,0);defineRoads();
+    grid_=four(minx,miny,nx,ny);geo_=four(cell,groups,slots_,0);
+    coverGrid_=four(boca::west,boca::south,boca::cell*boca::size,0);
+    if(std::abs(s.latitude-boca::latitude*pi/180)<1e-6&&std::abs(s.longitude-boca::longitude*pi/180)<1e-6){
+        coverGrid_.x+=float((boca::longitude*pi/180-s.longitude)*n*std::cos(s.latitude));
+        coverGrid_.y+=float((boca::latitude*pi/180-s.latitude)*a*(1-e2)/std::pow(1-e2*sn*sn,1.5));coverGrid_.w=1;
+    }
+    defineRoads();
+}
+// Two filtered weight layers share the road material and its geodetic coordinate. The low
+// setting averages 2x2 source cells before upload (a quarter of the texture memory).
+void Roads::cover(int quality){
+    const unsigned slot=quality>0?1:0;if(cover_[slot])return;
+    const bool enabled=coverGrid_.w>0;const unsigned step=slot?1:2,width=enabled?boca::size/step:1;
+    std::vector<unsigned char> weights(width*width*4,0),shore(weights.size(),0);
+    int w=0,h=0,c=0;unsigned char* pixels=nullptr;
+    if(enabled){pixels=stbi_load_from_memory(boca::png,sizeof(boca::png),&w,&h,&c,3);
+        if(!pixels||w!=boca::size||h!=boca::size){stbi_image_free(pixels);throw std::runtime_error("Invalid built-in Boca Chica cover");}}
+    if(enabled)for(unsigned y=0;y<width;++y)for(unsigned x=0;x<width;++x){unsigned a[4]{},b[4]{};
+        for(unsigned dy=0;dy<step;++dy)for(unsigned dx=0;dx<step;++dx){const auto* p=pixels+((y*step+dy)*w+x*step+dx)*3;
+            if(p[0]==1||p[0]==6)a[0]+=255;else if(p[0]>=2&&p[0]<=4)a[p[0]-1]+=255;
+            b[0]+=p[0]==5?255:0;b[1]+=p[0]==6?255:0;b[2]+=unsigned(p[1])*256+p[2];}
+        const unsigned count=step*step,coast=(b[2]+count/2)/count;const auto offset=(y*width+x)*4;
+        for(unsigned k=0;k<4;++k)weights[offset+k]=static_cast<unsigned char>(a[k]/count);
+        for(unsigned k=0;k<2;++k)shore[offset+k]=static_cast<unsigned char>(b[k]/count);
+        shore[offset+2]=static_cast<unsigned char>(coast/256);shore[offset+3]=static_cast<unsigned char>(coast%256);}
+    stbi_image_free(pixels);
+    auto make=[&](std::vector<unsigned char> values){auto t=DataTexture::create(ImageData(std::move(values)),width,width*2);
+        t->minFilter=Filter::LinearMipmapLinear;t->magFilter=Filter::Linear;t->generateMipmaps=true;t->anisotropy=slot?4:1;return t;};
+    weights.insert(weights.end(),shore.begin(),shore.end());cover_[slot]=make(std::move(weights));
 }
 std::shared_ptr<Material> Roads::material(const std::shared_ptr<MeshStandardMaterial>& base,int quality){
     if(!base||!data_)return base;
     auto& m=materials_[base->id];if(!m){m=ShaderMaterial::create();m->name="albert:roads";m->lights=true;}
     m->side=base->side;m->visible=base->visible;m->transparent=base->transparent;m->depthWrite=base->depthWrite;
-    auto& u=m->uniforms;u["colour"].setValue(four(base->color.r,base->color.g,base->color.b,base->opacity));u["emissive"].setValue(four(0,0,0,base->bumpMap&&base->bumpMap->wrapS==TextureWrapping::Repeat?1:0));
+    cover(quality);const unsigned slot=quality>0?1:0;
+    auto& u=m->uniforms;u["coverMap"].setValue(cover_[slot].get());u["coverGrid"].setValue(coverGrid_);u["colour"].setValue(four(base->color.r,base->color.g,base->color.b,base->opacity));u["emissive"].setValue(four(0,0,0,base->bumpMap&&base->bumpMap->wrapS==TextureWrapping::Repeat?1:0));
     u["params"].setValue(four(base->roughness,base->metalness,base->alphaTest,base->lightMapIntensity));
     u["flags"].setValue(four(base->map&&base->map->colorSpace==ColorSpace::sRGB?1:0,2,base->alphaMap?1:0,base->lightMap?1:0));
     u["specular"].setValue(four(0,0,0,base->bumpScale));u["more"].setValue(four(base->bumpMap?1:0,base->roughnessMap?2:0,base->side==Side::Double?1:0,0));
@@ -82,17 +114,94 @@ std::shared_ptr<Material> Roads::material(const std::shared_ptr<MeshStandardMate
 namespace {
 void defineRoads(){
     static const bool defined=[](){using gpu::Uniform;auto p=gpu::surfaceProgram();
-        for(const char* n:{"colour","emissive","params","flags","specular","more","roadOrigin","roadGrid","roadGeo","roadOffset"})p.uniforms.emplace_back(n,Uniform::vec4);
-        p.exactTextures={"roadIndex","roadData"};p.textures.push_back("roadIndex");p.textures.push_back("roadData");p.attributes.emplace_back("geoResidual",2);
-        auto& w=p.wgsl;auto at=w.find("more: vec4f }");w.replace(at,std::string("more: vec4f }").size(),"more: vec4f, roadOrigin: vec4f, roadGrid: vec4f, roadGeo: vec4f, roadOffset: vec4f }");
+        for(const char* n:{"colour","emissive","params","flags","specular","more","roadOrigin","roadGrid","roadGeo","roadOffset","coverGrid"})p.uniforms.emplace_back(n,Uniform::vec4);
+        p.exactTextures={"roadIndex","roadData"};p.textures.push_back("roadIndex");p.textures.push_back("roadData");p.textures.push_back("coverMap");p.attributes.emplace_back("geoResidual",2);
+        auto& w=p.wgsl;auto at=w.find("more: vec4f }");w.replace(at,std::string("more: vec4f }").size(),"more: vec4f, roadOrigin: vec4f, roadGrid: vec4f, roadGeo: vec4f, roadOffset: vec4f, coverGrid: vec4f }");
         at=w.find("@location(5) worldNormal: vec3f }");w.replace(at,std::string("@location(5) worldNormal: vec3f }").size(),"@location(5) worldNormal: vec3f, @location(6) road: vec2f }");
         at=w.find("@location(3) uv2: vec2f) -> Varyings");w.replace(at,std::string("@location(3) uv2: vec2f) -> Varyings").size(),"@location(3) uv2: vec2f, @location(4) geoResidual: vec2f) -> Varyings");
-        at=w.find("    return o;\n}");w.insert(at,"    o.road = (uv2 - material.roadOrigin.xy) * material.roadOrigin.zw + geoResidual * material.roadOrigin.zw + material.roadOffset.xy;\n");
+        at=w.find("    return o;\n}");w.insert(at,"    o.road = (uv2 - material.roadOrigin.xy) * material.roadOrigin.zw + geoResidual * material.roadOrigin.zw + material.roadOffset.xy;\n"+std::string(R"(
+    // Only the drawn vertices move: neither the DEM provider nor Terrain::ground changes.
+    let coverUV = (o.road-material.coverGrid.xy)/material.coverGrid.z;
+    let inside = all(coverUV>vec2f(0.0))&&all(coverUV<vec2f(1.0));
+    let border = min(min(coverUV.x,coverUV.y),min(1.0-coverUV.x,1.0-coverUV.y))*material.coverGrid.z;
+    let water = textureSampleLevel(coverMap,coverSampler,coverUV*vec2f(1.0,0.5),0.0).r * material.coverGrid.w * select(0.0,1.0,inside)*smoothstep(0.0,128.0,border);
+    if(frame.oceanEast.w>0.0&&water>0.0){
+        let up = cross(frame.oceanEast.xyz,frame.oceanNorth.xyz);
+        let rel = (o.world-frame.ocean.xyz)*frame.oceanEast.w;let level = rel-up*dot(rel,up);
+        let above = dot(rel,up)+dot(level,level)/12742000.0;
+        o.world -= up*(above/frame.oceanEast.w)*smoothstep(0.55,0.98,water);
+        o.position = (frame.view*vec4f(o.world,1.0)).xyz;o.clip=frame.projection*vec4f(o.position,1.0);
+    }
+)"));
         at=w.find("@fragment fn fs_main");w.insert(at,std::string(concreteWgsl())+R"(
 @group(2) @binding(11) var roadIndex: texture_2d<f32>;
 @group(2) @binding(12) var roadIndexSampler: sampler;
 @group(2) @binding(13) var roadData: texture_2d<f32>;
 @group(2) @binding(14) var roadDataSampler: sampler;
+@group(2) @binding(15) var coverMap: texture_2d<f32>;
+@group(2) @binding(16) var coverSampler: sampler;
+struct Cover { colour: vec3f, water: f32, sea: f32, wet: f32, valid: f32, relief: f32 };
+fn coverRelief(q: vec2f, pixel: f32) -> f32 {
+    return roadNoise(q*0.38)*(1.0-smoothstep(0.4,1.6,pixel));
+}
+fn coastValue(p: vec4f) -> f32 {return (p.b*65280.0+p.a*255.0-32768.0)/128.0;}
+fn coastAt(uv: vec2f) -> f32 {
+    // Decode before bilinear interpolation. Some UNORM samplers round filtered
+    // channels separately, losing the high byte's fraction (two-metre surf steps).
+    let size = vec2i(textureDimensions(coverMap));
+    let p = (uv*vec2f(1.0,0.5)+vec2f(0.0,0.5))*vec2f(size)-0.5;let i = vec2i(floor(p));let f = fract(p);
+    let lo = vec2i(0,size.y/2);let hi = size-1;
+    let a = coastValue(textureLoad(coverMap,clamp(i,lo,hi),0));
+    let b = coastValue(textureLoad(coverMap,clamp(i+vec2i(1,0),lo,hi),0));
+    let c = coastValue(textureLoad(coverMap,clamp(i+vec2i(0,1),lo,hi),0));
+    let d = coastValue(textureLoad(coverMap,clamp(i+vec2i(1,1),lo,hi),0));
+    return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+}
+fn coverSurface(q: vec2f, dx: vec2f, dy: vec2f, imagery: vec3f) -> Cover {
+    let uv = (q-material.coverGrid.xy)/material.coverGrid.z;
+    if(material.coverGrid.w<0.5||any(uv<vec2f(0.0))||any(uv>vec2f(1.0))){return Cover(imagery,0.0,0.0,0.0,0.0,0.0);}
+    let atlasScale = vec2f(1.0,0.5);
+    let weights = textureSampleGrad(coverMap,coverSampler,uv*atlasScale,dx*atlasScale/material.coverGrid.z,dy*atlasScale/material.coverGrid.z);
+    let shore = textureSampleGrad(coverMap,coverSampler,uv*atlasScale+vec2f(0.0,0.5),dx*atlasScale/material.coverGrid.z,dy*atlasScale/material.coverGrid.z);
+    let boundary = min(min(uv.x,uv.y),min(1.0-uv.x,1.0-uv.y))*material.coverGrid.z;
+    let valid = smoothstep(0.0,128.0,boundary)*material.coverGrid.w;
+    let pixel = max(length(dx),length(dy));let detail = material.roadGeo.w;
+    // Each octave returns to its mean before it becomes subpixel. No distant grain or grass sparkle.
+    let broad = mix(0.5,roadNoise(q*0.018),1.0-smoothstep(12.0,45.0,pixel));
+    let medium = mix(0.5,roadNoise(q*0.18),1.0-smoothstep(1.5,5.0,pixel));
+    var fine = 0.5;
+    if(detail>0.0){fine=mix(0.5,roadNoise(q*3.0),1.0-smoothstep(0.06,0.3,pixel));}
+    let texture = 0.77+0.36*broad+0.28*(medium-0.5)+0.16*(fine-0.5);
+    let maskCell = material.coverGrid.z/f32(textureDimensions(coverMap).x);
+    let wetLod = max(2.0,log2(max(pixel/maskCell,1.0)));
+    let blurredWater = textureSampleLevel(coverMap,coverSampler,uv*atlasScale,wetLod).r;
+    let damp = clamp((blurredWater-weights.r)*2.2,0.0,1.0);
+    let sand = vec3f(0.48,0.43,0.32)*(1.0-0.32*damp);
+    let marsh = mix(vec3f(0.085,0.105,0.033),vec3f(0.18,0.19,0.075),broad);
+    let flats = mix(vec3f(0.28,0.27,0.21),vec3f(0.43,0.405,0.32),0.35+0.3*medium)*(1.0-0.28*damp);
+    let scrub = mix(vec3f(0.055,0.071,0.025),vec3f(0.13,0.135,0.055),medium);
+    let land = weights.gba;let total = dot(land,vec3f(1.0))+shore.r;
+    let painted = (marsh*land.x+flats*land.y+sand*land.z+scrub*shore.r)/max(total,0.001);
+    // Keep the satellite's luminance variations and some chroma underneath every class.
+    let variation = clamp(dot(imagery,vec3f(0.2126,0.7152,0.0722))/0.20,0.65,1.35);
+    var colour = mix(imagery,painted*(0.78+0.22*variation),total*0.72*valid);
+    // Unmapped coastal grassland keeps its observed colour, with the same filtered
+    // metre-scale tussocks as the mapped vegetation rather than a smooth satellite texel.
+    colour *= mix(1.0,texture,valid);
+    var coast = coastValue(shore);let sea = shore.g;
+    if(abs(coast)<96.0&&pixel<maskCell*2.0){coast=coastAt(uv);}
+    let waterColour = mix(vec3f(0.055,0.13,0.15),vec3f(0.018,0.10,0.14),sea)*(0.88+0.18*broad);
+    colour = mix(colour,mix(waterColour,imagery,0.18),weights.r*valid);
+    // A wet beach margin and two broad, footprint-filtered breakers on the seaward side.
+    let aa = max(2.0,pixel);let wetBeach = (1.0-smoothstep(4.0,22.0,-coast))*(1.0-smoothstep(-aa,aa,coast));
+    colour *= 1.0-0.20*wetBeach*valid;
+    let wave = coast-8.0-2.5*sin(q.y*0.035+frame.ocean.w*frame.weather.z);
+    let foam = max(roadLine(wave,3.5,aa),roadLine(wave-15.0,2.0,aa)*0.55)*(1.0-smoothstep(35.0,70.0,coast));
+    let breakup = mix(0.7,0.45+0.55*roadNoise(q*0.16),1.0-smoothstep(0.8,4.0,pixel));
+    colour = mix(colour,vec3f(0.62,0.68,0.65),foam*breakup*valid*0.72);
+    let relief = mix(0.025,0.20,clamp(weights.g+shore.r+(1.0-total)*0.5,0.0,1.0));
+    return Cover(colour,weights.r*valid,sea*valid,damp*valid,valid,relief);
+}
 // Return albedo and coverage; all derivatives are computed before the spatially varying loop.
 fn roadSurface(q: vec2f, dx: vec2f, dy: vec2f) -> vec4f {
     let tile = vec2i(floor((q-material.roadGrid.xy)/material.roadGeo.x));
@@ -140,9 +249,41 @@ fn roadSurface(q: vec2f, dx: vec2f, dy: vec2f) -> vec4f {
     return vec4f(colour,cover);
 }
 )");
-        at=w.find("    let light = airLight");w.insert(at,"    let road = roadSurface(v.road, dpdx(v.road), dpdy(v.road));\n    base = vec4f(mix(base.rgb, road.rgb, road.a), base.a);\n");
-        // Paved surfaces are matte even where the imagery's water classifier disagrees.
-        at=w.find("* select(1.0, 1.0 - smoothstep(1.0, 3.0, above), frame.ocean.w > 0.0);");w.insert(at+std::string("* select(1.0, 1.0 - smoothstep(1.0, 3.0, above), frame.ocean.w > 0.0)").size()," * (1.0-road.a)");
+        at=w.find("    let light = airLight");w.insert(at,R"(
+    let groundDx = dpdx(v.road);let groundDy = dpdy(v.road);
+    let cover = coverSurface(v.road,groundDx,groundDy,base.rgb);
+    let road = roadSurface(v.road,groundDx,groundDy);
+    base = vec4f(mix(cover.colour,road.rgb,road.a),base.a);
+    let sigmaX = dpdx(v.position);let sigmaY = dpdy(v.position);
+    if(material.roadGeo.w>0.0&&cover.valid>0.0){
+        let pixel = max(length(groundDx),length(groundDy));let height = coverRelief(v.road,pixel);
+        let units = length(sigmaX)/max(length(groundDx),0.001);
+        let amplitude = cover.relief*cover.valid*(1.0-cover.water)*(1.0-road.a)*units;
+        let bx = (coverRelief(v.road+groundDx,pixel)-height)*amplitude;
+        let by = (coverRelief(v.road+groundDy,pixel)-height)*amplitude;
+        let r1 = cross(sigmaY,n);let r2 = cross(n,sigmaX);let det = dot(sigmaX,r1)*face;
+        n = normalize(max(abs(det),1e-30)*n-sign(det)*(bx*r1+by*r2));
+    }
+)");
+        at=w.find("        if (material.more.y > 1.5");w.insert(at,R"(
+        let lagoon = max(cover.water-cover.sea,0.0)*(1.0-road.a);
+        roughness = mix(roughness,mix(0.88,0.68,cover.wet),cover.valid);
+        roughness = mix(roughness,0.24,cover.water*(1.0-road.a));
+        roughness = mix(roughness,0.20,lagoon);
+        if(frame.oceanEast.w>0.0&&cover.water>0.0){
+            let up = cross(frame.oceanEast.xyz,frame.oceanNorth.xyz);
+            var calm = normalize((frame.view*vec4f(up,0.0)).xyz);
+            // Sheltered water gets centimetre ripples, not the Gulf's deep-water spectrum.
+            let ripple = (1.0-smoothstep(0.12,0.8,max(length(groundDx),length(groundDy))))*material.roadGeo.w;
+            calm = normalize(calm+vec3f(sin(v.road.x*1.3+v.road.y*0.7),cos(v.road.y*1.1),0.0)*0.018*ripple);
+            n = normalize(mix(n,calm,cover.water*(1.0-road.a)));
+        }
+)");
+        // The OSM mask overrides imagery's blue-colour water classifier only inside its bounds.
+        const std::string oldWater="let water = (1.0 - smoothstep(0.35, 0.5, roughTexel.g)) * select(1.0, 1.0 - smoothstep(1.0, 3.0, above), frame.ocean.w > 0.0);";
+        at=w.find(oldWater);w.replace(at,oldWater.size(),"let water = mix((1.0-smoothstep(0.35,0.5,roughTexel.g))*select(1.0,1.0-smoothstep(1.0,3.0,above),frame.ocean.w>0.0),cover.sea,cover.valid)*(1.0-road.a);");
+        at=w.find("if (material.more.y > 1.5 && frame.weather.z > 0.0 && frame.air.w > 0.0)");
+        w.replace(at,std::string("if (material.more.y > 1.5 && frame.weather.z > 0.0 && frame.air.w > 0.0)").size(),"if ((material.more.y > 1.5 || cover.sea > 0.0) && frame.weather.z > 0.0 && frame.air.w > 0.0)");
         gpu::define("albert:roads",std::move(p));return true;}();(void)defined;
 }
 }

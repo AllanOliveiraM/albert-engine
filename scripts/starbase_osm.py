@@ -3,9 +3,9 @@
 examples/starbase_osm.hpp: storage tanks, buildings, the other tower, roads, in metres east/north of the pad's site.
 Usage: starbase_osm.py OVERPASS_JSON LAT LON > examples/starbase_osm.hpp"""
 import json,math,sys
+from osm_enu import metres_per_degree
 data=json.load(open(sys.argv[1]));lat0,lon0=float(sys.argv[2]),float(sys.argv[3])
-a=6378137.0;e2=6.69437999014e-3;ph=math.radians(lat0)
-mlat=a*(1-e2)/(1-e2*math.sin(ph)**2)**1.5*math.pi/180;mlon=a/math.sqrt(1-e2*math.sin(ph)**2)*math.cos(ph)*math.pi/180
+mlon,mlat=metres_per_degree(lat0)
 def enu(g):return ((g['lon']-lon0)*mlon,(g['lat']-lat0)*mlat)
 def box(pts): # Centre, length along the long axis, width across, heading of the long axis (degrees from north), by PCA.
     if pts[0]==pts[-1]:pts=pts[:-1]

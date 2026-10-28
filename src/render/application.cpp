@@ -2884,14 +2884,14 @@ int albert::runRenderer(int argc, char** argv) {
                 const ph::V3 gcrf{c.x*r+sceneOrigin.x,-c.z*r+sceneOrigin.y,c.y*r+sceneOrigin.z};const ph::Tt tt=ph::ttFromUtc(simulatedUtc);
                 const ph::M3 fixed=ph::Rotation::iau(ph::secondsSinceJ2000(tt)-(simulatedUtc-946728000.)).at(tt).fixed;const ph::V3 eye=fixed*gcrf;
                 const ph::Geodetic here=ph::geodetic(ph::earth,eye);const bool on=preferences.oceanWaves&&here.height<30e3&&here.height>-100;
-                if(on){
+                if(here.height<30e3&&here.height>-100){
                     if(!seaOrigin||ph::norm(eye-seaOrigin->position)>200e3){const double sl=std::sin(here.latitude),cl=std::cos(here.latitude),so=std::sin(here.longitude),co=std::cos(here.longitude);
                         seaOrigin=SeaFrame{ph::fixedPosition(ph::earth,{here.latitude,here.longitude,ph::geoidHeight(here.latitude,here.longitude)}),{-so,co,0},{-sl*co,-sl*so,cl}};} // On the mean sea (the geoid): the shader keeps the waves to what lies at its level.
                     const auto& o=*seaOrigin;const ph::V3 d=eye-o.position;
                     const ph::V3 anchor=o.position+o.east*(512*std::round(ph::dot(d,o.east)/512))+o.north*(512*std::round(ph::dot(d,o.north)/512));
                     auto toWorld=[&](ph::V3 a){const ph::V3 g=ph::transpose(fixed)*a;return Vector3(static_cast<float>(g.x),static_cast<float>(g.z),static_cast<float>(-g.y));}; // ECEF → world axes.
                     Vector3 at=toWorld((anchor-eye)*(1/r));at.add(camera->position);
-                    graphics.setSea(true,seaClock,seaWindEast,seaWindNorth,at,toWorld(o.east).normalize(),toWorld(o.north).normalize(),static_cast<float>(r));
+                    graphics.setSea(on,seaClock,seaWindEast,seaWindNorth,at,toWorld(o.east).normalize(),toWorld(o.north).normalize(),static_cast<float>(r));
                 }else graphics.setSea(false,seaClock,seaWindEast,seaWindNorth,{},{},{},static_cast<float>(r));
                 // Volumetric clouds (Ajustes "Nuvens volumetricas") up to 50 km, handing over to the flat shell from 30 km; their noise
                 // drifts with the wind at their height, taken as 1.5 times the sea's (the 850 hPa wind over the 10 m one).

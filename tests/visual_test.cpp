@@ -16,6 +16,8 @@
 #include "gpu/context.hpp"
 #include "gpu/scene.hpp"
 #include "gpu/atmosphere.hpp"
+#include "gpu/ocean.hpp"
+#include <numbers>
 #include "lighting.hpp"
 #include "sound.hpp"
 #include "webgpu_programs.hpp"
@@ -260,6 +262,7 @@ struct GpuTarget final:Target {
     }
 };
 #include "vehicle_visuals.hpp"
+#include "land_visuals.hpp"
 void roadGraphics(Target& renderer){
     auto site=std::make_shared<albert::core::Scenery>();site->latitude=25.996128*3.141592653589793/180;site->longitude=-97.154517*3.141592653589793/180;
     albert::core::SceneryRoad highway;highway.surface=albert::core::SceneryRoad::Surface::Asphalt;highway.width=10.5;highway.highway=true;highway.points={{-30,0,0},{0,0,0},{30,0,0}};site->roads.push_back(highway);
@@ -274,7 +277,7 @@ void roadGraphics(Target& renderer){
     for(int i=0;i<positions->count();++i){const double u=(site->longitude+pi)/(2*pi)+positions->getX(i)/(2*pi*n*std::cos(site->latitude));
         const double v=site->latitude/pi+.5+positions->getY(i)/(pi*a*(1-e2)/std::pow(1-e2*sn*sn,1.5));uv.insert(uv.end(),{float(u),float(v)});residual.insert(residual.end(),{float(u-float(u)),float(v-float(v))});}
     geometry->setAttribute("uv2",FloatBufferAttribute::create(std::move(uv),2));geometry->setAttribute("geoResidual",FloatBufferAttribute::create(std::move(residual),2));
-    auto world=Scene::create();world->background=Color(0);auto sun=DirectionalLight::create(Color(0xffffff),3);sun->position.set(0,0,50);world->add(sun);world->add(Mesh::create(geometry,material));
+    auto world=Scene::create();world->background=Color(0);auto sun=DirectionalLight::create(Color(0xffffff),3);sun->position.set(0,0,50);world->add(sun);auto ground=Mesh::create(geometry,material);world->add(ground);
     auto camera=OrthographicCamera::create(-30,30,30,-30,.1,100);camera->position.set(0,0,50);camera->lookAt(Vector3());renderer.render(*world,*camera);const auto pixels=renderer.readRGBPixels();
     auto bright=[&](int x,int y){const auto i=3*(y*192+x);return int(pixels[i])+pixels[i+1]+pixels[i+2];};
     require(bright(55,102)<bright(55,140)*.7,"Asphalt did not replace the ground imagery");
@@ -283,6 +286,24 @@ void roadGraphics(Target& renderer){
     int yellow=0;for(int y=94;y<98;++y)for(int x=20;x<170;++x){const auto i=3*(y*192+x);yellow+=pixels[i]>pixels[i+2]+20&&pixels[i+1]>pixels[i+2]+10;}
     require(yellow>50,"Antialiased yellow highway centre lines missing");
     sun->intensity=0;renderer.render(*world,*camera);const auto dark=renderer.readRGBPixels();require(dark[3*(96*192+55)]<pixels[3*(96*192+55)]/3,"Roads glow without sunlight");
+    // Saved geographic samples: South Bay water, tidal flats west of the pad, saltmarsh,
+    // a scrub island south of the site, and the beach north of the pad. The constant
+    // imagery isolates the cover, and ENU offsets exercise the terrain UV residual path.
+    auto sample=[&](double east,double north){auto* global=geometry->getAttribute<float>("uv2");auto* residuals=geometry->getAttribute<float>("geoResidual");
+        for(int i=0;i<positions->count();++i){const double u=(site->longitude+pi)/(2*pi)+(positions->getX(i)+east)/(2*pi*n*std::cos(site->latitude));
+            const double v=site->latitude/pi+.5+(positions->getY(i)+north)/(pi*a*(1-e2)/std::pow(1-e2*sn*sn,1.5));
+            global->setXY(i,float(u),float(v));residuals->setXY(i,float(u-float(u)),float(v-float(v)));}
+        global->needsUpdate();residuals->needsUpdate();renderer.render(*world,*camera);auto image=renderer.readRGBPixels();std::array<int,3> mean{};
+        for(int y=90;y<102;++y)for(int x=90;x<102;++x)for(int c=0;c<3;++c)mean[c]+=image[3*(y*192+x)+c];
+        for(auto& c:mean)c/=144;return mean;};
+    sun->intensity=3;sun->position.set(30,-20,50);const auto lagoon=sample(-2500,3000),flat=sample(-3000,0),marsh=sample(-2746,-3054),scrub=sample(-118,-498),beach=sample(226,2082);
+    std::cout<<"Boca cover RGB: ";for(const auto& rgb:{lagoon,flat,marsh,scrub,beach})std::cout<<rgb[0]<<','<<rgb[1]<<','<<rgb[2]<<"  ";std::cout<<'\n';
+    require(lagoon[2]>lagoon[0]+4,"Geographic lagoon missing or cover flipped north/south");
+    require(marsh[1]>marsh[2]+10&&scrub[1]>scrub[2]+10,"Saltmarsh or scrub lost its olive colour");
+    require(beach[0]>marsh[0]+25&&flat[0]>scrub[0]+20,"Beach and tidal flats lost their sand cover");
+    ground->setMaterial(roads.material(base,0));const auto low=sample(-2500,3000);
+    require(std::abs(low[2]-lagoon[2])<12,"Low quality changed the lagoon's geographic coverage");
+    sun->intensity=0;const auto unlit=sample(-2500,3000);require(unlit[0]+unlit[1]+unlit[2]<6,"Inland water emits light at night");
     registry.remove("road-site");roads.sync(registry);require(roads.material(base,1)==base,"Removed site retained its road decal");
 }
 void padGraphics(Target& renderer){
@@ -769,6 +790,7 @@ void lunarAdaptationLevels(){
 int main(int argc,char** argv) {
     try {
 #ifdef ALBERT_TEST_RPC
+        if(argc>2&&std::string_view(argv[1])=="land-captures"){landCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
 #endif
         controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();

@@ -120,6 +120,9 @@ Assets estáticos (origens, hashes e avisos completos em `assets/manifest.json` 
 - OpenStreetMap: a disposição do sítio de lançamento de Starbase (tanques, prédios, a Torre 2 e a vala do Pad 2) em
   `examples/starbase_osm.hpp`, gerado por `scripts/starbase_osm.py` a partir de uma consulta Overpass de 2026-10-24.
   © colaboradores do OpenStreetMap, dados sob a Open Database License (ODbL) 1.0, https://www.openstreetmap.org/copyright.
+  A cobertura natural de Boca Chica em `assets/geography/boca-chica-natural.json` (base OSM de
+  2026-07-24T11:04:51Z) e a máscara derivada `src/render/starbase_cover.hpp` têm a mesma atribuição
+  e licença. `scripts/starbase_cover.py` reproduz a máscara a partir desse JSON, sem rede.
 - NASA GIBS: paleta pública de fração de nuvens MODIS, convertida para JSON,
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml.
 - Planetas e luas (créditos e limites por corpo em `assets/planetary-sources.json`,
