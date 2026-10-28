@@ -346,6 +346,35 @@ struct Material { diffuse: vec3f, opacity: f32, emissive: vec3f, roughness: f32,
 }
 )";
     albert::gpu::define("albert:bell",bell);
+    // Rigid vehicle hardware is CPU posed once per changed sample, then one indexed draw.
+    // Per-vertex heat keeps each bell independent, including unlit neighbours.
+    Program hardware;hardware.attributes={{"normal",3},{"color",3},{"emission",3},{"finish",2}};
+    hardware.uniforms={{"waterPlane",Uniform::vec4}};
+    hardware.wgsl=R"(
+struct Material { waterPlane: vec4f };
+@group(2) @binding(0) var<uniform> material: Material;
+struct Hardware { @builtin(position) clip: vec4f, @location(0) world: vec3f, @location(1) normal: vec3f,
+    @location(2) colour: vec3f, @location(3) emission: vec3f, @location(4) finish: vec2f, @location(5) water: f32 };
+@vertex fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) colour: vec3f,
+    @location(3) emission: vec3f, @location(4) finish: vec2f) -> Hardware {
+    var o: Hardware; let world=object.model*vec4f(position,1.0);o.world=world.xyz;
+    o.clip=frame.projection*frame.view*world;o.normal=normalize(object.normalWorld*normal);
+    o.colour=colour;o.emission=emission;o.finish=finish;o.water=dot(material.waterPlane,vec4f(position,1.0));return o;
+}
+@fragment fn fs_main(v: Hardware, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+    let submerged=dot(material.waterPlane.xyz,material.waterPlane.xyz)>0.000001;
+    if(submerged && v.water < -0.18){discard;}
+    let wet=select(0.0,1.0-smoothstep(0.0,2.4,v.water),submerged);
+    let worldNormal=normalize(v.normal)*select(-1.0,1.0,front);
+    let n=normalize((frame.view*vec4f(worldNormal,0.0)).xyz);let position=(frame.view*vec4f(v.world,1.0)).xyz;
+    let air=airLight(v.world,worldNormal);
+    let colour=standardLight(v.colour*(1.0-wet*0.42),mix(v.finish.x,0.19,wet),v.finish.y,n,n,position,
+        air.sky*frame.sunColor.rgb,shadowFactor(v.world,worldNormal)*air.sun)+v.emission;
+    return vec4f(finish(airApply(v.world,colour)),1.0);
+}
+)";
+    albert::gpu::define("albert:vehicle-detail",std::move(hardware));
+
     Program plasma;plasma.attributes=surfaceAttributes;plasma.uniforms={{"strength",Uniform::f32},{"upwind",Uniform::vec3},{"seconds",Uniform::f32},
         {"quality",Uniform::f32},{"wake",Uniform::f32},{"leading",Uniform::vec4},{"extent",Uniform::vec3},{"span",Uniform::f32}};
     plasma.wgsl=std::string(surface)+albert::entryPlasmaShader;albert::gpu::define("albert:plasma",std::move(plasma));

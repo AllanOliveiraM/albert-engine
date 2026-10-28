@@ -324,6 +324,7 @@ void shadowGraphics(GpuTarget& renderer){
     renderer.scene.shadowMetersPerUnit=0;renderer.scene.shadows=false;
 }
 #include "vehicle_visuals.hpp"
+#include "vehicle_geometry_visuals.hpp"
 #include "entry_visuals.hpp"
 #include "plume_visuals.hpp"
 #include "production_visuals.hpp"
@@ -874,15 +875,20 @@ int main(int argc,char** argv) {
         if(argc>2&&std::string_view(argv[1])=="launch-cloud-captures"){launchCloudCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="plume-captures"){plumeCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="entry-captures"){entryCaptures(argv[2]);return 0;}
+        if(argc>2&&std::string_view(argv[1])=="geometry-captures"){vehicleGeometryCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
 #endif
         shadowStability();controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();splashdownControls();
 #ifdef ALBERT_TEST_RPC
-        productionData();industrialData();
+        productionData();industrialData();vehicleGeometryControls();
 #endif
         if(argc>1){
             std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';return 77;}
-            if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";shadowGraphics(*gpu);graphics(*gpu);require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}
+            if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";shadowGraphics(*gpu);graphics(*gpu);
+#ifdef ALBERT_TEST_RPC
+                vehicleGeometryGraphics(*gpu);
+#endif
+                require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}
         }
         return 0;
     }

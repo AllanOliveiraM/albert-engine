@@ -7,6 +7,7 @@
 #include <webgpu/wgpu.h>
 #include <threepp/threepp.hpp>
 #include <threepp/materials/ShaderMaterial.hpp>
+#include <threepp/objects/LOD.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -564,6 +565,9 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     Mesh* contactField=nullptr;
     DirectionalLight* shadowLight=nullptr;std::vector<Mesh*> casters;std::vector<PointLight*> localLights;
     scene.traverseVisible([&](Object3D& o){
+        if(auto* lod=o.as<LOD>();lod&&lod->autoUpdate){ // LOD distances are object-local metres, including Earth-scaled vehicles.
+            const float zoom=camera.zoom,scale=Vector3().setFromMatrixColumn(*o.matrixWorld,0).length();
+            camera.zoom*=std::max(scale,1e-20f);lod->update(camera);camera.zoom=zoom;}
         if(auto* mesh=dynamic_cast<Mesh*>(&o);mesh&&mesh->material()&&mesh->material()->name=="albert:contact-field"){contactField=mesh;return;}
         if(auto* light=dynamic_cast<DirectionalLight*>(&o)){Vector3 p,t;p.setFromMatrixPosition(*light->matrixWorld);t.setFromMatrixPosition(*light->target().matrixWorld);sun=p.sub(t).normalize();sunOn=1;sunColor=light->color;sunColor.multiplyScalar(light->intensity);
             if(shadows&&light->castShadow&&light->shadow)shadowLight=light;return;}

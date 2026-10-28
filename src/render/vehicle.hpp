@@ -6,8 +6,10 @@
 // vehicle has broken up, a fireball, smoke and debris thrown out instead, by the seconds since.
 #include "core/scene.hpp"
 #include "engine_cycle.hpp"
+#include "vehicle_geometry.hpp"
 #include "threepp/threepp.hpp"
 #include "threepp/materials/ShaderMaterial.hpp"
+#include "threepp/objects/LOD.hpp"
 #include <array>
 #include <chrono>
 #include <memory>
@@ -37,6 +39,7 @@ private:
     struct Jet {std::shared_ptr<threepp::Mesh> mesh;};
     struct Piece {std::shared_ptr<threepp::Mesh> mesh;threepp::Vector3 velocity,spin;};
     std::shared_ptr<threepp::Mesh> root_;std::vector<Engine> engines_;std::vector<Part> parts_;std::vector<Jet> jets_;
+    std::array<VehicleGeometry,2> hardware_;std::shared_ptr<threepp::LOD> detail_; // Near/far rigid hardware, one draw each.
     double length_=1;std::shared_ptr<threepp::Mesh> fire_,smoke_;std::vector<Piece> pieces_; // The breakup's, made when it comes.
     std::shared_ptr<threepp::PointLight> exhaustLight_; // One bounded warm source per stage, weighted by the lit bells.
     float obstruction_=0,impingement_=0,thrust_=0;
