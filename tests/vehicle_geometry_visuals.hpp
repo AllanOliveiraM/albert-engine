@@ -59,8 +59,10 @@ void vehicleGeometryControls(){
             require(std::abs(vertices->getX(i))<=spec.width/2+.0001&&std::abs(vertices->getY(i))<=spec.thickness/2+.0001&&std::abs(vertices->getZ(i))<=spec.span/2+.0001,"Grid sheets exceed the declared fin envelope");}
     // Radial rays cross an opening above the dome, then hit its neighbouring ligament.
     const auto& ring=look.sections.front();const float y=float(look.length/2-ring.from-.45),r=float(look.diameter/2);
-    auto radial=[&](float angle){Vector3 d(std::sin(angle),0,std::cos(angle));Raycaster ray(Vector3(d).multiplyScalar(r+1).setY(y),Vector3(d).negate());ray.farPlane=1.5f;return !ray.intersectObject(*near).empty();};
-    require(!radial(3.14159265f/20)&&radial(0),"Hot-staging apertures do not pass rays");
+    auto radial=[&](float angle,float at){Vector3 d(std::sin(angle),0,std::cos(angle));Raycaster ray(Vector3(d).multiplyScalar(r+1).setY(at),Vector3(d).negate());ray.farPlane=1.5f;return !ray.intersectObject(*posedNear).empty();};
+    // V3's open ring: between two struts at mid-height a ray passes; at a strut pair's foot (its clevis) it is stopped.
+    const float ringHeight=float(ring.to-ring.from),mid=float(look.length/2-ring.from)-ringHeight/2-.2f,foot=float(look.length/2-ring.to)-.65f;
+    require(!radial(0,mid)&&radial(3.14159265f/20,foot),"Hot-staging struts do not open the ring or meet at their clevises");
     booster.quality(0);require(!near->visible&&far->visible&&!lod->autoUpdate,"Low quality retained near hardware");booster.quality(1);require(lod->autoUpdate,"High quality failed to restore automatic LOD");
     const auto shipLook=captureLook(ex::stack(),1);albert::Vehicle ship(shipLook);require(ship.engineCount()==6,"Ship engine count changed");
     auto flapSample=geometrySample(shipLook,.4f);ship.animate(&flapSample,0);unsigned flaps=0;
@@ -110,6 +112,7 @@ void vehicleGeometryCaptures(const std::string& directory){
     view(booster,{-3,bh-43,0},{-28,bh-40,-30},50);report("booster-chine-opposite");
     view(ship,{-4,sh-8,-1},{-18,sh-3,-17},47);report("ship-forward-flap");
     view(ship,{-6,sh-44.5f,1},{-14,sh-41,12},50);report("ship-aft-flap");
+    view(ship,{0,sh-26,4.5f},{2,sh-24,12},50);report("ship-tiles-8m");view(ship,{0,sh-26,0},{8,sh-20,30},40);report("ship-tiles-30m");view(ship,{0,sh-30,4.5f},{3.5f,sh-22,7},60);report("ship-tiles-grazing");
     sun->position.set(10,-35,20);view(booster,{0,-bh+1,0},{4,-bh-12,5},54);report("booster-engine-bay");
     bs[1]=.16f;bs[2]=-.12f;booster.animate(&bs,1);report("booster-engine-gimbal");
     view(booster,{0,-bh+.5f,0},{4,-bh+.8f,0},105);report("booster-engine-bay-close");

@@ -89,14 +89,19 @@ inline const char* vehicleSurfaceFragment=R"(
     let pixel = max(fwidth(q), vec2f(0.0001));
     let detail = quality * (1.0 - smoothstep(0.08, 0.32, max(pixel.x, pixel.y)));
     var tileAlbedo = vec3f(0.036);
+    // Each tile glazed (a faint sheen, its own) and seated a hair off flush: under the sun each catches it a little differently,
+    // which is what shows their hexagons on the real ship; near-black and even, a rare darker replacement.
+    var tileTilt = vec2f(0.0); var tileRough = 0.88;
     if (quality > 0.5) {
         let hex = vehicleHex(q / 0.17);
         let gutter = vehicleLine(hex.x, 0.018, max(pixel.x, pixel.y) / 0.17);
-        let tileSeed = vehicleHash(hex.yz);
-        let tileShade = mix(0.026, 0.052, tileSeed) * select(1.0, 0.38, tileSeed < 0.023);
+        let tileSeed = vehicleHash(hex.yz);let tileSeed2 = vehicleHash(hex.yz + vec2f(17.3, 5.1));
+        let tileShade = mix(0.029, 0.043, tileSeed) * select(1.0, 0.75, tileSeed < 0.003);
         let missing = select(0.0, 1.0, tileSeed > 0.9985);
         let resolved = mix(vec3f(tileShade), vec3f(0.017, 0.012, 0.009), missing) * (1.0 - 0.68 * gutter);
         tileAlbedo = mix(tileAlbedo, resolved, detail);
+        tileTilt = (vec2f(tileSeed, tileSeed2) - 0.5) * 2.0 * detail * (1.0 - gutter);
+        tileRough = mix(0.88, mix(0.5, 0.66, tileSeed2) + 0.32 * gutter, detail);
     }
     let hullY = select(v.local.y, q.y + material.vehicleHull.z, kind == 2.0);
     let boundary = material.vehicleHull.x * 0.5 + vehicleTileEdge(hullY);
@@ -162,7 +167,7 @@ inline const char* vehicleSurfaceFragment=R"(
         let edge = 1.0 - smoothstep(0.12, 0.45, abs(dot(normalize(v.worldNormal), normalize(object.normalWorld * vec3f(0, 1, 0)))));
         albedo *= 1.0 + 0.7 * edge; rough = mix(rough, 0.25, edge * 0.65);
     }
-    albedo = mix(albedo, tileAlbedo, tile); rough = mix(rough, 0.88, tile); metal = mix(metal, 0.0, tile);
+    albedo = mix(albedo, tileAlbedo, tile); rough = mix(rough, tileRough, tile); metal = mix(metal, 0.0, tile);
     var alpha = material.opacity;
     if (kind == 2.0) {
         let edge = q.y + 0.045 * sin(q.x * 13.0) + 0.025 * sin(q.x * 31.0);
@@ -179,6 +184,7 @@ inline const char* vehicleSurfaceFragment=R"(
     if (dot(tangent, tangent) < 0.0001) { tangent = cross(n, vec3f(0.0, 0.0, 1.0)); }
     if (dot(tangent, tangent) < 0.0001) { tangent = cross(n, vec3f(0.0, 1.0, 0.0)); }
     tangent = normalize(tangent); let bitangent = normalize(cross(n, tangent));
+    n = normalize(n + (tangent * tileTilt.x + bitangent * tileTilt.y) * 0.035 * tile); // About 2 degrees at most.
     let normalPixel = max(abs(dpdx(geometryNormal)), abs(dpdy(geometryNormal)));
     rough = clamp(rough + max(max(normalPixel.x, normalPixel.y), normalPixel.z), 0.12, 1.0);
     rough = mix(rough,0.19,wet);

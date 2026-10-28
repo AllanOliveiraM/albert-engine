@@ -41,6 +41,12 @@ std::shared_ptr<BufferGeometry> joined(const std::vector<std::shared_ptr<BufferG
 std::shared_ptr<BufferGeometry> bar(Vector3 a,Vector3 b,float radius,int sides=8){
     Vector3 d=Vector3(b).sub(a);auto g=CylinderGeometry::create(radius,radius,d.length(),sides,1,false);Quaternion q;q.setFromUnitVectors(Vector3(0,1,0),d.normalize());Matrix4 m;m.makeRotationFromQuaternion(q);g->applyMatrix4(m);a.add(b).multiplyScalar(.5f);g->translate(a.x,a.y,a.z);return g;
 }
+// A strut tapering from its middle to a point at each end (V3's hot-staging ring), from a to b.
+std::shared_ptr<BufferGeometry> strut(Vector3 a,Vector3 b,float radius,int sides=12){
+    Vector3 d=Vector3(b).sub(a);const float length=d.length();std::vector<Vector2> profile;
+    for(int k=0;k<=16;++k){const float t=float(k)/16,taper=std::min(1.f,std::min(t,1-t)/.22f);profile.push_back({std::max(.025f,radius*std::pow(taper,.6f)),(t-.5f)*length});}
+    auto g=LatheGeometry::create(profile,sides);Quaternion q;q.setFromUnitVectors(Vector3(0,1,0),d.normalize());Matrix4 m;m.makeRotationFromQuaternion(q);g->applyMatrix4(m);a.add(b).multiplyScalar(.5f);g->translate(a.x,a.y,a.z);return g;
+}
 std::shared_ptr<BufferGeometry> collar(float radius,float thickness,float y,int segments=40){
     auto g=TorusGeometry::create(radius,thickness,4,segments);g->rotateX(pi/2);g->translate(0,y,0);return g;
 }
@@ -105,7 +111,13 @@ Vehicle::Vehicle(const core::VehicleLook& look){
             const float r=bottom;
             for(int tier=0;tier<2;++tier){const int segments=tier==0?64:24;
                 for(float h:{y-height/2+.09f,y+height/2-.09f}){auto rim=CylinderGeometry::create(r,r,.18f,segments,1,true);rim->translate(0,h,0);hardware(rim,nullptr,steel,.35f,.9f,tier);hardware(collar(r-.045f,.055f,h,segments),nullptr,steel,.35f,.9f,tier);}
-                for(int i=0;i<vents;++i){const float a=2*pi*i/static_cast<float>(vents);auto post=BoxGeometry::create(.14f,height-.3f,.16f);post->rotateY(a);post->translate(r*std::sin(a),y,r*std::cos(a));hardware(post,nullptr,steel,.38f,.85f,tier);}
+                // V3's open ring: tapered struts in a zigzag, pairs meeting at the top ring and at clevises on the tank's barrel just
+                // below its top edge (the dome showing between them).
+                const float upper=y+height/2-.18f,lower=y-height/2-.55f;
+                for(int i=0;i<vents;++i){const float a=2*pi*i/static_cast<float>(vents),b=a+pi/static_cast<float>(vents);const Vector3 top(r*std::sin(a),upper,r*std::cos(a)),foot((r+.05f)*std::sin(b),lower,(r+.05f)*std::cos(b));
+                    hardware(strut(top,foot,.11f,tier==0?12:6),nullptr,steel,.3f,.92f,tier);
+                    const float a2=a+2*pi/static_cast<float>(vents);hardware(strut(Vector3(r*std::sin(a2),upper,r*std::cos(a2)),foot,.11f,tier==0?12:6),nullptr,steel,.3f,.92f,tier);
+                    auto clevis=BoxGeometry::create(.26f,.5f,.16f);clevis->rotateY(b);clevis->translate((r+.07f)*std::sin(b),lower-.1f,(r+.07f)*std::cos(b));hardware(clevis,nullptr,steel,.4f,.85f,tier);}
                 auto dome=SphereGeometry::create(r-.14f,segments,tier==0?12:6,0,2*pi,0,pi/2);dome->scale(1,.26f,1);dome->translate(0,y-height/2-.2f,0);hardware(dome,nullptr,dark,.58f,.55f,tier);
             }
             // Booster side fairings are visual additions: this appearance declares no chine solids.

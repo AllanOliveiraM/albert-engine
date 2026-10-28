@@ -23,6 +23,7 @@ void gridFinCaptures(const std::string& directory){
     // From above the remaining 180 degree gap, all three declared fins project outside the hull.
     const Vector3 aim(0,float(look.length/2)-4,0);camera->up.set(0,1,0);camera->position.copy(aim).add(Vector3(0,51.961525f,-30));camera->lookAt(aim);camera->fov=30;camera->updateProjectionMatrix();save("booster-top-60m",*world,*camera);
     {const Vector3 at(0,float(look.length/2)-8,0);camera->up.set(0,1,0);camera->position.copy(at).add(Vector3(18,-22,26));camera->lookAt(at);camera->fov=34;camera->updateProjectionMatrix();save("booster-fins-below",*world,*camera);}
+    {const Vector3 at(0,float(look.length/2)-1.5f,0);camera->up.set(0,1,0);camera->position.copy(at).add(Vector3(4,1,14));camera->lookAt(at);camera->fov=45;camera->updateProjectionMatrix();save("hot-staging-ring",*world,*camera);}
     auto* lod=booster.node()->getObjectByName("vehicle detail LOD")->as<LOD>();
     for(int tier=0;tier<2;++tier){const auto g=albert::gridFin(4.f,4.7f,.6f,tier);manifest<<"tier "<<tier<<": "<<g.cells<<" complete interior cells, "<<g.walls<<" sheet spans, "<<g.ends<<" rounded boundary ends, "<<g.joints<<" rounded boundary welds, "<<g.segments<<" segments per span, "<<g.geometry->getAttribute<float>("position")->count()/3<<" lattice triangles per fin, "<<lod->getLevels()[tier].object->geometry()->getIndex()->count()/3<<" total booster hardware triangles\n";}
     CameraFixture f;*f.look=look;f.utc=310;f.vehicle();f.place({800,0,3000},{160,0,-170});
