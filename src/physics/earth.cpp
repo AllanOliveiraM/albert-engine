@@ -128,13 +128,16 @@ Orientation Rotation::at(Tt t)const{
     if(!iau_)return{rotationZ(angle_+rate_*secondsSinceJ2000(t-epoch_)),{0,0,rate_}};
     constexpr Tt bucket=60*second;constexpr Tt day=86400*second;
     const Tt k=t>=0?t/bucket:(t-bucket+1)/bucket;
-    if(cached_!=k){
+    // The bucket's ends kept on the thread, for every IAU rotation there: they depend on the time alone, and the renderer makes a
+    // fresh rotation each frame (it recomputed the nutation series twice a frame).
+    thread_local Tt cached=INT64_MIN;thread_local M3 c2i0,c2i1;
+    if(cached!=k){
         for(int i=0;i<2;++i){double m[3][3];eraC2i06a(2451545.0,secondsSinceJ2000((k+i)*bucket)/86400.,m);
-            for(int r=0;r<3;++r)for(int c=0;c<3;++c)(i?c2i1_:c2i_).m[r][c]=m[r][c];}
-        cached_=k;
+            for(int r=0;r<3;++r)for(int c=0;c<3;++c)(i?c2i1:c2i0).m[r][c]=m[r][c];}
+        cached=k;
     }
     const double w=secondsSinceJ2000(t-k*bucket)/60.;M3 c2i;
-    for(int r=0;r<3;++r)for(int c=0;c<3;++c)c2i.m[r][c]=c2i_.m[r][c]+(c2i1_.m[r][c]-c2i_.m[r][c])*w;
+    for(int r=0;r<3;++r)for(int c=0;c<3;++c)c2i.m[r][c]=c2i0.m[r][c]+(c2i1.m[r][c]-c2i0.m[r][c])*w;
     const Tt ut1=t-deltaT_,d=ut1>=0?ut1/day:(ut1-day+1)/day;
     const double era=eraEra00(2451545.0+static_cast<double>(d),secondsSinceJ2000(ut1-d*day)/86400.);
     constexpr double rate=2*3.14159265358979323846*1.00273781191135448/86400.;

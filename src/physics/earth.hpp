@@ -38,7 +38,7 @@ V3 harmonics(int degree,V3 fixed);                 // EGM2008 to degree × order
 double geoidHeight(double latitude,double longitude); // EGM2008 (degree 70) over WGS 84, Bruns (m).
 
 // Inertial (GCRF) to body-fixed. Uniform: rotation about z from the epoch (check cases).
-// IAU: CIO-based IAU 2006/2000A bias-precession-nutation (cached 60 s) and Earth rotation
+// IAU: CIO-based IAU 2006/2000A bias-precession-nutation (cached 60 s on each thread) and Earth rotation
 // angle; polar motion neglected (≤15 m).
 struct Orientation {M3 fixed;V3 omega;}; // ECI→ECEF matrix; Earth angular velocity in ECI.
 // Moon: IAU mean-Earth frame with its libration series (within ~155 m of the DE ephemeris at
@@ -53,7 +53,6 @@ public:
     bool iau()const{return iau_;}
 private:
     bool iau_=false;Center body_=Center::earth;double rate_=0,angle_=0;Tt epoch_=0,deltaT_=0;
-    mutable Tt cached_=INT64_MIN;mutable M3 c2i_,c2i1_;
 };
 // Geocentric Sun and Moon (GCRS, m) from ERFA epv00/moon98; TDB taken as TT (<2 ms).
 struct Perturbers {V3 sun,moon;};
