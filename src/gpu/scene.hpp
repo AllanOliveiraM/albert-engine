@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <map>
 #include "gpu/context.hpp"
 #include "threepp/math/Vector3.hpp"
 #include <memory>
@@ -24,6 +25,7 @@ public:
     // Four fixed, camera-centred light-space levels; metres/world unit (0: the light's legacy map).
     float shadowMetersPerUnit=0;bool shadowHigh=true;
     unsigned samples=4; // Multisampling: 4 (resolved into the target) or 1.
+    bool reducedMedia=true; // Depth-aware half/quarter resolution for broad local gas shells; false: native reference.
     bool measured=true; // GPU timing of the render (off for a second view).
     // The air this frame: aerial perspective, sunlight and sky light through `atmosphere` around
     // `body`, whose local frame times kmPerUnit is the atmosphere's planet frame; strength 0-1. Its
@@ -59,6 +61,7 @@ public:
     [[nodiscard]] std::string memory()const; // What the GPU copies hold: counts and MB of index buffers, attributes, textures and materials.
     [[nodiscard]] std::size_t vertexBytes()const; // Vertex buffers resident on the GPU.
     [[nodiscard]] double gpuMilliseconds()const; // GPU time of a recent scene pass (timestamp queries), or -1; see cloudsShown.
+    [[nodiscard]] const std::map<std::string,double>& gpuPassMilliseconds()const; // ALBERT_GPU_TIMING=1, last completed readback.
     void submitted(); // Call once the encoder given to render() has been submitted.
 private:
     struct Impl;std::unique_ptr<Impl> impl_;

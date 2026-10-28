@@ -1,0 +1,40 @@
+zsh:3: /home/allan/.local/bin/ctest: bad interpreter: /home/linuxbrew/.linuxbrew/opt/python@3.14/bin/python3.14: no such file or directory
+Test project /unreal/allan/albert-codex/build/linux
+    Start 7: visual_controls
+1/2 Test #7: visual_controls ..................   Passed    1.57 sec
+    Start 8: visual_webgpu
+2/2 Test #8: visual_webgpu ....................***Failed   17.64 sec
+Broadcast cameras: names, lens, horizon, tracking, rebase, rigid mounts, cloud avoidance and director OK
+lunar dark adaptation: crescent (150 deg) x21.0823, night side x761.617 (quarter over earthshine 761.617)
+sound: 1 kHz band at 95 dB SPL plays at -14.3885 dBFS, 1010 Hz by zero crossings
+sound: 135 dB after 10 s plays at -14.146 dBFS (adaptation 39.9739 dB)
+sound: panned right, left -100.142 dBFS, right -11.3424 dBFS
+sound: silent at -inf dBFS
+sound: crackle at 60% of the treble: -15.3535 dBFS against -14.1899, the slope's skewness 2.50761 against -0.000459892
+sound: a 1 Pa boom peaks at 0.168676 after 96 samples, -0.0884681 at 75 ms
+Launch crowd: 915 vehicles/equipment, 2767 spectators, span 3396.94 m, types 299 295 222 68 19 12
+Beach spectators: 872
+Crowd near templates: 1112 car triangles, 572 person triangles; instances 33 / 76
+Vehicle geometry: booster 146829 / 22895 near/far hardware triangles, 3 fins, 33 engines, open lattice/vents, actuator samples verified
+WebGPU (llvmpipe (LLVM 21.1.8, 256 bits)):
+Local shadow pixels 1391, unchanged concrete 35292, shadow draws 8, unstable pixels 0, scaled changes 0
+Distant shadow pixels 896
+Ambient contact pixels 2172
+Media reference: samples 1, inside 0, MAE 0.036603, channels >20 0
+Media reference: samples 1, inside 1, MAE 0.146476, channels >20 0
+Media reference: samples 4, inside 0, MAE 0.036711, channels >20 0
+Media reference: samples 4, inside 1, MAE 0.146476, channels >20 0
+Media steam reference MAE 0.01143
+Media analytic mist energy ratio 1.01224
+Night lighting pixels 30949, clipped white 1
+Distant red pixels 4, peak 106
+Vent became invisible or an opaque white ball
+
+
+50% tests passed, 1 tests failed out of 2
+
+Total Test time (real) =  19.21 sec
+
+The following tests FAILED:
+	  8 - visual_webgpu (Failed)
+Errors while running CTest

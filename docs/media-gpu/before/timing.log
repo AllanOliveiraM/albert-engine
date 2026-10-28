@@ -1,0 +1,18 @@
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=381.274ms gas-1=882.813ms launch-cloud=505.079ms opaque=4045.538ms scene=65.396ms transparent=1431.384ms
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=45.344ms gas-1=9.221ms launch-cloud=161.318ms opaque=52.515ms scene=9.704ms transparent=7.608ms
+liftoff-shore-tracking, 15 draws, llvmpipe (LLVM 21.1.8, 256 bits)
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=53.994ms gas-1=9.930ms launch-cloud=191.489ms opaque=195.270ms scene=9.865ms transparent=11.070ms
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=52.680ms gas-1=11.635ms launch-cloud=200.424ms opaque=380.126ms scene=10.753ms transparent=8.663ms
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=53.948ms gas-1=11.205ms launch-cloud=199.758ms opaque=382.427ms scene=9.402ms transparent=9.004ms
+liftoff-orbit-near-stack, 14 draws, llvmpipe (LLVM 21.1.8, 256 bits)
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=36.148ms gas-0=107.356ms gas-1=11.229ms launch-cloud=197.599ms opaque=432.717ms scene=9.510ms transparent=7.912ms
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=18.074ms gas-0=107.574ms opaque=482.117ms scene=9.889ms transparent=7.187ms
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=17.679ms gas-0=102.224ms opaque=454.456ms scene=9.364ms transparent=6.932ms
+boostback-near-booster-two-envelopes, 10 draws, llvmpipe (LLVM 21.1.8, 256 bits)
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=35.156ms engine-cloud=162.037ms gas-0=102.226ms gas-1=41.033ms gas-2=38.783ms opaque=345.778ms scene=9.464ms transparent=540.392ms
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=55.039ms engine-cloud=5.337ms gas-1=42.961ms gas-2=38.122ms opaque=234.380ms scene=10.056ms transparent=13.788ms
+landing-ignition-near-booster, 11 draws, llvmpipe (LLVM 21.1.8, 256 bits)
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=49.388ms engine-cloud=5.397ms gas-1=39.116ms gas-2=37.317ms opaque=230.691ms scene=9.553ms transparent=12.424ms
+GPU passes (llvmpipe (LLVM 21.1.8, 256 bits)): cluster-plume=45.105ms gas-1=33.200ms gas-2=37.204ms opaque=252.864ms scene=10.020ms transparent=8.663ms
+landing-burn-near-booster, 9 draws, llvmpipe (LLVM 21.1.8, 256 bits)
+Adapter llvmpipe (LLVM 21.1.8, 256 bits), validation errors 0

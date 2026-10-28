@@ -47,7 +47,9 @@
 
 using namespace threepp;
 namespace {
+bool keepGoing=false;unsigned failedChecks=0;
 void require(bool condition,const char* message) {
+    if(!condition&&keepGoing){++failedChecks;std::cerr<<"FAILED: "<<message<<'\n';return;}
     if(!condition) throw std::runtime_error(message);
 }
 void shadowStability(){
@@ -438,8 +440,10 @@ void towerGraphics(Target& renderer){
 #include "camera_captures.hpp"
 #include "ascent_visuals.hpp"
 #include "grid_fin_captures.hpp"
+#include "media_captures.hpp"
+#include "media_visuals.hpp"
 void graphics(Target& renderer) {
-    nightGraphics(renderer);
+    mediaGraphics();nightGraphics(renderer);
     vehicleGraphics(renderer);entryGraphics(renderer);
     plumeGraphics(renderer);returnGraphics(renderer);ascentGraphics(renderer);
     launchCloudGraphics(renderer);splashdownGraphics(renderer);
@@ -874,7 +878,10 @@ void lunarAdaptationLevels(){
 }
 int main(int argc,char** argv) {
     try {
+        if(argc>1&&std::string_view(argv[1])=="media-check"){mediaGraphics();return 0;}
+        keepGoing=argc>1&&std::string_view(argv[1])=="webgpu-keep-going";
 #ifdef ALBERT_TEST_RPC
+        if(argc>2&&std::string_view(argv[1])=="media-captures"){mediaCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="crowd-captures"){landCaptures(argv[2],false,false,false,false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="camera-diagnostics"){cameraCaptures(argv[2],true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="camera-captures"){cameraCaptures(argv[2]);return 0;}
@@ -906,7 +913,8 @@ int main(int argc,char** argv) {
 #endif
                 require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}
         }
-        return 0;
+        if(failedChecks)std::cerr<<failedChecks<<" visual checks failed\n";
+        return failedChecks?1:0;
     }
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

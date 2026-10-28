@@ -15,6 +15,7 @@ fn cloudNoise(p: vec3f) -> f32 {
 }
 fn launchDensity(p: vec3f, detail: bool) -> f32 {
     let h = p.z + material.extent.z * 0.45;
+    if (h <= 0.0) { return 0.0; } // Exact empty half-space, before noise and lighting.
     let radial = p.xy / material.extent.xy;
     let r = length(radial);
     let angle = atan2(radial.y, radial.x);
@@ -45,7 +46,10 @@ fn launchDensity(p: vec3f, detail: bool) -> f32 {
     let middle = v.local - direction * dot(v.local,direction);
     let halfChord = sqrt(max(0.0,1.0 - dot(middle,middle)));
     let near = select(halfChord,clamp(dot(eye,direction),-halfChord,halfChord),inside);
-    let step = (near + halfChord) / material.samples;
+    // Sparse exterior rays need the original phase grid to preserve the cloud lobes.
+    let minimum = min(material.samples,select(20.0,19.0,object.flags.w > 0.5));
+    let count = max(minimum,round(material.samples * max(object.flags.y,0.95)));
+    let step = (near + halfChord) / count;
     let metres = length(direction * material.extent) * step;
     let up = normalize(basis[2]);
     var sun = up; if (frame.sun.w > 0.0) { sun = normalize(frame.sun.xyz); }
@@ -55,8 +59,11 @@ fn launchDensity(p: vec3f, detail: bool) -> f32 {
     let sky = incident.sky * frame.sunColor.rgb + frame.ambient.rgb;
     var transmission = 1.0; var scattered = vec3f(0.0);
     for (var i = 0; i < 32; i++) {
-        if (f32(i) >= material.samples) { break; }
+        if (f32(i) >= count) { break; }
         let p = (middle + direction * (near - (f32(i) + 0.5) * step)) * material.extent;
+        // Keep the accepted sample positions; skip the exact empty support in front of/below the bank.
+        let sampleHeight = p.z + material.extent.z * 0.45;
+        if (sampleHeight <= 0.0) { if (direction.z >= 0.0) { break; } continue; }
         let rho = launchDensity(p,material.samples > 12.0);
         if (rho > 0.001) {
             let h = p.z + material.extent.z * 0.45;

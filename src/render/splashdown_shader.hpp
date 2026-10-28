@@ -9,6 +9,7 @@ void splashdownPrograms(const char* surface,const std::vector<std::pair<std::str
     volume.replace(begin,end-begin,R"(
 fn launchDensity(p: vec3f, detail: bool) -> f32 {
     let h = p.z + material.extent.z * 0.45;
+    if (h <= -0.3) { return 0.0; }
     let r = length(p.xy); let extent = material.extent.x;
     let scale = 5.0 + material.extent.z * 0.17;
     let flow = p + vec3f(0,0,-material.bank.x * 0.65);
@@ -38,6 +39,7 @@ fn launchDensity(p: vec3f, detail: bool) -> f32 {
             let bow = mix(vec3f(0.3,0.4,1.0),vec3f(1.0,0.25,0.08),hue) * rainbow * sunlight * 0.045;
 )");
     volume.replace(volume.find("let colour = lit +"),std::string("let colour = lit +").size(),"let colour = lit + bow +");
+    const auto floor=volume.find("sampleHeight <= 0.0");volume.replace(floor,std::string("sampleHeight <= 0.0").size(),"sampleHeight <= -0.3");
     // Density already includes steam decay and the independent impact crown.
     const auto density=volume.find("rho * material.bank.y * metres");volume.replace(density, std::string("rho * material.bank.y * metres").size(),"rho * metres");
     p.wgsl=std::string(surface)+volume;albert::gpu::define("albert:splashdown",p);

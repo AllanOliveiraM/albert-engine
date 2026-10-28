@@ -70,6 +70,10 @@ fn condensation(ray: vec3f, view: vec3f, shoulder: f32) -> f32 {
     }
     return optical;
 }
+fn gasLighting(world: vec3f) -> vec3f {
+    let incident = airLight(world,normalize(object.model[1].xyz));
+    return (incident.sun * frame.sunColor.rgb + incident.sky * frame.sunColor.rgb + frame.ambient.rgb) * 0.28;
+}
 @fragment fn fs_main(v: Surface, @builtin(front_facing) front: bool) -> @location(0) vec4f {
     let basis = mat3x3f(object.model[0].xyz,object.model[1].xyz,object.model[2].xyz);
     let inverse = transpose(mat3x3f(normalize(basis[0]),normalize(basis[1]),normalize(basis[2])));
@@ -83,8 +87,8 @@ fn condensation(ray: vec3f, view: vec3f, shoulder: f32) -> f32 {
     let middle = v.local - direction * dot(v.local,direction);
     let halfChord = sqrt(max(0.0,1.0 - dot(middle,middle)));
     let near = select(halfChord,clamp(dot(eye,direction),-halfChord,halfChord),inside);
-    let up = normalize(basis[1]); let incident = airLight(v.world,up);
-    let lighting = (incident.sun * frame.sunColor.rgb + incident.sky * frame.sunColor.rgb + frame.ambient.rgb) * 0.28;
+    if (halfChord < 0.00001) { discard; }
+    let count = max(min(material.samples,6.0),round(material.samples * object.flags.y));
     if (material.kind > 2.5) {
         let ray = middle * material.extent; let view = normalize(direction * material.extent);
         let outlets = array<vec4f,20>(material.outlet0, material.outlet1, material.outlet2, material.outlet3, material.outlet4, material.outlet5, material.outlet6, material.outlet7, material.outlet8, material.outlet9, material.outlet10, material.outlet11, material.outlet12, material.outlet13, material.outlet14, material.outlet15, material.outlet16, material.outlet17, material.outlet18, material.outlet19);
@@ -136,17 +140,20 @@ fn condensation(ray: vec3f, view: vec3f, shoulder: f32) -> f32 {
         let fade = smoothstep(0.0,0.2,age) * exp(-age * 0.5) * (1.0 - smoothstep(6.0,8.0,age));
         density += material.body.w * fade * 0.8 * filament(ray,view,vec3f(r,-l * 0.48,0) + drift,vec3f(r + 10.0,-l * 0.45,0) + drift,2.0 + age * 0.2);
         let alpha = 1.0 - exp(-density * 1.7);
-        let white = lighting * mix(1.0,3.0,material.state.x);
+        if (alpha == 0.0) { discard; }
+        let white = gasLighting(v.world) * mix(1.0,3.0,material.state.x);
         return vec4f(finish(white * vec3f(0.98,0.99,1.0) * airFilter(v.world)) * alpha,alpha);
     }
     if (material.kind > 0.5) {
+        let lighting = gasLighting(v.world);
         let view = normalize(direction * material.extent);
         let start = (middle + direction * near) * material.extent;
         let distance = min((near + halfChord) * length(direction * material.extent),hullDistance(start + material.offset,-view));
-        let step = distance / material.samples; let r = material.body.x;
+        let step = distance / count; let r = material.body.x;
         var emission = vec3f(0.0); var ignition = vec3f(0.0); var transmission = 1.0;
         for (var i = 0; i < 12; i++) {
-            if (f32(i) >= material.samples) { break; }
+            if (f32(i) >= count) { break; }
+            if (object.flags.z < 0.5 && transmission < 0.001 && material.state.x == 0.0) { break; }
             let p = start - view * ((f32(i) + 0.5) * step);
             let relative = p - material.source; let h = relative.y; let rise = max(0.0,h); let radial = length(relative.xz);
             let flash = material.state.x; let collar = material.state.y;
@@ -174,27 +181,30 @@ fn condensation(ray: vec3f, view: vec3f, shoulder: f32) -> f32 {
         }
         return vec4f(finish((ignition + emission) * airFilter(v.world)),1.0 - transmission);
     }
-    let step = (near + halfChord) / material.samples;
-    var emission = vec3f(0.0); var optical = 0.0;
+    let step = (near + halfChord) / count;
+    var emission = vec3f(0.0); var litEmission = vec3f(0.0); var optical = 0.0;
     for (var i = 0; i < 12; i++) {
-        if (f32(i) >= material.samples) { break; }
+        if (f32(i) >= count) { break; }
         let q = middle + direction * (near - (f32(i) + 0.5) * step);
         let p = q * material.extent; let radial = length(p.xz - material.source.xz);
         let ripple = 0.85 + 0.10 * sin(q.y * 24.0 + q.x * 11.0 - material.seconds * 2.0) + 0.05 * sin(q.z * 27.0 + material.seconds * 3.0);
         if (material.kind < 0.5) {
             let down = (material.source.y - p.y) / (material.extent.y * 1.85);
+            if (down <= 0.0 || down >= 1.0) { continue; }
             let width = material.extent.x * (0.018 + 0.84 * sin(clamp(down,0.0,1.0) * 3.14159) * sqrt(max(0.0,down)));
             let rho = exp(-radial * radial / max(1.0,width * width) * 2.6) * exp(-down * 1.8)
                 * smoothstep(0.0,0.015,down) * (1.0 - smoothstep(0.65,1.0,down)) * ripple * material.state.x * material.state.y;
             let rareColour = mix(vec3f(0.60,0.78,1.0),vec3f(1.0,0.53,0.24),smoothstep(0.02,0.5,down));
             let hotColour = mix(vec3f(5.0,4.6,3.8),vec3f(2.4,0.42,0.04),smoothstep(0.0,0.3,down));
             let colour = mix(rareColour,hotColour,material.state.z);
-            emission += rho * colour * (vec3f(0.055 + material.state.z * 1.6) + lighting * 1.8) * step * 2.2;
+            emission += rho * colour * (0.055 + material.state.z * 1.6) * step * 2.2;
+            litEmission += rho * colour * step * 2.2;
             optical += rho * step * 0.12;
         }
     }
+    if (optical == 0.0) { discard; } // Empty parts of the kilometre-scale envelope do not sample atmosphere tables.
     let alpha = 1.0 - exp(-optical);
-    return vec4f(finish(emission * airFilter(v.world)),alpha);
+    return vec4f(finish((emission + litEmission * gasLighting(v.world) * 1.8) * airFilter(v.world)),alpha);
 }
 )";
 }

@@ -1,0 +1,36 @@
+Broadcast cameras: names, lens, horizon, tracking, rebase, rigid mounts, cloud avoidance and director OK
+lunar dark adaptation: crescent (150 deg) x21.0823, night side x761.617 (quarter over earthshine 761.617)
+sound: 1 kHz band at 95 dB SPL plays at -14.3885 dBFS, 1010 Hz by zero crossings
+sound: 135 dB after 10 s plays at -14.146 dBFS (adaptation 39.9739 dB)
+sound: panned right, left -100.142 dBFS, right -11.3424 dBFS
+sound: silent at -inf dBFS
+sound: crackle at 60% of the treble: -15.3535 dBFS against -14.1899, the slope's skewness 2.50761 against -0.000459892
+sound: a 1 Pa boom peaks at 0.168676 after 96 samples, -0.0884681 at 75 ms
+Launch crowd: 915 vehicles/equipment, 2767 spectators, span 3396.94 m, types 299 295 222 68 19 12
+Beach spectators: 872
+Crowd near templates: 1112 car triangles, 572 person triangles; instances 33 / 76
+Vehicle geometry: booster 146829 / 22895 near/far hardware triangles, 3 fins, 33 engines, open lattice/vents, actuator samples verified
+WebGPU (llvmpipe (LLVM 21.1.8, 256 bits)):
+Local shadow pixels 1391, unchanged concrete 35292, shadow draws 8, unstable pixels 0, scaled changes 0
+Distant shadow pixels 896
+Ambient contact pixels 2172
+Media reference: samples 1, inside 0, MAE 0.036603, channels >20 0
+Media reference: samples 1, inside 1, MAE 0.146476, channels >20 0
+Media reference: samples 4, inside 0, MAE 0.036711, channels >20 0
+Media reference: samples 4, inside 1, MAE 0.146476, channels >20 0
+Media steam reference MAE 0.01143
+Media analytic mist energy ratio 1.01224
+Night lighting pixels 30949, clipped white 1
+Distant red pixels 4, peak 106
+FAILED: Vent became invisible or an opaque white ball
+Vent wisps: translucent filaments, wind, calm settling, pause, expiry and release gate OK
+Vehicle steel/tile image energy 4.64212e+06 / 2.30288e+06
+Tile-only hot/back energy 2.70243e+06 / 1724
+Entry plasma OK: threshold, heat response, paused time, camera continuity, quality, airflow and scene scale
+Landing plume white pixels 539, width 78
+Launch cloud: radial coverage, pause, toggle, wind, residual, quality, internal light and expiry OK
+Splashdown: burn, touchdown, tip-over, residual foam, deterministic pause, quality, toggle, rewind and night light OK
+Boca cover RGB: 107,118,113  168,162,144  142,140,112  136,133,109  175,167,147  
+pad scorch luminance: 401 / 467
+Graphics OK: incremental upload, terrain occlusion, paths, clouds, objects, artistic rocks, lunar eclipse, comet dust and ions
+1 visual checks failed
