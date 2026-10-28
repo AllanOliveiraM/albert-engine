@@ -40,6 +40,15 @@ fn vehicleSpecular(n: vec3f, t: vec3f, b: vec3f, l: vec3f, v: vec3f, f0: vec3f, 
     let fresnel = mix(f0, vec3f(1.0), f2 * f2 * f);
     return fresnel / max(2.0 * PI_L * ax * ay * d * d * (nl * lv + nv * ll), 0.000001);
 }
+// Local plasma irradiance on the exposed face, separate from tile emission. No scene light slots.
+fn vehicleEntryLight(worldNormal: vec3f, world: vec3f, albedo: vec3f, metal: f32) -> vec3f {
+    let facing = dot(normalize(worldNormal), material.entryLight.xyz);
+    let exposed = smoothstep(-0.35, 0.65, facing);
+    let colour = mix(vec3f(1.0, 0.095, 0.018), vec3f(1.0, 0.12, 0.38), material.entryLight.w);
+    let reflected = reflect(-normalize(frame.camera.xyz - world), normalize(worldNormal));
+    let broadReflection = 0.3 + 0.7 * smoothstep(-0.6, 0.8, dot(reflected, material.entryLight.xyz));
+    return colour * material.entryLight.w * exposed * (albedo * (1.0 - metal) + vec3f(0.18 * broadReflection) * metal) * 1.6;
+}
 // The same physical sky as the background, sampled at vertices and interpolated. Roughness blends
 // toward hemispherical irradiance in the fragment. Ground uses the atmosphere's mean Lambert albedo.
 fn vehicleEnvironment(world: vec3f, reflected: vec3f) -> vec3f {
@@ -117,6 +126,7 @@ inline const char* vehicleSurfaceFragment=R"(
         let air = airLight(v.world, v.worldNormal);
         var colour = standardLight(simple, rough, metal, n, geometryNormal, v.position, air.sky * frame.sunColor.rgb, shadowFactor(v.world, v.worldNormal) * air.sun);
         colour += material.emissive * select(1.0, tile, abs(material.vehicleHull.x) > 0.0 && (kind == 0.0 || kind == 1.0));
+        colour += vehicleEntryLight(v.worldNormal, v.world, simple, metal);
         colour += simple * material.auxiliaryStrength * (1.0 - smoothstep(-0.10, 0.0, dot(n, normalize(material.auxiliarySolarDirection))));
         return vec4f(finish(airApply(v.world, colour)), alpha);
     }
@@ -179,7 +189,8 @@ inline const char* vehicleSurfaceFragment=R"(
     colour += siteIrradiance(v.world) * (diffuse + f0 * 0.65) / PI_L;
     colour += contactAmbient(v.position) * (frame.ambient.rgb + air.sky * frame.sunColor.rgb) * diffuse / PI_L;
     colour += contactAmbient(v.position) * environment * fresnel * (1.0 - 0.45 * rough);
-    colour += material.emissive * select(1.0, tile, abs(material.vehicleHull.x) > 0.0 && (kind == 0.0 || kind == 1.0));
+    colour += material.emissive * mix(vec3f(1.0), tileAlbedo / 0.036, tile * 0.65) * select(1.0, tile, abs(material.vehicleHull.x) > 0.0 && (kind == 0.0 || kind == 1.0));
+    colour += vehicleEntryLight(v.worldNormal, v.world, albedo, metal);
     colour += albedo * material.auxiliaryStrength * (1.0 - smoothstep(-0.10, 0.0, dot(n, normalize(material.auxiliarySolarDirection))));
     return vec4f(finish(airApply(v.world, colour)), alpha);
 )";

@@ -2,6 +2,7 @@
 #include "gpu/programs.hpp"
 #include "roads.hpp"
 #include "vehicle_surface.hpp"
+#include "entry_plasma.hpp"
 #include "launch_cloud_shader.hpp"
 using albert::gpu::Program;using albert::gpu::Uniform;
 namespace {
@@ -343,25 +344,9 @@ struct Material { diffuse: vec3f, opacity: f32, emissive: vec3f, roughness: f32,
 }
 )";
     albert::gpu::define("albert:bell",bell);
-    // vehicle.cpp: the shock layer's glow around a vehicle entering the air (a shell offset to its windward side): faint where
-    // looked through face-on, brightest at its rim, the core colour face-on; strength from the heating.
-    Program plasma;plasma.attributes=surfaceAttributes;plasma.uniforms={{"core",Uniform::vec3},{"edge",Uniform::vec3},{"strength",Uniform::f32},{"upwind",Uniform::vec3}};
-    plasma.wgsl=std::string(surface)+R"(
-struct Material { core: vec3f, edge: vec3f, strength: f32, upwind: vec3f };
-@group(2) @binding(0) var<uniform> material: Material;
-// The shock layer: bright where it faces the air (the bow shock over the windward side, limb-brightened), a faint wake behind,
-// nothing at the sides: no outline of a shell.
-@fragment fn fs_main(v: Surface) -> @location(0) vec4f {
-    let n = normalize(v.worldNormal);
-    let facing = dot(n, normalize(material.upwind));
-    let mu = abs(dot(n, normalize(frame.camera.xyz - v.world)));
-    let shock = pow(max(facing, 0.0), 1.6) * (0.35 + 0.65 * (1.0 - mu));
-    let wake = 0.25 * pow(max(-facing, 0.0), 3.0) * (1.0 - mu);
-    let colour = mix(material.edge, material.core, clamp(facing, 0.0, 1.0));
-    return vec4f(linearToSrgb(colour * airFilter(v.world)), (shock + wake) * material.strength);
-}
-)";
-    albert::gpu::define("albert:plasma",plasma);
+    Program plasma;plasma.attributes=surfaceAttributes;plasma.uniforms={{"strength",Uniform::f32},{"upwind",Uniform::vec3},{"seconds",Uniform::f32},
+        {"quality",Uniform::f32},{"wake",Uniform::f32},{"leading",Uniform::vec4},{"extent",Uniform::vec3},{"span",Uniform::f32}};
+    plasma.wgsl=std::string(surface)+albert::entryPlasmaShader;albert::gpu::define("albert:plasma",std::move(plasma));
     Program clouds;clouds.attributes=surfaceAttributes;clouds.textures={"cloudMap","detailMap","previousDetailMap"};
     clouds.uniforms=cloudUniforms;for(auto u:{std::pair{"solarDirection",Uniform::vec3},{"moonPosition",Uniform::vec3},{"eclipseSunPosition",Uniform::vec3},{"eclipseEnabled",Uniform::f32},{"visibility",Uniform::f32}})clouds.uniforms.emplace_back(u.first,u.second);
     clouds.wgsl=std::string(surface)+"struct Material { "+cloudFields+", solarDirection: vec3f, moonPosition: vec3f, eclipseSunPosition: vec3f, eclipseEnabled: f32, visibility: f32 };\n@group(2) @binding(0) var<uniform> material: Material;\n"
@@ -849,9 +834,9 @@ void objects(){
     p.wgsl=assisted(true,false);albert::gpu::define("albert:assisted-flat",p);
     p.wgsl=assisted(false,true);albert::gpu::define("albert:rock",p);
     auto vehicle=p;vehicle.wgsl=assisted(false,false);
-    vehicle.uniforms.insert(vehicle.uniforms.end(),{{"vehicleHull",Uniform::vec4},{"vehicleSurface",Uniform::vec4},{"vehicleQuality",Uniform::f32},{"vehicleSoot",Uniform::f32},{"frostHeight",Uniform::f32}});
+    vehicle.uniforms.insert(vehicle.uniforms.end(),{{"entryLight",Uniform::vec4},{"vehicleHull",Uniform::vec4},{"vehicleSurface",Uniform::vec4},{"vehicleQuality",Uniform::f32},{"vehicleSoot",Uniform::f32},{"frostHeight",Uniform::f32}});
     auto& v=vehicle.wgsl;auto field=v.find("rockScale: f32 }");v.replace(field,std::string("rockScale: f32 }").size(),
-        "rockScale: f32, vehicleHull: vec4f, vehicleSurface: vec4f, vehicleQuality: f32, vehicleSoot: f32, frostHeight: f32 }");
+        "rockScale: f32, entryLight: vec4f, vehicleHull: vec4f, vehicleSurface: vec4f, vehicleQuality: f32, vehicleSoot: f32, frostHeight: f32 }");
     field=v.find("worldNormal: vec3f }");v.replace(field,std::string("worldNormal: vec3f }").size(),"worldNormal: vec3f, @location(5) environment: vec3f }");
     v.insert(v.find("return o;"),R"(
     o.environment = vec3f(0.0);

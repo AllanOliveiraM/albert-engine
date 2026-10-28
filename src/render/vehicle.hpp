@@ -49,7 +49,7 @@ private:
     std::vector<Vent> vents_;std::array<Puff,48> mist_;float radius_=1,frostArc_=0;std::uint32_t ventSeed_=0x82ac91b7u;
     double ventUtc_=0;bool ventTimed_=false;
     struct Frost {std::shared_ptr<threepp::Mesh> mesh;core::LookTank tank;};
-    std::shared_ptr<threepp::Mesh> plasma_,vapour_;std::vector<Frost> frost_;std::vector<std::shared_ptr<threepp::ShaderMaterial>> tiles_; // tiles_: the heat shield's, glowing with its heat.
+    std::shared_ptr<threepp::Mesh> plasma_,wake_,vapour_;std::vector<std::shared_ptr<threepp::Mesh>> sheaths_;threepp::Vector3 entryWind_{0,0,1};std::vector<Frost> frost_;std::vector<std::shared_ptr<threepp::ShaderMaterial>> tiles_; // tiles_: the heat shield's, glowing with its heat.
     void shine(float heating,float fill); // The shock layer's glow by the heat flux (W/m²); the tanks' frost by their fill.
 };
 }

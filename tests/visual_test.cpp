@@ -315,6 +315,7 @@ void shadowGraphics(GpuTarget& renderer){
     renderer.scene.shadowMetersPerUnit=0;renderer.scene.shadows=false;
 }
 #include "vehicle_visuals.hpp"
+#include "entry_visuals.hpp"
 #include "plume_visuals.hpp"
 #include "production_visuals.hpp"
 #include "land_visuals.hpp"
@@ -418,7 +419,7 @@ void towerGraphics(Target& renderer){
 #include "night_visuals.hpp"
 void graphics(Target& renderer) {
     nightGraphics(renderer);
-    vehicleGraphics(renderer);
+    vehicleGraphics(renderer);entryGraphics(renderer);
     plumeGraphics(renderer);
     launchCloudGraphics(renderer);
     roadGraphics(renderer);
@@ -860,6 +861,7 @@ int main(int argc,char** argv) {
         if(argc>2&&std::string_view(argv[1])=="production-captures"){landCaptures(argv[2],true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="launch-cloud-captures"){launchCloudCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="plume-captures"){plumeCaptures(argv[2]);return 0;}
+        if(argc>2&&std::string_view(argv[1])=="entry-captures"){entryCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
 #endif
         shadowStability();controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();

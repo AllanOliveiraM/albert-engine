@@ -35,6 +35,26 @@ std::shared_ptr<ShaderMaterial> engineCloud(){ // One soft chord, for a brief fl
     m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::OneMinusSrcAlpha;
     m->uniforms={{"density",Uniform(0.f)},{"time",Uniform(0.f)},{"seed",Uniform(0.f)},{"flame",Uniform(0.f)}};return m;
 }
+// A thin, depth-tested curtain on the actual hull and hinged flap geometry. The wake uses the same program.
+std::shared_ptr<ShaderMaterial> plasmaMaterial(float wake=0){
+    auto m=ShaderMaterial::create();m->name="albert:plasma";m->transparent=true;m->depthWrite=false;m->side=wake>0?Side::Back:Side::Double;
+    m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::One;
+    m->uniforms={{"strength",Uniform(0.f)},{"upwind",Uniform(Vector3(0,0,1))},{"seconds",Uniform(0.f)},{"quality",Uniform(1.f)},
+        {"wake",Uniform(wake)},{"leading",Uniform(Vector4(0,0,0,0))},{"extent",Uniform(Vector3(1,1,1))},{"span",Uniform(1.f)}};return m;
+}
+// Deindex once at construction, offset in metres and join all hull sections into one curtain draw.
+void curtain(const BufferGeometry& source,std::vector<float>& positions,std::vector<float>& normals){
+    const auto* p=source.getAttribute<float>("position");const auto* n=source.getAttribute<float>("normal");const auto* index=source.getIndex();
+    const auto count=index?index->count():p->count();
+    for(int i=0;i<count;++i){const int j=index?static_cast<int>(index->getX(i)):i;
+        positions.insert(positions.end(),{p->getX(j)+.28f*n->getX(j),p->getY(j)+.28f*n->getY(j),p->getZ(j)+.28f*n->getZ(j)});
+        normals.insert(normals.end(),{n->getX(j),n->getY(j),n->getZ(j)});}
+}
+std::shared_ptr<Mesh> curtainMesh(std::vector<float> positions,std::vector<float> normals,float span){
+    auto g=BufferGeometry::create();const auto count=positions.size()/3;g->setAttribute("position",FloatBufferAttribute::create(std::move(positions),3));
+    g->setAttribute("normal",FloatBufferAttribute::create(std::move(normals),3));g->setAttribute("uv",FloatBufferAttribute::create(std::vector<float>(count*2),2));
+    auto m=plasmaMaterial();m->uniforms.at("span").setValue(span);auto mesh=Mesh::create(g,m);mesh->name="entry sheath";mesh->visible=false;mesh->renderOrder=11;mesh->frustumCulled=false;return mesh;
+}
 Vector3 graphical(core::Vector p){return {static_cast<float>(p.x),static_cast<float>(p.z),static_cast<float>(-p.y)};}
 core::Vector physical(Vector3 p){return {p.x,-p.z,p.y};}
 std::shared_ptr<MeshBasicMaterial> glow(std::uint32_t colour,float opacity){ // A jet: unlit, added to what is behind.
@@ -43,14 +63,14 @@ std::shared_ptr<MeshBasicMaterial> glow(std::uint32_t colour,float opacity){ // 
 }
 Vehicle::Vehicle(const core::VehicleLook& look){
     root_=Mesh::create(BufferGeometry::create());root_->frustumCulled=false;length_=look.length;
-    const double half=look.length/2;
+    const double half=look.length/2;std::vector<float> sheathPositions,sheathNormals;
     auto point=[&](core::Vector p){return Vector3(static_cast<float>(-p.y),static_cast<float>(half-p.x),static_cast<float>(p.z));}; // x aft of the nose.
     // The engine bay: the aft skirt open, a heat shield across it where the bells come out (most of each below it).
     double base=0,bay=1e9;for(const auto& e:look.engines){base=std::max(base,e.position.x);bay=std::min(bay,(e.exitRadius>1?2.6:2.2)*e.exitRadius*.85);} // The shortest bell's.
     auto surface=[&](Color colour,float metal,float rough,float kind,Vector4 hull={},float width=0,float span=0,bool open=false){
         auto m=assistedMaterial(colour,metal,rough,false,open);m->name="albert:vehicle";
         m->uniforms.emplace("vehicleHull",Uniform(hull));m->uniforms.emplace("vehicleSurface",Uniform(Vector4(kind,width,span,0.f)));
-        m->uniforms.emplace("vehicleQuality",Uniform(1.f));m->uniforms.emplace("vehicleSoot",Uniform(0.f));m->uniforms.emplace("frostHeight",Uniform(1.f));surfaces_.push_back(m);return m;};
+        m->uniforms.emplace("entryLight",Uniform(Vector4(0,0,0,0)));m->uniforms.emplace("vehicleQuality",Uniform(1.f));m->uniforms.emplace("vehicleSoot",Uniform(0.f));m->uniforms.emplace("frostHeight",Uniform(1.f));surfaces_.push_back(m);return m;};
     for(const auto& s:look.sections){ // One frustum: the shader joins the wavy tile edge to the steel without overlapping shells.
         const float top=static_cast<float>(s.radiusFrom),bottom=static_cast<float>(s.radiusTo),height=static_cast<float>(s.to-s.from),y=static_cast<float>(half-(s.from+s.to)/2);
         const float tiles=static_cast<float>(std::clamp(s.tiles,0.,2*3.14159265358979));const bool skirt=!look.engines.empty()&&s.to>=base-.01;
@@ -58,7 +78,7 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         auto m=surface(vents?Color(.36f,.35f,.33f):Color(s.color).multiplyScalar(.79f),1.f,.3f,vents?3.f:0.f,
             Vector4(tiles,static_cast<float>(look.diameter/2),static_cast<float>(half-base),tiles>0?0.f:7.f),y,height,skirt);
         if(tiles>0)tiles_.push_back(m);else if(skirt)aft_.push_back(m);
-        auto g=CylinderGeometry::create(top,bottom,height,64,1,skirt);g->translate(0,y,0);auto mesh=part(g,m);mesh->name=vents?"hot-staging vents":"vehicle hull";root_->add(mesh);
+        auto g=CylinderGeometry::create(top,bottom,height,64,1,skirt);g->translate(0,y,0);auto mesh=part(g,m);mesh->name=vents?"hot-staging vents":"vehicle hull";root_->add(mesh);curtain(*g,sheathPositions,sheathNormals);
         if(skirt){auto g=CircleGeometry::create(bottom*.995f,64);g->rotateX(pi/2);g->translate(0,static_cast<float>(half-(base-bay)),0); // The shield, facing aft.
             auto m=assistedMaterial(Color(0x26262a),.35f,.6f,false,true);aft_.push_back(m);root_->add(part(g,m));}
     }
@@ -77,6 +97,13 @@ Vehicle::Vehicle(const core::VehicleLook& look){
                 x.pivot->add(part(plate(w,t,span,static_cast<float>(p.tipSpan<0?p.span:p.tipSpan),along*static_cast<float>(p.tipShift),static_cast<float>(p.tipThickness<0?p.thickness:p.tipThickness)),m));}}
         else for(int i=0;i<=4;++i){auto a=BoxGeometry::create(w,t,span*.03f);a->translate(0,0,span*(i/4.f-.5f));x.pivot->add(part(a,m)); // Centred on its spindle.
             auto b=BoxGeometry::create(w*.03f,t,span);b->translate(w*(i/4.f-.5f),0,0);x.pivot->add(part(b,m));}
+        if(flap){std::vector<float> positions,normals;const auto& source=*x.pivot->children.front()->geometry();curtain(source,positions,normals);
+            auto shell=curtainMesh(std::move(positions),std::move(normals),static_cast<float>(look.length));
+            float hingeEdge=-1e6f,tipEdge=-1e6f;const auto* vertices=source.getAttribute<float>("position");
+            for(int i=0;i<vertices->count();++i){if(vertices->getX(i)<.01f)hingeEdge=std::max(hingeEdge,vertices->getZ(i));
+                if(vertices->getX(i)>w-.01f)tipEdge=std::max(tipEdge,vertices->getZ(i));}
+            shell->material()->as<ShaderMaterial>()->uniforms.at("leading").setValue(Vector4(w,hingeEdge,tipEdge,1.f));
+            x.pivot->add(shell);sheaths_.push_back(shell);}
         root_->add(x.pivot);parts_.push_back(std::move(x));
     }
     for(const auto& e:look.engines){ // The bell from its throat (the gimbal's pivot) to the exit, and its plume beyond.
@@ -107,11 +134,9 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         const float r=static_cast<float>(look.diameter/2),l=static_cast<float>(look.length);auto g=CylinderGeometry::create(r*1.02f,r*2.3f,.22f*l,48,1,true);
         g->translate(0,static_cast<float>(half)-.31f*l,0);auto m=MeshBasicMaterial::create();m->color=Color(0xf4f6f8);m->transparent=true;m->opacity=0;m->depthWrite=false;m->side=Side::Double;
         vapour_=Mesh::create(g,m);vapour_->visible=false;vapour_->renderOrder=8;root_->add(vapour_);}
-    { // The shock layer: an ellipsoid shell, a little longer than the vehicle and wider, set toward its belly (+z).
-        const float r=static_cast<float>(look.diameter/2),l=static_cast<float>(look.length);auto g=SphereGeometry::create(1,48,24);
-        g->scale(1.55f*r,.6f*l,1.55f*r);g->translate(0,0,.45f*r);auto m=ShaderMaterial::create();m->name="albert:plasma";m->transparent=true;m->depthWrite=false;
-        m->side=Side::Front;m->blending=Blending::Additive;m->uniforms={{"core",Uniform(Vector3(1,.62f,.82f))},{"edge",Uniform(Vector3(1,.32f,.12f))},{"strength",Uniform(0.f)},{"upwind",Uniform(Vector3(0,0,1))}};
-        plasma_=Mesh::create(g,m);plasma_->visible=false;plasma_->renderOrder=11;root_->add(plasma_);}
+    { // Conforming hull curtain plus a bounded, analytic volume downstream along the air-relative flow.
+        plasma_=curtainMesh(std::move(sheathPositions),std::move(sheathNormals),static_cast<float>(look.length));root_->add(plasma_);sheaths_.push_back(plasma_);
+        wake_=Mesh::create(SphereGeometry::create(1,32,16),plasmaMaterial(1));wake_->name="entry wake";wake_->visible=false;wake_->renderOrder=12;wake_->frustumCulled=false;root_->add(wake_);sheaths_.push_back(wake_);}
     { // Frost below each tank's liquid, over its own steel arc: the ship's tiles must not mask the booster's frost in a stack.
         double tiles=0;for(const auto& sct:look.sections)tiles=std::max(tiles,std::clamp(sct.tiles,0.,2*3.14159265358979));
         const float r=static_cast<float>(look.diameter/2)*1.006f;radius_=r;frostArc_=static_cast<float>(tiles);
@@ -131,6 +156,7 @@ Vehicle::Vehicle(const core::VehicleLook& look){
     }
 }
 void Vehicle::quality(int value){
+    for(auto& p:sheaths_)p->material()->as<ShaderMaterial>()->uniforms.at("quality").setValue(value>0?1.f:0.f);
     for(auto& m:surfaces_)m->uniforms.at("vehicleQuality").setValue(value>0?1.f:0.f);
     for(auto& e:engines_)for(auto* shells:{&e.plume,&e.remnant})for(auto& p:*shells)p->material()->as<ShaderMaterial>()->uniforms.at("quality").setValue(value>0?1.f:0.f);
 }
@@ -158,11 +184,24 @@ void Vehicle::explode(float t){
     for(auto& p:pieces_){p.mesh->position.copy(p.velocity).multiplyScalar(std::min(t,30.f));p.mesh->rotation.set(p.spin.x*t,p.spin.y*t,p.spin.z*t);p.mesh->visible=t<20;}
 }
 void Vehicle::shine(float heating,float fill){
-    const float glow=std::pow(std::clamp((heating-4e4f)/6e5f,0.f,1.f),.8f)*1.3f;plasma_->visible=glow>.003f;
-    plasma_->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(glow);
+    // Smooth threshold with a bounded response: no altitude gate, camera LOD, random births or temporal feedback.
+    const float h=std::clamp((std::max(heating,0.f)-3e4f)/5.7e5f,0.f,1.f),glow=h*h*(3-2*h);
+    Vector3 wind=entryWind_;root_->updateWorldMatrix(true,false);wind.transformDirection(*root_->matrixWorld);
+    // Every temporal shader frequency is an integer harmonic: wrapping this phase is continuous.
+    const float seconds=static_cast<float>(std::fmod(surfaceUtc_,6.283185307179586));
+    for(auto& p:sheaths_){p->visible=glow>0;auto& u=p->material()->as<ShaderMaterial>()->uniforms;
+        u.at("strength").setValue(glow);u.at("upwind").setValue(wind);u.at("seconds").setValue(seconds);}
+    const float l=static_cast<float>(length_),r=radius_/1.006f;
+    Vector3 across(0,1,0);across.addScaledVector(entryWind_,-entryWind_.y);const float broadside=across.length();
+    if(broadside<.001f)across.set(0,0,1);
+    across.normalize();Vector3 lateral;lateral.crossVectors(entryWind_,across).normalize();
+    Matrix4 basis;basis.makeBasis(lateral,entryWind_,across);wake_->quaternion.setFromRotationMatrix(basis);
+    wake_->position.copy(entryWind_).multiplyScalar(-5*l-.5f*r);wake_->scale.set(2.8f*r,5*l,std::max(2.8f*r,.65f*l*broadside));
+    wake_->material()->as<ShaderMaterial>()->uniforms.at("extent").setValue(wake_->scale);
+    for(auto& m:surfaces_)m->uniforms.at("entryLight").setValue(Vector4(wind.x,wind.y,wind.z,glow));
     { // The tiles at their radiative equilibrium under 60% of the stagnation's flux (ε 0.85), glowing as a black body does: dull red
       // from ~900 K, orange-yellow by 1900 K (Planck's colour by temperature, its brightness rising steeply with it).
-        const float t=std::pow(std::max(.6f*heating,0.f)/(.85f*5.670e-8f),.25f);const Vector3 c=blackBody(t);
+        const float t=std::pow(std::max(.6f*heating,0.f)/(.85f*5.670e-8f),.25f);const Vector3 c=blackBody(t).multiplyScalar(.07f);
         for(auto& m:tiles_)m->uniforms.at("emissive").setValue(c);
         aftGlow_=blackBody(.8f*t).multiplyScalar(.12f);for(auto& m:aft_)m->uniforms.at("emissive").setValue(aftGlow_);} // The sheltered aft metal runs cooler than the tiles.
     const float half=static_cast<float>(length_/2);
@@ -221,9 +260,8 @@ void Vehicle::animate(const std::vector<float>* parts,double utc,core::Vector po
         for(auto& m:surfaces_)m->uniforms.at("vehicleSoot").setValue(soot_);}
     if(parts&&parts->size()>=7&&parts->back()>=0){if(exhaustLight_)exhaustLight_->intensity=0;explode(parts->back());return;} // Broken up: its pieces.
     auto tail=[&](std::size_t k,float fallback){return parts&&parts->size()>=7?(*parts)[parts->size()-7+k]:fallback;}; // Pressure, heat flux, fill, Mach, α, β.
-    { // The shock layer's bright side toward the air's way (the body's velocity through it: x along the nose as local y, y as -x, z as z).
-        const float al=tail(4,0),be=tail(5,0);Vector3 up(-std::sin(be),std::cos(al)*std::cos(be),std::sin(al)*std::cos(be));
-        up.transformDirection(*root_->matrixWorld);plasma_->material()->as<ShaderMaterial>()->uniforms.at("upwind").setValue(up);}
+    { // Incidence is measured against the air-relative velocity by physics, including wind and planetary rotation.
+        const float al=tail(4,0),be=tail(5,0);entryWind_.set(-std::sin(be),std::cos(al)*std::cos(be),std::sin(al)*std::cos(be));}
     const float pressure=tail(0,101325.f),ambient=std::clamp(pressure,0.f,101325.f),thin=1-ambient/101325.f,air=std::sqrt(ambient/101325.f),expansion=std::log(101375.f/(ambient+50.f))/std::log(2027.5f),heating=tail(1,0),fill=tail(2,0),mach=std::abs(tail(3,0)); // Log pressure keeps expansion gradual from liftoff through MECO to vacuum.
     shine(heating,fill);
     { // Condensation round the body near Mach 1 in thick air: strongest at 1, gone by 0.88 and 1.2; flaring downstream (toward the

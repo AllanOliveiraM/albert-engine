@@ -1,5 +1,7 @@
 # Starship and Super Heavy surfaces
 
+The subsequent [entry plasma update](STARSHIP_PLASMA.md) replaces the old shock shell, recalibrates tile emission and adds local plasma illumination. The surface implementation and earlier captures below predate that update.
+
 The vehicle renderer now uses metallic stainless steel, a procedural tiled windward surface and frost driven by the existing flight samples. Changes are confined to rendering, visual tests and this report. The four protected guidance headers, physics, vehicle definitions and RPC data are unchanged. No commit was made.
 
 ## Files

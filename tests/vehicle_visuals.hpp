@@ -22,10 +22,13 @@ void vehicleGraphics(Target& renderer){
     sample[5]=0;vehicle.animate(&sample,3);renderer.render(*world,*camera);require(renderer.readRGBPixels()==steel,"Empty tanks retained frost");
     sun->intensity=0;ambient->intensity=0;renderer.render(*world,*camera);require(energy(renderer.readRGBPixels())<1,"Stainless emits light without illumination");
     camera->position.z=60;camera->lookAt(Vector3());sample[4]=4e5;vehicle.animate(&sample,4);
-    // Isolate the tiles' radiative glow from the existing plasma shell.
+    // Isolate tile incandescence from the sheath and its reflected illumination.
+    vehicle.node()->traverseType<Mesh>([](Mesh& mesh){auto* m=mesh.material()?mesh.material()->as<ShaderMaterial>():nullptr;
+        if(m&&m->name=="albert:vehicle")m->uniforms.at("entryLight").setValue(Vector4(0,0,0,0));});
     for(auto* child:vehicle.node()->children)if(child->material()&&child->material()->name=="albert:plasma")child->visible=false;
     renderer.render(*world,*camera);const auto hot=renderer.readRGBPixels();require(energy(hot)>energy(tiles),"Procedural heat shield lost its thermal emission");
     camera->position.z=-60;camera->lookAt(Vector3());renderer.render(*world,*camera);
+    std::cout<<"Tile-only hot/back energy "<<energy(hot)<<" / "<<energy(renderer.readRGBPixels())<<'\n';
     require(energy(renderer.readRGBPixels())<energy(hot)*.15,"Windward thermal glow leaked across the leeward steel");
     // Rotated and scaled as in the live scene: metre-sized relief must not become Earth-radius-sized bump.
     sample[4]=0;vehicle.animate(&sample,5);sun->intensity=1;ambient->intensity=.7f;
