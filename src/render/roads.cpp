@@ -129,7 +129,11 @@ void defineRoads(){
         let up = cross(frame.oceanEast.xyz,frame.oceanNorth.xyz);
         let rel = (o.world-frame.ocean.xyz)*frame.oceanEast.w;let level = rel-up*dot(rel,up);
         let above = dot(rel,up)+dot(level,level)/12742000.0;
-        o.world -= up*(above/frame.oceanEast.w)*smoothstep(0.55,0.98,water);
+        // The waves' plane is tangent where the eye first came under 30 km (redrawn only 200 km on), so away from there its up
+        // leans off the local vertical and `above` grows with distance (walls of ground hundreds of metres high): levelled only
+        // where it reads as the flats and lagoons it is meant for, within a few metres of the sea, else the ground left as it is.
+        let trust = 1.0-smoothstep(4.0,10.0,abs(above));
+        o.world -= up*(above/frame.oceanEast.w)*smoothstep(0.55,0.98,water)*trust;
         o.position = (frame.view*vec4f(o.world,1.0)).xyz;o.clip=frame.projection*vec4f(o.position,1.0);
     }
 )"));
