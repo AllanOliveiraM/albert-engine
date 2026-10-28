@@ -163,6 +163,7 @@ void furnishing(Pieces& out,const core::SceneryPart& p,const Matrix4& m){
 Site::Site(const core::Scenery& s){
     lighting_=std::make_unique<SiteLighting>(s);
     root_=Mesh::create(BufferGeometry::create(),contactField(s,contactTexture_,lighting_->pools()));root_->frustumCulled=false;root_->add(lighting_->node());
+    if(std::abs(s.latitude-25.996128*pi/180)<1e-6&&std::abs(s.longitude+97.154517*pi/180)<1e-6&&!s.roads.empty()){crowd_=std::make_unique<LaunchCrowd>(s);root_->add(crowd_->node());}
     if(!s.buildings.empty()){production_=std::make_unique<ProductionSite>(s.buildings);root_->add(production_->node());}
     const std::size_t n=s.bars.size();hinges_.resize(n);
     for(std::size_t k=0;k<n;++k)if(s.bars[k].hinged){auto& h=hinges_[k];h.pivot=Object3D::create();h.pivot->position.copy(vec(s.bars[k].pivot));h.axis=vec(s.bars[k].axis).normalize();root_->add(h.pivot);}
@@ -248,7 +249,7 @@ Site::Site(const core::Scenery& s){
         centre.multiplyScalar(1.f/static_cast<float>(vents_.size()));centre.z=ground;
         launchCloud_=std::make_unique<LaunchCloud>(centre,vents_.front().ahead);root_->add(launchCloud_->node());}
 }
-void Site::quality(int value){quality_=value;cloudQuality(cloudQuality_);auto& u=root_->material()->as<ShaderMaterial>()->uniforms;u.at("strength").setValue(value>0?1.f:0.f);lighting_->update(night_,ventUtc_,value);if(production_)production_->quality(value);if(detail_)detail_->visible=value>0;if(industrialFine_)industrialFine_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
+void Site::quality(int value){quality_=value;if(crowd_)crowd_->enabled(launchDay_,value);cloudQuality(cloudQuality_);auto& u=root_->material()->as<ShaderMaterial>()->uniforms;u.at("strength").setValue(value>0?1.f:0.f);lighting_->update(night_,ventUtc_,value);if(production_)production_->quality(value);if(detail_)detail_->visible=value>0;if(industrialFine_)industrialFine_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
 void Site::lighting(const Vector3& sun){
     root_->updateWorldMatrix(true,false);Matrix4 inverse;inverse.copy(*root_->matrixWorld).invert();Vector3 toward=sun;toward.applyMatrix4(inverse).normalize();
     night_=siteNight(toward.z);lighting_->update(night_,ventUtc_,quality_);root_->material()->as<ShaderMaterial>()->uniforms.at("night").setValue(night_);

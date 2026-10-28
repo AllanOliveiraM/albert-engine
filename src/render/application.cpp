@@ -2445,7 +2445,7 @@ int albert::runRenderer(int argc, char** argv) {
             sceneOrigin=nextOrigin;
 #ifdef ALBERT_HAS_RPC
             if(rpc)for(const auto& x:rpc->flightSounds())if(x.id.rfind("site",0)==0&&x.id.find('/')==std::string::npos){objects.deluge(x.id,static_cast<float>(x.emission.pad.waterFlow/1000));objects.wind(x.id,Vector3(static_cast<float>(x.windEnu.x),static_cast<float>(x.windEnu.y),0));} // Its pad's deluge (kg/s) as the trench's spray.
-            if(rpc)for(const auto& g:rpc->flightGauges())objects.count(g.id,g.countState=="HOLD"?g.countTime:simulatedUtc-g.zero,g.countState=="SCRUB"); // The vents' pressurisation closing.
+            if(rpc)for(const auto& g:rpc->flightGauges())objects.count(g.id,g.countState=="HOLD"?g.countTime:simulatedUtc-g.zero,g.countState=="SCRUB",std::abs(g.zero-g.start)>.001||!g.countState.empty()); // The vents' pressurisation closing.
 #endif
             objects.delugeEffects(preferences.deluge);
             objects.sync(registry,simulatedUtc,sceneOrigin);objects.cloudQuality(visualSettings.quality?preferences.launchCloudQuality:0);
@@ -2502,6 +2502,13 @@ int albert::runRenderer(int argc, char** argv) {
             if(broadcastActive){
                 transition.active=false;automaticOrbit=false;controls.autoRotate=false;
                 camera->position.copy(broadcastView->eye);controls.target.copy(broadcastView->aim);camera->up.copy(broadcastView->up);
+                if(broadcastView->shot==albert::core::CameraMode::Tracking&&visualSettings.terrain){
+                    Vector3 eye=camera->position;earth->worldToLocal(eye);const auto* terrain=planets.earthTerrain();
+                    if(const auto ground=terrain?terrain->ground(eye):std::nullopt){
+                        const float floor=float(*ground+1.85/albert::core::earthRadiusMeters);
+                        if(eye.length()<floor){eye.setLength(floor);earth->localToWorld(eye);camera->position.copy(eye);}
+                    }
+                }
                 camera->fov=broadcastView->fov;camera->lookAt(controls.target);
                 zoomTarget=zoomDisplayed=camera->position.distanceTo(controls.target);
             }else if (transition.active) {
@@ -2783,6 +2790,7 @@ int albert::runRenderer(int argc, char** argv) {
             solids.update(*camera,sunPosition,tdb,detailFocus,visualSettings.quality,dt,visualSettings.auxiliary,visualSettings.terrain);
             {std::map<std::string,Vector3> nuclei;for(const auto& [id,node]:objects.nodes())if(comets.known(id)&&registry.get(id).visible)nuclei.emplace(id,node->position);
              comets.update(*camera,sunPosition,nuclei,cometStates,tdb,dt);}
+            objects.terrain(visualSettings.terrain?planets.earthTerrain():nullptr,earth.get());
             objects.quality(visualSettings.quality);objects.updateLighting(*camera,sunPosition,visualSettings.auxiliary,dt);
 
             if (appliedQuality != visualSettings.quality) {

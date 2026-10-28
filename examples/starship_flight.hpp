@@ -242,14 +242,7 @@ inline void addStarbase(api::CreateFlightRequest& create){
     };
     services({0,0,0},trench,{-1,0,0},{-34,84,0},true);
     if(pad2&&tower2){const Vec toward{tower2->x-pad2->x,tower2->y-pad2->y,0};services({pad2->x,pad2->y,0},pad2->heading,toward*(1/norm(toward)),{-148,98,0},false);}
-    // Launch-day parking follows the saved highway tangents, outside its full paved width and clear of junctions.
-    int parked=0;
-    for(const auto& road:starbaseRoads)if(road.highway)for(unsigned i=1;i<road.count&&parked<20;i+=2){const auto& a=starbaseRoadPoints[road.first+i-1];const auto& b=starbaseRoadPoints[road.first+i];Vec d{b.x-a.x,b.y-a.y,0};if(norm(d)<8)continue;d=d*(1/norm(d));
-        for(const double side:{-1.,1.}){const Vec at=Vec{(a.x+b.x)*.5,(a.y+b.y)*.5,0}+Vec{d.y,-d.x,0}*(side*(road.width/2+1.7));bool clear=at.x>-500&&at.x<250&&at.y<220;
-            for(const auto& other:starbaseRoads)if(roadDistance(at,other)<other.width/2+(other.highway?.9:8.))clear=false;
-            for(const auto& row:starbaseOsm)if(norm(at+Vec{-row.x,-row.y,0})<std::hypot(row.length,row.width)/2+4)clear=false;
-            for(int k=0;k<create.scenery_size();++k){const auto& p=create.scenery(k);if(!p.name().starts_with("detail "))continue;const auto& v=p.centre_enu_meters();if(std::hypot(at.x-v.x(),at.y-v.y())<9)clear=false;}
-            if(clear){part("detail car",Shape::BOX,at,{2,4.5,1.8},parked%3==0?0x637b8a:white,std::atan2(d.x,d.y)/deg);++parked;}}}
+
 }
 // What a vehicle coming back must never strike or come down on, as its computer knows the site (TowerApproach's columns and
 // works): the tower's column (its lattice's corners, the crown and the mast), the tank farm; the catch arms and the ship's

@@ -17,7 +17,7 @@ build/linux/src/rpc/albert_flight_client --camera=orbit
 | Name | View |
 | --- | --- |
 | `orbit` | Existing orbit/focus/zoom controls and preferred FOV. |
-| `tracking` | Shore tripod at ENU (2600, −2100, 18) m; lagged pointing, bounded deterministic jitter and distance-dependent long lens framed by the projected hull size. |
+| `tracking` | Public beach tripod at nominal ENU (500, −2500, 1.85) m, raised above the drawn terrain when needed; lagged pointing, bounded deterministic jitter and distance-dependent long lens framed by the projected hull size. |
 | `drone` | Behind the horizontal travel direction, above and offset to one side. Heading and position ease; vehicle translation feeds forward. |
 | `tower` | Crown bracket outside the mount-facing corner. Pan/tilt follows the launch; during a catch it frames the incoming fittings and rail slot, tightening to 36° at contact. The eye stays fixed. |
 | `onboard` | Engine mount for the booster or full stack; aft flap mount for the ship. |
@@ -130,3 +130,9 @@ Automatic direction infers phases from render telemetry, not authoritative guida
 Ground/drone/tower views require site scenery; unsupported targets retain orbit behaviour. Clearance envelopes are conservative visual approximations, not swept mesh collision tests. They can hide a theoretically available view inside open steel, and cloud-band avoidance can cause an intentional position cut at the band boundary. They do not model arbitrary third-party meshes or terrain relief outside the existing launch area. A fixed tower camera can naturally lose a very distant vehicle behind scenery or the horizon; auto uses tracking for distant flight.
 
 No flight guidance or physics files were changed. No commit was made.
+
+The launch-crowd work moves the tracking tripod onto the saved dry shoreline south of
+both pad closures. Its former (2600, −2100) position lay offshore in the bundled
+coastline. Launch spectators can now occupy its foreground; the same mount is used
+by clearance fallback shots. See [launch-day crowd](STARBASE_CROWD.md) for current
+captures and cost. Earlier camera capture artifacts above retain their historical mounts.

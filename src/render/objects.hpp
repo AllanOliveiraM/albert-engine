@@ -14,6 +14,7 @@ threepp::Vector3 renderPosition(core::Vector position,core::Vector origin={});
 // The same in double precision (Earth radii; x, z, -y): a node's float position about 1 unit out carries ~0.4 m of error,
 // which a part placed from it (a terrain node, a vehicle's) must not inherit.
 std::array<double,3> renderPositionExact(core::Vector position,core::Vector origin={});
+class Terrain;
 class SceneObjects {
 public:
     ~SceneObjects();
@@ -25,13 +26,15 @@ public:
     void cloudQuality(int value){splashQuality_=std::clamp(value,0,2);for(auto& [id,site]:sites_)site->cloudQuality(value);for(auto& [id,water]:water_)water->quality(quality_<=0?0:splashQuality_);}
     void delugeEffects(bool on){delugeEffects_=on;} // The pads' spray and launch steam (Ajustes).
     void quality(int value){quality_=value;for(auto& [id,water]:water_)water->quality(value<=0?0:splashQuality_);for(auto& [id,site]:sites_)site->quality(value);for(auto& [id,vehicle]:vehicles_)vehicle->quality(value);}
-    void count(const core::ObjectId& flight,double seconds,bool scrubbed){count_[flight]={seconds,scrubbed};} // Its count time (T, s) and whether it scrubbed.
+    void count(const core::ObjectId& flight,double seconds,bool scrubbed,bool launch=true){count_[flight]={seconds,scrubbed,launch};} // Its count time (T, s) and whether it scrubbed.
+    void terrain(const Terrain* terrain,const threepp::Object3D* earth){terrain_=terrain;earth_=earth;}
     void updateLighting(threepp::Camera&,const threepp::Vector3& sun,const AuxiliaryLights&,float seconds);
     std::optional<core::ObjectId> pick(const core::Scene&,threepp::Raycaster&) const;
     const std::map<core::ObjectId,std::shared_ptr<threepp::Mesh>>& nodes() const{return nodes_;}
     const Vehicle* vehicle(const core::ObjectId& id)const{const auto it=vehicles_.find(id);return it==vehicles_.end()?nullptr:it->second.get();}
     const std::array<double,3>* exact(const core::ObjectId& id)const{const auto it=exact_.find(id);return it==exact_.end()?nullptr:&it->second;} // Its node's position at the last sync, in double precision.
 private:
+    const Terrain* terrain_=nullptr;const threepp::Object3D* earth_=nullptr;
     threepp::Scene& scene_;
     std::map<core::ObjectId,std::shared_ptr<threepp::Mesh>> nodes_;std::map<core::ObjectId,std::array<double,3>> exact_;
     std::map<core::ObjectId,std::shared_ptr<const threepp::BVH>> pickers_;
@@ -43,7 +46,8 @@ private:
     std::map<core::ObjectId,std::unique_ptr<Vehicle>> vehicles_; // Objects with a look.
     std::map<core::ObjectId,std::unique_ptr<Site>> sites_;       // With scenery.
     std::map<core::ObjectId,float> deluge_; // Each site's deluge water now (m³/s), from its pad's sound source.
-    std::map<core::ObjectId,std::pair<double,bool>> count_;bool delugeEffects_=true;
+    struct Count {double seconds;bool scrubbed,launch;};
+    std::map<core::ObjectId,Count> count_;bool delugeEffects_=true;
     std::map<core::ObjectId,threepp::Vector3> winds_;
     std::map<core::ObjectId,std::unique_ptr<Splashdown>> water_;int quality_=1,splashQuality_=1;
     double cloudUtc_=0;bool cloudTimed_=false;

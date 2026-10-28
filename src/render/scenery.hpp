@@ -4,6 +4,7 @@
 // by the structures' angles (a sample's parts).
 #include "core/scene.hpp"
 #include "production.hpp"
+#include "launch_crowd.hpp"
 #include "launch_cloud.hpp"
 #include "site_lighting.hpp"
 #include "threepp/threepp.hpp"
@@ -19,7 +20,8 @@ public:
     const std::shared_ptr<threepp::Mesh>& node()const{return root_;}
     void animate(const std::vector<float>* angles);
     void quality(int value); // Small furnishings and tower fittings are optional; the structural silhouettes survive.
-    void view(threepp::Camera& camera){if(production_)production_->view(camera);}
+    void view(threepp::Camera& camera,const LaunchCrowd::Ground& ground={}){if(production_)production_->view(camera);if(crowd_)crowd_->view(camera,ground);}
+    void launchDay(double count,bool scrubbed){launchDay_=LaunchCrowd::launchDay(count,scrubbed);if(crowd_)crowd_->enabled(launchDay_,quality_);}
     void venting(double utc); // Simulated UTC keeps tank vapour on the acoustic schedule.
     void lighting(const threepp::Vector3& sun); // World position, from the scene's own sun; local +z is up.
     void cloudQuality(int value){cloudQuality_=value;if(launchCloud_)launchCloud_->quality(quality_>0?value:0);}
@@ -33,6 +35,7 @@ private:
     std::shared_ptr<threepp::DataTexture> contactTexture_;
     std::shared_ptr<threepp::Mesh> root_;std::vector<Hinge> hinges_; // By structure; no pivot when fixed.
     std::unique_ptr<ProductionSite> production_;
+    std::unique_ptr<LaunchCrowd> crowd_;bool launchDay_=false;
     std::unique_ptr<SiteLighting> lighting_;
     std::vector<std::shared_ptr<threepp::ShaderMaterial>> lamps_;
     float night_=0;int quality_=1,cloudQuality_=1;

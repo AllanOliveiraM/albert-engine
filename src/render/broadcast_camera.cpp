@@ -136,7 +136,7 @@ std::optional<BroadcastView> BroadcastCamera::update(const core::Scene& registry
         return std::max(radius*3.f,length*std::sqrt(1-along*along)+radius*2*along);
     };
     if(shot==M::Tracking){
-        eye.set(2600,-2100,18); // A raised shore tripod, looking inland across the pad.
+        eye.set(500,-2500,1.85f); // Public dry beach, beyond the 2 km closure; the saved coastline is ~620 m east here.
         const float range=eye.distanceTo(position),extent=projectedSize(eye);
         fov=std::clamp(2*std::atan2(extent*1.65f,std::max(range,1.f))*180/pi,.035f,42.f);
         // Critically damped mount approximation, with a range-bounded pointing error (never shakes the vehicle off screen).
@@ -247,7 +247,7 @@ std::optional<BroadcastView> BroadcastCamera::update(const core::Scene& registry
         // Moving the eye away from that mount would violate the rigid vehicle attachment.
         Vector3 clear=eye;clearStructures(clear,scenery,angles.get(),.15f);
         if(clear.distanceTo(eye)>.2f){
-            shot=M::Tracking;fisheye=false;eye.set(2600,-2100,18);aim=position;up.set(0,0,1);
+            shot=M::Tracking;fisheye=false;eye.set(500,-2500,1.85f);aim=position;up.set(0,0,1);
             fov=std::clamp(2*std::atan2(projectedSize(eye)*1.65f,eye.distanceTo(position))*180/pi,.035f,42.f);
             clearStructures(eye,scenery,angles.get(),.6f);
         }

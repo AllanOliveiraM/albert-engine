@@ -20,7 +20,7 @@ Positions below are metres across/along each pad's existing trench axes: Pad 1 a
 - Two parking rows per pad use across -53/-42 m, along -118 to -88 m, facing across the apron. The final site has 16 pickups and three larger trucks; a fourth truck candidate conflicted with Pad 2's access road and was rejected.
 - Eighteen cones mark the parking boundary at across -34 m, along -126 to -86 m. Each has a dark foot, tapered orange body and white band.
 - Six equipment skids and six open ladder cable trays sit toward the farm side, at across -42 to -24 m, along 47/36 m. Road-conflicting candidates at Pad 2 are rejected. The existing pipe racks, manifolds, covered cable trenches and eight floodlight poles are reused.
-- Seven cars follow the saved Highway 4 tangents, their centres 1.7 m beyond the full paved edge. They avoid service junctions, OSM structures and other furnishings. Full car corners, including tyre width, clear the pavement by at least 0.59 m. These cars stand on the flat ground/shoulder surface, outside the traffic lanes.
+- The former seven static Highway 4 cars have been replaced by the phase-controlled, terrain-following [launch-day crowd](STARBASE_CROWD.md). Pad worker pickups and trucks remain static furnishings.
 
 A conservative circumscribed footprint check keeps new walls and apron furnishings away from every saved road. The final capture audit checks rotated corners against apron footprints and road edges: zero placement conflicts. It includes the physical tyre width and the T-wall feet. It does not claim a surveyed parking layout.
 

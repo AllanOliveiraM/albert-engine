@@ -16,6 +16,7 @@
 #include "core/model.hpp"
 #include "model_fixture.hpp"
 #include "gpu/context.hpp"
+#include "gpu/programs.hpp"
 #include "gpu/scene.hpp"
 #include "gpu/shadows.hpp"
 #include "gpu/atmosphere.hpp"
@@ -331,6 +332,7 @@ void shadowGraphics(GpuTarget& renderer){
 #include "entry_visuals.hpp"
 #include "plume_visuals.hpp"
 #include "production_visuals.hpp"
+#include "crowd_visuals.hpp"
 #include "land_visuals.hpp"
 #include "launch_cloud_visuals.hpp"
 #include "splashdown_visuals.hpp"
@@ -869,6 +871,7 @@ void lunarAdaptationLevels(){
 int main(int argc,char** argv) {
     try {
 #ifdef ALBERT_TEST_RPC
+        if(argc>2&&std::string_view(argv[1])=="crowd-captures"){landCaptures(argv[2],false,false,false,false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="camera-diagnostics"){cameraCaptures(argv[2],true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="camera-captures"){cameraCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="coastal-captures"){landCaptures(argv[2],false,false,false,false,true);return 0;}
@@ -886,13 +889,13 @@ int main(int argc,char** argv) {
 #endif
         shadowStability();cameraControls();controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();splashdownControls();
 #ifdef ALBERT_TEST_RPC
-        productionData();industrialData();vehicleGeometryControls();cameraCaptureControls();
+        crowdControls();productionData();industrialData();vehicleGeometryControls();cameraCaptureControls();
 #endif
         if(argc>1){
             std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';return 77;}
             if(gpu){std::cout<<"WebGPU ("<<gpu->context.adapter()<<"):\n";shadowGraphics(*gpu);cameraGraphics(*gpu);graphics(*gpu);
 #ifdef ALBERT_TEST_RPC
-                vehicleGeometryGraphics(*gpu);
+                crowdGraphics(*gpu);vehicleGeometryGraphics(*gpu);
 #endif
                 require(albert::gpu::errors()==0,"WebGPU graphics without validation errors");}
         }

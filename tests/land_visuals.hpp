@@ -1,6 +1,6 @@
 #pragma once
 #ifdef ALBERT_TEST_RPC
-void landCaptures(const std::string& directory,bool production=false,bool industrial=false,bool shadowCheck=false,bool nightCheck=false,bool coastCheck=false){
+void landCaptures(const std::string& directory,bool production=false,bool industrial=false,bool shadowCheck=false,bool nightCheck=false,bool coastCheck=false,bool crowdCheck=false){
     std::filesystem::create_directories(directory);
     namespace ex=albert::example::starship;namespace api=albert::v1;
     api::CreateFlightRequest request;ex::addTower(request,true);auto scenery=std::make_shared<albert::core::Scenery>();scenery->latitude=ex::towerLatitude*ex::deg;scenery->longitude=ex::towerLongitude*ex::deg;
@@ -53,7 +53,7 @@ void landCaptures(const std::string& directory,bool production=false,bool indust
     constexpr unsigned width=1280,height=960,row=width*4;WGPUTextureDescriptor td{};td.size={width,height,1};td.format=context.format();td.dimension=WGPUTextureDimension_2D;td.mipLevelCount=td.sampleCount=1;td.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_CopySrc;
     auto target=wgpuDeviceCreateTexture(context.device(),&td);auto view=wgpuTextureCreateView(target,nullptr);std::shared_ptr<Camera> camera=OrthographicCamera::create(-560,560,420,-420,.1,30000);
     Vector3 aim(-75,100,0);
-    auto shot=[&](const std::string& name){const int repeats=(nightCheck||coastCheck)?4:shadowCheck?6:1;std::vector<double> milliseconds,gpuTimes;for(int repeat=0;repeat<repeats;++repeat){const auto start=std::chrono::steady_clock::now();if(shadowCheck&&std::getenv("ALBERT_SHADOW_BASELINE"))site.node()->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(0.f);camera->lookAt(aim);site.view(*camera);auto encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);renderer.render(*world,*camera,view,width,height,encoder);auto cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);renderer.submitted();wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);
+    auto shot=[&](const std::string& name){const int repeats=crowdCheck&&name.starts_with("cost-")?9:(nightCheck||coastCheck)?4:shadowCheck?6:1;std::vector<double> milliseconds,gpuTimes;for(int repeat=0;repeat<repeats;++repeat){const auto start=std::chrono::steady_clock::now();if(shadowCheck&&std::getenv("ALBERT_SHADOW_BASELINE"))site.node()->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(0.f);camera->lookAt(aim);site.view(*camera);auto encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);renderer.render(*world,*camera,view,width,height,encoder);auto cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);renderer.submitted();wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);
         WGPUBufferDescriptor bd{};bd.size=row*height;bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;auto buffer=wgpuDeviceCreateBuffer(context.device(),&bd);encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=target;WGPUTexelCopyBufferInfo dst{};dst.buffer=buffer;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=height;WGPUExtent3D size{width,height,1};wgpuCommandEncoderCopyTextureToBuffer(encoder,&src,&dst,&size);cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);
         bool ready=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&ready;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};wgpuBufferMapAsync(buffer,WGPUMapMode_Read,0,bd.size,cb);while(!ready)wgpuInstanceProcessEvents(context.instance());
         const auto* pixels=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(buffer,0,bd.size));std::vector<unsigned char> rgba(pixels,pixels+bd.size);if(context.format()==WGPUTextureFormat_BGRA8Unorm)for(std::size_t i=0;i<rgba.size();i+=4)std::swap(rgba[i],rgba[i+2]);
@@ -61,8 +61,46 @@ void landCaptures(const std::string& directory,bool production=false,bool indust
         milliseconds.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
         if(repeat==repeats-1){std::ofstream output(directory+"/"+name+".ppm",std::ios::binary);output<<"P6\n"<<width<<' '<<height<<"\n255\n";
         for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)output.write(reinterpret_cast<const char*>(rgba.data()+y*row+x*4),3);}
-        wgpuBufferUnmap(buffer);wgpuBufferRelease(buffer);wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);}std::sort(gpuTimes.begin(),gpuTimes.end());std::sort(milliseconds.begin()+((shadowCheck||nightCheck||coastCheck)?1:0),milliseconds.end());std::cout<<name<<" synchronized frame ms "<<milliseconds[milliseconds.size()/2]<<", draws "<<renderer.drawn()<<", shadow draws "<<renderer.shadowDrawn()<<", shadow bytes "<<renderer.shadowBytes()<<", GPU ms "<<(gpuTimes.empty()?renderer.gpuMilliseconds():gpuTimes[gpuTimes.size()/2])<<"\n";};
+        wgpuBufferUnmap(buffer);wgpuBufferRelease(buffer);wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);}std::sort(gpuTimes.begin(),gpuTimes.end());std::sort(milliseconds.begin()+((shadowCheck||nightCheck||coastCheck||repeats>1)?1:0),milliseconds.end());std::cout<<name<<" synchronized frame ms "<<milliseconds[milliseconds.size()/2]<<", draws "<<renderer.drawn()<<", shadow draws "<<renderer.shadowDrawn()<<", shadow bytes "<<renderer.shadowBytes()<<", GPU ms "<<(gpuTimes.empty()?renderer.gpuMilliseconds():gpuTimes[gpuTimes.size()/2])<<"\n";
+        if(crowdCheck){auto* crowd=site.node()->getObjectByName("launch day crowd");if(crowd&&crowd->visible)for(auto* child:crowd->children)if(child->visible&&child->geometry()){
+            const auto* program=albert::gpu::program(child->material()->name);std::cout<<"  "<<child->name<<": "<<child->geometry()->drawRange.count<<" instances, "<<(program?program->instanceVertices/3:0)<<" triangles each\n";}}
+    };
     auto frame=[&](Vector3 at,Vector3 eye,float fov){aim=at;auto c=PerspectiveCamera::create(fov,4.f/3,.1,30000);c->up.set(0,0,1);if(eye.x==at.x&&eye.y==at.y)c->up.set(0,1,0);c->position.copy(eye);camera=c;};
+    if(crowdCheck){
+        renderer.shadowMetersPerUnit=1;renderer.shadowHigh=false;renderer.sea.enabled=false;site.launchDay(-30,false);
+        auto* layer=site.node()->getObjectByName("launch day crowd");require(layer&&layer->visible,"Capture failed to enable launch crowd");
+        std::ofstream manifest(directory+"/manifest.csv");manifest<<"capture,eye_east,eye_north,eye_up,aim_east,aim_north,aim_up,fov\n";
+        auto capture=[&](const char* name,Vector3 at,Vector3 eye,float fov){frame(at,eye,fov);manifest<<name<<','<<eye.x<<','<<eye.y<<','<<eye.z<<','<<at.x<<','<<at.y<<','<<at.z<<','<<fov<<'\n';shot(name);};
+        capture("tower-highway",{-2950,-700,0},{-32,0,153},12);
+        capture("beach-500m",{540,-2600,0},{600,-2700,500},65);
+        // Pick an actual parked instance so this view stays among cars if the OSM fixture changes.
+        auto* batch=layer->getObjectByName("launch parked cars and press");const auto* positions=batch->geometry()->getAttribute<float>("position");
+        Vector3 parked(positions->getX(0),positions->getY(0),positions->getZ(0));
+        capture("among-cars",Vector3(parked).add({-70,-15,1.6f}),Vector3(parked).add({12,-3,1.7f}),70);
+        auto* detailed=layer->getObjectByName("launch near cars");if(detailed){const auto* types=detailed->geometry()->getAttribute<float>("kind");const auto* points=detailed->geometry()->getAttribute<float>("position");const auto* ahead=detailed->geometry()->getAttribute<float>("forward");
+            for(int i=0;i<detailed->geometry()->drawRange.count;++i)if(types->getX(i)==5){const Vector3 at(points->getX(i),points->getY(i),points->getZ(i)),forward(ahead->getX(i),ahead->getY(i),ahead->getZ(i)),right(forward.y,-forward.x,0);
+                capture("tailgate-poses",Vector3(at).addScaledVector(forward,-1.3f).add({0,0,1}),Vector3(at).addScaledVector(forward,-8).addScaledVector(right,5).add({0,0,2.1f}),60);break;}}
+        // Use the actual broadcast rig with the real site, vehicle appearance, prescribed liftoff telemetry and count hook.
+        CameraFixture f;f.scenery=scenery;auto object=f.registry.get("site");object.scenery=scenery;object.samples.front().parts=std::make_shared<const std::vector<float>>(angles);f.registry.create(object,true);
+        *f.look=captureLook(ex::stack());f.vehicle();f.utc=3;f.place({0,0,ex::deck+look.length/2+14},{0,0,20});
+        auto state=f.registry.evaluate("flight",3).state;auto parts=std::make_shared<std::vector<float>>(f.look->engines.size()*3+7,0);for(unsigned i=0;i<f.look->engines.size();++i)(*parts)[i*3]=.8f;parts->back()=-1;state.parts=parts;f.registry.replace("flight",{state});
+        f.objects.count("flight",3,false);f.objects.deluge("site",41);f.objects.sync(f.registry,1,{});f.objects.sync(f.registry,3,{});
+        albert::BroadcastCamera rig;rig.select(albert::core::CameraMode::Tracking);const auto tracking=f.view(rig);
+        // Convert the rig's world Earth-radii (x,up,-north) to the metre ENU fixture.
+        auto enu=[](Vector3 p){return Vector3(p.x,-p.z,p.y).multiplyScalar(6378137);};
+        vehicle.node()->visible=false;auto flight=f.objects.nodes().at("flight");f.world->remove(*flight);flight->scale.setScalar(1);flight->position.copy(enu(flight->position));flight->quaternion.setFromAxisAngle({1,0,0},std::numbers::pi_v<float>/2);world->add(flight);
+        site.exhaust(.8f,14,1,41);site.launchDay(3,false);capture("liftoff-tracking",enu(tracking.aim),enu(tracking.eye),tracking.fov);
+        const auto* kinds=batch->geometry()->getAttribute<float>("kind");for(int i=0;i<kinds->count();++i)if(kinds->getX(i)==5){const Vector3 press(positions->getX(i),positions->getY(i),positions->getZ(i));capture("press-pull-off",press,Vector3(press).add({18,-22,3}),62);break;}
+        albert::LaunchCrowd audit(*scenery);audit.enabled(true,1);std::ofstream instances(directory+"/instances.tsv");instances<<"batch\tkind\teast\tnorth\tup\n";
+        for(const auto& p:audit.vehicles())instances<<"car/press\t"<<p.kind<<'\t'<<p.position.x<<'\t'<<p.position.y<<'\t'<<p.position.z<<'\n';
+        for(const auto& p:audit.spectators())instances<<"person\t"<<p.kind<<'\t'<<p.position.x<<'\t'<<p.position.y<<'\t'<<p.position.z<<'\n';
+        // Paired identical views isolate crowd cost/pixels; low and non-launch switch just this layer for measurement.
+        frame(Vector3(parked).add({-70,-15,1.6f}),Vector3(parked).add({12,-3,1.7f}),70);
+        shot("cost-crowd-on");layer->visible=false;shot("cost-crowd-off");layer->visible=true;
+        site.launchDay(1400,false);shot("after-launch");site.launchDay(-30,true);shot("scrubbed");site.launchDay(-30,false);site.quality(0);shot("low-quality");
+        std::cout<<"Adapter "<<context.adapter()<<", validation errors "<<albert::gpu::errors()<<"\n";
+        wgpuTextureViewRelease(view);wgpuTextureRelease(target);require(albert::gpu::errors()==0,"Crowd captures produced GPU validation errors");return;
+    }
     if(coastCheck){
         renderer.shadowMetersPerUnit=1;renderer.shadowHigh=false;renderer.sea.enabled=false;
         const auto coastal=albert::coastalLight(1);

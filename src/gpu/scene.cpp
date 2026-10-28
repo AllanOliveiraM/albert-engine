@@ -755,7 +755,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         if(group!=lastGroup){wgpuRenderPassEncoderSetBindGroup(pass,2,group,0,nullptr);lastGroup=group;}
         for(std::size_t i=0;i<buffers.size();++i)if(buffers[i]!=lastBuffers[i]){wgpuRenderPassEncoderSetVertexBuffer(pass,static_cast<std::uint32_t>(i),buffers[i],0,WGPU_WHOLE_SIZE);lastBuffers[i]=buffers[i];}
         const auto range=item.geometry->drawRange;
-        if(item.points){const unsigned first=static_cast<unsigned>(std::max(0,range.start)),n=std::min<unsigned>(vertices-std::min(first,vertices),static_cast<unsigned>(range.count));if(n)wgpuRenderPassEncoderDraw(pass,6,n,0,first);}
+        if(item.points){const unsigned first=static_cast<unsigned>(std::max(0,range.start)),n=std::min<unsigned>(vertices-std::min(first,vertices),static_cast<unsigned>(range.count));if(n)wgpuRenderPassEncoderDraw(pass,item.program->program.instanceVertices,n,0,first);}
         else if(auto* idx=item.geometry->getIndex()){
             g.upload(geo.index,idx->array().data(),idx->array().size()*4,WGPUBufferUsage_Index,idx->version);
             const unsigned total=static_cast<unsigned>(idx->array().size()),first=std::min(total,static_cast<unsigned>(std::max(0,range.start))),n=std::min(total-first,static_cast<unsigned>(range.count));

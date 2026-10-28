@@ -5,6 +5,7 @@
 #include "rocks.hpp"
 #include "scenery.hpp"
 #include "vehicle.hpp"
+#include "terrain.hpp"
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -60,7 +61,7 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             if(o.appearance.shape==core::Shape::Builtin&&!(core::localOrbit(id)&&artisticRock(id)))continue;
             instances_[id]=o.instance;
             if(o.scenery){ // A site's: its parts and structures, in metres.
-                auto v=std::make_unique<Site>(*o.scenery);auto mesh=v->node();mesh->scale.setScalar(static_cast<float>(1/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);sites_[id]=std::move(v);
+                auto v=std::make_unique<Site>(*o.scenery);v->quality(quality_);auto mesh=v->node();mesh->scale.setScalar(static_cast<float>(1/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);sites_[id]=std::move(v);
             }else if(o.look){ // A vehicle: its body, parts, bells, plumes and jets, in metres.
                 auto v=std::make_unique<Vehicle>(*o.look);auto mesh=v->node();mesh->scale.setScalar(static_cast<float>(1/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);vehicles_[id]=std::move(v);
             }else if(artisticRock(id)){
@@ -134,16 +135,33 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
         if(v!=vehicles_.end()&&nodes_.at(v->first)->visible){const auto& p=exact_.at(v->first);const auto& o=exact_.at(id);Vector3 up(0,0,1),aft(0,-1,0);up.applyQuaternion(nodes_.at(id)->quaternion);aft.applyQuaternion(nodes_.at(v->first)->quaternion);
             const double m=core::earthRadiusMeters,dx=p[0]-o[0],dy=p[1]-o[1],dz=p[2]-o[2],h=(dx*up.x+dy*up.y+dz*up.z)*m+v->second->length()/2*aft.dot(up);
             if(std::sqrt(dx*dx+dy*dy+dz*dz)*m<2e3){thrust=v->second->thrust();above=static_cast<float>(h);vents[v->first]=std::clamp(1-(above-20)/150,0.f,1.f);}} // Over its pad only (in orbit, beyond the Earth's limb, the height along the pad's up went negative: it vented and steamed there).
+        const auto count=count_.find("flight"+id.substr(4));
+        site->launchDay(count!=count_.end()&&count->second.launch&&v!=vehicles_.end()?count->second.seconds:1e9,count!=count_.end()&&count->second.scrubbed);
         if(rewind)site->resetExhaust();const auto water=deluge_.find(id);const auto wind=winds_.find(id);
         site->exhaust(thrust,above,seconds,water!=deluge_.end()?water->second:0.f,wind!=winds_.end()?wind->second:Vector3(2,-.8f,0),delugeEffects_);site->venting(now);}
     // The stack's vents shut for tank pressurisation from T-40 s to liftoff (a hold keeps its count time), open again after a scrub.
-    for(auto& [id,v]:vehicles_){const auto it=vents.find(id);const auto c=count_.find(id);const bool closed=c!=count_.end()&&c->second.first>=-40&&!c->second.second;
+    for(auto& [id,v]:vehicles_){const auto it=vents.find(id);const auto c=count_.find(id);const bool closed=c!=count_.end()&&c->second.seconds>=-40&&!c->second.scrubbed;
         v->venting(it!=vents.end()?it->second:0.f,now,closed);}
 }
 
 void albert::SceneObjects::updateLighting(Camera& camera,const Vector3& sun,const AuxiliaryLights& settings,float seconds){
     camera.updateMatrixWorld();
-    for(auto& [id,site]:sites_){site->view(camera);site->lighting(sun);}
+    for(auto& [id,site]:sites_){
+        LaunchCrowd::Ground ground;
+        if(terrain_&&earth_){
+            site->node()->updateWorldMatrix(true,false);Matrix4 inverse;inverse.copy(*earth_->matrixWorld).invert();Matrix4 local;local.multiplyMatrices(inverse,*site->node()->matrixWorld);
+            ground=[this,local](const Vector3& p)->std::optional<float>{
+                // Double arithmetic preserves metre offsets before subtracting two Earth-sized radii.
+                const auto& e=local.elements;const double x=e[0]*double(p.x)+e[4]*double(p.y)+e[8]*double(p.z)+e[12],
+                    y=e[1]*double(p.x)+e[5]*double(p.y)+e[9]*double(p.z)+e[13],z=e[2]*double(p.x)+e[6]*double(p.y)+e[10]*double(p.z)+e[14];
+                const auto r=terrain_->ground({float(x),float(y),float(z)});if(!r)return std::nullopt;
+                const double length=std::sqrt(x*x+y*y+z*z),dot=x*e[8]+y*e[9]+z*e[10];
+                if(!(length>0&&dot>0))return std::nullopt;
+                return float(p.z+(*r-length)*length/dot);
+            };
+        }
+        site->view(camera,ground);site->lighting(sun);
+    }
     for(const auto& [id,instance]:instances_){(void)instance;const auto configured=settings.find(id);const bool enabled=configured!=settings.end()&&configured->second.enabled;
         if(!enabled&&!displayedFill_.contains(id))continue;
         auto& strength=displayedFill_[id];strength=animateValue(strength,enabled?std::clamp(configured->second.intensity,0.f,1.5f):0.f,seconds);
