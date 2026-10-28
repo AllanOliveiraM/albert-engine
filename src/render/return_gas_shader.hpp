@@ -1,8 +1,8 @@
 #pragma once
 namespace albert {
 inline const char* returnGasShader=R"(
-struct Material { kind: f32, extent: vec3f, state: vec4f, body: vec4f, offset: vec3f, wind: vec3f, source: vec3f, seconds: f32, samples: f32,
-    tip0: vec4f, tip1: vec4f, tip2: vec4f, tip3: vec4f, tip4: vec4f, tip5: vec4f, vent0: vec4f, vent1: vec4f, vent2: vec4f, vent3: vec4f };
+struct Material { kind: f32, extent: vec3f, state: vec4f, body: vec4f, offset: vec3f, wind: vec3f, source: vec3f, seconds: f32, samples: f32, ring: vec4f,
+    tip0: vec4f, tip1: vec4f, tip2: vec4f, tip3: vec4f, tip4: vec4f, tip5: vec4f, vent0: vec4f, vent1: vec4f, vent2: vec4f, vent3: vec4f, outlet0: vec4f, outlet1: vec4f, outlet2: vec4f, outlet3: vec4f, outlet4: vec4f, outlet5: vec4f, outlet6: vec4f, outlet7: vec4f, outlet8: vec4f, outlet9: vec4f, outlet10: vec4f, outlet11: vec4f, outlet12: vec4f, outlet13: vec4f, outlet14: vec4f, outlet15: vec4f, outlet16: vec4f, outlet17: vec4f, outlet18: vec4f, outlet19: vec4f };
 @group(2) @binding(0) var<uniform> material: Material;
 fn gasHash(p: vec3f) -> f32 {
     let v = bitcast<vec3u>(vec3i(p));
@@ -44,9 +44,9 @@ fn filament(ray: vec3f, view: vec3f, start: vec3f, end: vec3f, radius: f32) -> f
     return exp(-dot(d,d) / (radius * radius)) * (0.4 + 0.6 * sin(3.14159 * t)) * gasVisible(start + axis * t,view);
 }
 // Resolve the thin cone at its two exact ray crossings; a sparse march would blur or miss its leading face.
-fn condensation(ray: vec3f, view: vec3f) -> f32 {
+fn condensation(ray: vec3f, view: vec3f, shoulder: f32) -> f32 {
     let r = material.body.x; let axis = -normalize(material.wind);
-    let centre = vec3f(0,material.body.z,0) - axis * (r * 0.45);
+    let centre = vec3f(0,shoulder,0) - axis * (r * 0.45);
     let p = ray - centre; let height = r * 1.8; let slope = 0.65;
     let h = dot(p,axis); let dh = dot(view,axis);
     let cross = p - axis * h; let dc = view - axis * dh;
@@ -85,6 +85,26 @@ fn condensation(ray: vec3f, view: vec3f) -> f32 {
     let near = select(halfChord,clamp(dot(eye,direction),-halfChord,halfChord),inside);
     let up = normalize(basis[1]); let incident = airLight(v.world,up);
     let lighting = (incident.sun * frame.sunColor.rgb + incident.sky * frame.sunColor.rgb + frame.ambient.rgb) * 0.28;
+    if (material.kind > 2.5) {
+        let ray = middle * material.extent; let view = normalize(direction * material.extent);
+        let outlets = array<vec4f,20>(material.outlet0, material.outlet1, material.outlet2, material.outlet3, material.outlet4, material.outlet5, material.outlet6, material.outlet7, material.outlet8, material.outlet9, material.outlet10, material.outlet11, material.outlet12, material.outlet13, material.outlet14, material.outlet15, material.outlet16, material.outlet17, material.outlet18, material.outlet19);
+        var density = 0.0; var hot = 0.0;
+        // All apertures share one shell. Coarser tiers group adjacent jets instead of adding draws.
+        let stride = select(select(5,2,material.samples > 2.0),1,material.samples > 6.0);
+        for (var i = 0; i < 20; i += stride) {
+            let outlet = outlets[i]; if (outlet.w <= 0.0) { continue; }
+            let outward = normalize(vec3f(outlet.x,0,outlet.z));
+            let start = outlet.xyz - material.offset + outward * 0.12;
+            let end = start + outward * (material.body.x * (1.5 + material.state.x)) + vec3f(0,-material.body.x * 0.7,0);
+            let width = outlet.w * (0.38 + 0.12 * f32(stride));
+            density += filament(ray,view,start,end,width);
+            hot += filament(ray,view,start,start + outward * 2.0,width * 0.65);
+        }
+        let flicker = 0.93 + 0.07 * sin(material.seconds * 53.0);
+        let alpha = 1.0 - exp(-density * material.state.x * flicker * 2.0);
+        let colour = mix(vec3f(2.6,0.6,0.12),vec3f(7.0,5.8,3.6),clamp(hot,0.0,1.0));
+        return vec4f(finish(colour * airFilter(v.world)) * alpha,alpha * 0.18);
+    }
     if (material.kind > 1.5) {
         let ray = middle * material.extent; let view = normalize(direction * material.extent);
         let r = material.body.x; let l = material.body.y;
@@ -109,7 +129,7 @@ fn condensation(ray: vec3f, view: vec3f) -> f32 {
             density += vent.w * material.state.z * pulse * 3.0 * filament(ray,view,start,end,0.55 + age * 1.4);
         }
         let flicker = 0.86 + 0.09 * sin(material.seconds * 43.0) + 0.05 * sin(material.seconds * 17.0);
-        density += material.state.x * condensation(ray,view) * flicker * 2.6;
+        density += material.state.x * (condensation(ray,view,material.body.z) + select(0.0,condensation(ray,view,material.ring.x),material.ring.z > 0.0 && abs(material.ring.x - material.body.z) > material.body.x)) * flicker * 2.6;
         // Retained cold inventory after the burn vents at both ends while the nearly stationary hull is held.
         let age = fract(material.seconds * 0.125) * 8.0;
         let drift = vec3f(age * 1.5,0,0);
@@ -166,8 +186,10 @@ fn condensation(ray: vec3f, view: vec3f) -> f32 {
             let width = material.extent.x * (0.018 + 0.84 * sin(clamp(down,0.0,1.0) * 3.14159) * sqrt(max(0.0,down)));
             let rho = exp(-radial * radial / max(1.0,width * width) * 2.6) * exp(-down * 1.8)
                 * smoothstep(0.0,0.015,down) * (1.0 - smoothstep(0.65,1.0,down)) * ripple * material.state.x * material.state.y;
-            let colour = mix(vec3f(0.60,0.78,1.0),vec3f(1.0,0.53,0.24),smoothstep(0.02,0.5,down));
-            emission += rho * colour * (vec3f(0.055) + lighting * 1.8) * step * 2.2;
+            let rareColour = mix(vec3f(0.60,0.78,1.0),vec3f(1.0,0.53,0.24),smoothstep(0.02,0.5,down));
+            let hotColour = mix(vec3f(5.0,4.6,3.8),vec3f(2.4,0.42,0.04),smoothstep(0.0,0.3,down));
+            let colour = mix(rareColour,hotColour,material.state.z);
+            emission += rho * colour * (vec3f(0.055 + material.state.z * 1.6) + lighting * 1.8) * step * 2.2;
             optical += rho * step * 0.12;
         }
     }

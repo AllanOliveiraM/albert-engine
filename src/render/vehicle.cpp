@@ -208,6 +208,15 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         auto cloud=SphereGeometry::create(1,12,8);for(auto& p:x.gas){p.mesh=Mesh::create(cloud,engineCloud());p.mesh->name="engine puff";p.mesh->visible=false;p.mesh->renderOrder=9;p.mesh->frustumCulled=false;root_->add(p.mesh);}
         x.pivot->quaternion.setFromUnitVectors(Vector3(0,1,0),along);root_->add(x.pivot);engines_.push_back(std::move(x));
     }
+    if(engines_.size()>1){
+        for(unsigned k=0;k<exhaust_.size();++k){std::vector<std::shared_ptr<BufferGeometry>> geometry;std::vector<float> index;
+            auto m=plumeMaterial();m->name="albert:cluster-plume";
+            for(unsigned i=0;i<64;++i)for(const char* field:{"transform","a","b"})m->uniforms.emplace("engine"+std::to_string(i)+field,Uniform(Matrix4()));
+            for(unsigned i=0;i<engines_.size();++i){auto& e=engines_[i];auto& source=k<2?e.plume[k]:k==2?e.exit:e.remnant[k-3];source->material()->visible=false;
+                geometry.push_back(source->geometry());index.insert(index.end(),source->geometry()->getAttribute<float>("position")->count(),float(i));}
+            auto g=joined(geometry);g->setAttribute("engine",FloatBufferAttribute::create(std::move(index),1));
+            auto mesh=Mesh::create(g,m);mesh->name="engine exhaust batch "+std::to_string(k);mesh->frustumCulled=false;mesh->renderOrder=10+int(k<3?k:k-3);mesh->visible=false;root_->add(mesh);exhaust_[k]=mesh;
+        }}
     if(!engines_.empty()){exhaustLight_=PointLight::create(Color(1.f,.24f,.055f),0,120,2);exhaustLight_->name="exhaust light";root_->add(exhaustLight_);}
     return_=std::make_unique<ReturnEffects>(look,*root_);
     { // Conforming hull curtain plus a bounded, analytic volume downstream along the air-relative flow.
@@ -245,6 +254,7 @@ void Vehicle::water(const Vector4& plane){
     for(auto* child:root_->children)visit(visit,*child,Matrix4());
 }
 void Vehicle::quality(int value){
+    quality_=std::clamp(value,0,2);
     return_->quality(value);
     detail_->autoUpdate=value>0;if(value<=0){hardware_[0].mesh->visible=false;hardware_[1].mesh->visible=true;}
     for(auto& p:sheaths_)p->material()->as<ShaderMaterial>()->uniforms.at("quality").setValue(value>0?1.f:0.f);
@@ -302,6 +312,7 @@ void Vehicle::shine(float heating,float fill){
         auto hull=m->uniforms.at("vehicleHull").value<Vector4>();hull.z=f.mesh->position.y;m->uniforms.at("vehicleHull").setValue(hull);}
 }
 void Vehicle::impinge(float metres,float glow){obstruction_=std::max(0.f,metres);impingement_=std::clamp(glow,0.f,1.f);}
+void Vehicle::hotstage(float flow,float gap,double utc){return_->hotstage(flow,gap,utc);}
 void Vehicle::venting(float strength,double utc,bool closed){
     if(!std::isfinite(utc))return;const bool reset=ventTimed_&&utc<ventUtc_;
     const float dt=ventTimed_&&!reset?static_cast<float>(utc-ventUtc_):0.f;ventUtc_=utc;ventTimed_=true;
@@ -364,7 +375,7 @@ void Vehicle::animate(const std::vector<float>* parts,double utc,core::Vector po
     if(!engines_.empty()&&engines_.front().cycle.known&&utc<engines_.front().cycle.utc){engineSounds_={};soundSerial_=0;}
     std::size_t lit=0;thrust_=0;for(std::size_t i=0;i<engines;++i){lit+=at(3*i)>.01f;thrust_+=std::clamp(at(3*i),0.f,1.f)/static_cast<float>(engines);}
     const float crowd=std::min(1.f,6.f/static_cast<float>(std::max<std::size_t>(lit,1))); // Many plumes overlap: each fainter.
-    Vector3 lightCentre;float lightFlow=0,startFlash=0;
+    Vector3 lightCentre;float lightFlow=0,startFlash=0;unsigned gasDraws=0,torchDraws=0;const unsigned transientBudget=quality_>=2?2:quality_>0?1:0;
     for(std::size_t i=0;i<engines;++i){ // The gimballed thrust as the physics turns it: yaw about z, then pitch about y.
         auto& e=engines_[i];const float share=at(3*i),pitch=at(3*i+1),yaw=at(3*i+2);const auto& d=e.direction;
         const bool wasOn=e.cycle.on;e.cycle.step(share,utc);const auto& cycle=e.cycle;
@@ -385,7 +396,7 @@ void Vehicle::animate(const std::vector<float>* parts,double utc,core::Vector po
         if(on&&mainAge>=0&&mainAge<1.1f)startFlash+=std::min(1.f,mainAge/.09f)*std::pow(1-mainAge/1.1f,2.f)*throttle;
         const float flash=cycle.on&&cycle.main?std::max(0.f,1-mainAge/.065f):0,torch=cycle.torching()?(.6f+.4f*std::sin(static_cast<float>(utc-cycle.started)*pi/.24f)):0;
         if(on){Vector3 source(0,e.exitY-3*r,0);source.applyQuaternion(e.pivot->quaternion).add(e.pivot->position);lightCentre.addScaledVector(source,throttle);lightFlow+=throttle;}
-        e.torch->visible=torch>0;e.torch->material()->opacity=.85f*torch;
+        e.torch->visible=torch>0&&torchDraws++<transientBudget;e.torch->material()->opacity=.85f*torch;
         if(cycle.ignition||cycle.shutdown){const auto serial=++soundSerial_;engineSounds_[serial%engineSounds_.size()]={serial,cycle.ignition?cycle.started:cycle.stopped,r,cycle.ignition};}
         auto release=[&](Gas& p,double born,float life,unsigned kind){p.born=born;p.pending=born>utc;p.life=life;p.kind=kind;p.radius=r;p.air=air;p.speed=(kind==1?8.f:3.f)*r;
             p.attitude=root_->quaternion;p.attitude.multiply(e.pivot->quaternion);Vector3 exit(0,e.exitY,0);exit.applyQuaternion(e.pivot->quaternion).add(e.pivot->position).applyQuaternion(root_->quaternion);
@@ -394,7 +405,7 @@ void Vehicle::animate(const std::vector<float>* parts,double utc,core::Vector po
         if(cycle.shutdown){release(e.gas[0],utc,.18f,1);for(std::size_t k=1;k<e.gas.size();++k)release(e.gas[k],utc+.14+.26*(k-1),air>.05f?.8f:.45f,2);}
         e.heat+=(on?flow-e.heat:-e.heat)*(1-std::exp(-dt/(on?8.f:45.f))); // Thermal inertia leaves a red lip for roughly 30-60 seconds after a long burn.
         auto& bell=e.bell->uniforms;bell.at("burn").setValue(blackBody(300+1000*e.heat).add(Vector3(1,.3f,.04f).multiplyScalar(.7f*torch+2*flash)));bell.at("lip").setValue(blackBody(300+1350*e.heat));bell.at("emissive").setValue(aftGlow_);
-        if(e.hot){e.hot->visible=e.heat>.4f;e.hot->material()->as<MeshBasicMaterial>()->opacity=.35f*std::max(0.f,(e.heat-.4f)/.6f);} // Keep the radiatively cooled vacuum extension warm between burns.
+        if(e.hot){e.hot->visible=quality_>0&&e.heat>.4f;e.hot->material()->as<MeshBasicMaterial>()->opacity=.35f*std::max(0.f,(e.heat-.4f)/.6f);} // Keep the radiatively cooled vacuum extension warm between burns.
         e.exit->visible=on||flash>0;auto& exit=e.exit->material()->as<ShaderMaterial>()->uniforms;exit.at("strength").setValue((obstruction_>0?1.4f*hit*std::sqrt(crowd):.95f*(1-.9f*vacuum))*throttle+flash);exit.at("time").setValue(time+static_cast<float>(i)*1.73f);exit.at("flash").setValue(4*flash);
         e.exit->position.y=e.plume[0]->position.y-(obstruction_>0?obstruction_:.008f*r);const float splash=obstruction_>0?5+3*hit:1;e.exit->scale.set(splash,1,splash); // Reuse the axial glow where the gas spreads over the obstruction.
         exit.at("core").setValue(obstruction_>0?Vector3(1,.75f,.3f):Vector3(5.f,4.6f,3.8f).lerp(Vector3(1,.7f,.2f),rich));exit.at("edge").setValue(obstruction_>0?Vector3(1,.55f,.15f):Vector3(1,.28f,.19f).lerp(Vector3(1,.48f,.06f),rich));
@@ -417,7 +428,7 @@ void Vehicle::animate(const std::vector<float>* parts,double utc,core::Vector po
                 auto& u=p.material()->as<ShaderMaterial>()->uniforms;const float metres=u.at("metres").value<float>();
                 const float width=e.remnantWidth*(1+.8f*offAge);p.scale.set(width,metres*(.2f+.8f*fade),width);
                 u.at("strength").setValue(e.remnantStrength[k]*fade*fade);u.at("time").setValue(time+static_cast<float>(i)*1.73f);}}
-        for(auto& p:e.gas){const float age=static_cast<float>(utc-p.born);p.mesh->visible=p.life>0&&age>=0&&age<p.life;if(!p.mesh->visible)continue;
+        for(auto& p:e.gas){const float age=static_cast<float>(utc-p.born);p.mesh->visible=p.life>0&&age>=0&&age<p.life&&gasDraws++<transientBudget;if(!p.mesh->visible)continue;
             if(p.pending){p.pending=false;p.attitude=root_->quaternion;p.attitude.multiply(e.pivot->quaternion); // Later parcels still come from the moving bell, then drift freely.
                 Vector3 exit(0,e.exitY,0);exit.applyQuaternion(e.pivot->quaternion).add(e.pivot->position).applyQuaternion(root_->quaternion);
                 p.origin=position+physical(exit)-velocity*age;p.velocity=velocity;p.flow=relativeFlow;}
@@ -433,7 +444,18 @@ void Vehicle::animate(const std::vector<float>* parts,double utc,core::Vector po
     std::array<Vector3,6> tips{};unsigned tipCount=0;
     for(const auto& p:parts_)if(p.trail&&tipCount<tips.size())tips[tipCount++]=Vector3(p.tip).applyQuaternion(p.pivot->quaternion).add(p.pivot->position);
     const Vector3 source=lightFlow>0?Vector3(lightCentre).multiplyScalar(1/lightFlow):Vector3(0,-static_cast<float>(length_/2),0);
-    return_->update(utc,pressure,mach,fill,entryWind_,lightFlow,std::min(1.f,startFlash/std::sqrt(float(std::max<std::size_t>(lit,1)))),source,humidity_,tips,tipCount);
+    return_->update(utc,pressure,mach,fill,entryWind_,lightFlow,std::min(1.f,startFlash/std::sqrt(float(std::max<std::size_t>(lit,1)))),source,humidity_,tips,tipCount,obstruction_>0?std::clamp((obstruction_-2.f)/28.f,0.f,1.f):1.f);
+    // Keep each nozzle's exact pose and sampled shader state, but submit shells, discs and shutdown remnants in fixed batches.
+    for(unsigned k=0;k<exhaust_.size();++k)if(exhaust_[k]){auto& mesh=*exhaust_[k];auto& table=mesh.material()->as<ShaderMaterial>()->uniforms;bool visible=false;
+        for(unsigned i=0;i<engines_.size()&&i<64;++i){auto& e=engines_[i];auto& p=*(k<2?e.plume[k]:k==2?e.exit:e.remnant[k-3]);auto& u=p.material()->as<ShaderMaterial>()->uniforms;
+            const bool on=p.visible&&(k<3||e.detached->visible)&&(quality_>0||(k!=0&&k!=3));visible=visible||on;
+            Matrix4 a,b;a.elements.fill(0);b.elements.fill(0);const auto core=u.at("core").value<Vector3>(),edge=u.at("edge").value<Vector3>();const auto radii=u.at("radii").value<Vector2>();
+            a.elements={core.x,core.y,core.z,on?u.at("strength").value<float>():0.f,edge.x,edge.y,edge.z,u.at("diamonds").value<float>(),u.at("time").value<float>(),radii.x,radii.y,u.at("falloff").value<float>(),u.at("rarefied").value<float>(),u.at("disc").value<float>(),u.at("metres").value<float>(),u.at("vacuum").value<float>()};
+            b.elements[0]=u.at("impingement").value<float>();b.elements[1]=u.at("flash").value<float>();b.elements[2]=u.at("inner").value<float>();b.elements[3]=u.at("quality").value<float>();b.elements[4]=u.at("spacing").value<float>();
+            p.updateMatrix();auto& parent=k<3?e.pivot:e.detached;parent->updateMatrix();Matrix4 transform;transform.multiplyMatrices(*parent->matrix,*p.matrix);
+            const auto key="engine"+std::to_string(i);table.at(key+"transform").setValue(transform);table.at(key+"a").setValue(a);table.at(key+"b").setValue(b);
+        }mesh.visible=visible;
+    }
     for(auto& batch:hardware_)batch.update();
     if(exhaustLight_){exhaustLight_->intensity=450*lightFlow*air;if(lightFlow>0)exhaustLight_->position.copy(lightCentre).multiplyScalar(1/lightFlow);}
     for(std::size_t i=0;i<jets_.size();++i){const float duty=at(engines*3+surfaces+i);auto& j=*jets_[i].mesh;j.visible=duty>.02f;

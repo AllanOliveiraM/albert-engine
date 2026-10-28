@@ -193,6 +193,26 @@ struct Surface { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @locati
 }
 )";
     albert::gpu::define("albert:plume",plume);
+    // Uniform array packing matches three mat4 fields per engine; geometry carries only its engine index.
+    Program cluster=plume;cluster.attributes.emplace_back("engine",1);cluster.uniforms.clear();
+    for(unsigned i=0;i<64;++i)for(const char* field:{"transform","a","b"})cluster.uniforms.emplace_back("engine"+std::to_string(i)+field,Uniform::mat4);
+    std::string code=plume.wgsl;
+    auto replace=[&](const std::string& from,const std::string& to){std::size_t at=0;while((at=code.find(from,at))!=std::string::npos){code.replace(at,from.size(),to);at+=to.size();}};
+    replace("struct Material {","struct Plume {");replace("@group(2) @binding(0) var<uniform> material: Material;",R"(
+struct EnginePlume { transform: mat4x4f, a: mat4x4f, b: mat4x4f };
+struct Material { engines: array<EnginePlume,64> };
+@group(2) @binding(0) var<uniform> material: Material;
+fn unpack(e: EnginePlume) -> Plume {
+    return Plume(e.a[0].xyz,e.a[1].xyz,e.a[0].w,e.a[1].w,e.a[2].x,e.a[2].yz,e.a[2].w,e.a[3].x,e.a[3].y,e.a[3].z,e.a[3].w,e.b[0].x,e.b[0].y,e.b[0].z,e.b[0].w,e.b[1].x);
+}
+)");
+    replace("material.","jet.");replace("object.model","model");
+    replace("@location(4) world: vec3f }","@location(4) world: vec3f, @location(5) @interpolate(flat) engine: u32 }");
+    replace("@location(2) uv: vec2f) -> Surface {","@location(2) uv: vec2f, @location(3) engine: f32) -> Surface {\n    let data = material.engines[u32(engine)]; let jet = unpack(data); let model = object.model * data.transform;");
+    replace("@fragment fn fs_main(v: Surface) -> @location(0) vec4f {","@fragment fn fs_main(v: Surface) -> @location(0) vec4f {\n    let data = material.engines[v.engine]; let jet = unpack(data); let model = object.model * data.transform;");
+    replace("    return o;","    o.engine = u32(engine); if (jet.strength <= 0.0) { o.clip = vec4f(2,2,2,1); }\n    return o;");
+    cluster.wgsl=std::move(code);albert::gpu::define("albert:cluster-plume",cluster);
+
     // The bell's attachment puff, fuel-rich tail and purge: a single turbulent chord through each pooled shell.
     Program engineCloud;engineCloud.attributes=surfaceAttributes;engineCloud.uniforms={{"density",Uniform::f32},{"time",Uniform::f32},{"seed",Uniform::f32},{"flame",Uniform::f32}};
     engineCloud.wgsl=std::string(surface)+R"(
@@ -216,9 +236,10 @@ struct Material { density: f32, time: f32, seed: f32, flame: f32 };
 )";
     albert::gpu::define("albert:engine-cloud",engineCloud);
     Program returning;returning.attributes=surfaceAttributes;returning.uniforms={{"kind",Uniform::f32},{"extent",Uniform::vec3},{"state",Uniform::vec4},{"body",Uniform::vec4},{"offset",Uniform::vec3},
-        {"wind",Uniform::vec3},{"source",Uniform::vec3},{"seconds",Uniform::f32},{"samples",Uniform::f32},
+        {"wind",Uniform::vec3},{"source",Uniform::vec3},{"seconds",Uniform::f32},{"samples",Uniform::f32},{"ring",Uniform::vec4},
         {"tip0",Uniform::vec4},{"tip1",Uniform::vec4},{"tip2",Uniform::vec4},{"tip3",Uniform::vec4},{"tip4",Uniform::vec4},{"tip5",Uniform::vec4}};
     for(unsigned k=0;k<4;++k)returning.uniforms.emplace_back("vent"+std::to_string(k),Uniform::vec4);
+    for(unsigned k=0;k<20;++k)returning.uniforms.emplace_back("outlet"+std::to_string(k),Uniform::vec4);
     returning.wgsl=std::string(surface)+albert::returnGasShader;albert::gpu::define("albert:return-gas",returning);
     // Integrate inside the existing depth-tested shells so density stays attached to the vapour.
     Program steam;steam.attributes=surfaceAttributes;steam.uniforms={{"density",Uniform::f32},{"seed",Uniform::f32},{"time",Uniform::f32},{"up",Uniform::vec3},{"hull",Uniform::vec4},{"size",Uniform::vec3},{"kind",Uniform::f32},{"cloud",Uniform::vec4}};

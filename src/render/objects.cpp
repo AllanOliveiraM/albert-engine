@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <tuple>
 using namespace threepp;
 threepp::Vector3 albert::renderPosition(core::Vector p,core::Vector origin){
     p=p-origin;return {static_cast<float>(p.x/core::earthRadiusMeters),static_cast<float>(p.z/core::earthRadiusMeters),static_cast<float>(-p.y/core::earthRadiusMeters)};
@@ -101,20 +102,24 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             if(const auto v=vehicles_.find(id);v!=vehicles_.end()){
                 const auto p=state.positionMeters;const double r=std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z),w=std::sqrt(weatherCentre_.x*weatherCentre_.x+weatherCentre_.y*weatherCentre_.y+weatherCentre_.z*weatherCentre_.z);
                 const auto d=r>0&&w>0?p*(w/r)-weatherCentre_:core::Vector{1e9,0,0};
-                v->second->humidity(d.x*d.x+d.y*d.y+d.z*d.z<50e3*50e3?humidity_:-1.f);
-                v->second->animate(state.parts.get(),now,state.positionMeters,state.velocityMetersPerSecond);}
+                v->second->humidity(d.x*d.x+d.y*d.y+d.z*d.z<50e3*50e3?humidity_:-1.f);}
             if(const auto v=sites_.find(id);v!=sites_.end())v->second->animate(state.parts.get());
         }
     }
     // A stage lit over the one it left (hot staging): its plumes end on that one's top and splash there, the brightest close,
     // gone by ~80 m apart.
-    for(auto& [id,v]:vehicles_){float metres=0,glow=0;const auto& a=*nodes_.at(id);
+    std::vector<std::tuple<Vehicle*,Vehicle*,float>> staging;
+    for(auto& [id,v]:vehicles_){v->hotstage(0,0,now);float metres=0,glow=0;const auto& a=*nodes_.at(id);
         if(a.visible)for(const auto& [other,w]:vehicles_){const auto& b=*nodes_.at(other);if(other==id||!b.visible)continue;
             Vector3 aft(0,-1,0);aft.applyQuaternion(a.quaternion);const auto& p=exact_.at(id);const auto& q=exact_.at(other);const double m=core::earthRadiusMeters;
             const double dx=(q[0]-p[0])*m,dy=(q[1]-p[1])*m,dz=(q[2]-p[2])*m,along=dx*aft.x+dy*aft.y+dz*aft.z,across=std::sqrt(std::max(0.,dx*dx+dy*dy+dz*dz-along*along));
             const double gap=along-v->length()/2-w->length()/2;
-            if(gap>-2&&gap<80&&across<5+.2*gap){metres=static_cast<float>(std::max(gap,.3));glow=static_cast<float>(std::clamp(1-(gap-10)/70,0.,1.));break;}}
+            Vector3 nose(0,1,0);nose.applyQuaternion(b.quaternion);
+            if(gap>-2&&gap<80&&across<5+.2*gap&&nose.dot(aft)<-.85f){metres=static_cast<float>(std::max(gap,.3));glow=static_cast<float>(std::clamp(1-(gap-10)/70,0.,1.));staging.emplace_back(w.get(),v.get(),metres);break;}}
         v->impinge(metres,glow);}
+    // Resolve both poses before animating: first-frame staging and rewind must not inherit yesterday's obstruction.
+    for(auto& [id,v]:vehicles_){const auto state=registry.evaluate(id,now).state;v->animate(state.parts.get(),now,state.positionMeters,state.velocityMetersPerSecond);}
+    for(const auto& [receiver,ship,gap]:staging)receiver->hotstage(ship->thrust()*float(ship->engineCount()),gap,now);
     // A pad's trench steams while its flight's engines burn over it ("site" with "flight", "site.<id>" with "flight.<id>").
     const bool rewind=cloudTimed_&&now<cloudUtc_;const float seconds=cloudTimed_&&!rewind?static_cast<float>(now-cloudUtc_):0.f;cloudUtc_=now;cloudTimed_=true;
     // Telemetry explicitly marks water; never infer it from altitude or the terrain colour.

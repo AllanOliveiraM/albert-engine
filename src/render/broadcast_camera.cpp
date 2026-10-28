@@ -137,13 +137,21 @@ std::optional<BroadcastView> BroadcastCamera::update(const core::Scene& registry
     };
     if(shot==M::Tracking){
         eye.set(500,-2500,1.85f); // Public dry beach, beyond the 2 km closure; the saved coastline is ~620 m east here.
-        const float range=eye.distanceTo(position),extent=projectedSize(eye);
+        float extent=projectedSize(eye);Vector3 subject=position;
+        if(state.parts&&state.parts->size()>=7&&(*state.parts)[state.parts->size()-7]<4000){
+            if(const auto* gas=node->second->getObjectByName("rarefied exhaust");gas&&gas->visible){
+                Vector3 offset=Vector3(gas->position).applyQuaternion(attitude);
+                const Vector3 axis=Vector3(0,1,0).applyQuaternion(attitude),line=Vector3(position).sub(eye).normalize();
+                const float projected=std::sqrt(std::max(0.f,1-axis.dot(line)*axis.dot(line)));
+                extent=std::max(extent,gas->scale.x*.7f+gas->scale.y*.5f*projected);subject.addScaledVector(offset,.65f);
+            }} // The stack becomes the bright apex: keep its sunlit exhaust in the long-lens frame.
+        const float range=eye.distanceTo(subject);
         fov=std::clamp(2*std::atan2(extent*1.65f,std::max(range,1.f))*180/pi,.035f,42.f);
         // Critically damped mount approximation, with a range-bounded pointing error (never shakes the vehicle off screen).
         const float alpha=1-std::exp(-dt/ .16f);
-        if(cut)aim_=position;else aim_.lerp(position,alpha);
-        Vector3 error=Vector3(aim_).sub(position);const float maxError=extent*.28f;
-        if(error.length()>maxError)aim_.copy(position).add(error.normalize().multiplyScalar(maxError));
+        if(cut)aim_=subject;else aim_.lerp(subject,alpha);
+        Vector3 error=Vector3(aim_).sub(subject);const float maxError=extent*.28f;
+        if(error.length()>maxError)aim_.copy(subject).add(error.normalize().multiplyScalar(maxError));
         aim=aim_;const float jitter=extent*.002f; // Presentation time, deterministic and bounded, no random walk.
         aim.x+=jitter*(std::sin(age_*7.1f)+.3f*std::sin(age_*17));aim.z+=jitter*.6f*std::sin(age_*9.3f);
         if(!cut)fov=std::lerp(fov_,fov,1-std::exp(-dt*6));

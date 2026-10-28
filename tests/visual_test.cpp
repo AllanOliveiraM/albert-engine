@@ -436,11 +436,12 @@ void towerGraphics(Target& renderer){
 }
 #include "night_visuals.hpp"
 #include "camera_captures.hpp"
+#include "ascent_visuals.hpp"
 #include "grid_fin_captures.hpp"
 void graphics(Target& renderer) {
     nightGraphics(renderer);
     vehicleGraphics(renderer);entryGraphics(renderer);
-    plumeGraphics(renderer);returnGraphics(renderer);
+    plumeGraphics(renderer);returnGraphics(renderer);ascentGraphics(renderer);
     launchCloudGraphics(renderer);splashdownGraphics(renderer);
     roadGraphics(renderer);
     padGraphics(renderer);
@@ -885,6 +886,7 @@ int main(int argc,char** argv) {
         if(argc>2&&std::string_view(argv[1])=="production-captures"){landCaptures(argv[2],true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="splashdown-captures"){splashdownCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="launch-cloud-captures"){launchCloudCaptures(argv[2]);return 0;}
+        if(argc>2&&std::string_view(argv[1])=="ascent-captures"){ascentCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="return-captures"){returnCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="plume-captures"){plumeCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="entry-captures"){entryCaptures(argv[2]);return 0;}

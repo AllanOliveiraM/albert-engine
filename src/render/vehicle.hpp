@@ -23,6 +23,7 @@ public:
     static float gimballing(const threepp::Object3D& node,const core::VehicleLook& look); // Read the animated bells through the scene node.
     void animate(const std::vector<float>* parts,double utc,core::Vector position={},core::Vector velocity={});
     void impinge(float metres,float glow);
+    void hotstage(float flow,float gap,double utc); // Lit neighbouring stage over the real vent band.
     void venting(float strength,double utc,bool closed=false); // Simulated UTC keeps boil-off on the acoustic schedule.
     double length()const{return length_;}
     float thrust()const{return thrust_;} // The share of its full thrust burning, at the last animate().
@@ -42,6 +43,7 @@ private:
     struct Jet {std::shared_ptr<threepp::Mesh> mesh;};
     struct Piece {std::shared_ptr<threepp::Mesh> mesh;threepp::Vector3 velocity,spin;};
     std::shared_ptr<threepp::Mesh> root_;std::vector<Engine> engines_;std::vector<Part> parts_;std::vector<Jet> jets_;
+    std::array<std::shared_ptr<threepp::Mesh>,5> exhaust_;int quality_=1; // Shells, discs and released exhaust, independent of engine count.
     std::array<VehicleGeometry,2> hardware_;std::shared_ptr<threepp::LOD> detail_; // Near/far rigid hardware, one draw each.
     double length_=1;std::shared_ptr<threepp::Mesh> fire_,smoke_;std::vector<Piece> pieces_; // The breakup's, made when it comes.
     std::shared_ptr<threepp::PointLight> exhaustLight_; // One bounded warm source per stage, weighted by the lit bells.
