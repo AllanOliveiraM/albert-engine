@@ -195,7 +195,7 @@ inline void addStarbase(api::CreateFlightRequest& create){
     pad({0,0,0},trench,{-1,0,0},9);
     for(const double side:{-1.,1.})part("steam vent",Shape::BOX,place(0,side*42,3),{18,1,6},wet,side>0?trench:trench+180); // Not drawn: where the deluge's steam leaves the trench.
     const OsmPart *pad2=nullptr,*tower2=nullptr;for(const auto& row:starbaseOsm){const std::string kind=row.kind;if(kind=="trench")pad2=&row;else if(kind=="tower")tower2=&row;}
-    for(const auto& row:starbaseOsm){const std::string kind=row.kind,name=row.name;const Vec centre{row.x,row.y,0},axis{std::sin(row.heading*deg),std::cos(row.heading*deg),0},across{axis.y,-axis.x,0};
+    for(const auto& row:starbaseOsm){const std::string kind=row.kind,name=row.name;const Vec centre{row.x,row.y,0},axis{std::sin(row.heading*deg),std::cos(row.heading*deg),0};
         if(kind=="trench"){const Vec toward{tower2->x-row.x,tower2->y-row.y,0};pad(centre,row.heading,toward*(1/norm(toward)));}
         else if(kind=="tower"){const Vec toward{pad2->x-row.x,pad2->y-row.y,0},reach=toward*(1/norm(toward)),side{reach.y,-reach.x,0};const double bearing=std::atan2(reach.x,reach.y)/deg;
             tower(centre,row.heading,row.height,false); // Its OSM service building already occupies the foot of Tower 2.
@@ -205,27 +205,27 @@ inline void addStarbase(api::CreateFlightRequest& create){
                 armDetail(centre+reach*(half+1.5)+side*(sign*5)+Vec{0,0,armHeight-armRadius},reach,side,25,sign,0,3,23);}
             shipArm(centre+reach*half+side*half+Vec{0,0,deck+78},reach,side,13,0);
         }else if(kind=="building"){const bool vapor=name.find("Vaporizer")!=std::string::npos,bunker=name.find("bunker")!=std::string::npos||name.find("Bunker")!=std::string::npos;
-            const bool towerService=tower2&&std::hypot(row.x-tower2->x,row.y-tower2->y)<12;
-            part(towerService?"tower service building":name.empty()?"OSM building":row.name,Shape::BOX,centre+Vec{0,0,vapor?3:row.height/2},vapor?Vec{2.5,2.14,6}:Vec{row.width,row.length,row.height},vapor?dark:bunker?0x6f6d69:0x9a9893,row.heading);
-            if(vapor)for(int i=0;i<4;++i)part("vaporizer fin",Shape::BOX,centre+across*(-.9+.6*i)+Vec{0,0,3.03},{.12,2.5,5.88},dark,row.heading); // Expose fins on both sides; recess their tops by 3 cm.
-        }else if(kind=="tank"||kind=="lying tank"){const bool lying=kind=="lying tank",methane=name.find("methane")!=std::string::npos,oxygen=name.find("oxygen")!=std::string::npos||name.find("LOX")!=std::string::npos,nitrogen=name.find("nitrogen")!=std::string::npos;
-            const double diameter=lying?row.width:row.length,z=lying?diameter/2+.6:row.height/2;const std::uint32_t colour=nitrogen?tankSteel:name.find("water")!=std::string::npos?0xd8d6cf:oxygen||methane?white:tankSteel;
-            part(name.empty()?"OSM tank":row.name,Shape::CYLINDER,centre+Vec{0,0,z},{diameter,diameter,lying?row.length:row.height},colour,row.heading,lying?90:0);
-            if(lying)for(const double sign:{-1.,1.})part("tank saddle",Shape::BOX,centre+axis*(sign*row.length*.3)+Vec{0,0,.575},{diameter*.82,1.5,1.15},concrete,row.heading); // Embed the tank bottom in two saddles.
-            if(methane)part("methane tank band",Shape::CYLINDER,centre+axis*(lying?row.length*.3:0)+Vec{0,0,lying?z:row.height*.75},{diameter+.06,diameter+.06,.8},0xcfd1d0,row.heading,lying?90:0); // Lift the band 3 cm clear of the shell.
-            if(oxygen||methane||nitrogen)part("tank vent",Shape::BOX,centre+axis*(lying?row.length/2-.7:0)+Vec{0,0,lying?z+diameter/2+.72:row.height+.72},{.6,.6,1.5},dark,row.heading); // Embed the vent base by 3 cm for later boil-off.
+            const std::string marker=vapor?"farm vaporizer":name=="Starhopper"?name:"farm building "+name;
+            part(marker.c_str(),Shape::BOX,centre+Vec{0,0,name=="Starhopper"?row.height/2:0},{row.width,row.length,vapor?6:row.height},bunker?0x8a8780:0xa4a9ab,row.heading);
+        }else if(kind=="tank"||kind=="lying tank"){const bool lying=kind=="lying tank",methane=name.find("methane")!=std::string::npos,oxygen=name.find("oxygen")!=std::string::npos,nitrogen=name.find("nitrogen")!=std::string::npos;
+            const double diameter=lying?row.width:row.length,z=lying?diameter/2+.6:row.height/2;const std::uint32_t colour=nitrogen?tankSteel:name.find("water")!=std::string::npos?0xd8d6cf:oxygen||methane||!lying?white:tankSteel;
+            part(lying?"farm horizontal tank":"farm vertical tank",Shape::BOX,centre,{diameter,lying?row.length:diameter,lying?diameter:row.height},colour,row.heading);
+            if(oxygen||methane||nitrogen)part("tank vent",Shape::BOX,centre+axis*(lying?row.length/2-.7:0)+Vec{0,0,lying?z+diameter/2+.72:row.height+.72},{.6,.6,1.5},dark,row.heading);
         }
     }
+    // The photo's long covered western bank. OSM tank centres remain untouched; the open sides expose the service ends.
+    part("farm canopy",Shape::BOX,{-88.6,116.2,0},{98,54,10},0xc6cbcd,13.3);
+
+    for(const Vec at:{Vec{-145,102,0},Vec{47,74,0},Vec{-113,181,0},Vec{-210,177,0}})
+        part("farm light pole",Shape::BOX,at,{.4,.4,9},galvanised);
     auto services=[&](Vec centre,double bearing,Vec qd,Vec farm,bool ownWater){const double sn=std::sin(bearing*deg),cs=std::cos(bearing*deg);const Vec across{qd.y,-qd.x,0};
         auto p=[&](double x,double y,double z){return centre+Vec{x*cs+y*sn,-x*sn+y*cs,z};};
         const Vec foot=p(-25,0,0),riser=centre+qd*12.5,d1=foot+farm*-1.,d2=riser+foot*-1.,n1{d1.y/norm(d1),-d1.x/norm(d1),0},n2{d2.y/norm(d2),-d2.x/norm(d2),0},mitre=(n1+n2)*(1/(1+n1.x*n2.x+n1.y*n2.y));
-        part("tank farm valve manifold",Shape::BOX,farm+d1*(-.8/norm(d1))+Vec{0,0,2.6},{5.5,2,2.2},tankSteel,std::atan2(d1.x,d1.y)/deg);
-        auto rack=[&](Vec a,Vec b,Vec left,Vec right,bool first){const Vec d=b+a*-1.,side{d.y/norm(d),-d.x/norm(d),0};const int bays=int(std::ceil(norm(d)/8));
-            for(int i=first?0:1;i<=bays;++i){const Vec at=a+d*(double(i)/bays);bar("pipe rack stanchion",at+Vec{0,0,1.0},at+Vec{0,0,2.53},.32,lattice);
-                bar("pipe rack T head",at+side*-2.5+Vec{0,0,2.5},at+side*2.5+Vec{0,0,2.5},.26,lattice);}
+        part("farm manifold",Shape::BOX,farm+d1*(-.8/norm(d1)),{5.5,2,2.2},tankSteel,std::atan2(d1.x,d1.y)/deg);
+        auto rack=[&](Vec a,Vec b,Vec left,Vec right){const Vec d=b+a*-1.;part("farm pipe trestle",Shape::BOX,(a+b)*.5,{5,norm(d),2.6},lattice,std::atan2(d.x,d.y)/deg);
             for(int i=0;i<4;++i){const double diameter=i<2?1.:i==2?.3:.18,z=2.6+diameter/2,offset=-1.8+1.2*i;
                 pipe(i==0?"vacuum jacket LOX":i==1?"vacuum jacket methane":i==2?"rack GN2":"rack helium",a+left*offset+Vec{0,0,z},b+right*offset+Vec{0,0,z},diameter);}};
-        rack(farm,foot,n1,mitre,true);rack(foot,riser,mitre,n2,false); // Mitre the elbows so each lane stays separate around the bend.
+        rack(farm,foot,n1,mitre);rack(foot,riser,mitre,n2); // Mitre the elbows so each lane stays separate around the bend.
         for(int i=0;i<4;++i){const double diameter=i<2?1.:i==2?.3:.18,offset=-1.8+1.2*i,out=i==0?-2.65:i==1?2.65:i==2?-3.05:3.05;
             const Vec low=riser+n2*offset+Vec{0,0,2.6+diameter/2},high=riser+n2*offset+Vec{0,0,deck+.25};
             pipe("mount service riser",low,high,diameter);pipe("mount valve header",high,centre+qd*8.95+across*out+Vec{0,0,deck+.25},diameter);}

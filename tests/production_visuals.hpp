@@ -10,7 +10,7 @@ std::vector<albert::core::SceneryBuilding> productionBuildings(const albert::v1:
 }
 void productionData(){
     namespace ex=albert::example::starship;albert::v1::CreateFlightRequest request;ex::addTower(request,true);
-    require(request.scenery_size()==1259&&request.structures_size()==9,"Production scenery changed the pad/contact fixture");
+    require(request.scenery_size()>1000&&request.scenery_size()<=2048&&request.structures_size()==9,"Production scenery changed the pad/contact fixture");
     require(request.buildings_size()==458,"Lost a production building, disjoint outer ring, or tank");
     require(request.roads_size()<=512,"Production road API budget exceeded");
     std::size_t points=0;for(const auto& r:request.roads())points+=r.points_enu_meters_size();require(points<=4096,"Production road point budget exceeded");

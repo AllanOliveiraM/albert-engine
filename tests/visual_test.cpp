@@ -265,6 +265,7 @@ struct GpuTarget final:Target {
 #include "plume_visuals.hpp"
 #include "production_visuals.hpp"
 #include "land_visuals.hpp"
+#include "industrial_visuals.hpp"
 void roadGraphics(Target& renderer){
     auto site=std::make_shared<albert::core::Scenery>();site->latitude=25.996128*3.141592653589793/180;site->longitude=-97.154517*3.141592653589793/180;
     albert::core::SceneryRoad highway;highway.surface=albert::core::SceneryRoad::Surface::Asphalt;highway.width=10.5;highway.highway=true;highway.points={{-30,0,0},{0,0,0},{30,0,0}};site->roads.push_back(highway);
@@ -367,6 +368,7 @@ void graphics(Target& renderer) {
     padGraphics(renderer);
     towerGraphics(renderer);
     productionGraphics(renderer);
+    industrialGraphics(renderer);
     { // A handful of offscreen frames compiles and exercises the transient shaders without a flight or a warm GPU.
         auto world=Scene::create();world->background=Color(0x000000);world->add(AmbientLight::create(Color(0xffffff),.2f));
         albert::core::VehicleLook look;look.length=4;look.diameter=2;look.engines.push_back({{4,0,0},{1,0,0},.5});albert::Vehicle vehicle(look);world->add(vehicle.node());
@@ -795,13 +797,14 @@ int main(int argc,char** argv) {
     try {
 #ifdef ALBERT_TEST_RPC
         if(argc>2&&std::string_view(argv[1])=="land-captures"){landCaptures(argv[2]);return 0;}
+        if(argc>2&&std::string_view(argv[1])=="tank-farm-captures"){landCaptures(argv[2],false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="production-captures"){landCaptures(argv[2],true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="plume-captures"){plumeCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="vehicle-captures"){vehicleCaptures(argv[2]);return 0;}
 #endif
         controls();orbitPaths();lunarAdaptationLevels();engineTransitions();soundLevels();
 #ifdef ALBERT_TEST_RPC
-        productionData();
+        productionData();industrialData();
 #endif
         if(argc>1){
             std::unique_ptr<GpuTarget> gpu;try{gpu=std::make_unique<GpuTarget>();}catch(const std::exception& e){std::cout<<"WebGPU graphics skipped: "<<e.what()<<'\n';return 77;}

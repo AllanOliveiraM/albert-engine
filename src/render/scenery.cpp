@@ -1,5 +1,6 @@
 #include "scenery.hpp"
 #include "lighting.hpp"
+#include "industrial.hpp"
 #include "core/vents.hpp"
 #include "threepp/utils/BufferGeometryUtils.hpp"
 #include <algorithm>
@@ -164,7 +165,7 @@ Site::Site(const core::Scenery& s){
     const std::size_t n=s.bars.size();hinges_.resize(n);
     for(std::size_t k=0;k<n;++k)if(s.bars[k].hinged){auto& h=hinges_[k];h.pivot=Object3D::create();h.pivot->position.copy(vec(s.bars[k].pivot));h.axis=vec(s.bars[k].axis).normalize();root_->add(h.pivot);}
     // By what carries them (0: the ground, k: the k-th structure's pivot) and colour, about that pivot.
-    std::map<std::pair<std::size_t,std::uint32_t>,Pieces> by;Pieces details;constexpr std::uint32_t steel=0x1000000,concrete=0x1000001,beacon=0x1000002; // Past any colour: shared materials.
+    std::map<std::pair<std::size_t,std::uint32_t>,Pieces> by;Pieces details,industrialPaint,industrialMetal,industrialFine;constexpr std::uint32_t steel=0x1000000,concrete=0x1000001,beacon=0x1000002; // Past any colour: shared materials.
     std::map<std::size_t,Pieces> towerSteel,towerFine;
     std::array<Vector4,2> pads{Vector4(0,0,0,1),Vector4(1e6f,1e6f,0.f,1.f)};unsigned pad=0;
     for(const auto& p:s.parts)if(p.name=="trench floor"&&pad<2)pads[pad++]=Vector4(float(p.centre.x),float(p.centre.y),float(std::sin(p.heading)),float(std::cos(p.heading)));
@@ -183,6 +184,13 @@ Site::Site(const core::Scenery& s){
         if(p.name=="trench floor")pools_.push_back({vec(p.centre).add(Vector3(z).multiplyScalar(static_cast<float>(p.size.z)*.5f+.5f)),y,across,z,static_cast<float>(p.size.x),static_cast<float>(p.size.y),carrier(p.structure)});
         Pieces local;const float w=static_cast<float>(p.size.x),d=static_cast<float>(p.size.y),l=static_cast<float>(p.size.z);
         Matrix4 m;m.makeBasis(across,y,z);m.setPosition(vec(p.centre));
+        const auto np=industrialPaint.size(),nm=industrialMetal.size(),nf=industrialFine.size();
+        if(industrialGeometry(industrialPaint,industrialMetal,industrialFine,p)){
+            for(std::size_t j=np;j<industrialPaint.size();++j)industrialPaint[j]->applyMatrix4(m);
+            for(std::size_t j=nm;j<industrialMetal.size();++j)industrialMetal[j]->applyMatrix4(m);
+            for(std::size_t j=nf;j<industrialFine.size();++j)industrialFine[j]->applyMatrix4(m);
+            continue;
+        }
         if(p.name.starts_with("detail ")){furnishing(details,p,m);continue;}
         const std::size_t k=carrier(p.structure);Pieces fine;
         if(towerGeometry(local,fine,p)){
@@ -220,6 +228,11 @@ Site::Site(const core::Scenery& s){
         (k?hinges_[k-1].pivot:root_)->add(x);if(fine)towerDetails_.push_back(x);}};
     mergedTower(towerSteel,false);mergedTower(towerFine,true);
     if(!details.empty()){auto material=assistedMaterial(Color(0xffffff),.15f,.75f);material->name="albert:site-detail";detail_=Mesh::create(mergeBufferGeometries(details),material);detail_->name="pad furnishings";detail_->castShadow=detail_->receiveShadow=true;root_->add(detail_);}
+    auto industrial=[&](const Pieces& pieces,const char* name,float metalness,float roughness){if(pieces.empty())return std::shared_ptr<Mesh>{};
+        auto material=assistedMaterial(Color(0xffffff),metalness,roughness);material->name="albert:site-detail";
+        auto mesh=Mesh::create(mergeBufferGeometries(pieces),material);mesh->name=name;mesh->castShadow=mesh->receiveShadow=true;root_->add(mesh);return mesh;};
+    industrial(industrialPaint,"tank farm shells",.03f,.8f);industrial(industrialMetal,"tank farm steel",.55f,.48f);
+    industrialFine_=industrial(industrialFine,"tank farm fittings",.4f,.6f);
     auto active=[&](const Vent& s){return std::none_of(vents_.begin(),vents_.end(),[&](const Vent& v){return Vector3(s.centre).sub(v.centre).lengthSq()<120*120;});};
     std::erase_if(sprays_,active);std::erase_if(pools_,active); // Only water the mount served by the exhaust markers.
     if(!vents_.empty()||!tankVents_.empty()){auto g=SphereGeometry::create(1,20,12);auto pool=[&](auto& puffs){for(auto& p:puffs){
@@ -227,7 +240,7 @@ Site::Site(const core::Scenery& s){
         m->uniforms={{"density",Uniform(0.f)},{"seed",Uniform(0.f)},{"time",Uniform(0.f)},{"up",Uniform(Vector3(0,0,1))},{"kind",Uniform(0.f)},{"size",Uniform(Vector3(1,1,1))},{"cloud",Uniform(Vector4(0,0,0,0))}};p.mesh=Mesh::create(g,m);p.mesh->visible=false;root_->add(p.mesh);}};
         if(!vents_.empty()){pool(steam_);pool(spray_);}if(!tankVents_.empty())pool(boiloff_);} // Reserve water slots so the launch cannot starve the deluge; 256 shared-geometry shells total.
 }
-void Site::quality(int value){if(production_)production_->quality(value);if(detail_)detail_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
+void Site::quality(int value){if(production_)production_->quality(value);if(detail_)detail_->visible=value>0;if(industrialFine_)industrialFine_->visible=value>0;for(auto& x:towerDetails_)x->visible=value>0;if(concrete_)concrete_->uniforms["concreteQuality"].setValue(Vector4(value>0?1.f:0.f,0.f,0.f,0.f));}
 void Site::animate(const std::vector<float>* angles){
     for(std::size_t k=0;k<hinges_.size();++k)if(auto& h=hinges_[k];h.pivot)h.pivot->quaternion.setFromAxisAngle(h.axis,angles&&k<angles->size()?(*angles)[k]:0.f);
 }

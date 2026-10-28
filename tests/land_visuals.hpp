@@ -1,6 +1,6 @@
 #pragma once
 #ifdef ALBERT_TEST_RPC
-void landCaptures(const std::string& directory,bool production=false){
+void landCaptures(const std::string& directory,bool production=false,bool industrial=false){
     std::filesystem::create_directories(directory);
     namespace ex=albert::example::starship;namespace api=albert::v1;
     api::CreateFlightRequest request;ex::addTower(request,true);auto scenery=std::make_shared<albert::core::Scenery>();scenery->latitude=ex::towerLatitude*ex::deg;scenery->longitude=ex::towerLongitude*ex::deg;
@@ -60,6 +60,21 @@ void landCaptures(const std::string& directory,bool production=false){
         std::ofstream output(directory+"/"+name+".ppm",std::ios::binary);output<<"P6\n"<<width<<' '<<height<<"\n255\n";
         for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)output.write(reinterpret_cast<const char*>(rgba.data()+y*row+x*4),3);wgpuBufferUnmap(buffer);wgpuBufferRelease(buffer);wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);std::cout<<name<<"\n";};
     auto frame=[&](Vector3 at,Vector3 eye,float fov){aim=at;auto c=PerspectiveCamera::create(fov,4.f/3,.1,30000);c->up.set(0,0,1);if(eye.x==at.x&&eye.y==at.y)c->up.set(0,1,0);c->position.copy(eye);camera=c;};
+    if(industrial){
+        light->position.set(-6000,-8000,9000);
+        for(const char* name:{"tank farm shells","tank farm steel","tank farm fittings"}){auto* mesh=site.node()->getObjectByName(name)->as<Mesh>();
+            const auto& g=*mesh->geometry();const unsigned triangles=g.getIndex()?g.getIndex()->count()/3:g.getAttribute<float>("position")->count()/3;
+            std::cout<<name<<": 1 draw, "<<triangles<<" triangles\n";}
+        frame({-67,116,3},{-22,5,146},70);shot("tank-farm-tower-top");
+        frame({-91,124,0},{110,-100,300},62);shot("tank-farm-300m");
+        site.quality(0);shot("tank-farm-300m-low");site.quality(1);
+        frame({-28,102,4},{46,41,1.7f},64);shot("tank-farm-eye");
+        frame({-99,123,4},{-118,72,1.7f},66);shot("tank-farm-canopy-eye");
+        frame({-167,150,5},{-225,100,1.7f},66);shot("tank-farm-gse-eye");
+        light->position.set(6000,8000,9000);frame({-96,155,3},{-66,179,11},54);shot("tank-farm-vaporizers");
+        std::cout<<"Adapter "<<context.adapter()<<", validation errors "<<albert::gpu::errors()<<"\n";
+        wgpuTextureViewRelease(view);wgpuTextureRelease(target);require(albert::gpu::errors()==0,"Tank farm captures produced GPU validation errors");return;
+    }
     if(production){
         productionData();
         frame({-3330,-1040,42},{-150,-200,20},42);shot("production-pad-west");
