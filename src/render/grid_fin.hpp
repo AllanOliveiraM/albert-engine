@@ -41,6 +41,10 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
     std::map<std::pair<int,int>,unsigned> welds;std::vector<float> junctions(perimeter.begin(),perimeter.end()-1); // The corners, then where walls meet the rim.
     auto point=[](float u,float v){return Vector3((u+v)*rt,0,(u-v)*rt);};
     auto well=[](float v){return .24f+1.56f*std::clamp(1-std::min(v,1-v)/.14f,0.f,1.f);};
+    // Inside the V at the hinge (from the root's ends to the base beam's middle) no lattice: the walls stop at its arms.
+    const Vector3 vLeft(outline[0].x,0,outline[0].y),vRight(outline[1].x,0,outline[1].y),vTip=Vector3(outline[corners-1].x,0,outline[corners-1].y).lerp(Vector3(outline[2].x,0,outline[2].y),.5f);
+    const std::array<Vector3,3> hole{vLeft,vRight,vTip};
+    auto holeSide=[&](const Vector3& p,int e){const auto& u=hole[e];const auto& v=hole[(e+1)%3];const float dx=v.x-u.x,dz=v.z-u.z;return (dx*(p.z-u.z)-dz*(p.x-u.x))/std::hypot(dx,dz);};
     for(int i=-count;i<=count;++i)for(int j=-count;j<count;++j){
         if(clearance(point((i+.5f)*pitch,(j+.5f)*pitch))>.34f)++result.cells;
         for(int family=0;family<2;++family){const auto a=family==0?point(i*pitch,j*pitch):point(j*pitch,i*pitch);
@@ -49,26 +53,33 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
             for(int e=0;e<corners;++e){const float da=distance(a,e),db=distance(b,e);
                 if(da<0&&db<0){hi=-1;break;}if(da<0)lo=std::max(lo,da/(da-db));if(db<0)hi=std::min(hi,da/(da-db));}
             if((hi-lo)*pitch<.03f)continue;
-            const bool cutA=lo>.0001f,cutB=hi<.9999f;
-            if(!cutA)++welds[family==0?std::pair{i,j}:std::pair{j,i}];else{junctions.push_back(onRim(Vector3(a).lerp(b,lo)));++result.ends;}
-            if(!cutB)++welds[family==0?std::pair{i,j+1}:std::pair{j+1,i}];else{junctions.push_back(onRim(Vector3(a).lerp(b,hi)));++result.ends;}
-            auto section=[&](float s){const float q=2*s-1,arc=tier==0?(std::sqrt(std::max(0.f,1-.84f*q*q))-.4f)/.6f:0.f;
-                const float h=thickness/2-.13f*arc,bow=.055f*arc;const auto p=Vector3(a).lerp(b,s);std::array<Vector3,4> v;int k=0;
-                for(const auto d:std::array<Vector2,4>{{{-1,-1},{1,-1},{1,1},{-1,1}}})v[k++]=Vector3(p).addScaledVector(across,d.x*gauge/2+d.y*bow).setY(d.y*h);return v;};
+            float in0=0,in1=1; // The part inside the V.
+            for(int e=0;e<3;++e){const float da=holeSide(a,e),db=holeSide(b,e);
+                if(da<0&&db<0){in1=-1;break;}if(da<0)in0=std::max(in0,da/(da-db));if(db<0)in1=std::min(in1,da/(da-db));}
+            std::vector<std::array<float,2>> pieces;
+            if(in1<=in0||in1<=lo||in0>=hi)pieces.push_back({lo,hi});else{if(in0-lo>.03f/pitch)pieces.push_back({lo,in0});if(hi-in1>.03f/pitch)pieces.push_back({in1,hi});}
+            for(const auto& [from,to]:pieces){
+            const bool cutA=from>.0001f,cutB=to<.9999f,rimA=lo>.0001f&&from==lo,rimB=hi<.9999f&&to==hi;
+            if(!cutA)++welds[family==0?std::pair{i,j}:std::pair{j,i}];else if(rimA){junctions.push_back(onRim(Vector3(a).lerp(b,from)));++result.ends;}
+            if(!cutB)++welds[family==0?std::pair{i,j+1}:std::pair{j+1,i}];else if(rimB){junctions.push_back(onRim(Vector3(a).lerp(b,to)));++result.ends;}
+            // Top edges in shallow concave arcs; the bottom ones rise from a sharp convex point at each crossing (the spikes the fin
+            // shows underneath).
+            auto section=[&](float s){const float q=2*s-1,arc=tier==0?(std::sqrt(std::max(0.f,1-.84f*q*q))-.4f)/.6f:0.f,spike=tier==0?std::sqrt(std::max(0.f,std::sin(pi*s))):0.f;
+                const float top=thickness/2-.13f*arc,under=thickness/2-.22f*spike,bow=.055f*arc;const auto p=Vector3(a).lerp(b,s);std::array<Vector3,4> v;int k=0;
+                for(const auto d:std::array<Vector2,4>{{{-1,-1},{1,-1},{1,1},{-1,1}}})v[k++]=Vector3(p).addScaledVector(across,d.x*gauge/2+d.y*bow).setY(d.y>0?top:-under);return v;};
             // Split the depth, not the draw: bright narrow lips surround dark well faces in the same PBR batch.
             for(int face=0;face<4;++face){const bool inner=face%2;const std::array<float,4> depth{0,.14f,.86f,1};
                 for(int band=0;band<(inner?3:1);++band){const float v0=inner?depth[band]:0,v1=inner?depth[band+1]:1;std::vector<Vertex> strip;
-                    for(int k=0;k<=segments;++k){const float s=std::lerp(lo,hi,float(k)/segments);const auto v=section(s),prev=section(std::max(lo,s-.001f)),next=section(std::min(hi,s+.001f));
+                    for(int k=0;k<=segments;++k){const float s=std::lerp(from,to,float(k)/segments);const auto v=section(s),prev=section(std::max(from,s-.001f)),next=section(std::min(to,s+.001f));
                         for(float f:{v0,v1}){const int at=(face+1)%4;const auto p=Vector3(v[face]).lerp(v[at],f),p0=Vector3(prev[face]).lerp(prev[at],f),p1=Vector3(next[face]).lerp(next[at],f);
                             auto n=Vector3(p1).sub(p0).cross(Vector3(v[at]).sub(v[face])).normalize();strip.push_back({p,n,inner?well(f):1.8f});}}
                     for(int k=0;k<segments;++k){triangle(strip[2*k],strip[2*k+2],strip[2*k+3]);triangle(strip[2*k],strip[2*k+3],strip[2*k+1]);}}}
-            for(int end=0;end<2;++end){const auto v=section(end?hi:lo);const auto n=Vector3(along).multiplyScalar(end?1.f:-1.f);
+            for(int end=0;end<2;++end){const auto v=section(end?to:from);const auto n=Vector3(along).multiplyScalar(end?1.f:-1.f);
                 triangle({v[0],n,1},{v[1],n,1},{v[2],n,1});triangle({v[0],n,1},{v[2],n,1},{v[3],n,1});}
-            ++result.walls;
+            ++result.walls;}
         }
     }
-    // The rim: straight from each junction to the next, as deep as the walls, its edges dipping between junctions as theirs do:
-    // those dips, front and back, are the crown.
+    // The rim: straight from each junction to the next, as deep as the walls, flat on top and in triangular teeth underneath.
     std::sort(junctions.begin(),junctions.end());
     {std::vector<float> kept;for(const float s:junctions)if(kept.empty()||s-kept.back()>.02f)kept.push_back(s);junctions.swap(kept);}
     // The base, where V3 rests on the tower's arms, reinforced: its rim (the root and the two cuts from it) twice as thick and
@@ -77,18 +88,19 @@ inline GridFin gridFin(float width,float span,float thickness,int tier){
         for(std::size_t k=0;k<junctions.size();++k){const float s0=junctions[k],s1=k+1<junctions.size()?junctions[k+1]:junctions.front()+perimeter.back();
             const bool root=s1<=perimeter[2]+1e-4f||s0>=perimeter[corners-1]-1e-4f;const float rim=root?.08f:.035f;const Vector3 p0=rimAt(s0),p1=rimAt(s1);Vector3 chord=Vector3(p1).sub(p0);const float length=chord.length();
             if(length<1e-4f)continue;chord.divideScalar(length);const Vector3 out(chord.z,0,-chord.x);const float bulge=0; // Straight in the plane: the crown is the depth's scallops, not the outline's.
-            auto at=[&](float t,Vector3& centre,Vector3& normal,float& h){centre=Vector3(p0).lerp(p1,t).addScaledVector(out,bulge*std::sin(pi*t));
+            auto at=[&](float t,Vector3& centre,Vector3& normal,float& h,float& under){centre=Vector3(p0).lerp(p1,t).addScaledVector(out,bulge*std::sin(pi*t));
                 const Vector3 tangent=Vector3(chord).multiplyScalar(length).addScaledVector(out,bulge*pi*std::cos(pi*t)).normalize();normal.set(tangent.z,0,-tangent.x);
-                h=thickness/2-(tier==0&&!root?.10f*std::sin(pi*t):0.f);}; // The base's rim straight through its depth.
-            for(int step=0;step<steps;++step){Vector3 c0,n0,c1,n1;float h0,h1;at(float(step)/steps,c0,n0,h0);at(float(step+1)/steps,c1,n1,h1);
+                h=thickness/2;under=thickness/2-(!root?.18f*(1-std::abs(2*t-1)):0.f);}; // Triangular teeth underneath, pointing down at each wall; the base straight.
+            for(int step=0;step<steps;++step){Vector3 c0,n0,c1,n1;float h0,h1,u0,u1;at(float(step)/steps,c0,n0,h0,u0);at(float(step+1)/steps,c1,n1,h1,u1);
                 for(const float side:{1.f,-1.f}){ // The outer face, and the inner a well's dark.
                     const Vector3 o0=Vector3(c0).addScaledVector(n0,side*rim/2),o1=Vector3(c1).addScaledVector(n1,side*rim/2),m0=Vector3(n0).multiplyScalar(side),m1=Vector3(n1).multiplyScalar(side);
                     const float shade=side>0?1.f:.5f;
-                    triangle({Vector3(o0).setY(-h0),m0,shade},{Vector3(o1).setY(-h1),m1,shade},{Vector3(o1).setY(h1),m1,shade});
-                    triangle({Vector3(o0).setY(-h0),m0,shade},{Vector3(o1).setY(h1),m1,shade},{Vector3(o0).setY(h0),m0,shade});}
+                    triangle({Vector3(o0).setY(-u0),m0,shade},{Vector3(o1).setY(-u1),m1,shade},{Vector3(o1).setY(h1),m1,shade});
+                    triangle({Vector3(o0).setY(-u0),m0,shade},{Vector3(o1).setY(h1),m1,shade},{Vector3(o0).setY(h0),m0,shade});}
                 for(const float y:{1.f,-1.f}){const Vector3 up(0,y,0); // The lips.
-                    const Vector3 a0=Vector3(c0).addScaledVector(n0,rim/2).setY(y*h0),b0=Vector3(c0).addScaledVector(n0,-rim/2).setY(y*h0);
-                    const Vector3 a1=Vector3(c1).addScaledVector(n1,rim/2).setY(y*h1),b1=Vector3(c1).addScaledVector(n1,-rim/2).setY(y*h1);
+                    const float e0=y>0?h0:u0,e1=y>0?h1:u1;
+                    const Vector3 a0=Vector3(c0).addScaledVector(n0,rim/2).setY(y*e0),b0=Vector3(c0).addScaledVector(n0,-rim/2).setY(y*e0);
+                    const Vector3 a1=Vector3(c1).addScaledVector(n1,rim/2).setY(y*e1),b1=Vector3(c1).addScaledVector(n1,-rim/2).setY(y*e1);
                     triangle({a0,up,1.8f},{a1,up,1.8f},{b1,up,1.8f});triangle({a0,up,1.8f},{b1,up,1.8f},{b0,up,1.8f});}}}}
     // Straight steel bars through the fin's depth: the beam across the base, and a V from its middle opening onto the root at the
     // hinge.
