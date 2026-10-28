@@ -14,13 +14,13 @@ struct GridFin {
 inline GridFin gridFin(float width,float span,float thickness,int tier){
     using namespace threepp;constexpr float rt=.70710678118f,pi=3.14159265359f;
     const float pitch=.48f,gauge=.022f;const int segments=tier==0?10:1;
-    // V3's fin as built: seven sides, a near-regular hexagon pointed out along the spindle whose corner at the hull is cut by the
-    // straight root at the hinge; two sides open from the root, two run parallel, two close at the tip; closed all round by a rim
-    // of arcs (one a boundary cell) whose crown makes it read round. Inside the declared envelope with the rim's bulge (8 cm at
-    // most) and the walls' cut ends' gauge and bow.
-    const float bottom=-span/2+.08f,top=span/2-.14f,radius=std::min((width/2-.14f)/.8660254f,(top-bottom)/1.65f),cut=.35f*radius,centre=top-radius;
-    const float root=cut*1.7320508f,x=.8660254f*radius;
-    const std::vector<Vector2> outline{{-root,bottom},{root,bottom},{x,centre-radius/2},{x,centre+radius/2},{0.f,top},{-x,centre+radius/2},{-x,centre-radius/2}};
+    // V3's fin as built, a shield of seven sides: narrow at its root at the hinge (a short straight side), two long sides opening
+    // out from it, and the broad far end closed by four short sides; closed all round by a rim of arcs (one a boundary cell)
+    // whose crown makes it read round. Inside the declared envelope with the rim's bulge (8 cm at most) and the walls' cut ends'
+    // gauge and bow.
+    const float bottom=-span/2+.08f,top=span/2-.14f,root=.12f*width,lean=10*pi/180,radius=std::min((width/2-.14f)/std::cos(lean),.6f*(top-bottom)),centre=top-radius;
+    std::vector<Vector2> outline{{-root,bottom},{root,bottom}};
+    for(int k=0;k<=4;++k){const float t=-lean+k*(pi+2*lean)/4;outline.push_back({radius*std::cos(t),centre+radius*std::sin(t)});}
     const int corners=static_cast<int>(outline.size());
     auto distance=[&](const Vector3& p,int e){const auto& u=outline[e];const auto& v=outline[(e+1)%corners];const float dx=v.x-u.x,dz=v.y-u.y;
         return (dx*(p.z-u.y)-dz*(p.x-u.x))/std::hypot(dx,dz);}; // Inside > 0 (counterclockwise).
