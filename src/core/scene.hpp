@@ -14,6 +14,8 @@ using ObjectId=std::string;
 inline constexpr double earthRadiusMeters=6378137.;
 struct Vector {double x=0,y=0,z=0;Vector operator+(Vector b) const{return {x+b.x,y+b.y,z+b.z};}Vector operator-(Vector b) const{return {x-b.x,y-b.y,z-b.z};}Vector operator*(double k) const{return {x*k,y*k,z*k};}};
 struct Quaternion {double x=0,y=0,z=0,w=1;};
+// Render telemetry only; mean water plane and wind in geocentric ICRF, axes of unit length.
+struct WaterSurface {Vector origin,east,north,wind;bool contact=false;};
 struct Sample {
     Sample(double utc=0,Vector position={},Vector velocity={},std::optional<Quaternion> rotation={},bool measuredVelocity=false):
         utcSeconds(utc),positionMeters(position),velocityMetersPerSecond(velocity),attitude(rotation),hasVelocity(measuredVelocity){}
@@ -25,6 +27,7 @@ struct Sample {
     // and yaw (rad); per surface its deflection (rad); per thruster its duty; then the ambient pressure (Pa), the stagnation
     // heat flux (W/m²), the tanks' fill (0-1), the Mach number and the seconds since it broke up (negative: whole). Up to 1024.
     std::shared_ptr<const std::vector<float>> parts;
+    std::optional<WaterSurface> water; // Present only over the flight environment's water.
 };
 // How a vehicle looks beyond a plain shape, in metres along its stage (x aft of the nose, y right, z down, as the flight API's;
 // drawn about the stage's middle): its body as frustums (black tiles on an arc centred on +z), parts on hinges turning by a

@@ -378,12 +378,25 @@ struct Slot {
             e.position+=ph::V3{s.positionMeters.x,s.positionMeters.y,s.positionMeters.z}-then;break;}
         return e;
     }
+    mutable std::optional<ph::Geodetic> waterAnchor; // A render-only sea frame, fixed on the rotating body near arrival.
     core::Sample scene()const{ // Cylinder axis (local y) along body x, centred on the stack.
         const auto& s=flight->state();const auto& st=flight->vehicle().stages[s.stage];
         const double cg=flight->centreOfMass();
         const ph::Q q=s.attitude*ph::Q{std::sqrt(.5),0,0,-std::sqrt(.5)};const ph::PositionVelocity o=origin(s.time);
         const ph::V3 p=o.position+s.position+ph::matrix(s.attitude)*ph::V3{cg-st.length/2,0,0},v=o.velocity+s.velocity;
-        core::Sample x{ph::utcFromTt(s.time),{p.x,p.y,p.z},{v.x,v.y,v.z},core::Quaternion{q.x,q.y,q.z,q.w},true};x.parts=parts();return x;
+        core::Sample x{ph::utcFromTt(s.time),{p.x,p.y,p.z},{v.x,v.y,v.z},core::Quaternion{q.x,q.y,q.z,q.w},true};x.parts=parts();
+        const auto& env=flight->environment();
+        if(env.water&&std::isfinite(env.ground)){
+            const auto sample=flight->sample();
+            if(sample.geodetic.height>env.ground+500)waterAnchor.reset();
+            else if(!waterAnchor)waterAnchor=ph::Geodetic{sample.geodetic.latitude,sample.geodetic.longitude,env.ground};
+            if(waterAnchor){const auto& g=*waterAnchor;const auto back=ph::transpose(env.rotation.at(s.time).fixed);
+                const auto enu=ph::transpose(ph::nedFromFixed(g.latitude,g.longitude));
+                auto cv=[](ph::V3 a){return core::Vector{a.x,a.y,a.z};};
+                ph::V3 wind;if(env.atmosphere&&env.wind&&env.air)wind=env.air->at(s.time,g.latitude,g.longitude,g.height).wind;
+                if(env.atmosphere)wind=wind+flight->gust();
+                x.water=core::WaterSurface{cv(o.position+back*ph::fixedPosition(env.planet,g)),cv(back*(enu*ph::V3{0,1,0})),cv(back*(enu*ph::V3{1,0,0})),{wind.y,wind.x,0},s.contact};}}
+        return x;
     }
     // The stage flying now as it looks: its definition's appearance (else a plain cylinder), its engines' bells and its thrusters.
     std::shared_ptr<const core::VehicleLook> look()const{

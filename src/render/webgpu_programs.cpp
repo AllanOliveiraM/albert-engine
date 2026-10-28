@@ -4,6 +4,7 @@
 #include "vehicle_surface.hpp"
 #include "entry_plasma.hpp"
 #include "launch_cloud_shader.hpp"
+#include "splashdown_shader.hpp"
 using albert::gpu::Program;using albert::gpu::Uniform;
 namespace {
 // Points: one quad per vertex; `corner` spans [-1, 1]² and replaces gl_PointCoord.
@@ -320,6 +321,7 @@ fn steamField(q: vec3f) -> f32 {
     albert::gpu::define("albert:steam",steam);
     Program launch;launch.attributes=surfaceAttributes;launch.uniforms={{"bank",Uniform::vec4},{"extent",Uniform::vec3},{"source",Uniform::vec3},{"samples",Uniform::f32}};
     launch.wgsl=std::string(surface)+launchCloudShader;albert::gpu::define("albert:launch-cloud",launch);
+    splashdownPrograms(surface,surfaceAttributes);
     // vehicle.cpp: axial heat bands on the existing metal bell avoid another shell and draw call per engine.
     Program bell;bell.attributes=surfaceAttributes;bell.uniforms={{"diffuse",Uniform::vec3},{"opacity",Uniform::f32},{"emissive",Uniform::vec3},{"roughness",Uniform::f32},{"metalness",Uniform::f32},
         {"auxiliaryStrength",Uniform::f32},{"auxiliarySolarDirection",Uniform::vec3},{"doubleSided",Uniform::f32},{"burn",Uniform::vec3},{"lip",Uniform::vec3},{"bellLength",Uniform::f32}};
@@ -834,10 +836,10 @@ void objects(){
     p.wgsl=assisted(true,false);albert::gpu::define("albert:assisted-flat",p);
     p.wgsl=assisted(false,true);albert::gpu::define("albert:rock",p);
     auto vehicle=p;vehicle.wgsl=assisted(false,false);
-    vehicle.uniforms.insert(vehicle.uniforms.end(),{{"entryLight",Uniform::vec4},{"vehicleHull",Uniform::vec4},{"vehicleSurface",Uniform::vec4},{"vehicleQuality",Uniform::f32},{"vehicleSoot",Uniform::f32},{"frostHeight",Uniform::f32}});
+    vehicle.uniforms.insert(vehicle.uniforms.end(),{{"waterPlane",Uniform::vec4},{"entryLight",Uniform::vec4},{"vehicleHull",Uniform::vec4},{"vehicleSurface",Uniform::vec4},{"vehicleQuality",Uniform::f32},{"vehicleSoot",Uniform::f32},{"frostHeight",Uniform::f32}});
     auto& v=vehicle.wgsl;auto field=v.find("rockScale: f32 }");v.replace(field,std::string("rockScale: f32 }").size(),
-        "rockScale: f32, entryLight: vec4f, vehicleHull: vec4f, vehicleSurface: vec4f, vehicleQuality: f32, vehicleSoot: f32, frostHeight: f32 }");
-    field=v.find("worldNormal: vec3f }");v.replace(field,std::string("worldNormal: vec3f }").size(),"worldNormal: vec3f, @location(5) environment: vec3f }");
+        "rockScale: f32, waterPlane: vec4f, entryLight: vec4f, vehicleHull: vec4f, vehicleSurface: vec4f, vehicleQuality: f32, vehicleSoot: f32, frostHeight: f32 }");
+    field=v.find("worldNormal: vec3f }");v.replace(field,std::string("worldNormal: vec3f }").size(),"worldNormal: vec3f, @location(5) environment: vec3f, @location(6) waterHeight: f32 }");
     v.insert(v.find("return o;"),R"(
     o.environment = vec3f(0.0);
     if (material.vehicleQuality > 0.5 && material.metalness > 0.05) {
@@ -846,6 +848,14 @@ void objects(){
         o.environment = vehicleEnvironment(o.world, worldRay);
     }
     )"); // The frame's atmosphere tables already support vertex-stage reads; no new resources or passes.
+    v.insert(v.find("return o;"),R"(
+    o.waterHeight = dot(material.waterPlane.xyz,position) + material.waterPlane.w;
+    if(dot(material.waterPlane.xyz,material.waterPlane.xyz)>0.000001 && frame.ocean.w>0.0){
+        let rel=(o.world-frame.ocean.xyz)*frame.oceanEast.w;
+        let uv=vec2f(dot(rel,frame.oceanEast.xyz),dot(rel,frame.oceanNorth.xyz));
+        for(var c=0;c<3;c++){let periods=array<f32,3>(512,128,32);o.waterHeight-=textureSampleLevel(oceanDisplacement,oceanSampler,uv/periods[c],c,0.0).y;}
+    }
+)");
     const auto shade=v.find("    let air = airLight");v.replace(shade,v.size()-shade,std::string(albert::vehicleSurfaceFragment)+"}\n");
     v.insert(v.find("@fragment fn fs_main"),albert::vehicleSurfaceFunctions);albert::gpu::define("albert:vehicle",std::move(vehicle));
     auto concrete=p;concrete.wgsl=assisted(false,false);

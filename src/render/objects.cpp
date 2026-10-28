@@ -49,7 +49,7 @@ std::optional<albert::core::ObjectId> albert::SceneObjects::pick(const core::Sce
 void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vector origin){
     for(auto it=nodes_.begin();it!=nodes_.end();) {
         if(!registry.objects().contains(it->first)||(!registry.get(it->first).builtin&&instances_[it->first]!=registry.get(it->first).instance)){
-            auto mesh=it->second;scene_.remove(*mesh);mesh->traverseType<Mesh>([](Mesh& part){part.material()->dispose();});displayedFill_.erase(it->first);instances_.erase(it->first);pickers_.erase(it->first);vehicles_.erase(it->first);sites_.erase(it->first);it=nodes_.erase(it);
+            auto mesh=it->second;if(auto water=water_.find(it->first);water!=water_.end()){scene_.remove(*water->second->node());water_.erase(water);}scene_.remove(*mesh);mesh->traverseType<Mesh>([](Mesh& part){part.material()->dispose();});displayedFill_.erase(it->first);instances_.erase(it->first);pickers_.erase(it->first);vehicles_.erase(it->first);sites_.erase(it->first);it=nodes_.erase(it);
         }else ++it;
     }
     for(auto i=models_.begin();i!=models_.end();)if(!registry.models().contains(i->first)||registry.models().at(i->first)!=i->second.source){for(auto& g:i->second.geometry)g->dispose();for(auto& m:i->second.materials)m->dispose();i=models_.erase(i);}else ++i;
@@ -112,6 +112,23 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
         v->impinge(metres,glow);}
     // A pad's trench steams while its flight's engines burn over it ("site" with "flight", "site.<id>" with "flight.<id>").
     const bool rewind=cloudTimed_&&now<cloudUtc_;const float seconds=cloudTimed_&&!rewind?static_cast<float>(now-cloudUtc_):0.f;cloudUtc_=now;cloudTimed_=true;
+    // Telemetry explicitly marks water; never infer it from altitude or the terrain colour.
+    for(auto& [id,v]:vehicles_){const auto state=registry.evaluate(id,now).state;
+        if(!state.water){v->water(Vector4());if(auto w=water_.find(id);w!=water_.end())w->second->reset();continue;}
+        const auto& sea=*state.water;const auto& look=*registry.get(id).look;
+        auto direction=[](core::Vector a){return Vector3(float(a.x),float(a.z),float(-a.y)).normalize();};
+        const Vector3 east=direction(sea.east),north=direction(sea.north),up=Vector3(east).cross(north).normalize();
+        Matrix4 basis;basis.makeBasis(east,north,up);Quaternion frame;frame.setFromRotationMatrix(basis);const auto inverse=frame.clone().invert();
+        auto& water=water_[id];if(!water){water=std::make_unique<Splashdown>(float(look.length),float(look.diameter*.5));water->quality(quality_<=0?0:splashQuality_);scene_.add(water->node());}
+        const auto relative=state.positionMeters-sea.origin;
+        Vector3 centre(float(relative.x),float(relative.z),float(-relative.y));centre.applyQuaternion(inverse);
+        Vector3 nose(0,1,0);nose.applyQuaternion(nodes_.at(id)->quaternion).applyQuaternion(inverse);
+        if(rewind)water->reset();water->update(centre,nose,v->thrust(),sea.contact,now,{float(sea.wind.x),float(sea.wind.y),0},delugeEffects_);
+        water->node()->position.copy(renderPosition(sea.origin,origin));water->node()->quaternion.copy(frame);water->node()->scale.setScalar(float(1/core::earthRadiusMeters));
+        water->node()->visible=water->node()->visible&&nodes_.at(id)->visible;
+        const auto hullUp=Vector3(up).applyQuaternion(nodes_.at(id)->quaternion.clone().invert());
+        v->water(Vector4(hullUp.x,hullUp.y,hullUp.z,centre.z));
+    }
     std::map<core::ObjectId,float> vents; // Fuelled on its pad: venting boil-off and shedding cryogenic mist, fading as it climbs away (gone by ~170 m).
     for(auto& [id,site]:sites_){const auto v=vehicles_.find("flight"+id.substr(4));float thrust=0,above=1e9f;
         if(v!=vehicles_.end()&&nodes_.at(v->first)->visible){const auto& p=exact_.at(v->first);const auto& o=exact_.at(id);Vector3 up(0,0,1),aft(0,-1,0);up.applyQuaternion(nodes_.at(id)->quaternion);aft.applyQuaternion(nodes_.at(v->first)->quaternion);

@@ -1673,8 +1673,8 @@ int albert::runRenderer(int argc, char** argv) {
                     check("Cinturoes e nuvem de Oort",showDebris);
                     check("Girar devagar ao chegar",preferences.autoRotate);
                     check("Segunda vista dos voos",preferences.inset,"Com dois voos ou mais, um quadro no canto mostra o outro; clique nele para trocar.");
-                    check("Efeitos do dilúvio",preferences.deluge,"O spray de água do pad na contagem e as nuvens de vapor da decolagem (pesam na placa de vídeo).");
-                    ImGui::SetNextItemWidth(-1);if(ImGui::Combo("##Nuvem de lancamento",&preferences.launchCloudQuality,"Nuvem do lancamento: leve\0Nuvem do lancamento: media\0Nuvem do lancamento: alta\0"))savePreferences();
+                    check("Efeitos de água e vapor",preferences.deluge,"O dilúvio do pad, as nuvens da decolagem e o vapor, spray e espuma da amerissagem.");
+                    ImGui::SetNextItemWidth(-1);if(ImGui::Combo("##Nuvem de lancamento",&preferences.launchCloudQuality,"Vapor e spray: leve\0Vapor e spray: medio\0Vapor e spray: alto\0"))savePreferences();
                     slider("##Escala da interface",preferences.uiScale,.8f,1.6f,"Interface: %.1fx");
                     ImGui::Spacing();ImGui::TextDisabled("CAMERA");
                     bool free=freeCamera;if(ImGui::Checkbox("Camera livre (F)",&free))toggleFreeCamera(free);

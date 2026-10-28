@@ -49,6 +49,7 @@ void validate(Sample& s){
        !finite(s.velocityMetersPerSecond)||length(s.velocityMetersPerSecond)>3e8) throw std::invalid_argument("Invalid timestamp, position or velocity");
     if(s.attitude){auto& q=*s.attitude;const double n=std::hypot(std::hypot(q.x,q.y),std::hypot(q.z,q.w));
         if(!std::isfinite(n)||n<1e-12) throw std::invalid_argument("Invalid quaternion");q={q.x/n,q.y/n,q.z/n,q.w/n};}
+    if(s.water&&(!finite(s.water->origin)||!finite(s.water->east)||!finite(s.water->north)||!finite(s.water->wind)||length(s.water->east)<.5||length(s.water->north)<.5))throw std::invalid_argument("Invalid water surface");
     if(s.parts&&(s.parts->size()>1024||!std::all_of(s.parts->begin(),s.parts->end(),[](float x){return std::isfinite(x);})))throw std::invalid_argument("Invalid vehicle parts");
 }
 Scene::Scene(){
@@ -150,7 +151,9 @@ Evaluated sampled(const Object& o,double now){ // Between its samples.
     if(now<=v.front().utcSeconds)return {v.front(),now<v.front().utcSeconds};
     if(now>=v.back().utcSeconds){ // Past the last sample: on along its velocity for a second (a flight's samples come every ~33 ms of its own
         // clock; frozen in between, a vehicle riding the Earth would jump against what turns with it, the ground and its tower).
-        Sample r=v.back();const double ahead=std::min(now-r.utcSeconds,1.);
+        Sample r=v.back();
+        if(r.water){double m[3][3];earthTurn(r.utcSeconds,now,m);r.water->origin=turned(m,r.water->origin);r.water->east=turned(m,r.water->east);r.water->north=turned(m,r.water->north);}
+        const double ahead=std::min(now-r.utcSeconds,1.);
         // Resting on the ground or a tower (within 2 m/s of the Earth's turning there): carried round with the Earth past that
         // second (held in the sky, a caught ship left behind by the client slid off its tower at ~400 m/s).
         if(r.hasVelocity&&now-r.utcSeconds>1){double m[3][3];earthTurn(r.utcSeconds,r.utcSeconds+1,m);const Vector p=r.positionMeters,carried=turned(m,p)-p;
@@ -165,6 +168,7 @@ Evaluated sampled(const Object& o,double now){ // Between its samples.
     else r.positionMeters=a.positionMeters*(1-t)+b->positionMeters*t;
     r.velocityMetersPerSecond=a.velocityMetersPerSecond*(1-t)+b->velocityMetersPerSecond*t;
     r.hasVelocity=a.hasVelocity&&b->hasVelocity;
+    if(a.water&&b->water){auto& w=*r.water;w.origin=a.water->origin*(1-t)+b->water->origin*t;w.east=a.water->east*(1-t)+b->water->east*t;w.north=a.water->north*(1-t)+b->water->north*t;w.wind=a.water->wind*(1-t)+b->water->wind*t;}
     if(a.attitude&&b->attitude)r.attitude=blend(*a.attitude,*b->attitude,t);
     if(a.parts&&b->parts&&a.parts->size()==b->parts->size()){auto p=std::make_shared<std::vector<float>>(*a.parts);
         for(std::size_t i=0;i<p->size();++i)(*p)[i]+=static_cast<float>(t)*((*b->parts)[i]-(*p)[i]);r.parts=std::move(p);}

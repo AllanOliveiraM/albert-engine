@@ -74,6 +74,12 @@ fn vehicleEnvironment(world: vec3f, reflected: vec3f) -> vec3f {
 }
 )";
 inline const char* vehicleSurfaceFragment=R"(
+    // A hull-local signed plane avoids subtracting large world positions at the waterline.
+    let waterHeight = v.waterHeight;
+    let inWater = dot(material.waterPlane.xyz,material.waterPlane.xyz) > 0.000001;
+    if(inWater && waterHeight < -0.18){discard;}
+    let wet = select(0.0,1.0-smoothstep(0.0,2.4,waterHeight),inWater);
+    albedo *= 1.0-wet*0.42;
     let kind = material.vehicleSurface.x; let quality = material.vehicleQuality;
     let angle = atan2(v.local.x, v.local.z + select(0.0, 0.0001, dot(v.local.xz, v.local.xz) < 0.00000001));
     let radius = max(length(v.local.xz), 0.01);
@@ -123,6 +129,7 @@ inline const char* vehicleSurfaceFragment=R"(
             alpha *= (1.0 - smoothstep(-0.24, -0.015, q.y)) * smoothstep(-material.frostHeight, -material.frostHeight + 0.12, q.y) * (1.0 - tile);
             simple = material.diffuse * 0.93; metal = 0.0; rough = 0.96;
         }
+        simple *= 1.0-wet*0.42; rough=mix(rough,0.19,wet);
         let air = airLight(v.world, v.worldNormal);
         var colour = standardLight(simple, rough, metal, n, geometryNormal, v.position, air.sky * frame.sunColor.rgb, shadowFactor(v.world, v.worldNormal) * air.sun);
         colour += material.emissive * select(1.0, tile, abs(material.vehicleHull.x) > 0.0 && (kind == 0.0 || kind == 1.0));
@@ -174,6 +181,7 @@ inline const char* vehicleSurfaceFragment=R"(
     tangent = normalize(tangent); let bitangent = normalize(cross(n, tangent));
     let normalPixel = max(abs(dpdx(geometryNormal)), abs(dpdy(geometryNormal)));
     rough = clamp(rough + max(max(normalPixel.x, normalPixel.y), normalPixel.z), 0.12, 1.0);
+    rough = mix(rough,0.19,wet);
     let eye = viewDirection(v.position); let l = sunView();
     let f0 = mix(vec3f(0.04), albedo, metal);
     let f = 1.0 - clamp(dot(n, eye), 0.0, 1.0); let f2 = f * f;

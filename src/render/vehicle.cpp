@@ -70,7 +70,7 @@ Vehicle::Vehicle(const core::VehicleLook& look){
     auto surface=[&](Color colour,float metal,float rough,float kind,Vector4 hull={},float width=0,float span=0,bool open=false){
         auto m=assistedMaterial(colour,metal,rough,false,open);m->name="albert:vehicle";
         m->uniforms.emplace("vehicleHull",Uniform(hull));m->uniforms.emplace("vehicleSurface",Uniform(Vector4(kind,width,span,0.f)));
-        m->uniforms.emplace("entryLight",Uniform(Vector4(0,0,0,0)));m->uniforms.emplace("vehicleQuality",Uniform(1.f));m->uniforms.emplace("vehicleSoot",Uniform(0.f));m->uniforms.emplace("frostHeight",Uniform(1.f));surfaces_.push_back(m);return m;};
+        m->uniforms.emplace("waterPlane",Uniform(Vector4()));m->uniforms.emplace("entryLight",Uniform(Vector4(0,0,0,0)));m->uniforms.emplace("vehicleQuality",Uniform(1.f));m->uniforms.emplace("vehicleSoot",Uniform(0.f));m->uniforms.emplace("frostHeight",Uniform(1.f));surfaces_.push_back(m);return m;};
     for(const auto& s:look.sections){ // One frustum: the shader joins the wavy tile edge to the steel without overlapping shells.
         const float top=static_cast<float>(s.radiusFrom),bottom=static_cast<float>(s.radiusTo),height=static_cast<float>(s.to-s.from),y=static_cast<float>(half-(s.from+s.to)/2);
         const float tiles=static_cast<float>(std::clamp(s.tiles,0.,2*3.14159265358979));const bool skirt=!look.engines.empty()&&s.to>=base-.01;
@@ -155,6 +155,17 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         j.mesh->position.copy(point(t.position));j.mesh->quaternion.setFromUnitVectors(Vector3(0,1,0),axisOf(t.direction).normalize());root_->add(j.mesh);jets_.push_back(std::move(j));
     }
 }
+void Vehicle::water(const Vector4& plane){
+    // Accumulate only child transforms: world-space inversion would lose waterline precision at Earth scale.
+    auto visit=[&](auto&& self,Object3D& node,const Matrix4& parent)->void{
+        node.updateMatrix();const Matrix4 local=Matrix4(parent).multiply(*node.matrix);
+        if(auto* mesh=node.as<Mesh>())if(auto* m=mesh->material()->as<ShaderMaterial>();m&&m->uniforms.contains("waterPlane")){
+            const auto& e=local.elements;const Vector3 n(plane.x,plane.y,plane.z);
+            m->uniforms.at("waterPlane").setValue(Vector4(n.dot(Vector3(e[0],e[1],e[2])),n.dot(Vector3(e[4],e[5],e[6])),n.dot(Vector3(e[8],e[9],e[10])),plane.w+n.dot(Vector3(e[12],e[13],e[14]))));}
+        for(auto* child:node.children)self(self,*child,local);
+    };
+    for(auto* child:root_->children)visit(visit,*child,Matrix4());
+}
 void Vehicle::quality(int value){
     for(auto& p:sheaths_)p->material()->as<ShaderMaterial>()->uniforms.at("quality").setValue(value>0?1.f:0.f);
     for(auto& m:surfaces_)m->uniforms.at("vehicleQuality").setValue(value>0?1.f:0.f);
@@ -214,7 +225,7 @@ void Vehicle::impinge(float metres,float glow){obstruction_=std::max(0.f,metres)
 void Vehicle::venting(float strength,double utc,bool closed){
     if(!std::isfinite(utc))return;const bool reset=ventTimed_&&utc<ventUtc_;
     const float dt=ventTimed_&&!reset?static_cast<float>(utc-ventUtc_):0.f;ventUtc_=utc;ventTimed_=true;
-    if(reset){for(auto& p:mist_){p.life=0;p.mesh->visible=false;}for(auto& v:vents_)v.pending=0;}
+    if(reset){for(auto& p:mist_){p.life=0;if(p.mesh)p.mesh->visible=false;}for(auto& v:vents_)v.pending=0;}
     strength=std::isfinite(strength)?std::clamp(strength,0.f,1.f):0;if(vents_.empty())return;
     if(strength<=0||fire_){for(auto& p:mist_){p.life=0;p.mesh->visible=false;}for(auto& v:vents_)v.pending=0;return;}
     const float step=std::min(dt,.25f),half=static_cast<float>(length_/2);

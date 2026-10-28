@@ -23,6 +23,7 @@ public:
     void venting(float strength,double utc,bool closed=false); // Simulated UTC keeps boil-off on the acoustic schedule.
     double length()const{return length_;}
     float thrust()const{return thrust_;} // The share of its full thrust burning, at the last animate().
+    void water(const threepp::Vector4& plane); // Signed mean water height in hull metres; zero disables.
     void quality(int value); // Fine surface detail and directional atmosphere reflections simplify at low quality.
     struct EngineSound {std::uint64_t serial=0;double utc=0;float radius=0;bool ignition=false;};
     const std::array<EngineSound,256>& engineSounds()const{return engineSounds_;}
