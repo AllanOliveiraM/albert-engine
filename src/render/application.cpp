@@ -2619,9 +2619,12 @@ int albert::runRenderer(int argc, char** argv) {
 
             const float interactionRadius=radiusFor(focus);
             const float relativeAltitude=interactionRadius>0 ? std::max(0.f,camera->position.distanceTo(controls.target)-interactionRadius)/interactionRadius : 1.f;
-            controls.rotateSpeed=.75f*std::clamp(relativeAltitude,.025f,1.f)*preferences.sensitivity;
+            // Slowed near a globe's surface (it whips by otherwise); a vehicle or any other object orbited and zoomed at full speed at
+            // any distance (near one, both fell to a crawl: a wheel notch under 1%).
+            const bool globe=focus.front()!='@'&&registry.objects().contains(focus)&&(registry.get(focus).builtin||albert::core::surfaceBody(focus));
+            controls.rotateSpeed=.75f*std::clamp(globe?relativeAltitude:1.f,.025f,1.f)*preferences.sensitivity;
             if(!broadcastActive&&camera->fov!=preferences.fov){camera->fov=preferences.fov;camera->updateProjectionMatrix();}
-            controls.zoomSpeed=std::clamp(relativeAltitude,.18f,1.f);
+            controls.zoomSpeed=globe?std::clamp(relativeAltitude,.18f,1.f):2.f;
             automaticOrbitAge=automaticOrbit ? automaticOrbitAge+dt : 0.f;
             controls.autoRotate=automaticOrbit&&controls.enabled;
             // OrbitControls uses frame-based increments: compensate for actual dt.
