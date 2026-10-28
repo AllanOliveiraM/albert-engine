@@ -1,6 +1,6 @@
 #pragma once
 #ifdef ALBERT_TEST_RPC
-void landCaptures(const std::string& directory,bool production=false,bool industrial=false,bool shadowCheck=false,bool nightCheck=false){
+void landCaptures(const std::string& directory,bool production=false,bool industrial=false,bool shadowCheck=false,bool nightCheck=false,bool coastCheck=false){
     std::filesystem::create_directories(directory);
     namespace ex=albert::example::starship;namespace api=albert::v1;
     api::CreateFlightRequest request;ex::addTower(request,true);auto scenery=std::make_shared<albert::core::Scenery>();scenery->latitude=ex::towerLatitude*ex::deg;scenery->longitude=ex::towerLongitude*ex::deg;
@@ -53,7 +53,7 @@ void landCaptures(const std::string& directory,bool production=false,bool indust
     constexpr unsigned width=1280,height=960,row=width*4;WGPUTextureDescriptor td{};td.size={width,height,1};td.format=context.format();td.dimension=WGPUTextureDimension_2D;td.mipLevelCount=td.sampleCount=1;td.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_CopySrc;
     auto target=wgpuDeviceCreateTexture(context.device(),&td);auto view=wgpuTextureCreateView(target,nullptr);std::shared_ptr<Camera> camera=OrthographicCamera::create(-560,560,420,-420,.1,30000);
     Vector3 aim(-75,100,0);
-    auto shot=[&](const std::string& name){const int repeats=nightCheck?4:shadowCheck?6:1;std::vector<double> milliseconds,gpuTimes;for(int repeat=0;repeat<repeats;++repeat){const auto start=std::chrono::steady_clock::now();if(shadowCheck&&std::getenv("ALBERT_SHADOW_BASELINE"))site.node()->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(0.f);camera->lookAt(aim);site.view(*camera);auto encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);renderer.render(*world,*camera,view,width,height,encoder);auto cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);renderer.submitted();wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);
+    auto shot=[&](const std::string& name){const int repeats=(nightCheck||coastCheck)?4:shadowCheck?6:1;std::vector<double> milliseconds,gpuTimes;for(int repeat=0;repeat<repeats;++repeat){const auto start=std::chrono::steady_clock::now();if(shadowCheck&&std::getenv("ALBERT_SHADOW_BASELINE"))site.node()->material()->as<ShaderMaterial>()->uniforms.at("strength").setValue(0.f);camera->lookAt(aim);site.view(*camera);auto encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);renderer.render(*world,*camera,view,width,height,encoder);auto cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);renderer.submitted();wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);
         WGPUBufferDescriptor bd{};bd.size=row*height;bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;auto buffer=wgpuDeviceCreateBuffer(context.device(),&bd);encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=target;WGPUTexelCopyBufferInfo dst{};dst.buffer=buffer;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=height;WGPUExtent3D size{width,height,1};wgpuCommandEncoderCopyTextureToBuffer(encoder,&src,&dst,&size);cmd=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&cmd);
         bool ready=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&ready;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};wgpuBufferMapAsync(buffer,WGPUMapMode_Read,0,bd.size,cb);while(!ready)wgpuInstanceProcessEvents(context.instance());
         const auto* pixels=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(buffer,0,bd.size));std::vector<unsigned char> rgba(pixels,pixels+bd.size);if(context.format()==WGPUTextureFormat_BGRA8Unorm)for(std::size_t i=0;i<rgba.size();i+=4)std::swap(rgba[i],rgba[i+2]);
@@ -61,8 +61,42 @@ void landCaptures(const std::string& directory,bool production=false,bool indust
         milliseconds.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
         if(repeat==repeats-1){std::ofstream output(directory+"/"+name+".ppm",std::ios::binary);output<<"P6\n"<<width<<' '<<height<<"\n255\n";
         for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)output.write(reinterpret_cast<const char*>(rgba.data()+y*row+x*4),3);}
-        wgpuBufferUnmap(buffer);wgpuBufferRelease(buffer);wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);}std::sort(gpuTimes.begin(),gpuTimes.end());std::sort(milliseconds.begin()+((shadowCheck||nightCheck)?1:0),milliseconds.end());std::cout<<name<<" synchronized frame ms "<<milliseconds[milliseconds.size()/2]<<", draws "<<renderer.drawn()<<", shadow draws "<<renderer.shadowDrawn()<<", shadow bytes "<<renderer.shadowBytes()<<", GPU ms "<<(gpuTimes.empty()?renderer.gpuMilliseconds():gpuTimes[gpuTimes.size()/2])<<"\n";};
+        wgpuBufferUnmap(buffer);wgpuBufferRelease(buffer);wgpuCommandBufferRelease(cmd);wgpuCommandEncoderRelease(encoder);}std::sort(gpuTimes.begin(),gpuTimes.end());std::sort(milliseconds.begin()+((shadowCheck||nightCheck||coastCheck)?1:0),milliseconds.end());std::cout<<name<<" synchronized frame ms "<<milliseconds[milliseconds.size()/2]<<", draws "<<renderer.drawn()<<", shadow draws "<<renderer.shadowDrawn()<<", shadow bytes "<<renderer.shadowBytes()<<", GPU ms "<<(gpuTimes.empty()?renderer.gpuMilliseconds():gpuTimes[gpuTimes.size()/2])<<"\n";};
     auto frame=[&](Vector3 at,Vector3 eye,float fov){aim=at;auto c=PerspectiveCamera::create(fov,4.f/3,.1,30000);c->up.set(0,0,1);if(eye.x==at.x&&eye.y==at.y)c->up.set(0,1,0);c->position.copy(eye);camera=c;};
+    if(coastCheck){
+        renderer.shadowMetersPerUnit=1;renderer.shadowHigh=false;renderer.sea.enabled=false;
+        const auto coastal=albert::coastalLight(1);
+        renderer.air.hazeExtinction=coastal.extinction;renderer.air.hazeScaleKm=coastal.scaleKm;renderer.air.localCloudCover=coastal.cover;
+        renderer.air.cloudKm=(coastal.baseKm+coastal.topKm)*.5f;renderer.air.cloudShadow=.45f;
+        renderer.volume.enabled=true;renderer.volume.baseKm=coastal.baseKm;renderer.volume.topKm=coastal.topKm;
+        renderer.volume.divisor=4;renderer.volume.steps=32;renderer.volume.maxRays=80000;
+        light->intensity=2.4f;ambient->intensity=0; // Same sunlight and sky irradiance as the application.
+        for(const std::string time:{"noon","golden","sunset"}){
+            const float elevation=time=="noon"?.90f:time=="golden"?.104528f:.008727f;
+            const float horizontal=10000*std::sqrt(1-elevation*elevation);
+            light->position.set(-horizontal*.97f,-horizontal*.2431f,10000*elevation);
+            site.lighting(light->position);renderer.exposure=2.1f*albert::earthNightExposure(elevation);
+            frame({0,0,57},{100,-150,1.7f},64);shot("pad-eye-"+time);
+            frame({-3330,-1040,42},{-150,-200,500},48);shot("production-west-500m-"+time);
+            frame({3000,900,90},{-22,0,165},65);shot("tower-sea-"+time);
+        }
+        // Component timings and weather/night views use the same atmosphere and materials.
+        light->position.set(-4000,-3000,9000);site.lighting(light->position);renderer.exposure=2.1f;
+        renderer.volume.enabled=false;
+        frame({-3330,-1040,42},{-150,-200,500},48);shot("production-west-500m-haze-only");
+        renderer.air.hazeExtinction=0;renderer.air.localCloudCover=-1;renderer.air.cloudShadow=0;shot("production-west-500m-clear-control");
+        auto weather=[&](float humidity,float cover){const auto c=albert::coastalLight(1,humidity,cover);
+            renderer.air.hazeExtinction=c.extinction;renderer.air.localCloudCover=c.cover;renderer.air.cloudShadow=.45f;
+            renderer.air.cloudKm=(c.baseKm+c.topKm)*.5f;renderer.volume.baseKm=c.baseKm;renderer.volume.topKm=c.topKm;};
+        weather(.90f,.85f);renderer.volume.enabled=true;
+        frame({3000,900,90},{-22,0,165},65);shot("tower-sea-stratocumulus");
+        weather(.78f,.38f);light->position.set(9700,2431,1045);site.lighting(light->position);renderer.exposure=2.1f*albert::earthNightExposure(.104528f);shot("tower-sea-golden-glint");
+        light->position.set(-9000,0,-5000);site.lighting(light->position);renderer.shadows=false;renderer.exposure=2.1f*albert::earthNightExposure(-.48f);
+        auto stars=albert::makeStarField("assets/stars.csv",2461322.5);stars->frustumCulled=false;world->add(stars);
+        frame({3000,900,400},{-22,0,165},65);shot("tower-sea-night");
+        std::cout<<renderer.memory()<<"\nAdapter "<<context.adapter()<<", validation errors "<<albert::gpu::errors()<<"\n";
+        wgpuTextureViewRelease(view);wgpuTextureRelease(target);require(albert::gpu::errors()==0,"Coastal captures produced GPU validation errors");return;
+    }
     if(nightCheck){
         renderer.shadowMetersPerUnit=1;
         const bool disabled=std::getenv("ALBERT_SITE_LIGHTS_OFF");

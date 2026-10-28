@@ -1661,7 +1661,7 @@ int albert::runRenderer(int argc, char** argv) {
                     check("Sombras",visualSettings.shadows);
                     check("Atmosfera",visualSettings.atmosphere);
                     check("Relevo detalhado",visualSettings.terrain,"Copernicus 30 m na Terra, LOLA na Lua, MOLA em Marte.");
-                    check("Nuvens volumetricas",preferences.volumetricClouds,"Nuvens em 3D perto da Terra, das nuvens em tempo real; desligadas, fica a camada plana.");
+                    check("Nuvens volumetricas",preferences.volumetricClouds,"Nuvens em 3D: tempo do voo ou clima costeiro em Starbase; satelite nas demais regioes.");
                     check("Ondas no mar",preferences.oceanWaves,"Ondas pelo vento perto da camera; desligadas, o mar so tem a rugosidade media.");
                     slider("##Campo de visao",preferences.fov,35,90,"Campo de visao: %.0f graus");
                     ImGui::Spacing();ImGui::TextDisabled("TERRA");
@@ -2890,6 +2890,22 @@ int albert::runRenderer(int argc, char** argv) {
                 const ph::V3 gcrf{c.x*r+sceneOrigin.x,-c.z*r+sceneOrigin.y,c.y*r+sceneOrigin.z};const ph::Tt tt=ph::ttFromUtc(simulatedUtc);
                 const ph::M3 fixed=ph::Rotation::iau(ph::secondsSinceJ2000(tt)-(simulatedUtc-946728000.)).at(tt).fixed;const ph::V3 eye=fixed*gcrf;
                 const ph::Geodetic here=ph::geodetic(ph::earth,eye);const bool on=preferences.oceanWaves&&here.height<30e3&&here.height>-100;
+                // Only the Starbase marine boundary layer receives this default; weather travels with a nearby GFS flight.
+                const double coastDistance=std::hypot((here.latitude-25.996128*PI/180)*6378.137,
+                    std::remainder(here.longitude+97.154517*PI/180,2*PI)*std::cos(here.latitude)*6378.137);
+                const float coastalStrength=static_cast<float>((1-std::clamp((coastDistance-40)/60,0.,1.))*(1-std::clamp((here.height-10000)/20000,0.,1.)));
+                albert::CoastalLight coastal;
+                if(coastalStrength>0){
+                    float humidity=-1,cover=-1;
+                    if(flightTelemetry&&flightTelemetry->active&&steadyNow-flightTelemetryAt<std::chrono::seconds(10)){
+                        const auto& w=*flightTelemetry;
+                        const double distance=std::hypot((here.latitude-w.weatherLatitude)*6378.137,
+                            std::remainder(here.longitude-w.weatherLongitude,2*PI)*std::cos(here.latitude)*6378.137);
+                        if(distance<50){humidity=albert::relativeHumidity(w.specificHumidity,w.airTemperature,w.airPressure);cover=static_cast<float>(w.lowCloudCover);}
+                    }
+                    coastal=albert::coastalLight(coastalStrength,humidity,cover);
+                }
+                graphics.setCoastalLight(coastal);
                 if(here.height<30e3&&here.height>-100){
                     if(!seaOrigin||ph::norm(eye-seaOrigin->position)>200e3){const double sl=std::sin(here.latitude),cl=std::cos(here.latitude),so=std::sin(here.longitude),co=std::cos(here.longitude);
                         seaOrigin=SeaFrame{ph::fixedPosition(ph::earth,{here.latitude,here.longitude,ph::geoidHeight(here.latitude,here.longitude)}),{-so,co,0},{-sl*co,-sl*so,cl}};} // On the mean sea (the geoid): the shader keeps the waves to what lies at its level.
@@ -2903,8 +2919,8 @@ int albert::runRenderer(int argc, char** argv) {
                 // drifts with the wind at their height, taken as 1.5 times the sea's (the 850 hPa wind over the 10 m one).
                 // The shell gives way only where the volume was drawn (the air's tables ready, a cloud map), so neither vanishes alone.
                 const double fade=std::clamp((here.height-30e3)/20e3,0.,1.);
-                cloudShare=albert::animateValue(cloudShare,preferences.volumetricClouds?static_cast<float>(1-fade*fade*(3-2*fade)):0.f,dt);
-                const float volume=cloudShare*planets.cloudOpacity()/.88f;cloudVolume=graphics.cloudsShown()?volume:0.f;
+                cloudShare=albert::animateValue(cloudShare,preferences.volumetricClouds&&visualSettings.quality>0?static_cast<float>(1-fade*fade*(3-2*fade)):0.f,dt);
+                const float volume=cloudShare*(coastal.cover>=0?1.f:planets.cloudOpacity()/.88f);cloudVolume=graphics.cloudsShown()?volume:0.f;
                 graphics.setClouds(volume>0,volume,seaClock,1.5f*seaWindEast,1.5f*seaWindNorth);planets.setCloudShell(1-cloudVolume);
             }
             // Out of focus (another window over it, a workspace away) the compositor may hold the synced frames back: then unsynced,

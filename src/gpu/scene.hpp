@@ -34,7 +34,8 @@ public:
     struct Air {Atmosphere* atmosphere=nullptr;const threepp::Object3D* body=nullptr;float kmPerUnit=1,strength=0,groundKm=0;
         threepp::Texture* clouds=nullptr;float cloudKm=12,cloudShadow=0;
         float surfaceWind=0; // m/s: water (texels under 0.5 in the roughness maps of materials named "albert:water") takes Cox-Munk's slopes (0: the maps').
-        float polarRatio=1;} air; // The body's polar/equatorial axis ratio: the layer's map is in geodetic latitude.
+        float polarRatio=1; // Polar/equatorial axis ratio: the cloud map uses geodetic latitude.
+        float hazeExtinction=0,hazeScaleKm=.8f,localCloudCover=-1;} air; // Additional visual aerosol (/km, km); negative cover selects the satellite map.
     unsigned airSteps=4;
     // Earthshine on lit materials (earthLight in the photometry module): the Earth and its radius in world units (0: none).
     struct Earthshine {const threepp::Object3D* earth=nullptr;float radius=0;} earthshine;
@@ -43,8 +44,8 @@ public:
     struct Sea {Ocean* ocean=nullptr;bool enabled=false;double seconds=0;float east=0,north=0,metersPerUnit=6378137;threepp::Vector3 anchor,eastAxis,northAxis;} sea;
     // Volumetric clouds (gpu::Clouds) on the air's cloud map (air.clouds, with air.cloudShadow > 0), marched before the pass
     // and laid over the opaque objects (gpu::Clouds::View; divisor 0: the march's resolution kept near 300 000 rays, 2 to 4);
-    // wind: m/s toward east and north (the noise's drift), seconds its clock.
-    struct Volume {bool enabled=false;float strength=1,baseKm=1.5f,topKm=5.5f,extinction=75,windEast=0,windNorth=0;double seconds=0;unsigned divisor=2,steps=64;bool flat=false;} volume;
+    // wind: m/s toward east and north (the noise's drift), seconds its clock; maxRays bounds the reduced-resolution target (0: no additional limit).
+    struct Volume {bool enabled=false;float strength=1,baseKm=1.5f,topKm=5.5f,extinction=75,windEast=0,windNorth=0;double seconds=0;unsigned divisor=2,steps=64;bool flat=false;unsigned maxRays=0;} volume;
     [[nodiscard]] const Clouds* clouds()const; // The last march's (for tests); null before the first.
     [[nodiscard]] bool cloudsShown()const;     // The last render marched them (enabled, the air's tables ready, a cloud map).
     // GPU time (gpuMilliseconds) spans the clouds' march, when there is one, the sun's shadow and the scene pass.

@@ -613,9 +613,12 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         Vector3 toward=sun;toward.transformDirection(planet); // Linear part, normalised: the ellipsoid maps to the model's sphere.
         f[92]=eye.x;f[93]=eye.y;f[94]=eye.z;f[95]=std::min(air.strength,1.f);f[96]=toward.x;f[97]=toward.y;f[98]=toward.z;
     }
+    f[156]=airTables?std::max(air.hazeExtinction,0.f):0.f;f[157]=air.hazeScaleKm;
+    f[158]=air.localCloudCover;
     // Cloud shadows: the layer's map (its GPU copy is the cloud material's), its height and opacity.
     std::uint64_t cloudSerial=2;WGPUTextureView cloudView=g.black;
     if(airTables&&air.clouds&&air.cloudShadow>0){cloudView=g.view(air.clouds,true,cloudSerial);f[100]=air.cloudKm;f[101]=std::min(air.cloudShadow,1.f);}
+    if(airTables&&air.localCloudCover>=0){f[100]=air.cloudKm;f[101]=std::clamp(air.cloudShadow,0.f,1.f);}
     f[103]=air.polarRatio>0?air.polarRatio:1.f;
     if(airTables)f[102]=std::max(air.surfaceWind,0.f); // The sea's roughness (Cox-Munk).
     if(earthshine.earth&&earthshine.radius>0){Vector3 e;e.setFromMatrixPosition(*earthshine.earth->matrixWorld);f[104]=e.x;f[105]=e.y;f[106]=e.z;f[107]=earthshine.radius;}
@@ -653,7 +656,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     wgpuQueueWriteBuffer(g.queue,g.frameBuffer,0,f,sizeof f);
     // Volumetric clouds: marched now, laid over the opaque objects in the pass. Their noise drifts with the wind along east and
     // north at the eye (planet frame: y polar, the map's u growing east), wrapped to its period, so it never jumps.
-    bool clouded=volume.enabled&&volume.strength>0&&airTables&&cloudSerial!=2&&!dynamic_cast<OrthographicCamera*>(&camera);
+    bool clouded=volume.enabled&&volume.strength>0&&airTables&&(cloudSerial!=2||air.localCloudCover>0)&&!dynamic_cast<OrthographicCamera*>(&camera);
     if(clouded&&!g.clouds){ // The noise off this thread; the clouds once it is ready (the cloud shell meanwhile).
         if(!g.cloudNoise.valid())g.cloudNoise=std::async(std::launch::async,Clouds::noise);
         if(g.cloudNoise.wait_for(std::chrono::seconds(0))==std::future_status::ready)g.clouds=std::make_unique<Clouds>(g.gpu,g.frameLayout,g.cloudNoise.get());else clouded=false;
@@ -666,6 +669,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         if(ul>0&&el>1e-6*ul){const double up[3]{ux/ul,uy/ul,uz/ul},east[3]{uz/el,0,-ux/el},north[3]{up[1]*east[2]-up[2]*east[1],up[2]*east[0]-up[0]*east[2],up[0]*east[1]-up[1]*east[0]};
             for(int i=0;i<3;++i){double& d=g.cloudDrift[static_cast<std::size_t>(i)];d=std::fmod(d+(east[i]*volume.windEast+north[i]*volume.windNorth)*step*1e-3,Clouds::tile);if(d<0)d+=Clouds::tile;}}
         Clouds::View v;v.width=width;v.height=height;v.divisor=volume.divisor?volume.divisor:std::clamp(static_cast<unsigned>(std::ceil(std::sqrt(width*height/3e5))),2u,4u); // ~300 000 rays.
+        if(volume.maxRays)v.divisor=std::max(v.divisor,static_cast<unsigned>(std::ceil(std::sqrt(static_cast<double>(width)*height/volume.maxRays))));
         v.steps=volume.steps;v.strength=std::min(volume.strength,1.f);v.baseKm=volume.baseKm;v.topKm=volume.topKm;
         v.extinction=volume.extinction;v.flat=volume.flat;for(std::size_t i=0;i<3;++i)v.drift[i]=static_cast<float>(g.cloudDrift[i]);
         WGPUPassTimestampWrites start{};start.querySet=g.timestamps;start.beginningOfPassWriteIndex=0;start.endOfPassWriteIndex=WGPU_QUERY_SET_INDEX_UNDEFINED;

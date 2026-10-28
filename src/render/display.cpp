@@ -61,15 +61,20 @@ void albert::Display::setWeather(threepp::Texture* clouds,float cloudKm,float cl
 void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength,float groundKm,bool mars){
     auto& d=*impl_;auto& air=mars?d.marsAir:d.earthAir; // Each precomputed once, when first needed.
     if(!air&&body&&strength>0){air=std::make_unique<gpu::Atmosphere>(*d.context,mars?gpu::marsAtmosphere():gpu::earthAtmosphere());d.scene->airSteps=d.context->software()?1:4;}
-    auto weather=d.scene->air;d.scene->air={air.get(),body,kmPerUnit,strength,groundKm,weather.clouds,weather.cloudKm,weather.cloudShadow,weather.surfaceWind,weather.polarRatio};
+    auto weather=d.scene->air;d.scene->air={air.get(),body,kmPerUnit,strength,groundKm,weather.clouds,weather.cloudKm,weather.cloudShadow,weather.surfaceWind,weather.polarRatio,weather.hazeExtinction,weather.hazeScaleKm,weather.localCloudCover};
 }
 void albert::Display::setSea(bool on,double seconds,float east,float north,const Vector3& anchor,const Vector3& eastAxis,const Vector3& northAxis,float metersPerUnit){
     auto& d=*impl_;on=on&&!d.context->software(); // CPU adapters: too slow, and WARP loses the device on the cascades.
     if(on&&!d.ocean)d.ocean=std::make_unique<gpu::Ocean>(*d.context);
     auto& s=d.scene->sea;s.ocean=d.ocean.get();s.enabled=on;s.seconds=seconds;s.east=east;s.north=north;s.anchor=anchor;s.eastAxis=eastAxis;s.northAxis=northAxis;s.metersPerUnit=metersPerUnit;
 }
+void albert::Display::setCoastalLight(const CoastalLight& light){
+    auto& s=*impl_->scene;s.air.hazeExtinction=light.extinction;s.air.hazeScaleKm=light.scaleKm;s.air.localCloudCover=light.cover;
+    if(light.cover>=0){s.air.cloudKm=(light.baseKm+light.topKm)*.5f;s.air.cloudShadow=.45f;}
+    s.volume.baseKm=light.cover>=0?light.baseKm:1.5f;s.volume.topKm=light.cover>=0?light.topKm:5.5f;
+}
 void albert::Display::setClouds(bool on,float strength,double seconds,float east,float north){
-    auto& v=impl_->scene->volume;v.enabled=on&&strength>0&&!impl_->context->software();v.strength=strength;v.seconds=seconds;v.windEast=east;v.windNorth=north;v.divisor=0;v.steps=64;}
+    auto& v=impl_->scene->volume;v.enabled=on&&strength>0&&!impl_->context->software();v.strength=strength;v.seconds=seconds;v.windEast=east;v.windNorth=north;v.divisor=4;v.steps=32;v.maxRays=80000;}
 bool albert::Display::cloudsShown()const{return impl_->scene->cloudsShown();}
 void albert::Display::setSamples(unsigned samples){impl_->scene->samples=samples>1?4u:1u;}
 void albert::Display::setVsync(bool on){impl_->context->setVsync(on);}

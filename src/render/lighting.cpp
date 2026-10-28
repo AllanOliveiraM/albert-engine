@@ -18,4 +18,20 @@ float albert::lunarAdaptation(double phase,double earthward,double earthPhase,do
     return static_cast<float>(std::clamp(moon(90)/(moon(phase)+shine*moon(earthward)),1.,1000.));
 }
 float albert::siteNight(float sunHeight){const float t=std::clamp((.052336f-sunHeight)/.122092f,0.f,1.f);return t*t*(3-2*t);}
-float albert::earthNightExposure(float sunHeight){return 1+1.4f*siteNight(sunHeight);}
+float albert::earthNightExposure(float sunHeight){const float low=1.f-std::clamp((sunHeight-.015f)/.20f,0.f,1.f);return (1.f-.18f*low)+1.58f*siteNight(sunHeight);}
+
+float albert::relativeHumidity(double q,double temperature,double pressure){
+    if(!std::isfinite(q)||!std::isfinite(temperature)||!std::isfinite(pressure)||q<0||q>.1||temperature<180||temperature>330||pressure<=0)return -1;
+    const double c=temperature-273.15,saturation=611.2*std::exp(17.67*c/(c+243.5));
+    return static_cast<float>(std::clamp(q*pressure/(.622+.378*q)/saturation,0.,1.));
+}
+albert::CoastalLight albert::coastalLight(float strength,float humidity,float cover){
+    const float rh=std::isfinite(humidity)&&humidity>=0?std::clamp(humidity,0.f,.98f):.78f;
+    CoastalLight light;
+    // Hygroscopic sea salt grows in humid air. Cap below saturation; this is haze, not a fog simulator.
+    light.extinction=std::clamp(strength,0.f,1.f)*(.018f+.028f*(std::pow(1.f-std::min(rh,.96f),-.55f)-1.f));
+    light.cover=std::clamp(strength,0.f,1.f)*(std::isfinite(cover)&&cover>=0?std::clamp(cover,0.f,1.f):.38f);
+    light.baseKm=std::clamp(3.4f*(1-rh),.45f,1.5f); // Approximate lifting condensation level of warm marine air.
+    light.topKm=light.baseKm+std::lerp(1.5f,.65f,std::clamp((light.cover-.55f)/.4f,0.f,1.f));
+    return light;
+}

@@ -30,7 +30,7 @@ struct Frame {
     oceanSlopes: vec4f,      // Mean square slope in each cascade's band (512, 128, 32 m).
     localPosition: array<vec4f, 4>, // World position and range; zero range disables the slot.
     localColour: array<vec4f, 4>,   // Radiance divided by range squared.
-    reserved: vec4f, // Preserve the original 640-byte frame block.
+    coastal: vec4f, // Additional marine aerosol extinction (/km), scale height (km), local cloud cover (-1: map), reserved.
     shadowLevels: array<mat4x4f, 3>,
     shadowScale: vec4f, // Level count, metres/world unit, depth span, caster level.
     contactMatrix: mat4x4f, // World to site-local metres.
@@ -174,11 +174,36 @@ fn airEntry(camera: vec3f, ray: vec3f) -> AirRay { // From space: moved to the t
     if (rmu >= 0.0 || h2 >= top * top) { return AirRay(camera, r, rmu, false); }
     let half = sqrt(top * top - h2); return AirRay(camera + ray * (-rmu - half), top, -half, true);
 }
+// A shallow marine layer added to the global clear-air LUTs without rebuilding them.
+// Exponential column integral with spherical endpoint height; bounded to 80 km.
+fn coastalColumn(c: vec3f, ray: vec3f, distance: f32) -> f32 {
+    let d = clamp(distance, 0.0, 80.0); let h0 = max(length(c) - bottomRadius(), 0.0);
+    let mu = dot(normalize(c), ray); let h1 = max(h0 + d * mu + d * d * (1.0 - mu * mu) / (2.0 * bottomRadius()), 0.0);
+    let scale = max(frame.coastal.y, 0.1); let dh = (h1 - h0) / scale;
+    if (abs(dh) < 0.01) { return d * exp(-(h0 + h1) * 0.5 / scale); }
+    return d * (exp(-h0 / scale) - exp(-h1 / scale)) / dh;
+}
+fn coastalSun(p: vec3f, sun: vec3f) -> vec3f {
+    if (frame.coastal.x <= 0.0) { return vec3f(1.0); }
+    let h = max(length(p) - bottomRadius(), 0.0); let mu = dot(normalize(p), sun); let scale = max(frame.coastal.y, 0.1);
+    let column = scale * exp(-h / scale) / sqrt(max(mu, 0.0) * max(mu, 0.0) + 0.637 * scale / bottomRadius());
+    return exp(-vec3f(0.88, 1.0, 1.13) * frame.coastal.x * column);
+}
+fn coastalScatter(c: vec3f, ray: vec3f, distance: f32, sun: vec3f, clear: Sky) -> Sky {
+    if (frame.coastal.x <= 0.0) { return clear; }
+    let t = exp(-vec3f(0.88, 1.0, 1.13) * frame.coastal.x * coastalColumn(c, ray, distance));
+    let r = max(length(c), bottomRadius()) + 0.4; let muS = dot(normalize(c), sun);
+    let sunlight = transmittanceToSun(airTransmittance, airSampler, r, muS) * coastalSun(normalize(c) * r, sun);
+    let diffuse = lookupIrradiance(airIrradiance, airSampler, r, muS);
+    let forward = pow(max(dot(ray, sun), 0.0), 8.0);
+    let source = sunlight * (0.14 + 0.22 * forward) + diffuse * 0.22;
+    return Sky(clear.radiance * t + source * (1.0 - t), clear.transmittance * t);
+}
 fn skyRadiance(camera: vec3f, ray: vec3f, sun: vec3f) -> Sky { // Along the whole ray (to the ground or space).
     let e = airEntry(camera, ray); if (!e.hit) { return Sky(vec3f(0.0), vec3f(1.0)); }
     let mu = e.rmu / e.r; let muS = dot(e.camera, sun) / e.r; let nu = dot(ray, sun); let ground = intersectsGround(e.r, mu);
     let s = airScatter(e.r, mu, muS, nu, ground);
-    return Sky(s.rayleigh * rayleighPhase(nu) + s.mie * miePhase(nu), select(transmittanceToTop(airTransmittance, airSampler, e.r, mu), vec3f(0.0), ground));
+    return coastalScatter(e.camera, ray, distanceToNearest(e.r, mu, ground), sun, Sky(s.rayleigh * rayleighPhase(nu) + s.mie * miePhase(nu), select(transmittanceToTop(airTransmittance, airSampler, e.r, mu), vec3f(0.0), ground)));
 }
 // A point inside the air; onGround: the point is on the ground, so a downward ray reaches it there
 // (a point on the sphere makes the discriminant ~0, and its sign noise flips the lookups per pixel).
@@ -191,7 +216,7 @@ fn skyRadianceToPoint(camera: vec3f, point: vec3f, sun: vec3f, onGround: bool) -
     let a = airScatter(r, mu, muS, nu, ground);
     let rp = clampRadius(sqrt(d * d + 2.0 * r * mu * d + r * r)); let b = airScatter(rp, clampCosine((r * mu + d) / rp), clampCosine((r * muS + d * nu) / rp), nu, ground);
     let rayleigh = max(a.rayleigh - t * b.rayleigh, vec3f(0.0)); let mie = max(a.mie - t * b.mie, vec3f(0.0)) * smoothstep(0.0, 0.01, muS); // Bruneton's twilight fix.
-    return Sky(rayleigh * rayleighPhase(nu) + mie * miePhase(nu), t);
+    return coastalScatter(e.camera, ray, d, sun, Sky(rayleigh * rayleighPhase(nu) + mie * miePhase(nu), t));
 }
 fn airPoint(world: vec3f) -> vec3f { let p = (frame.planet * vec4f(world, 1.0)).xyz; return p * (1.0 - frame.airSun.w / max(length(p), 1.0)); } // Radii raised by the lowered ground.
 fn horizonPoint(c: vec3f, toward: vec3f) -> vec3f { // The model sphere's horizon seen from c, in the azimuth of `toward`.
@@ -204,11 +229,15 @@ fn horizonPoint(c: vec3f, toward: vec3f) -> vec3f { // The model sphere's horizo
 fn cloudUv(p: vec3f) -> vec2f { return vec2f(atan2(p.z, -p.x) / (2.0 * AIR_PI), atan2(p.y, length(p.xz) * frame.weather.w) / AIR_PI + 0.5); }
 // Sunlight through the cloud layer over a point (planet frame, radius r): the layer's opacity where the
 // ray toward the sun crosses it (1 above it, or without clouds).
+fn cloudCover(p: vec3f) -> f32 {
+    if (frame.coastal.z >= 0.0) { return frame.coastal.z; }
+    return textureSampleLevel(airClouds, airCloudSampler, cloudUv(p), 0.0).g;
+}
 fn cloudShadow(p: vec3f, r: f32) -> f32 {
     let top = bottomRadius() + frame.weather.x; let sun = frame.airSun.xyz;
     if (frame.weather.y <= 0.0 || r >= top) { return 1.0; }
     let rmu = dot(p, sun); let crossing = p + sun * (-rmu + sqrt(max(rmu * rmu - (r - top) * (r + top), 0.0)));
-    return 1.0 - frame.weather.y * textureSampleLevel(airClouds, airCloudSampler, cloudUv(crossing), 0.0).g;
+    return 1.0 - frame.weather.y * cloudCover(crossing);
 }
 struct AirLight { sun: vec3f, sky: vec3f }; // Sunlight reaching a point (fraction of the sun's colour); sky irradiance (relative to it).
 fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {
@@ -216,8 +245,14 @@ fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {
     let p = airPoint(world); let r = length(p); if (r >= topRadius()) { return AirLight(vec3f(1.0), vec3f(0.0)); }
     let up = p / r; let muS = dot(up, frame.airSun.xyz); let rc = max(r, bottomRadius());
     let n = normalize((frame.planet * vec4f(worldNormal, 0.0)).xyz);
-    let sky = lookupIrradiance(airIrradiance, airSampler, rc, muS) * (1.0 + dot(n, up)) * 0.5;
-    return AirLight(mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, muS), frame.air.w) * cloudShadow(p, r), sky * frame.air.w);
+    var sky = lookupIrradiance(airIrradiance, airSampler, rc, muS);
+    if (frame.coastal.x > 0.0) { // Extra aerosol redistributes sunlight into the diffuse hemisphere, warming open shade at low sun.
+        let layerR = clampRadius(rc + 0.8);
+        let marineSun = transmittanceToSun(airTransmittance, airSampler, layerR, muS) * coastalSun(up * layerR, frame.airSun.xyz);
+        sky += (marineSun * 0.4 + sky * 0.5) * (1.0 - exp(-4.0 * frame.coastal.x * frame.coastal.y));
+    }
+    sky *= (1.0 + dot(n, up)) * 0.5;
+    return AirLight(mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, muS) * coastalSun(p, frame.airSun.xyz), frame.air.w) * cloudShadow(p, r), sky * frame.air.w);
 }
 fn skyHitsGround(c: vec3f, ray: vec3f) -> bool { let e = airEntry(c, ray); return e.hit && intersectsGround(e.r, e.rmu / e.r); }
 // The air between c and c + segment (planet frame, km). The segment comes from camera-relative world

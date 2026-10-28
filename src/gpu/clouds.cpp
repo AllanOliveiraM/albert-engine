@@ -66,7 +66,9 @@ const char* const marchEntry=R"(
 @compute @workgroup_size(8, 8, 1) fn marchPass(@builtin(global_invocation_id) id: vec3u) {
     let size = vec2u(clouds.size.xy); if (any(id.xy >= size)) { return; }
     let ndc = vec2f((f32(id.x) + 0.5) / f32(size.x) * 2.0 - 1.0, 1.0 - (f32(id.y) + 0.5) / f32(size.y) * 2.0);
-    let jitter = fract(52.9829189 * fract(dot(vec2f(id.xy), vec2f(0.06711056, 0.00583715)))); // Interleaved gradient noise: no banding.
+    let noise = fract(52.9829189 * fract(dot(vec2f(id.xy), vec2f(0.06711056, 0.00583715))));
+    // No temporal accumulation: full-step jitter becomes a visible stipple at quarter resolution.
+    let jitter = select(noise, 0.5 + 0.12 * (noise - 0.5), clouds.size.z <= 32.0);
     let r = cloudMarch(ndc, jitter); textureStore(colourOut, id.xy, r.colour); textureStore(depthOut, id.xy, vec4f(r.depth, 0.0, 0.0, 0.0));
 }
 )";
@@ -108,10 +110,10 @@ fn cloudTop(cover: f32) -> f32 { if (clouds.drift.w > 0.5) { return clouds.layer
 // The density (a fraction of the extinction) at a point h km over the air's ground, and the column's top there: cloud where
 // the shape noise (uniform) times the height profile exceeds 1 - cover, so that fraction of the sky is cloudy at mid-height.
 fn cloudDensity(p: vec3f, h: f32, detail: f32) -> vec2f { // detail: the erosion's weight (0: the shape only).
-    let cover = textureSampleLevel(airClouds, airCloudSampler, cloudUv(p), 0.0).g; let base = clouds.layer.x; let top = cloudTop(cover);
+    let cover = cloudCover(p); let base = clouds.layer.x; let top = cloudTop(cover);
     if (h < base || h > top || cover <= 0.0) { return vec2f(0.0, top); }
     if (clouds.drift.w > 0.5) { return vec2f(cover, top); }
-    let f = (h - base) / (top - base); let profile = smoothstep(0.0, 0.1, f) * (1.0 - f * f); // Flat bases, narrowing to domed tops.
+    let f = (h - base) / (top - base); let profile = smoothstep(0.0, 0.1, f) * mix(1.0 - f * f, 1.0 - smoothstep(0.65, 1.0, f), smoothstep(0.55, 0.95, cover) * select(0.0, 1.0, frame.coastal.z >= 0.0)); // Flat bases, narrowing to domed tops.
     // Columns: the shape at the base under the point (the cloudy fraction seen from above is then the cover); the profile domes their tops.
     let q = p - clouds.drift.xyz; let shape = textureSampleLevel(cloudShape, cloudNoise, (q - p * ((h - base) / length(p))) / CLOUD_TILE, 0.0).r;
     var bumps = 0.0; if (detail > 0.0) { bumps = textureSampleLevel(cloudShape, cloudNoise, q * (4.0 / CLOUD_TILE) + 0.37, 0.0).r - 0.5; } // Their sides, in 3D (zero mean).
@@ -173,7 +175,7 @@ fn cloudMarch(ndc: vec2f, jitter: f32) -> CloudRay {
         let p = c + ray * t; let r = length(p); let h = r - bottomRadius(); let s = cloudDensity(p, h, 1.0 - smoothstep(15.0, 40.0, t)); // The detail (47 m texels, no mipmaps) fades out far away.
         if (s.x <= 0.0) { continue; }
         let sigma = clouds.layer.z * s.x; let up = p / r; let mu0 = dot(up, sun); let rc = clampRadius(r);
-        let sunlight = mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, mu0), frame.air.w);
+        let sunlight = mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, mu0) * coastalSun(p, sun), frame.air.w);
         let sky = lookupIrradiance(airIrradiance, airSampler, rc, mu0) * frame.air.w;
         let single = sunlight * phase * exp(-cloudSunDepth(p, sun));
         let field = cloudDiffuse(scaled * sigma * (s.y - h), scaled * sigma * (s.y - clouds.layer.x), mu0, sunlight, sky, -dot(ray, up));

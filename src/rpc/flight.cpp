@@ -565,9 +565,18 @@ struct Slot {
             auto it=std::find_if(milestones.begin(),milestones.end(),[&](const Gauge::Milestone& x){return x.name==n;});
             if(it==milestones.end()){if(milestones.size()<64)milestones.push_back({n,at,m.planned()});}else if(it->planned)*it={n,at,m.planned()};}
     }
+    std::vector<providers::GribField> visualClouds; // TCDC metadata; never supplied to flight dynamics.
     core::FlightTelemetry telemetry()const{
         const ph::Sample x=flight->sample();const auto& st=flight->state();
-        return{true,st.burning,st.clamped,st.landed,flight->vehicle().name,atmosphere,models(),elapsed(),x.geodetic.height,ph::norm(x.nedVelocity),x.mach,x.dynamicPressure,x.mass,st.propellant,x.air.wind.x,x.air.wind.y,st.stage,static_cast<int>(flight->vehicle().stages.size())};
+        core::FlightTelemetry out{true,st.burning,st.clamped,st.landed,flight->vehicle().name,atmosphere,models(),elapsed(),x.geodetic.height,ph::norm(x.nedVelocity),x.mach,x.dynamicPressure,x.mass,st.propellant,x.air.wind.x,x.air.wind.y,st.stage,static_cast<int>(flight->vehicle().stages.size())};
+        const auto& env=flight->environment();
+        if(env.air&&atmosphere.find("GFS")!=std::string::npos){
+            const auto& g=x.geodetic;const auto air=env.air->at(st.time,g.latitude,g.longitude,env.ground+10);
+            out.airTemperature=air.temperature;out.airPressure=air.pressure;out.specificHumidity=air.humidity;
+            out.weatherLatitude=g.latitude;out.weatherLongitude=g.longitude;
+            out.lowCloudCover=providers::gfsLowCloudCover(visualClouds,g.latitude/deg,g.longitude/deg,ph::utcFromTt(st.time));
+        }
+        return out;
     }
     grpc::Status create(const api::CreateFlightRequest& r,const Prepared& p,std::shared_ptr<const physics::AirModel> air,std::string atmosphere,
         std::vector<std::string> grib,std::vector<ph::SpaceWeatherDay> days,providers::GravityModel gravity,const std::function<bool()>& cancelled,api::FlightSample* out);
@@ -873,6 +882,8 @@ grpc::Status Slot::create(const api::CreateFlightRequest& r,const Prepared& p,st
         sense();
     }
     log=api::FlightLog{};record.clear();children.clear();overheated.clear();lastRecord=std::string::npos;truncated=false;log.set_engine("Albert Engine "+std::string(ALBERT_VERSION));*log.mutable_request()=r;log.mutable_request()->set_utc_unix_seconds(p.utc);log.set_atmosphere(atmosphere);
+    visualClouds.clear();
+    for(const auto& b:grib)for(auto& f:providers::decodeGrib2(b))if(f.discipline==0&&f.category==6&&f.number==1&&f.surface==214)visualClouds.push_back(std::move(f));
     for(auto& b:grib)log.add_gfs(std::move(b));
     log.set_gravity(std::move(gravity.table));
     for(const auto& d:days){auto* x=log.add_space_weather();x->set_day(d.day);x->set_f107(d.f107);x->set_f107a(d.f107a);x->set_ap_average(d.apAverage);x->set_type(d.type);if(d.hasAp)for(double a:d.ap)x->add_ap(a);}

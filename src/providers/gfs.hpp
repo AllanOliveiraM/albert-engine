@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 namespace albert::providers {
-// One GRIB2 field: templates 3.0 (latitude/longitude), 4.0 and 5.0 (simple packing), no bitmap.
+// One GRIB2 field: templates 3.0 (latitude/longitude), 4.0 (or 4.8 for low-cloud averages), 5.0 (simple packing), no bitmap.
 struct GribField {
     int discipline=0,category=0,number=0,surface=0;double level=0; // Level in the surface's unit (Pa for isobaric).
     double reference=0;int forecastMinutes=0;                      // Reference time (Unix UTC).
@@ -21,6 +21,9 @@ std::vector<GribField> decodeGrib2(std::string_view bytes);
 physics::WeatherGrid gfsGrid(const std::vector<std::vector<GribField>>& hours,std::string source);
 // Latest NOAA GFS 0.25° cycle around a point: the two forecast hours bracketing `utc`,
 // ±6° subregion from the NOMADS filter, cycle found through the AWS open-data index.
+// Visual cloud cover only: bilinear in position, linear in forecast time; -1 without a matching field.
+// Accepts TCDC on the low-cloud layer (GRIB2 surface 214), independent of the physics grid.
+double gfsLowCloudCover(const std::vector<GribField>& fields,double latitude,double longitude,double utc);
 class Gfs {
 public:
     using Transport=std::function<std::string(const std::string&,DownloadProgress*)>;

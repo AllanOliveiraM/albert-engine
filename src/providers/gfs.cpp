@@ -32,12 +32,19 @@ std::vector<GribField> decodeGrib2(std::string_view b){
                 f.ni=static_cast<int>(be(b,s+30,4));f.nj=static_cast<int>(be(b,s+34,4));f.la1=signedValue(b,s+46,4)*1e-6;f.lo1=signedValue(b,s+50,4)*1e-6;
                 f.di=static_cast<double>(be(b,s+63,4))*1e-6;f.dj=static_cast<double>(be(b,s+67,4))*1e-6;f.scan=static_cast<unsigned char>(b[s+71]);grid=true;
             }else if(number==4){
-                if(be(b,s+7,2)!=0)throw std::runtime_error("Unsupported GRIB2 product (template 4.0 only)");
+                const auto productTemplate=be(b,s+7,2);
+                if(productTemplate!=0&&productTemplate!=8)throw std::runtime_error("Unsupported GRIB2 product (template 4.0 or cloud 4.8 only)");
                 f.category=static_cast<unsigned char>(b[s+9]);f.number=static_cast<unsigned char>(b[s+10]);
                 const int unit=static_cast<unsigned char>(b[s+17]);const std::int64_t value=signedValue(b,s+18,4);
                 if(unit!=0&&unit!=1)throw std::runtime_error("Unsupported GRIB2 forecast time unit");
                 f.forecastMinutes=static_cast<int>(unit==1?value*60:value);f.surface=static_cast<unsigned char>(b[s+22]);
-                f.level=static_cast<double>(be(b,s+24,4))*std::pow(10.,-static_cast<double>(signedValue(b,s+23,1)));product=true;
+                f.level=static_cast<double>(be(b,s+24,4))*std::pow(10.,-static_cast<double>(signedValue(b,s+23,1)));
+                if(productTemplate==8){
+                    if(length<58||f.category!=6||f.number!=1||f.surface!=214||be(b,s+41,1)!=1||be(b,s+46,1)!=0)throw std::runtime_error("Unsupported GRIB2 statistical field");
+                    const time::Civil endTime{static_cast<int>(be(b,s+34,2)),static_cast<int>(be(b,s+36,1)),static_cast<int>(be(b,s+37,1)),static_cast<int>(be(b,s+38,1)),static_cast<int>(be(b,s+39,1)),static_cast<int>(be(b,s+40,1))};
+                    f.forecastMinutes=static_cast<int>((time::unixSeconds(endTime)-f.reference)/60); // Average attributed to its interval end, for drawing only.
+                }
+                product=true;
             }else if(number==5){
                 if(be(b,s+9,2)!=0)throw std::runtime_error("Unsupported GRIB2 packing (template 5.0 only)");
                 if(be(b,s+5,4)!=static_cast<std::uint64_t>(f.ni)*static_cast<std::uint64_t>(f.nj))throw std::runtime_error("GRIB2 point count mismatch");
@@ -90,6 +97,22 @@ physics::WeatherGrid gfsGrid(const std::vector<std::vector<GribField>>& hours,st
     std::sort(g.times.begin(),g.times.end(),[](const auto& a,const auto& b){return a.valid<b.valid;});
     return g; // Isobaric levels are encoded in Pa.
 }
+double gfsLowCloudCover(const std::vector<GribField>& fields,double lat,double lon,double utc){
+    double before=-1,after=-1,t0=-1e30,t1=1e30;
+    for(const auto& f:fields){
+        if(f.discipline!=0||f.category!=6||f.number!=1||f.surface!=214||f.ni<2||f.nj<2||f.di<=0||f.dj<=0||(f.scan!=0&&f.scan!=64))continue;
+        const double x=std::remainder(lon-f.lo1,360.)/f.di,y=(lat-f.la1)/f.dj*(f.scan==64?1:-1);
+        if(!(x>=0&&y>=0&&x<=f.ni-1&&y<=f.nj-1)||f.values.size()!=static_cast<std::size_t>(f.ni*f.nj))continue;
+        const int ix=std::min(static_cast<int>(x),f.ni-2),iy=std::min(static_cast<int>(y),f.nj-2);
+        const auto value=[&](int dx,int dy){return static_cast<double>(f.values[static_cast<std::size_t>((iy+dy)*f.ni+ix+dx)]);};
+        const double v=std::lerp(std::lerp(value(0,0),value(1,0),x-ix),std::lerp(value(0,1),value(1,1),x-ix),y-iy)/100.;
+        if(!std::isfinite(v))continue;
+        const double t=f.reference+f.forecastMinutes*60.;
+        if(t<=utc&&t>t0){t0=t;before=v;}if(t>=utc&&t<t1){t1=t;after=v;}
+    }
+    if(before<0||after<0)return -1; // Outside the downloaded hours: never use stale cloud cover.
+    return std::clamp(t1>t0?std::lerp(before,after,(utc-t0)/(t1-t0)):before,0.,1.);
+}
 Gfs::Gfs(std::filesystem::path cache,Transport transport):cache_(std::move(cache)),transport_(std::move(transport)){
     if(!transport_)transport_=[](const std::string& url,DownloadProgress* p){return httpGet(url,p,{32*1024*1024,90});};
 }
@@ -118,8 +141,17 @@ Gfs::Download Gfs::fetch(double lat,double lon,double utc,DownloadProgress* prog
                 std::ostringstream url;url<<"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?dir=%2Fgfs."<<day<<"%2F"<<hh<<"%2Fatmos&file="<<file<<"&var_HGT=on&var_TMP=on&var_UGRD=on&var_VGRD=on&var_SPFH=on";
                 for(const char* l:levels)url<<"&lev_"<<l<<"_mb=on";
                 url<<"&subregion=&toplat="<<north<<"&leftlon="<<west<<"&rightlon="<<east<<"&bottomlat="<<south;
-                const std::string bytes=transport_(url.str(),progress);auto fields=decodeGrib2(bytes); // Throws on an error page.
+                std::string bytes=transport_(url.str(),progress);auto fields=decodeGrib2(bytes); // Throws on an error page.
                 if(!complete(fields))throw std::runtime_error("Incomplete GFS response");
+                // Optional drawing metadata. Its availability/encoding must never prevent a flight using its weather.
+                try{
+                    std::ostringstream cloudUrl;cloudUrl<<"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?dir=%2Fgfs."<<day<<"%2F"<<hh<<"%2Fatmos&file="<<file
+                        <<"&var_TCDC=on&lev_low_cloud_layer=on&subregion=&toplat="<<north<<"&leftlon="<<west<<"&rightlon="<<east<<"&bottomlat="<<south;
+                    const auto cloudBytes=transport_(cloudUrl.str(),progress);auto clouds=decodeGrib2(cloudBytes);
+                    if(!clouds.empty()&&std::all_of(clouds.begin(),clouds.end(),[](const auto& f){return f.discipline==0&&f.category==6&&f.number==1&&f.surface==214;})){
+                        bytes+=cloudBytes;for(auto& f:clouds)fields.push_back(std::move(f));
+                    }
+                }catch(const std::exception&){if(progress)progress->checkCancelled();}
                 std::error_code ec;std::filesystem::create_directories(cache_,ec);
                 if(!ec){const auto partial=path(k+i).string()+".tmp";{std::ofstream o{partial,std::ios::binary};o.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));}std::filesystem::rename(partial,path(k+i),ec);}
                 hours[static_cast<std::size_t>(i)]=std::move(fields);raw[static_cast<std::size_t>(i)]=bytes;

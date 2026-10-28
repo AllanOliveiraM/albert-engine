@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include "lighting.hpp"
 namespace threepp {class Scene;class Camera;class Object3D;class Texture;}
 namespace albert {
 // Window, WebGPU scene renderer (src/gpu) and ImGui. `draw` draws the ImGui windows each frame.
@@ -46,8 +47,9 @@ public:
     // adapter): Cox-Munk only.
     void setSea(bool on,double seconds,float east,float north,const threepp::Vector3& anchor,const threepp::Vector3& eastAxis,const threepp::Vector3& northAxis,float metersPerUnit);
     void setVsync(bool on);
-    // Volumetric clouds on the cloud map setWeather gives (gpu::Clouds, made when first shown) at strength 0-1 over the scene;
-    // their noise drifts with the wind (m/s toward east and north) on its clock (s). Never on a CPU adapter (too slow).
+    // Volumetric clouds on the cloud map or local coastal cover (gpu::Clouds), at strength 0-1 over the scene;
+    // 32 steps and at most ~80k rays; noise drifts with the wind (m/s toward east and north). Never on a CPU adapter.
+    void setCoastalLight(const CoastalLight& light);
     void setClouds(bool on,float strength,double seconds,float east,float north);
     [[nodiscard]] bool cloudsShown()const; // The last frame drew them (the air ready, a cloud map): only then may the shell give way.
 private:

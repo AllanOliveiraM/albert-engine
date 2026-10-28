@@ -85,6 +85,15 @@ void engineTransitions(){
 }
 void controls() {
     const albert::VisualSettings settings;
+    {
+        const auto dry=albert::coastalLight(1,.2f,0),humid=albert::coastalLight(1,.9f,.9f),fallback=albert::coastalLight(1);
+        require(humid.extinction>dry.extinction*2&&humid.baseKm<dry.baseKm,"Humidity failed to grow aerosols or lower the cloud base");
+        require(fallback.extinction>.04f&&fallback.extinction<.1f&&fallback.cover>.2f&&fallback.cover<.5f,"Marine fallback outside its visual budget");
+        require(albert::coastalLight(0).extinction==0&&albert::coastalLight(1,1).extinction<.2f,"Marine haze escaped its bounds");
+        require(albert::relativeHumidity(-1,300,101325)==-1&&albert::relativeHumidity(.022,300,101325)>.95f,"Specific humidity conversion or unavailable weather failed");
+        float previous=0;for(int i=0;i<=200;++i){const float e=albert::earthNightExposure(1-i*.006f);require(std::isfinite(e)&&e>=.8f&&e<=2.401f,"Exposure outside its photographic bounds");if(i>170)require(e>=previous,"Night adaptation reversed");previous=e;}
+    }
+
     require(albert::flightEase(-1)==0 && albert::flightEase(2)==1,"Flight endpoints unclamped");
     require(albert::flightEase(.01f)<.00002f && albert::flightEase(.99f)>.99998f,"Flight ramp is abrupt");
     float previous=0;for(int i=0;i<=1000;++i){const float t=i/1000.f, value=albert::flightEase(t);require(value>=previous-1e-6f && std::abs(value+albert::flightEase(1-t)-1)<2e-6f,"Flight curve reverses or is asymmetric");previous=value;}
@@ -855,6 +864,7 @@ void lunarAdaptationLevels(){
 int main(int argc,char** argv) {
     try {
 #ifdef ALBERT_TEST_RPC
+        if(argc>2&&std::string_view(argv[1])=="coastal-captures"){landCaptures(argv[2],false,false,false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="night-captures"){landCaptures(argv[2],false,false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="shadow-captures"){landCaptures(argv[2],false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="land-captures"){landCaptures(argv[2]);return 0;}

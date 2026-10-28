@@ -45,6 +45,25 @@ int main(int argc,char** argv){try{
             sct+=length;}
         bool refused=false;try{providers::decodeGrib2(forged);}catch(const std::runtime_error&){refused=true;}require(refused,"Oversized GRIB2 grid accepted");
     }
+    // A low-cloud average (template 4.8), made from a real grid/packing header with a constant 50% field.
+    auto cloudMessage=[&](int endHour){
+        std::size_t total=0;for(int i=0;i<8;++i)total=total<<8|static_cast<unsigned char>(bytes[8+static_cast<std::size_t>(i)]);
+        std::string message=bytes.substr(0,total);
+        auto put=[&](std::size_t at,std::uint64_t value,int n){for(int i=0;i<n;++i)message[at+static_cast<std::size_t>(i)]=static_cast<char>(value>>(8*(n-1-i)));};
+        for(std::size_t section=16;section+5<message.size()-4;){std::size_t length=0;for(int i=0;i<4;++i)length=length<<8|static_cast<unsigned char>(message[section+static_cast<std::size_t>(i)]);
+            if(message[section+4]==4){
+                message.replace(section,length,std::string(58,0));length=58;put(section,length,4);put(section+4,4,1);put(section+7,8,2);
+                put(section+9,6,1);put(section+10,1,1);put(section+17,1,1);put(section+22,214,1);
+                put(section+34,2026,2);put(section+36,10,1);put(section+37,17,1);put(section+38,endHour,1);put(section+41,1,1);
+            }
+            if(message[section+4]==5){put(section+11,0x42480000,4);put(section+15,0,2);put(section+17,0,2);put(section+19,0,1);} // 50.0f, zero packed bits.
+            section+=length;
+        }
+        put(8,message.size(),8);return message;
+    };
+    const auto cloudFields=providers::decodeGrib2(cloudMessage(13));
+    require(cloudFields.size()==1&&cloudFields[0].surface==214&&cloudFields[0].forecastMinutes==60,"Cloud average interval end or field decoding");
+    near(cloudFields[0].values[0],50,1e-9,"Cloud packing");
     const physics::Weather w(providers::gfsGrid({fields},"fixture"));const auto& g=w.grid();
     require(g.rows==9&&g.columns==10&&g.pressure.size()==41&&g.pressure.front()==100000&&g.pressure.back()==1&&std::abs(g.west+83.5)<1e-9&&std::abs(g.south-26.75)<1e-9,"Grid layout");
     // Against the radiosonde at its own heights (geopotential to ellipsoidal height).
@@ -84,6 +103,7 @@ int main(int argc,char** argv){try{
             if(hourOne[sct+4]==4){hourOne[sct+18]=hourOne[sct+19]=hourOne[sct+20]=0;hourOne[sct+21]=1;}sct+=length;}
         at+=total;}
     providers::Gfs gfs(cache,[&](const std::string& url,DownloadProgress*){if(url.ends_with(".idx")){++index;if(url.find("/12/")==std::string::npos)throw std::runtime_error("404");return std::string("1:0:d=2026101712:HGT\n");}
+        if(url.find("var_TCDC=on")!=std::string::npos)throw std::runtime_error("Optional cloud field unavailable");
         ++downloads;require(url.find("filter_gfs_0p25.pl")!=std::string::npos&&url.find("lev_0.01_mb=on")!=std::string::npos&&url.find("var_SPFH=on")!=std::string::npos&&url.find("toplat=33.75")!=std::string::npos,"Filter request");
         return url.find(".f001")!=std::string::npos?hourOne:bytes;});
     const double now=1792238400.+1800; // 12:30 UTC: cycle 12Z, hours 0 and 1.
@@ -98,6 +118,18 @@ int main(int argc,char** argv){try{
         std::size_t total=0;for(int i=0;i<8;++i)total=total<<8|static_cast<unsigned char>(bytes[8+static_cast<std::size_t>(i)]);
         {std::ofstream o{first,std::ios::binary|std::ios::trunc};o.write(bytes.data(),static_cast<std::streamsize>(total));}
         gfs.around(27.7,-82.4,now);require(downloads==3,"Incomplete cache downloaded again");
+    }
+    {
+        providers::Gfs withClouds(cache/"visual-clouds",[&](const std::string& url,DownloadProgress*){
+            if(url.ends_with(".idx"))return std::string("index");
+            if(url.find("var_TCDC=on")!=std::string::npos)return cloudMessage(url.find(".f001")!=std::string::npos?13:12);
+            return url.find(".f001")!=std::string::npos?hourOne:bytes;
+        });
+        const auto downloaded=withClouds.fetch(27.7,-82.4,now);std::vector<providers::GribField> saved;
+        for(const auto& raw:downloaded.grib)for(auto& field:providers::decodeGrib2(raw))saved.push_back(std::move(field));
+        near(providers::gfsLowCloudCover(saved,27.7,-82.4,now),.5,1e-9,"Downloaded cloud metadata survives replay bytes");
+        const auto clearAir=live->at(static_cast<physics::Tt>(t),lat,lon,5000),cloudAir=downloaded.model->at(static_cast<physics::Tt>(t),lat,lon,5000);
+        require(clearAir.temperature==cloudAir.temperature&&clearAir.density==cloudAir.density&&clearAir.humidity==cloudAir.humidity&&clearAir.wind.x==cloudAir.wind.x,"Visual cloud metadata changed the physics atmosphere");
     }
     std::printf("provider: %d index probes, %d downloads\n",index,downloads);
     // CelesTrak SW-Last5Years.csv (2026-10-18 00 UTC download), 2026-10-12 to 22: observed then predicted.
@@ -141,6 +173,13 @@ int main(int argc,char** argv){try{
         near(above.x,hwm.north,1e-12,"HWM14 north wind above the weather");near(above.y,hwm.east,1e-12,"HWM14 east wind above the weather");
         require(std::hypot(above.x,above.y)>1,"Wind above the weather");
         near(layered->at(static_cast<std::int64_t>(t),lat,lon,5000).wind.y,w.at(static_cast<std::int64_t>(t),lat,lon,5000).wind.y,1e-12,"Weather winds below the blend");
+    }
+    {
+        providers::GribField cloud;cloud.category=6;cloud.number=1;cloud.surface=214;cloud.ni=cloud.nj=2;cloud.di=cloud.dj=1;
+        cloud.la1=26;cloud.lo1=262;cloud.scan=0;cloud.reference=1000;cloud.values={0,100,100,0};auto later=cloud;later.forecastMinutes=60;later.values={100,100,100,100};
+        near(providers::gfsLowCloudCover({cloud,later},25.5,-97.5,2800),.75,1e-9,"Visual cloud cover space/time interpolation");
+        require(providers::gfsLowCloudCover({cloud,later},25.5,-97.5,5000)<0&&providers::gfsLowCloudCover({},25.5,-97.5,1000)<0,"Missing or stale cloud fields should be unknown");
+        near(providers::gfsLowCloudCover({cloud},26,-98,1000),0,1e-9,"Clear GFS cloud cover was replaced by a default");
     }
     std::cout<<"weather_test: ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

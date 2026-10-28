@@ -20,7 +20,10 @@ struct Capture {std::string fileName;};
 struct Orbit {double azimuthRadians=0,elevationRadians=0,distanceScale=1;};
 struct SetTime {std::optional<double> utcSeconds,rate;bool live=false,hold=false;}; // Unset fields keep their value; hold moves the instant without a discontinuity.
 // Latest state of the external flight, for the on-screen panel; active=false hides it.
-struct FlightTelemetry {bool active=false,burning=false,clamped=false,landed=false;std::string vehicle,atmosphere,physics;double elapsed=0,height=0,speed=0,mach=0,dynamicPressure=0,mass=0,propellant=0,windNorth=0,windEast=0;int stage=0,stages=0;};
+struct FlightTelemetry {bool active=false,burning=false,clamped=false,landed=false;std::string vehicle,atmosphere,physics;double elapsed=0,height=0,speed=0,mach=0,dynamicPressure=0,mass=0,propellant=0,windNorth=0,windEast=0;int stage=0,stages=0;
+    // Drawing only: near-surface weather at the flight position. Unknown humidity/cover: -1.
+    double airTemperature=0,airPressure=0,specificHumidity=-1,lowCloudCover=-1,weatherLatitude=0,weatherLongitude=0;
+};
 using Command=std::variant<Create,Remove,Visibility,Append,Replace,Focus,Capture,Orbit,InstallModel,RemoveModel,CreateLayer,RemoveLayer,LayerVisibility,SetTime,FlightTelemetry>;
 enum class Code {Ok,Invalid,NotFound,Exhausted,Unavailable,Cancelled};
 struct Reply {Code code=Code::Ok;std::string message;std::uint64_t revision=0;};

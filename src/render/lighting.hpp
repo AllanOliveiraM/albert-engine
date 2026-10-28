@@ -12,6 +12,10 @@ std::shared_ptr<threepp::ShaderMaterial> assistedMaterial(threepp::Color color,f
 // Mallama and Hilton's phase curve). Degrees: the sun-Moon-camera and Earth-Moon-camera angles and the sun-Earth-Moon angle;
 // the Earth-Moon distance in Earth radii.
 float lunarAdaptation(double phase,double earthward,double earthPhase,double earthDistance);
+// Drawing-only marine boundary layer; fractions 0-1, lengths km, extinction /km.
+struct CoastalLight {float extinction=0,scaleKm=.8f,cover=-1,baseKm=.9f,topKm=2.2f;};
+float relativeHumidity(double specificHumidity,double temperature,double pressure); // -1 if unknown.
+CoastalLight coastalLight(float strength,float humidity=-1,float cloudCover=-1);
 float siteNight(float sunHeight); // Sine of the local solar elevation: lamps fade on from +3 to -4 degrees.
 float earthNightExposure(float sunHeight); // Bounded photographic adaptation, shared with offscreen captures.
 }
