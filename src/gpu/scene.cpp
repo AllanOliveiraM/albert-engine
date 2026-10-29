@@ -161,7 +161,7 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) position: vec3f, 
 Program surfaceProgram(){Program p;p.wgsl=builtinWgsl;p.attributes={{"normal",3},{"uv",2},{"uv2",2}};p.textures={"map","alphaMap","lightMap","bumpMap","roughnessMap"};return p;}
 struct SceneRenderer::Impl {
     Context& gpu;WGPUDevice device;WGPUQueue queue;
-    std::unique_ptr<Fisheye> lens;
+    std::unique_ptr<Fisheye> lens,scaler;
     // Depth and multisampled colour (resolved into the target) by size, two kept: a second, smaller view keeps its own.
     struct Targets {WGPUTexture depth=nullptr,colour=nullptr;WGPUTextureView depthView=nullptr,colourView=nullptr;unsigned width=0,height=0,samples=0;std::uint64_t used=0;} slots[2];
     WGPUTextureView depthView=nullptr,colourView=nullptr; // This render's.
@@ -559,11 +559,14 @@ bool SceneRenderer::cloudsShown()const{return impl_->clouded;}
 const std::map<std::string,double>& SceneRenderer::gpuPassMilliseconds()const{return impl_->passTiming.latest();}
 void SceneRenderer::submitted(){auto& g=*impl_;g.passTiming.submitted();if(g.mapPending){wgpuBufferMapAsync(g.readback,WGPUMapMode_Read,0,16,g.pendingMap);g.mapPending=false;}}
 void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,unsigned width,unsigned height,WGPUCommandEncoder encoder){
+    const float scale=std::clamp(renderScale,.25f,1.f);const bool scaled=scale<.999f;
+    if(scaled){width=std::max(1u,static_cast<unsigned>(width*scale+.5f));height=std::max(1u,static_cast<unsigned>(height*scale+.5f));}
     auto& g=*impl_;g.passTiming.begin(measured);++g.frame;g.drawn=g.shadowDrawn=0;const unsigned msaa=samples>1?4u:1u;g.ensureDepth(width,height,msaa);g.streamBudget=Impl::streamLimit;
     const auto output=target;
     const bool nativeMedia=!reducedMedia||(std::getenv("ALBERT_MEDIA_NATIVE")&&std::string_view(std::getenv("ALBERT_MEDIA_NATIVE"))=="1");
 
     if(fisheye){if(!g.lens)g.lens=std::make_unique<Fisheye>(g.gpu);target=g.lens->source(width,height);}
+    else if(scaled){if(!g.scaler)g.scaler=std::make_unique<Fisheye>(g.gpu,false);target=g.scaler->source(width,height);}
     scene.updateMatrixWorld();if(!camera.parent)camera.updateMatrixWorld();
     // Reversed-Z infinite perspective: depth = near / -z, 1 at the near plane, 0 at infinity.
     // Orthographic: depth = (far + z) / (far - near), 1 at the near plane and 0 at the far one.
@@ -857,7 +860,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         g.pendingMap=cb;g.mapPending=true;
     }
     g.passTiming.finish(encoder);
-    if(fisheye)g.lens->draw(encoder,output);
+    if(fisheye)g.lens->draw(encoder,output);else if(scaled)g.scaler->draw(encoder,output);
     wgpuInstanceProcessEvents(g.gpu.instance());
     if(g.frame%20==0)g.evict();
 }

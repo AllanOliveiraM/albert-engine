@@ -5,7 +5,7 @@ namespace albert::gpu {
 // Kept before ImGui so menus, telemetry and inset views retain their normal geometry.
 class Fisheye {
 public:
-    explicit Fisheye(Context&);
+    explicit Fisheye(Context&,bool lens=true); // lens false: a plain bilinear resample (the scene drawn at a lower resolution).
     ~Fisheye();
     WGPUTextureView source(unsigned width,unsigned height);
     void draw(WGPUCommandEncoder,WGPUTextureView target);

@@ -21,9 +21,19 @@ struct Vertex { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f3
     return textureSample(image,linear,uv);
 }
 )";
+constexpr std::string_view plain=R"(
+@group(0) @binding(0) var image: texture_2d<f32>;
+@group(0) @binding(1) var linear: sampler;
+struct Vertex { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> };
+@vertex fn vs(@builtin(vertex_index) i:u32)->Vertex {
+    let p=array<vec2<f32>,3>(vec2(-1,-1),vec2(3,-1),vec2(-1,3));
+    var out:Vertex;out.position=vec4(p[i],0,1);out.uv=p[i]*vec2(0.5,-0.5)+vec2(0.5);return out;
 }
-Fisheye::Fisheye(Context& context):context_(context){
-    WGPUShaderSourceWGSL code{};code.chain.sType=WGPUSType_ShaderSourceWGSL;code.code=sv(shader);
+@fragment fn fs(in:Vertex)->@location(0) vec4<f32> { return textureSample(image,linear,in.uv); }
+)";
+}
+Fisheye::Fisheye(Context& context,bool lens):context_(context){
+    WGPUShaderSourceWGSL code{};code.chain.sType=WGPUSType_ShaderSourceWGSL;code.code=sv(lens?shader:plain);
     WGPUShaderModuleDescriptor sm{};sm.nextInChain=&code.chain;auto module=wgpuDeviceCreateShaderModule(context.device(),&sm);
     WGPUBindGroupLayoutEntry entries[2]{};entries[0].binding=0;entries[0].visibility=WGPUShaderStage_Fragment;entries[0].texture.sampleType=WGPUTextureSampleType_Float;entries[0].texture.viewDimension=WGPUTextureViewDimension_2D;
     entries[1].binding=1;entries[1].visibility=WGPUShaderStage_Fragment;entries[1].sampler.type=WGPUSamplerBindingType_Filtering;

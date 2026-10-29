@@ -40,6 +40,7 @@ albert::Display::Display(const std::string& title,WindowSize size,const std::fil
     d.context=std::make_unique<gpu::Context>(d.window->handle());d.scene=std::make_unique<gpu::SceneRenderer>(*d.context);d.scene->exposure=1.05f;
     std::printf("WebGPU: %s\n",d.context->adapter().c_str());
     d.window->onResize([this](WindowSize){unsigned w,h;impl_->framebuffer(w,h);impl_->context->resize(static_cast<int>(w),static_cast<int>(h));});
+    if(const char* r=std::getenv("ALBERT_RENDER_SCALE"))d.scene->renderScale=static_cast<float>(std::atof(r)); // ALBERT_RENDER_SCALE=0.6: the scene at 60% of the window, the interface sharp.
     if(const char* m=std::getenv("ALBERT_MAXIMIZED");m&&*m&&*m!='0')glfwMaximizeWindow(d.window->handle()); // ALBERT_MAXIMIZED=1: the window opened maximized.
     ImGui::CreateContext();ImGui_ImplGlfw_InitForOther(d.window->handle(),true);
     ImGui_ImplWGPU_InitInfo info;info.Device=d.context->device();info.RenderTargetFormat=d.context->format();info.DepthStencilFormat=WGPUTextureFormat_Undefined;ImGui_ImplWGPU_Init(&info);
@@ -128,9 +129,9 @@ unsigned long long albert::Display::renderInset(Scene& scene,Camera& camera,unsi
         if(d.inset)d.retired.emplace_back(d.inset,d.insetView);
         WGPUTextureDescriptor t{};t.size={width,height,1};t.format=d.context->format();t.usage=WGPUTextureUsage_RenderAttachment|WGPUTextureUsage_TextureBinding;t.mipLevelCount=1;t.sampleCount=1;t.dimension=WGPUTextureDimension_2D;
         d.inset=wgpuDeviceCreateTexture(d.context->device(),&t);d.insetView=wgpuTextureCreateView(d.inset,nullptr);d.insetWidth=width;d.insetHeight=height;}
-    auto& r=*d.scene;const bool clouds=r.volume.enabled,sea=r.sea.enabled,lens=r.fisheye;r.volume.enabled=false;r.sea.enabled=false;r.fisheye=false;r.measured=false;
+    auto& r=*d.scene;const bool clouds=r.volume.enabled,sea=r.sea.enabled,lens=r.fisheye;const float scale=r.renderScale;r.volume.enabled=false;r.sea.enabled=false;r.fisheye=false;r.measured=false;r.renderScale=1;
     WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(d.context->device(),nullptr);r.render(scene,camera,d.insetView,width,height,e);
-    r.volume.enabled=clouds;r.sea.enabled=sea;r.fisheye=lens;r.measured=true;
+    r.volume.enabled=clouds;r.sea.enabled=sea;r.fisheye=lens;r.measured=true;r.renderScale=scale;
     WGPUCommandBuffer commands=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(d.context->queue(),1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(e);
     return static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(d.insetView));
 }
