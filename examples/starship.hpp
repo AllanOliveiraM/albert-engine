@@ -517,8 +517,8 @@ protected:
     Vec onto(const State& s,Vec to,double kv=-1,double fastest=8,double most=12*deg,double hard=0,double mouth=0,double gain=.375)const{
         if(kv<0)kv=std::min(.4,bandwidth(s)/3);const double d=norm(to);const Vec across=s.velocity+up_*-dot(s.velocity,up_);if(!(d>0))return across*-kv;
         const Vec u=to*(1/d);const double toward=std::max(-dot(across,u),0.),brake=norm(gravity(s.position))*std::tan(lean(s,s.position+site_*-1.+up_*-dot(s.position+site_*-1.,up_),u,most))/3;
-        const double left=std::max(d-toward/kv,0.),near=hard>0?std::min(left,mouth):left;
-        const double speed=std::min({fastest,gain*kv*d,std::sqrt(2*brake*near+2*hard*(left-near))});return (u*-speed+across*-1)*kv;
+        const double left=std::max(d-toward/kv,0.),nearDistance=hard>0?std::min(left,mouth):left;
+        const double speed=std::min({fastest,gain*kv*d,std::sqrt(2*brake*nearDistance+2*hard*(left-nearDistance))});return (u*-speed+across*-1)*kv;
     }
     // From where to head across (an offset from it, like flat): the arms open eastward into a V and the hull must not cross
     // them, so off their line (more than 4 m to the side) first onto it at the corridor point (corridor m east of the axis),
