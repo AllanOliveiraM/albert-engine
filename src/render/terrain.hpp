@@ -59,6 +59,7 @@ public:
     // the region (u' = (u - bounds.x) / bounds.z, v' = (v - bounds.y) / bounds.w, u and v as the globe's;
     // uv2 keeps the global ones). Nodes across its edge keep the body's material; none restores all.
     void material(std::shared_ptr<threepp::Material> material); // Changes the base material, preserving selected geometry.
+    // Visible nodes change immediately, so the caller may release the old textures before the next update.
     void detail(std::shared_ptr<threepp::Material> material,std::optional<threepp::Vector4> bounds);
     [[nodiscard]] std::size_t detailed()const; // Drawn nodes with the region's imagery.
     // Radius of the drawn relief toward a point in the parent's local frame (its finest built node,

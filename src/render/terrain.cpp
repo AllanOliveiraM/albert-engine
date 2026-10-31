@@ -244,7 +244,11 @@ int Terrain::finestLevel()const{return impl_->finest;}
 double Terrain::coveredSolidAngle()const{return impl_->solidAngle;}
 void Terrain::material(std::shared_ptr<Material> material){auto& g=*impl_;if(g.material==material)return;g.material=std::move(material);++g.detailVersion;}
 void Terrain::detail(std::shared_ptr<Material> material,std::optional<Vector4> bounds){
-    auto& g=*impl_;if(material==g.detailMaterial&&bounds==g.detailBounds)return;g.detailMaterial=std::move(material);g.detailBounds=bounds;++g.detailVersion;}
+    auto& g=*impl_;if(material==g.detailMaterial&&bounds==g.detailBounds)return;g.detailMaterial=std::move(material);g.detailBounds=bounds;++g.detailVersion;
+    // Quality can release regional textures after update(), before this frame's render.
+    // Rebind visible nodes while their old textures still exist; hidden nodes update when selected.
+    for(const auto& key:g.selected)if(auto* node=g.node(key))g.applyDetail(*node);
+}
 std::size_t Terrain::detailed()const{std::size_t n=0;for(const auto& k:impl_->selected)if(const auto* node=impl_->node(k);node&&node->detailed)++n;return n;}
 std::optional<double> Terrain::ground(const Vector3& local)const{
     const auto& g=*impl_;const Vec d{local.x,local.y,local.z};const double length=d.length();if(g.selected.empty()||!(length>0))return std::nullopt;

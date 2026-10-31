@@ -89,8 +89,9 @@ int main(){
             return std::pair{inside,wrong};};
         const auto [inside,wrong]=audit(true);std::printf("regional imagery: %zu of %zu drawn nodes, %zu wrong\n",inside,t.drawn(),wrong);
         check(inside>0&&inside==t.detailed()&&inside<t.drawn()&&wrong==0,"Regional imagery on the nodes inside its bounds, over its coordinates");
-        t.detail(nullptr,std::nullopt);t.update(eye,nullptr,false);const auto [left,stale]=audit(false);
-        check(left==0&&stale==0&&t.detailed()==0,"Clearing the region restores the body's material and coordinates");
+        // Quality changes can release the region after update(), before this frame is drawn.
+        t.detail(nullptr,std::nullopt);const auto [left,stale]=audit(false);
+        check(left==0&&stale==0&&t.detailed()==0,"Clearing the region restores visible nodes before another update");
     }
     { // Morph: children replacing a drawn parent start on its surface (their even posts are the parent's)
       // and rise to their own heights (here 500 m per level) once the morph has run.

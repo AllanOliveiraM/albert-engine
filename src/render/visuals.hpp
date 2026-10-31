@@ -31,6 +31,8 @@ struct DecodedAssets {
     std::vector<SurfaceAssets> surfaces;
 };
 DecodedAssets loadVisualAssets(const std::filesystem::path& directory, DownloadProgress& progress);
+// Build the final box-filtered ocean mask without a full-size temporary RGBA image.
+threepp::Image oceanRoughness(const threepp::Image& image,unsigned maximum=2048);
 
 struct VisualSettings {
     bool atmosphere = true;

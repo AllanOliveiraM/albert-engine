@@ -7,10 +7,21 @@
 #include "vehicle.hpp"
 #include "terrain.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <numbers>
 #include <tuple>
 using namespace threepp;
+namespace {
+struct BuildTiming {
+    const char* kind;const std::string& id;bool enabled=std::getenv("ALBERT_LOAD_STATS")!=nullptr;
+    std::chrono::steady_clock::time_point started=std::chrono::steady_clock::now();
+    BuildTiming(const char* kind,const std::string& id):kind(kind),id(id){if(enabled)std::fprintf(stderr,"BUILD begin %s %s\n",kind,id.c_str());}
+    ~BuildTiming(){if(enabled)std::fprintf(stderr,"BUILD done %s %s %.2fms\n",kind,id.c_str(),std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());}
+};
+}
 threepp::Vector3 albert::renderPosition(core::Vector p,core::Vector origin){
     p=p-origin;return {static_cast<float>(p.x/core::earthRadiusMeters),static_cast<float>(p.z/core::earthRadiusMeters),static_cast<float>(-p.y/core::earthRadiusMeters)};
 }
@@ -62,8 +73,10 @@ void albert::SceneObjects::sync(const core::Scene& registry,double now,core::Vec
             if(o.appearance.shape==core::Shape::Builtin&&!(core::localOrbit(id)&&artisticRock(id)))continue;
             instances_[id]=o.instance;
             if(o.scenery){ // A site's: its parts and structures, in metres.
+                BuildTiming timing("site",id);
                 auto v=std::make_unique<Site>(*o.scenery);v->quality(quality_);auto mesh=v->node();mesh->scale.setScalar(static_cast<float>(1/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);sites_[id]=std::move(v);
             }else if(o.look){ // A vehicle: its body, parts, bells, plumes and jets, in metres.
+                BuildTiming timing("vehicle",id);
                 auto v=std::make_unique<Vehicle>(*o.look);v->quality(quality_);v->gasQuality(quality_<=0?0:splashQuality_);auto mesh=v->node();mesh->scale.setScalar(static_cast<float>(1/core::earthRadiusMeters));nodes_[id]=mesh;scene_.add(mesh);vehicles_[id]=std::move(v);
             }else if(artisticRock(id)){
                 auto mesh=makeArtisticRock(*core::localOrbit(id));

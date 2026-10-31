@@ -180,7 +180,7 @@ struct SceneRenderer::Impl {
     struct Compiled {WGPUShaderModule module=nullptr;WGPUBindGroupLayout layout=nullptr;WGPUPipelineLayout pipelineLayout=nullptr;Program program;};
     std::unordered_map<unsigned,Geometry> geometries;std::unordered_map<const BufferAttribute*,Attribute> attributes;std::unordered_map<unsigned,Texture> textures;std::uint64_t serials=2;std::unordered_map<unsigned,MaterialState> materials; // Serials 1, 2: white, black.
     std::unordered_map<std::string,Compiled> compiled;std::map<std::array<std::int64_t,24>,WGPURenderPipeline> pipelines;std::set<std::string> reported;
-    unsigned frame=0,drawn=0,shadowDrawn=0;bool floatFilterable=false;float tickNanoseconds=1;
+    unsigned frame=0,drawn=0,shadowDrawn=0,maxTexture2D=8192;bool floatFilterable=false;float tickNanoseconds=1;
     // Sun shadow map: depth from the light's orthographic camera, compared with PCF in the receivers.
     WGPUTexture shadowTexture=nullptr,dummyShadow=nullptr;WGPUTextureView shadowView=nullptr,dummyShadowView=nullptr;unsigned shadowSize=0;std::uint64_t shadowSerial=0,boundFrame=~0ull; // boundFrame: the shadow map serial in frameGroup (0: the dummy).
     std::uint64_t boundContact=~0ull;const Atmosphere* boundAir=nullptr;std::uint64_t boundClouds=0;WGPUSampler airSampler=nullptr,cloudSampler=nullptr;WGPUTexture noVolume=nullptr;WGPUTextureView noVolumeView=nullptr;WGPUBuffer noAir=nullptr; // Placeholders without air.
@@ -192,6 +192,8 @@ struct SceneRenderer::Impl {
     WGPUQuerySet timestamps=nullptr;WGPUBuffer resolved=nullptr,readback=nullptr;bool mapping=false,mapPending=false;double gpuMs=-1;WGPUBufferMapCallbackInfo pendingMap{};
     PassTiming passTiming;std::array<std::unique_ptr<LocalMedia>,2> media;
     explicit Impl(Context& c):gpu(c),device(c.device()),queue(c.queue()),passTiming(c){
+        WGPULimits limits{};
+        if(wgpuDeviceGetLimits(device,&limits)==WGPUStatus_Success)maxTexture2D=limits.maxTextureDimension2D;
         auto uniformLayout=[&](bool dynamic){
             WGPUBindGroupLayoutEntry e{};e.binding=0;e.visibility=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;e.buffer.type=WGPUBufferBindingType_Uniform;e.buffer.hasDynamicOffset=dynamic;
             WGPUBindGroupLayoutDescriptor d{};d.entryCount=1;d.entries=&e;return wgpuDeviceCreateBindGroupLayout(device,&d);};
@@ -397,8 +399,19 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         serial=blank?2:1;if(!source)return blank?black:white;
         auto& t=textures[source->id];t.used=frame;if(t.view)serial=t.serial;
         if(t.version==source->version()&&t.view)return t.view;
-        const Image& image=source->image();const unsigned w=image.width(),h=std::max(1u,image.height());
-        if(!w)return t.view?t.view:blank?black:white;
+        const auto fallback=[&]{return t.view?t.view:blank?black:white;};
+        if(source->images().empty())return fallback();
+        const Image& image=source->image();const unsigned w=image.width(),h=image.height();
+        if(!w||!h||w>maxTexture2D||h>maxTexture2D||image.depth()>1){
+            report("invalid image dimensions for texture "+std::to_string(source->id)+": "+std::to_string(w)+"x"+std::to_string(h));
+            return fallback();
+        }
+        const int channels=image.channels();
+        const std::size_t component=image.isFloat()?sizeof(float):image.isHalfFloat()?sizeof(std::uint16_t):1;
+        if(channels<1||channels>4||image.byteSize()!=static_cast<std::size_t>(w)*h*channels*component){
+            report("invalid pixel buffer for texture "+std::to_string(source->id));
+            return fallback();
+        }
         const WGPUTextureFormat f=format(image,exact);const std::size_t texel=f==WGPUTextureFormat_RGBA32Float?16:f==WGPUTextureFormat_RGBA16Float?8:4;
         if(t.pendingVersion!=source->version()||t.width!=w||t.height!=h||t.texel!=texel){ // Start (or restart: new version or a replaced image) a copy.
             if(t.pending)wgpuTextureRelease(t.pending);t.converted.clear();t.row=0;t.width=w;t.height=h;t.texel=texel;t.pendingVersion=source->version();

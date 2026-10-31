@@ -25,30 +25,6 @@ using namespace threepp;
 namespace {
 constexpr double pi = std::numbers::pi;
 
-Image limitResolution(Image image, unsigned maximum) {
-    // The bundled maps have power-of-two dimensions. Box-filter once on the
-    // worker, then let the GPU's mipmaps handle minification during rendering.
-    const unsigned factor = std::max(1u, image.width() / maximum);
-    if (factor == 1) return image;
-    const unsigned width = image.width() / factor, height = image.height() / factor;
-    std::vector<unsigned char> pixels(static_cast<size_t>(width) * height * 4);
-    const auto& source = image.data();
-    for (unsigned y = 0; y < height; ++y) {
-        for (unsigned x = 0; x < width; ++x) {
-            for (unsigned c = 0; c < 4; ++c) {
-                unsigned sum = 0;
-                for (unsigned dy = 0; dy < factor; ++dy) {
-                    for (unsigned dx = 0; dx < factor; ++dx) {
-                        sum += source[4 * (static_cast<size_t>(y * factor + dy) * image.width() + x * factor + dx) + c];
-                    }
-                }
-                pixels[4 * (static_cast<size_t>(y) * width + x) + c] = static_cast<unsigned char>(sum / (factor * factor));
-            }
-        }
-    }
-    return Image(std::move(pixels), width, height);
-}
-
 std::shared_ptr<Texture> texture(Image image, ColorSpace colorSpace = ColorSpace::sRGB) {
     std::vector<Image> images;
     images.push_back(std::move(image));
@@ -108,6 +84,27 @@ std::shared_ptr<ShaderMaterial> overlay() {
 }
 } // namespace
 
+Image albert::oceanRoughness(const Image& image,unsigned maximum){
+    if(!maximum||!image.width()||!image.height()||image.isFloat()||image.isHalfFloat()||image.channels()!=4)
+        throw std::invalid_argument("Ocean mask requires an RGBA byte image and positive resolution");
+    const unsigned factor=std::max(1u,image.width()/maximum),width=image.width()/factor,height=image.height()/factor;
+    const auto& source=image.data();std::vector<unsigned char> pixels(static_cast<std::size_t>(width)*height*4);
+    const std::uint64_t samples=static_cast<std::uint64_t>(factor)*factor;
+    // Apply the same roughness transform and box filter directly into the final small mask.
+    // No full-resolution RGBA copy: a 4096x2048 day map would cost another 32 MiB.
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){std::uint64_t rough=0,alpha=0;
+        for(unsigned dy=0;dy<factor;++dy)for(unsigned dx=0;dx<factor;++dx){
+            const auto at=4*(static_cast<std::size_t>(y*factor+dy)*image.width()+x*factor+dx);
+            const float water=std::clamp((source[at+2]-source[at]*1.15f)/12.f,0.f,1.f);
+            rough+=static_cast<unsigned char>(220.f-water*170.f);alpha+=source[at+3];
+        }
+        const auto at=4*(static_cast<std::size_t>(y)*width+x);
+        pixels[at]=pixels[at+1]=pixels[at+2]=static_cast<unsigned char>(rough/samples);
+        pixels[at+3]=static_cast<unsigned char>(alpha/samples);
+    }
+    return Image(std::move(pixels),width,height);
+}
+
 albert::DecodedAssets albert::loadVisualAssets(const std::filesystem::path& directory, DownloadProgress& progress) {
     (void)directory;
     constexpr const char* layers[] = {"earth-day", "earth-night", "", "moon-day", "sun", "earth-height"};
@@ -130,15 +127,7 @@ albert::DecodedAssets albert::loadVisualAssets(const std::filesystem::path& dire
         }
     }
     // A visual ocean mask inferred from the day map, not elevation or terrain.
-    const auto& day = *result.images[0];
-    auto pixels = day.data();
-    for (size_t i = 0; i < pixels.size(); i += 4) {
-        const float water = std::clamp((pixels[i + 2] - pixels[i] * 1.15f) / 12.f, 0.f, 1.f);
-        // Dielectric ocean roughness, land stays diffuse. This mask is visual.
-        const auto value = static_cast<unsigned char>(220.f - water * 170.f);
-        pixels[i] = pixels[i + 1] = pixels[i + 2] = value;
-    }
-    result.oceans = limitResolution(Image(std::move(pixels), day.width(), day.height()), 2048);
+    result.oceans=oceanRoughness(*result.images[0]);
     return result;
 }
 

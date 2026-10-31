@@ -92,6 +92,15 @@ void engineTransitions(){
 void controls() {
     const albert::VisualSettings settings;
     {
+        const std::vector<unsigned char> pixels{
+            0,0,255,255, 0,0,255,255, 255,0,0,80, 255,0,0,120,
+            0,0,255,255, 0,0,255,255, 0,0,255,160, 0,0,255,200};
+        const Image day(pixels,4,2);const auto mask=albert::oceanRoughness(day,2);
+        require(mask.width()==2&&mask.height()==1&&mask.data()==std::vector<unsigned char>{50,50,50,255,135,135,135,140},
+                "Ocean roughness transform, box filter or alpha changed");
+        require(day.data()==pixels,"Ocean mask modified the source day map");
+    }
+    {
         const auto dry=albert::coastalLight(1,.2f,0),humid=albert::coastalLight(1,.9f,.9f),fallback=albert::coastalLight(1);
         require(humid.extinction>dry.extinction*2&&humid.baseKm<dry.baseKm,"Humidity failed to grow aerosols or lower the cloud base");
         require(fallback.extinction>.04f&&fallback.extinction<.1f&&fallback.cover>.2f&&fallback.cover<.5f,"Marine fallback outside its visual budget");
