@@ -16,7 +16,7 @@ Finish paint(){return {Color(1,1,1),0,.38f,.16f};}
 Finish fixed(unsigned colour,float rough=.8f,float metal=0){return {Color(colour),1,rough,metal};}
 void triangle(Model& out,Vector3 a,Vector3 b,Vector3 c,Finish finish){const auto n=Vector3(b).sub(a).cross(Vector3(c).sub(a)).normalize();for(const auto& p:{a,b,c})out.push_back({p,n,finish});}
 void quad(Model& out,Vector3 a,Vector3 b,Vector3 c,Vector3 d,Finish finish){triangle(out,a,b,c,finish);triangle(out,a,c,d,finish);}
-void piece(Model& out,std::shared_ptr<BufferGeometry> geometry,Vector3 at,Vector3 size,Finish finish,const Quaternion& rotation={}){
+void piece(Model& out,std::shared_ptr<BufferGeometry> geometry,Vector3 at,Vector3 size,Finish finish,const Quaternion& rotation=Quaternion()){
     if(geometry->hasIndex())geometry=geometry->toNonIndexed();
     const auto* p=geometry->getAttribute<float>("position");const auto* n=geometry->getAttribute<float>("normal");
     for(int i=0;i<p->count();++i){Vector3 v(p->getX(i)*size.x,p->getY(i)*size.y,p->getZ(i)*size.z),normal(n->getX(i)/size.x,n->getY(i)/size.y,n->getZ(i)/size.z);
