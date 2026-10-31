@@ -4,6 +4,8 @@
 #include "albert/v1/engine.grpc.pb.h"
 #include "gravity_turn.hpp"
 #include <grpcpp/grpcpp.h>
+#undef near
+#undef far
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>

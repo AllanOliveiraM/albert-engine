@@ -12,6 +12,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#undef near
+#undef far
 #elif defined(__linux__)
 #include <sys/resource.h>
 #include <unistd.h>
