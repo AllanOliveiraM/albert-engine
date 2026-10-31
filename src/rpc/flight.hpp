@@ -4,8 +4,6 @@
 #include "core/bridge.hpp"
 #include "air_sources.hpp"
 #include "albert/v1/engine.grpc.pb.h"
-#undef near
-#undef far
 #include <functional>
 #include <memory>
 namespace albert::rpc {

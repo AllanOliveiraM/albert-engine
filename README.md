@@ -11,7 +11,7 @@
   <a href="https://github.com/AllanOliveiraM/albert-engine/releases"><img src="https://img.shields.io/github/v/release/AllanOliveiraM/albert-engine?include_prereleases&label=download" alt="Download"></a>
 </p>
 
-<p align="center"><sub>Feito por Allan Oliveira com IA: <b>Claude Opus 5.5</b> no Claude Code e <b>GPT-6.1 Sol</b> no Codex.</sub></p>
+<p align="center"><sub>Feito por Allan Oliveira com IA: <b>Claude Opus 5.5</b> no Claude Code, <b>GPT-6.1 Sol</b> no Codex e <b>Gemini 4 Argon</b> no Antigravity.</sub></p>
 
 <p align="center">
   <a href="docs/images/starship-separacao.webp"><img src="docs/images/starship-separacao.webp" width="100%" alt="Starship e Super Heavy logo após a separação a quente, a 61 km"></a>
