@@ -19,10 +19,11 @@ int main(int argc, char** argv) {
     try {
         albert::DownloadProgress progress;
         progress.stage("Teste", 2);
+        progress.source("example.org");
         progress.transfer(5, 10);
         const auto status = progress.snapshot();
         if (status.stage != "Teste" || status.completed != 2 ||
-            status.received != 5 || status.total != 10) {
+            status.received != 5 || status.total != 10 || status.source != "example.org") {
             throw std::runtime_error("Progresso inconsistente");
         }
         progress.cancelled = true;
@@ -36,6 +37,11 @@ int main(int argc, char** argv) {
         progress.cancelled = false;
         progress.stage("Nova tentativa", 0);
         if (progress.snapshot().received != 0) throw std::runtime_error("Progresso antigo preservado");
+        if (!progress.snapshot().source.empty()) throw std::runtime_error("Origem antiga preservada");
+        progress.transfer(1,4,albert::ProgressUnit::Items);
+        if(progress.snapshot().unit!=albert::ProgressUnit::Items)throw std::runtime_error("Unidade dos blocos locais incorreta");
+        progress.stage("HTTP",0);
+        if(progress.snapshot().unit!=albert::ProgressUnit::Bytes)throw std::runtime_error("Unidade antiga preservada");
 
         // Optional local HTTP fixture exercises real transfers, HTTP failures,
         // a successful retry, and cancellation while a response is in flight.
@@ -55,6 +61,9 @@ int main(int argc, char** argv) {
             }
             if (progress.snapshot().received != 4096 || progress.snapshot().total != 4096) {
                 throw std::runtime_error("Contagem de bytes incorreta");
+            }
+            if (progress.snapshot().source != base.substr(base.find("://")+3)) {
+                throw std::runtime_error("Origem da transferencia incorreta");
             }
             failed=false;
             try{albert::httpGet(base+"/ok",&progress,{1024,5});}catch(const std::exception& e){failed=std::string(e.what()).find("size limit")!=std::string::npos;}

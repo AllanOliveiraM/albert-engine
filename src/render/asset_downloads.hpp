@@ -31,7 +31,7 @@ public:
     struct Item {std::string file,group;int level=0;bool essential=false,done=false,active=false;std::uint64_t bytes=0,received=0;int finished=-1;}; // finished: completion order.
     struct Status {
         std::vector<Item> items;std::uint64_t totalBytes=0,doneBytes=0;
-        bool essentialReady=false,complete=false;std::string error;int retrySeconds=0;std::string focus;
+        bool essentialReady=false,complete=false;std::string error;int retrySeconds=0;std::string focus,source;
     };
     AssetDownloads(AssetCatalog catalog,Options options);
     ~AssetDownloads();

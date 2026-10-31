@@ -320,6 +320,36 @@ volume; guardados em `settings.json` no diretório de dados (o som sempre começ
 da vertical local, sem rolagem), W/A/S/D andam, Espaço/E e Ctrl/Q sobem e descem, Shift multiplica por 5, a roda ajusta a
 velocidade (0,6 × a altura sobre a superfície mais próxima por segundo, no mínimo 2 m/s); nunca abaixo de 2 m do relevo
 desenhado; a origem flutuante segue o olho como nos voos entre corpos.
+
+Os ajustes são agrupados em Imagem, Desempenho, Efeitos, Cena e Terra, Voo, Câmera, Interface e Som.
+O cabeçalho fica fixo e o conteúdo tem rolagem própria. Com pouco espaço vertical em relação à fonte,
+um seletor substitui as abas; rótulos e explicações quebram linha. Sobre mostra a autoria de Allan Oliveira
+e o link do repositório, com um ícone vetorial. O loading destaca o recurso atual, mostra a origem sem
+parâmetros da requisição e informa bytes/porcentagem individual quando o tamanho é conhecido; as demais
+transferências usam uma barra indeterminada. Horário e nome do arquivo visual ficam em Detalhes.
+
+**Perfil controlado no Linux.** `python3 scripts/profile-mission.py --mode pad --seconds 45` abre uma
+instância separada a 1280×720, qualidade leve, escala de renderização 0,6 e 30 quadros/s. Não altera as
+preferências habituais. `--mode idle` mede a vista inicial; `--mode mission` usa o cliente Starship com
+`--landings=4`, acelerando a contagem e a subida. `--quality high`, `--effects` e `--scale` permitem comparações
+separadas. O aquecimento inicial dura oito segundos após o servidor estar pronto; a duração solicitada conta
+a partir daí. O monitor também acompanha o carregamento e encerra após 240 s se o servidor não iniciar.
+
+O script imprime temperaturas em tempo real e salva `samples.csv`, `summary.json`, `app.log` e `client.log`
+em `build/profiles/`. Registra CPU, RSS, faltas de página e E/S dos dois processos, memória disponível e os
+sensores NVIDIA disponíveis; o log inclui tempo de quadro, passadas da GPU e volume de uploads. Os dados
+da GPU são do dispositivo inteiro, incluindo outros programas; 100% de CPU corresponde a um núcleo.
+Sensores ausentes ficam vazios. O monitor exige um sensor de temperatura de CPU legível e encerra somente
+os processos que iniciou ao atingir 82 °C na CPU, 78 °C na GPU, RSS de 4096 MiB ou menos de 1024 MiB de
+memória disponível. São limites conservadores do ensaio, não especificações térmicas do equipamento.
+`--loading-duty .3` limita a execução do aplicativo a 30% do tempo durante a preparação e o aquecimento;
+a medição da missão volta à execução normal. Use esse recurso quando a preparação já atingir o limite.
+Uma interrupção térmica é registrada como tal e não conta como um teste de carga concluído.
+`--runtime-duty .3` também limita o processo durante o ensaio; altera a cadência e deve ser identificado
+como execução limitada, sem comparar seus tempos de quadro com execução normal. O perfil de energia é
+apenas consultado e registrado. As temperaturas são amostradas a cada segundo; a interrupção é uma reação
+à leitura e pode ocorrer depois de um pico. O monitor não substitui os controles térmicos do equipamento.
+
 Ondas no mar (`gpu::Ocean`, Ajustes "Ondas no mar"): espectro de Pierson-Moskowitz do vento (o do voo com GFS, senão 7 m/s de
 leste) com espalhamento cos², três cascatas periódicas de 256² (512, 128 e 32 m) avançadas por ω² = g k e trazidas ao espaço
 por FFT inversa em compute (4 dispatches por quadro); a água (`albert:water`) toma a normal das inclinações e a espuma onde o

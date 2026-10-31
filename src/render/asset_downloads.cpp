@@ -118,7 +118,7 @@ void albert::AssetDownloads::run(){backgroundPriority();
 
 albert::AssetDownloads::Status albert::AssetDownloads::status() const{
     std::lock_guard lock(mutex_);Status value;value.items=items_;value.error=error_;value.focus=focus_;
-    if(active_>=0&&current_){const auto snapshot=current_->snapshot();value.items[static_cast<size_t>(active_)].received=static_cast<std::uint64_t>(std::max<std::int64_t>(0,snapshot.received));}
+    if(active_>=0&&current_){const auto snapshot=current_->snapshot();value.source=snapshot.source;value.items[static_cast<size_t>(active_)].received=static_cast<std::uint64_t>(std::max<std::int64_t>(0,snapshot.received));}
     for(const auto& item:value.items){value.totalBytes+=item.bytes;value.doneBytes+=item.done?item.bytes:std::min(item.received,item.bytes);}
     value.essentialReady=!items_.empty()&&items_.front().done;
     value.complete=std::all_of(items_.begin(),items_.end(),[](const Item& i){return i.done;});

@@ -228,7 +228,7 @@ threepp::Image albert::AssetPack::image(const std::string& name,const GeoRegion&
         progress.checkCancelled();
         const int column=solar ? std::clamp(col.tile,0,totalColumns-1) : (col.tile%totalColumns+totalColumns)%totalColumns;
         const auto key="v1/"+name+"/"+std::to_string(level)+"/"+std::to_string(row.tile)+"/"+std::to_string(column)+"."+layer.extension;
-        progress.transfer(completed,rows.size()*columns.size());
+        progress.transfer(completed,rows.size()*columns.size(),ProgressUnit::Items);
         const auto bytes=index_->read(key);
         int tw=0,th=0;
         const int channels=sixteen ? 1 : 4;
@@ -248,6 +248,12 @@ threepp::Image albert::AssetPack::image(const std::string& name,const GeoRegion&
                 const double px=std::clamp(xs[x].pixel,0.,static_cast<double>(tw-1));
                 const int x0=std::min(static_cast<int>(px),tw-2);const float fx=static_cast<float>(px-x0);
                 const size_t at=4*(static_cast<size_t>(outHeight-1-y)*outWidth+x);
+                // Whole-map startup loads usually land exactly on source pixels. Preserve their bytes
+                // directly instead of running four bilinear samples and rounding for every channel.
+                if(!elevation&&fx==0.f&&fy==0.f){
+                    const auto* source=static_cast<const unsigned char*>(decoded.get())+4*(static_cast<size_t>(y0)*tw+x0);
+                    std::copy_n(source,4,pixels.data()+at);continue;
+                }
                 for (int c=0;c<(elevation ? 1 : 4);++c) {
                     const float top=sample(x0,y0,c)*(1-fx)+sample(x0+1,y0,c)*fx;
                     const float bottom=sample(x0,y0+1,c)*(1-fx)+sample(x0+1,y0+1,c)*fx;
@@ -261,7 +267,7 @@ threepp::Image albert::AssetPack::image(const std::string& name,const GeoRegion&
         }
         ++completed;
     }
-    progress.transfer(completed,completed);
+    progress.transfer(completed,completed,ProgressUnit::Items);
     if (elevation) return threepp::Image(std::move(heights),outWidth,outHeight);
     return threepp::Image(std::move(pixels),outWidth,outHeight);
 }

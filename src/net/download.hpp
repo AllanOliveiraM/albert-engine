@@ -9,11 +9,14 @@
 
 namespace albert {
 
+enum class ProgressUnit { Bytes, Items };
 struct DownloadSnapshot {
     std::string stage = "Preparando downloads";
     int completed = 0;
     std::int64_t received = 0;
     std::int64_t total = 0;
+    std::string source;
+    ProgressUnit unit = ProgressUnit::Bytes;
 };
 
 class DownloadProgress {
@@ -21,7 +24,8 @@ public:
     std::atomic_bool cancelled{false};
 
     void stage(std::string name, int completed);
-    void transfer(std::int64_t received, std::int64_t total);
+    void transfer(std::int64_t received, std::int64_t total,ProgressUnit unit=ProgressUnit::Bytes);
+    void source(std::string name);
     [[nodiscard]] DownloadSnapshot snapshot() const;
     void checkCancelled() const;
 

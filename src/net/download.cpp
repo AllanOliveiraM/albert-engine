@@ -8,7 +8,9 @@
 #include <curl/curl.h>
 
 #include <array>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <limits>
 #include <stdexcept>
@@ -18,14 +20,26 @@ namespace albert {
 
 void DownloadProgress::stage(std::string name, int completed) {
     checkCancelled();
+    static const bool trace=std::getenv("ALBERT_LOAD_STATS")!=nullptr;
+    if(trace){
+        static const auto started=std::chrono::steady_clock::now();
+        const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
+        std::fprintf(stderr,"LOAD %.3fs step=%d %s\n",seconds,completed,name.c_str());
+    }
     std::lock_guard lock(mutex_);
-    snapshot_ = {std::move(name), completed, 0, 0};
+    snapshot_ = {std::move(name), completed, 0, 0, {},ProgressUnit::Bytes};
 }
 
-void DownloadProgress::transfer(std::int64_t received, std::int64_t total) {
+void DownloadProgress::source(std::string name) {
+    std::lock_guard lock(mutex_);
+    snapshot_.source=std::move(name);
+}
+
+void DownloadProgress::transfer(std::int64_t received, std::int64_t total,ProgressUnit unit) {
     std::lock_guard lock(mutex_);
     snapshot_.received = received;
     snapshot_.total = total;
+    snapshot_.unit=unit;
 }
 
 DownloadSnapshot DownloadProgress::snapshot() const {
@@ -38,6 +52,13 @@ void DownloadProgress::checkCancelled() const {
 }
 
 namespace {
+// Show the origin without query parameters, credentials or local cache paths.
+std::string origin(const std::string& url){
+    const auto scheme=url.find("://");const auto begin=scheme==std::string::npos?0:scheme+3;
+    auto host=url.substr(begin,url.find_first_of("/?#",begin)-begin);
+    if(const auto at=host.rfind('@');at!=std::string::npos)host.erase(0,at+1);
+    return host;
+}
 struct Response {std::string bytes;std::size_t limit;bool overflow=false;};
 std::size_t writeString(char* data, std::size_t size, std::size_t count, void* user) noexcept {
     try {
@@ -66,6 +87,7 @@ int reportProgress(void* user, curl_off_t total, curl_off_t received,
 
 std::string httpGet(const std::string& url, DownloadProgress* progress,HttpOptions options) {
     if (progress) progress->checkCancelled();
+    if (progress) progress->source(origin(url));
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), curl_easy_cleanup);
     if (!curl) throw std::runtime_error("CURL indisponivel");
 
@@ -142,6 +164,7 @@ std::uint64_t httpDownloadFile(const std::string& url,const std::filesystem::pat
     std::error_code error;auto existing=std::filesystem::exists(partial,error)?std::filesystem::file_size(partial,error):0;
     if(error||existing>expectedBytes){std::filesystem::remove(partial,error);existing=0;}
     if(existing==expectedBytes)return existing;
+    if(progress)progress->source(origin(url));
     std::unique_ptr<CURL,decltype(&curl_easy_cleanup)> curl(curl_easy_init(),curl_easy_cleanup);
     if(!curl)throw std::runtime_error("CURL indisponivel");
     FileSink sink;sink.offset=existing;sink.expected=expectedBytes;sink.curl=curl.get();sink.progress=progress;

@@ -8,6 +8,10 @@ add_test(NAME platform COMMAND platform_test)
 add_test(NAME cache_override COMMAND ${CMAKE_COMMAND} -E env
     "ALBERT_DATA_DIR=${CMAKE_CURRENT_BINARY_DIR}/test cache"
     $<TARGET_FILE:platform_test> "${CMAKE_CURRENT_BINARY_DIR}/test cache")
+add_executable(menu_layout_test menu_layout_test.cpp)
+target_include_directories(menu_layout_test PRIVATE ${PROJECT_SOURCE_DIR}/src/render)
+target_link_libraries(menu_layout_test PRIVATE albert_imgui)
+add_test(NAME menu_layout COMMAND menu_layout_test)
 add_executable(astronomy_test astronomy_test.cpp)
 target_link_libraries(astronomy_test PRIVATE albert_render threepp::threepp)
 add_test(NAME astronomy COMMAND astronomy_test ${PROJECT_SOURCE_DIR}/assets/stars.csv)

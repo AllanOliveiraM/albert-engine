@@ -13,6 +13,7 @@
 #include <imgui.h>
 
 #include "application.hpp"
+#include "menu.hpp"
 #include "platform.hpp"
 #include "download.hpp"
 #include "visuals.hpp"
@@ -191,6 +192,7 @@ void waitForEssential(albert::AssetDownloads& assets,albert::DownloadProgress& p
         const auto& item=status.items.front();
         const auto stage=status.error.empty()?std::string("Baixando dados visuais essenciais"):"Dados essenciais: nova tentativa em "+std::to_string(status.retrySeconds)+" s ("+status.error.substr(0,60)+")";
         if(stage!=shown){progress.stage(stage,0);shown=stage;}
+        progress.source(status.source);
         progress.transfer(static_cast<std::int64_t>(item.received),static_cast<std::int64_t>(item.bytes));
         std::this_thread::sleep_for(std::chrono::milliseconds(100));progress.checkCancelled();
     }
@@ -638,9 +640,9 @@ private:
     std::future<LoadedData> pending_;
 };
 
-void drawLoadingBar(float fraction, bool indeterminate, bool animated, const ImVec4& tint) {
+void drawLoadingBar(float fraction, bool indeterminate, bool animated, const ImVec4& tint,float height=6.f) {
     const auto origin = ImGui::GetCursorScreenPos();
-    const float width = std::max(1.f, ImGui::GetContentRegionAvail().x), height = 6.f;
+    const float width = std::max(1.f, ImGui::GetContentRegionAvail().x);
     auto* draw = ImGui::GetWindowDrawList();
     draw->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
                         ImGui::GetColorU32(ImVec4(.10f, .16f, .21f, 1.f)), height / 2);
@@ -717,10 +719,22 @@ std::string offsetLabel(double seconds) {
 }
 
 void drawLoadingLabel(const char* label, const char* value) {
-    const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-    ImGui::TextDisabled("%s", label);
-    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), right - ImGui::CalcTextSize(value).x));
-    ImGui::TextDisabled("%s", value);
+    const float available=ImGui::GetContentRegionAvail().x;
+    const float needed=ImGui::CalcTextSize(label).x+ImGui::CalcTextSize(value).x+ImGui::GetStyle().ItemSpacing.x;
+    const float right=ImGui::GetCursorPosX()+available;
+    albert::menu::hint(label);
+    if(needed<=available)ImGui::SameLine(right-ImGui::CalcTextSize(value).x);
+    albert::menu::hint(value);
+}
+
+std::string transferBytes(std::int64_t count){
+    const double bytes=static_cast<double>(std::max<std::int64_t>(0,count));
+    char text[40];
+    if(bytes>=1024.*1024.*1024.)std::snprintf(text,sizeof text,"%.1f GB",bytes/(1024.*1024.*1024.));
+    else if(bytes>=1024.*1024.)std::snprintf(text,sizeof text,"%.1f MB",bytes/(1024.*1024.));
+    else if(bytes>=1024.)std::snprintf(text,sizeof text,"%.0f KB",bytes/1024.);
+    else std::snprintf(text,sizeof text,"%.0f B",bytes);
+    return text;
 }
 
 void drawDownloadStatus(DataLoader& loader) {
@@ -741,35 +755,30 @@ void drawDownloadStatus(DataLoader& loader) {
     animation.individual += (individual - animation.individual) * blend;
     if (ready) animation.overall = animation.individual = 1.f;
 
-    const auto indicator = ImGui::GetCursorScreenPos();
-    const float radius = ImGui::GetTextLineHeight() * .34f;
-    const ImVec2 center(indicator.x + radius + 1, indicator.y + ImGui::GetTextLineHeight() * .5f);
-    const auto accent = failed ? ImVec4(1.f, .55f, .45f, 1.f) : ImVec4(.35f, .82f, .91f, 1.f);
-    auto* draw = ImGui::GetWindowDrawList();
-    draw->AddCircle(center, radius, ImGui::GetColorU32(ImVec4(.16f, .26f, .32f, 1.f)), 24, 1.5f);
-    const float angle = static_cast<float>(ImGui::GetTime()) * 2.8f;
-    draw->PathArcTo(center, radius, ready || failed ? 0.f : angle,
-                    ready || failed ? 6.283185f : angle + 4.3f, 24);
-    draw->PathStroke(ImGui::GetColorU32(accent), 0, 1.5f);
-    ImGui::Dummy(ImVec2(radius * 2 + 2, ImGui::GetTextLineHeight()));
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s", failed ? "CARREGAMENTO INTERROMPIDO" : ready ? "CENA PRONTA" : "CARREGANDO A CENA");
-
-    char percentage[32];
-    std::snprintf(percentage, sizeof(percentage), "%d%%", static_cast<int>(animation.overall * 100.f));
-    drawLoadingLabel("Progresso geral", percentage);
-    drawLoadingBar(animation.overall, false, !failed && !ready, accent);
+    const auto accent = failed ? ImVec4(1.f,.55f,.45f,1.f) : ImVec4(.35f,.82f,.91f,1.f);
+    ImGui::TextWrapped("%s",failed?"Carregamento interrompido":ready?"Cena pronta":status.stage.c_str());
+    if(!ready){
+        if(status.source.empty())albert::menu::hint("Origem: biblioteca local ou cache");
+        else {
+            const auto source=(status.source.find("jpl.nasa.gov")!=std::string::npos?"NASA/JPL - ":"Origem: ")+status.source;
+            albert::menu::hint(source.c_str());
+        }
+        std::string transfer;
+        if(measurable){
+            transfer=status.unit==albert::ProgressUnit::Items?
+                std::to_string(status.received)+" de "+std::to_string(status.total)+" blocos":
+                transferBytes(status.received)+" de "+transferBytes(status.total);
+            const auto percentage=std::to_string(static_cast<int>(individual*100.f))+"%";
+            drawLoadingLabel(transfer.c_str(),percentage.c_str());
+        }else if(status.received>0)albert::menu::hint((transferBytes(status.received)+" recebidos").c_str());
+        else albert::menu::hint(status.source.empty()?"Preparando dados...":"Aguardando resposta...");
+        drawLoadingBar(animation.individual,!measurable&&!failed,!failed,accent);
+    }
     ImGui::Spacing();
-    const float stageY = ImGui::GetCursorPosY();
-    ImGui::TextWrapped("%s", status.stage.c_str());
-    // Reserve two lines so long stage names and transfer updates do not move the card.
-    ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), stageY + ImGui::GetTextLineHeight() * 2 + ImGui::GetStyle().ItemSpacing.y));
-    if (measurable || ready)
-        std::snprintf(percentage, sizeof(percentage), "%d%%", static_cast<int>(animation.individual * 100.f));
-    else std::snprintf(percentage, sizeof(percentage), "%s", failed ? "Interrompido" : "Em andamento");
-    drawLoadingLabel("Etapa atual", percentage);
-    drawLoadingBar(animation.individual, !measurable && !ready && !failed, !failed && !ready, accent);
-    ImGui::TextDisabled("Etapa %d de %d", std::min(status.completed + 1, loadSteps()), loadSteps());
+    char steps[48];std::snprintf(steps,sizeof steps,"Etapa %d de %d",std::min(status.completed+1,loadSteps()),loadSteps());
+    char percentage[16];std::snprintf(percentage,sizeof percentage,"%d%%",static_cast<int>(animation.overall*100.f));
+    drawLoadingLabel(steps,percentage);
+    drawLoadingBar(animation.overall,false,!failed&&!ready,accent,3.f);
     if (!loader.error.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.55f, 0.45f, 1.f));
         ImGui::TextWrapped("Nao foi possivel concluir o carregamento.");
@@ -1037,22 +1046,26 @@ int albert::runRenderer(int argc, char** argv) {
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, opacity);
             ImGui::SetNextWindowPos(ImVec2(display.x / 2, display.y / 2 - lift),
                                    ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-            ImGui::SetNextWindowSize(ImVec2(std::min(480.f, display.x - 24.f), 0));
+            const float width=std::min(480.f*std::max(1.f,ImGui::GetFontSize()/16.f),display.x-24.f);
+            ImGui::SetNextWindowSizeConstraints(ImVec2(width,0),ImVec2(width,std::max(1.f,display.y-24.f)));
+            ImGui::SetNextWindowSize(ImVec2(width, 0));
             ImGui::Begin("Carregamento", nullptr,
                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize);
-            ImGui::Text("ALBERT ENGINE");
-            ImGui::TextDisabled("PREPARANDO A SIMULACAO");
+            ImGui::TextColored(ImVec4(.5f,.86f,.93f,1),"ALBERT ENGINE");
             ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            const auto timing=timeService.status();
-            if(timing.synchronizing) ImGui::TextDisabled("Conferindo horario na internet...");
-            else if(timing.quality==albert::time::Quality::Local) ImGui::TextColored(ImVec4(1,.7f,.4f,1),"Horario local: sem confirmacao externa");
-            else ImGui::TextDisabled("Horario conferido na internet");
             drawDownloadStatus(downloads);
+            if(ImGui::CollapsingHeader("Detalhes")){
+                const auto timing=timeService.status();
+                if(timing.synchronizing)albert::menu::hint("Conferindo horario na internet...");
+                else if(timing.quality==albert::time::Quality::Local)albert::menu::hint("Horario local, ainda sem confirmacao externa.");
+                else albert::menu::hint(("Horario: "+timing.source).c_str());
+                if(assetDownloads){
+                    const auto status=assetDownloads->status();
+                    for(const auto& item:status.items)if(item.active){albert::menu::hint(("Arquivo: "+item.file).c_str());break;}
+                }
+            }
             ImGui::Spacing();
-            ImGui::TextWrapped("%s",assetDownloads?"Dados visuais essenciais baixados ao abrir; as demais resolucoes continuam em segundo plano. Buscando as posicoes reais dos corpos.":"Imagens incluidas no programa. Buscando as posicoes reais dos corpos disponiveis.");
             if (ImGui::Button("Sair", ImVec2(-1, 32))) graphics.close();
             ImGui::End();
             ImGui::PopStyleVar();
@@ -1393,13 +1406,15 @@ int albert::runRenderer(int argc, char** argv) {
             const bool vehicleFocus=focus.front()!='@'&&registry.get(focus).look!=nullptr;
             const float margin = 16.f;
             const float barWidth = std::min(420.f, display.x - margin * 2);
+            const float navigationRow=std::max(38.f,ImGui::GetFrameHeight());
+            const float navigationHeight=navigationRow+20.f+(vehicleFocus?ImGui::GetFrameHeightWithSpacing():0.f);
             ImGui::SetNextWindowPos(ImVec2(margin, margin), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(barWidth, vehicleFocus?94.f:58.f));
+            ImGui::SetNextWindowSize(ImVec2(barWidth, navigationHeight));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
             ImGui::Begin("Navegacao", nullptr, flags | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
             protectPanel();
             const auto menuPosition = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("##Menu", ImVec2(38, 38))) menuOpen = !menuOpen;
+            if (ImGui::Button("##Menu", ImVec2(navigationRow, navigationRow))) menuOpen = !menuOpen;
             auto* draw = ImGui::GetWindowDrawList();
             const ImU32 icon = ImGui::GetColorU32(ImVec4(180/255.f, 230/255.f, 240/255.f, 1.f));
             for (int line = 0; line < 3; ++line) {
@@ -1407,22 +1422,24 @@ int albert::runRenderer(int argc, char** argv) {
                 draw->AddLine(ImVec2(menuPosition.x + 10, y), ImVec2(menuPosition.x + 28, y), icon, 1.8f);
             }
             ImGui::SameLine();
+            if(barWidth>360.f*ImGui::GetFontSize()/16.f){
             ImGui::BeginGroup();
             ImGui::Dummy(ImVec2(0, 4));
             ImGui::TextColored(ImVec4(.6f,.88f,.95f,1), "A L B E R T");
 
             ImGui::EndGroup();
             ImGui::SameLine();
+            }
             const ImVec2 pickerPosition=ImGui::GetCursorScreenPos();const float pickerButtonWidth=ImGui::GetContentRegionAvail().x;
-            const bool openPicker=ImGui::Button("##Objeto atual",ImVec2(-1,38));
+            const bool openPicker=ImGui::Button("##Objeto atual",ImVec2(-1,navigationRow));
             auto* pickerDraw=ImGui::GetWindowDrawList();const ImU32 pickerColor=ImGui::GetColorU32(ImGuiCol_Text);
-            pickerDraw->PushClipRect(ImVec2(pickerPosition.x+12,pickerPosition.y),ImVec2(pickerPosition.x+pickerButtonWidth-30,pickerPosition.y+38),true);
-            pickerDraw->AddText(ImVec2(pickerPosition.x+12,pickerPosition.y+(38-ImGui::GetFontSize())*.5f),pickerColor,focusName(focus));pickerDraw->PopClipRect();
-            const float arrowX=pickerPosition.x+pickerButtonWidth-18,arrowY=pickerPosition.y+19;
+            pickerDraw->PushClipRect(ImVec2(pickerPosition.x+12,pickerPosition.y),ImVec2(pickerPosition.x+pickerButtonWidth-30,pickerPosition.y+navigationRow),true);
+            pickerDraw->AddText(ImVec2(pickerPosition.x+12,pickerPosition.y+(navigationRow-ImGui::GetFontSize())*.5f),pickerColor,focusName(focus));pickerDraw->PopClipRect();
+            const float arrowX=pickerPosition.x+pickerButtonWidth-18,arrowY=pickerPosition.y+navigationRow*.5f;
             pickerDraw->AddLine(ImVec2(arrowX-4,arrowY-2),ImVec2(arrowX,arrowY+2),pickerColor,1.5f);pickerDraw->AddLine(ImVec2(arrowX,arrowY+2),ImVec2(arrowX+4,arrowY-2),pickerColor,1.5f);
             if(openPicker){focusSearch.fill(0);ImGui::OpenPopup("Selecionar objeto");}
             const float pickerWidth=std::min(390.f,display.x-32.f);
-            ImGui::SetNextWindowPos(ImVec2(std::clamp(pickerPosition.x,16.f,std::max(16.f,display.x-pickerWidth-16.f)),pickerPosition.y+46),ImGuiCond_Appearing);
+            ImGui::SetNextWindowPos(ImVec2(std::clamp(pickerPosition.x,16.f,std::max(16.f,display.x-pickerWidth-16.f)),pickerPosition.y+navigationRow+8),ImGuiCond_Appearing);
             ImGui::SetNextWindowSizeConstraints(ImVec2(pickerWidth,0),ImVec2(pickerWidth,std::max(120.f,display.y-90.f)));
             if(ImGui::BeginPopup("Selecionar objeto")){
                 protectPanel();
@@ -1486,55 +1503,60 @@ int albert::runRenderer(int argc, char** argv) {
             menuProgress = std::clamp(menuProgress + (menuOpen ? 1.f : -1.f) * ImGui::GetIO().DeltaTime / .24f, 0.f, 1.f);
             const float menuReveal = smoothstep(menuProgress);
             if (menuReveal > 0.f) {
-                const float panelWidth = std::min(330.f, display.x - 32.f);
-                ImGui::SetNextWindowPos(ImVec2(margin - (1.f - menuReveal) * (panelWidth + margin), 94), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(panelWidth, std::max(80.f, display.y - 110.f)));
+                const float panelWidth = std::min(420.f*std::max(1.f,ImGui::GetFontSize()/16.f), display.x-margin*2);
+                const float panelTop=margin+navigationHeight+12.f;
+                ImGui::SetNextWindowPos(ImVec2(margin - (1.f - menuReveal) * (panelWidth + margin), panelTop), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(panelWidth, std::max(1.f, display.y-panelTop-margin)));
                 ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * menuReveal);
                 ImGui::Begin("Menu lateral", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                 protectPanel();
-                ImGui::TextColored(ImVec4(.5f,.86f,.93f,1), "%s", focusName(focus));
-                if(focus.front()!='@' && albert::core::localOrbit(focus)) {
-                    ImGui::TextDisabled("Orbita aproximada offline");
-                    const auto* surface=albert::core::surfaceBody(focus);
-                    ImGui::TextWrapped("%s",surface&&!surface->notice.empty()&&solids.contains(focus)?std::string(surface->notice).c_str():solids.measuredShape(focus)?"Forma observada DSK; mosaico Viking. Registro da imagem sobre o modelo ainda nao validado.":solids.contains(focus)?(surface&&surface->axesMeters[0]>0?"Mosaico Viking NASA/JPL/USGS; forma elipsoidal de referencia IAU. Sem relevo medido.":surface&&surface->partialMap?"Mapa parcial NASA. Areas uniformes ou borradas podem nao ter observacoes. Sem relevo medido.":"Mapa NASA do objeto; resolucao e cobertura variam. Sem relevo medido."):albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
-                }
-                if(focus==targets::Moon&&eclipses.lunarActive())ImGui::TextWrapped("Eclipse lunar: luz atmosferica avermelhada aproximada.");
-                if(solids.hazy(focus)){bool surface=solids.surfaceView(focus);if(ImGui::Checkbox("Superficie em infravermelho (938 nm)",&surface))solids.showSurface(focus,surface);}
-                if(solids.faintRings(focus)){
-                    bool enhanced=solids.ringsEnhanced(focus);if(ImGui::Checkbox("Realcar aneis tenues",&enhanced))solids.enhanceRings(focus,enhanced);
-                    ImGui::PushTextWrapPos(0);ImGui::TextDisabled(enhanced?"Brilho esticado, como em longa exposicao; proporcoes mantidas.":"Aneis escuros ou de poeira: quase invisiveis em luz visivel.");ImGui::PopTextWrapPos();
-                }
-                if(comets.known(focus)){
-                    bool enhanced=comets.enhanced(focus);if(ImGui::Checkbox("Realcar coma e caudas",&enhanced))comets.enhance(focus,enhanced);
-                    ImGui::PushTextWrapPos(0);
-                    if(comets.afrho(focus)>0)ImGui::TextDisabled("Atividade medida (Afrho): %.0f cm a %.2f UA do Sol. %s",comets.afrho(focus)*100,comets.distanceAu(focus),
-                        enhanced?"Brilho em escala asinh, como em astrofotografia: coma e cauda juntas.":"Em brilho fisico, quase invisivel como numa exposicao curta.");
-                    else ImGui::TextDisabled("Sem coma: a %.1f UA do Sol, alem do inicio da atividade. Escolha uma data perto do perielio.",comets.distanceAu(focus));
-                    ImGui::TextDisabled("Poeira em cinza; ions de CO+ em azul, na direcao do vento solar.");
-                    ImGui::PopTextWrapPos();
-                }
-                if(focus.front()!='@' && !registry.get(focus).builtin) {
-                    const auto state=registry.evaluate(focus,simulatedUtc);
-                    ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : registry.get(focus).providerManaged ? "Posicoes reais; visual simplificado" : "Dados fornecidos pelo integrador");
-                }
-                ImGui::TextDisabled(freeCamera?"Camera livre: arraste para olhar, W A S D movem. F ou Esc volta.":"Arraste para girar. Role para aproximar.");
-                ImGui::Spacing();
                 const char* pages[] = {"Cena", "Dados", "Fisica", "Ajustes", "Sobre"};
-                float labels = 0; // Each tab its label's width plus an even share of the rest.
-                for (const char* page : pages) labels += ImGui::CalcTextSize(page).x;
-                const float share = (ImGui::GetContentRegionAvail().x - 4 * ImGui::GetStyle().ItemSpacing.x - labels) / 5;
-                for (int i = 0; i < 5; ++i) {
-                    if (i) ImGui::SameLine();
-                    const bool selectedPage = menuPage == i;
-                    if (selectedPage) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.09f,.29f,.36f,1));
-                    if (ImGui::Button(pages[i], ImVec2(ImGui::CalcTextSize(pages[i]).x + share, 34))) menuPage = i;
-                    if (selectedPage) ImGui::PopStyleColor();
+                const bool compactMenu=display.y-panelTop<ImGui::GetFrameHeightWithSpacing()*10.f;
+                const float closeSize=ImGui::GetFrameHeight();
+                if(ImGui::Button("X##Fechar menu",ImVec2(closeSize,closeSize)))menuOpen=false;
+                if(ImGui::IsItemHovered())ImGui::SetTooltip("Fechar menu (Esc)");
+                ImGui::SameLine();
+                if(compactMenu){
+                    ImGui::SetNextItemWidth(-1);
+                    if(ImGui::BeginCombo("##Pagina do menu",pages[menuPage])){
+                        for(int i=0;i<5;++i)if(ImGui::Selectable(pages[i],menuPage==i))menuPage=i;
+                        ImGui::EndCombo();
+                    }
+                }else{
+                    ImGui::AlignTextToFramePadding();ImGui::TextWrapped("%s",focusName(focus));
+                    albert::menu::pages(pages,menuPage);
                 }
-                ImGui::Spacing();
                 ImGui::Separator();
-                ImGui::Spacing();
+                ImGui::BeginChild(pages[menuPage],ImVec2(0,0),0,ImGuiWindowFlags_AlwaysVerticalScrollbar);
+                ImGui::PushTextWrapPos(0);
                 if (menuPage == 0) {
+                    if(focus.front()!='@' && albert::core::localOrbit(focus)) {
+                        ImGui::TextDisabled("Orbita aproximada offline");
+                        const auto* surface=albert::core::surfaceBody(focus);
+                        ImGui::TextWrapped("%s",surface&&!surface->notice.empty()&&solids.contains(focus)?std::string(surface->notice).c_str():solids.measuredShape(focus)?"Forma observada DSK; mosaico Viking. Registro da imagem sobre o modelo ainda nao validado.":solids.contains(focus)?(surface&&surface->axesMeters[0]>0?"Mosaico Viking NASA/JPL/USGS; forma elipsoidal de referencia IAU. Sem relevo medido.":surface&&surface->partialMap?"Mapa parcial NASA. Areas uniformes ou borradas podem nao ter observacoes. Sem relevo medido.":"Mapa NASA do objeto; resolucao e cobertura variam. Sem relevo medido."):albert::artisticRock(focus)?"Representacao artistica: forma e superficie nao medidas.":"Superficie ilustrativa; imagens reais ainda nao incluidas.");
+                    }
+                    if(focus==targets::Moon&&eclipses.lunarActive())ImGui::TextWrapped("Eclipse lunar: luz atmosferica avermelhada aproximada.");
+                    if(solids.hazy(focus)){bool surface=solids.surfaceView(focus);if(albert::menu::checkbox("Superficie em infravermelho (938 nm)",surface))solids.showSurface(focus,surface);}
+                    if(solids.faintRings(focus)){
+                        bool enhanced=solids.ringsEnhanced(focus);if(albert::menu::checkbox("Realcar aneis tenues",enhanced))solids.enhanceRings(focus,enhanced);
+                        ImGui::PushTextWrapPos(0);ImGui::TextDisabled(enhanced?"Brilho esticado, como em longa exposicao; proporcoes mantidas.":"Aneis escuros ou de poeira: quase invisiveis em luz visivel.");ImGui::PopTextWrapPos();
+                    }
+                    if(comets.known(focus)){
+                        bool enhanced=comets.enhanced(focus);if(albert::menu::checkbox("Realcar coma e caudas",enhanced))comets.enhance(focus,enhanced);
+                        ImGui::PushTextWrapPos(0);
+                        if(comets.afrho(focus)>0)ImGui::TextDisabled("Atividade medida (Afrho): %.0f cm a %.2f UA do Sol. %s",comets.afrho(focus)*100,comets.distanceAu(focus),
+                            enhanced?"Brilho em escala asinh, como em astrofotografia: coma e cauda juntas.":"Em brilho fisico, quase invisivel como numa exposicao curta.");
+                        else ImGui::TextDisabled("Sem coma: a %.1f UA do Sol, alem do inicio da atividade. Escolha uma data perto do perielio.",comets.distanceAu(focus));
+                        ImGui::TextDisabled("Poeira em cinza; ions de CO+ em azul, na direcao do vento solar.");
+                        ImGui::PopTextWrapPos();
+                    }
+                    if(focus.front()!='@' && !registry.get(focus).builtin) {
+                        const auto state=registry.evaluate(focus,simulatedUtc);
+                        ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : registry.get(focus).providerManaged ? "Posicoes reais; visual simplificado" : "Dados fornecidos pelo integrador");
+                    }
+                    ImGui::TextDisabled(freeCamera?"Camera livre: arraste para olhar, W A S D movem. F ou Esc volta.":"Arraste para girar. Role para aproximar.");
+                    ImGui::Spacing();
                     ImGui::TextWrapped("Personalize sua vista");
                     ImGui::TextDisabled("Graficos, Terra, camera e som ficam em Ajustes.");
                     ImGui::Spacing();
@@ -1553,7 +1575,7 @@ int albert::runRenderer(int argc, char** argv) {
                         const bool lunar=focus==targets::Moon,terrestrial=focus==targets::Earth;
                         auto& extra=visualSettings.auxiliary[focus];bool& assist=lunar?visualSettings.moonAssist:terrestrial?visualSettings.earthAssist:extra.enabled;
                         float& intensity=lunar?visualSettings.moonAssistIntensity:terrestrial?visualSettings.earthAssistIntensity:extra.intensity;
-                        ImGui::Checkbox("Clarear o lado escuro",&assist);
+                        albert::menu::checkbox("Clarear o lado escuro",assist);
                         if(assist){ImGui::SetNextItemWidth(-1);int brightness=static_cast<int>(std::round(intensity*100.f));if(ImGui::SliderInt("##Brilho auxiliar",&brightness,10,150,"Brilho auxiliar: %d%%"))intensity=brightness/100.f;ImGui::TextDisabled("Ajuda visual para a regiao sem Sol.");}
                     }
                 } else if (menuPage == 1) {
@@ -1603,7 +1625,8 @@ int albert::runRenderer(int argc, char** argv) {
                         int selected=0;
                         for(int i=0;i<6;++i) if(cache.limitMB==sizes[i]) selected=i;
                         ImGui::BeginDisabled(cloudSync.active || cloudSync.detailActive() || planets.detailActive() || regional.active());
-                        if(ImGui::Combo("Limite",&selected,"128 MB\0" "512 MB\0" "1 GB\0" "2 GB\0" "4 GB\0" "8 GB\0")) cache.setLimit(sizes[selected]);
+                        ImGui::TextUnformatted("Limite do cache");ImGui::SetNextItemWidth(-1);
+                        if(ImGui::Combo("##Limite do cache",&selected,"128 MB\0" "512 MB\0" "1 GB\0" "2 GB\0" "4 GB\0" "8 GB\0")) cache.setLimit(sizes[selected]);
                         if(ImGui::Button("Limpar cache",ImVec2(-1,34))) { cache.clear(); planets.retryDetails(); regional.retry(); }
                         ImGui::EndDisabled();
                         ImGui::TextWrapped("Posicoes, orbitas e nuvens baixadas ficam no cache. A biblioteca incluida permanece intacta.");
@@ -1650,9 +1673,9 @@ int albert::runRenderer(int argc, char** argv) {
                     }
                 } else if (menuPage == 2) {
                     auto hint=[](const char* text){ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));ImGui::TextWrapped("%s",text);ImGui::PopStyleColor();};
-                    auto check=[&](const char* label,bool& value,const char* note){if(ImGui::Checkbox(label,&value)){savePreferences();applyPhysics();}hint(note);};
-                    ImGui::TextDisabled("MODELOS DOS NOVOS VOOS");
-                    hint("Valem para os voos criados pela API sem escolher (PhysicsSettings); cada voo grava os que usou.");
+                    auto check=[&](const char* label,bool& value,const char* note){if(albert::menu::checkbox(label,value)){savePreferences();applyPhysics();}hint(note);};
+                    ImGui::TextDisabled("NOVOS VOOS");
+                    hint("Valem para novos voos que usam as configuracoes padrao.");
                     check("Mares do Sol e da Lua",preferences.thirdBodies,"A atracao de mare dos terceiros corpos (na Lua, a Terra e o Sol; em Marte, o Sol).");
                     check("Relatividade geral",preferences.relativity,"O termo de Schwarzschild do corpo central: centimetros por orbita baixa.");
                     check("Atmosfera do voo",preferences.flightAir,"Arrasto, sustentacao, aquecimento e a contrapressao nos bocais; desligada, vacuo.");
@@ -1666,50 +1689,85 @@ int albert::runRenderer(int argc, char** argv) {
                     ImGui::Spacing();ImGui::TextDisabled("SEMPRE NO MODELO");
                     hint("Gravidade em harmonicos esfericos (grau do voo; 0: massa pontual), rotacao do corpo, empuxo com contrapressao e cardas, massa e inercia variaveis com amortecimento do jato, pernas com atrito, aquecimento de estagnacao. Motores, RCS e superficies de controle vem da definicao do veiculo.");
                 } else if (menuPage == 3) {
-                    auto hint=[](const char* text){ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));ImGui::TextWrapped("%s",text);ImGui::PopStyleColor();};
-                    auto check=[&](const char* label,bool& value,const char* note=nullptr){if(ImGui::Checkbox(label,&value))savePreferences();if(note)hint(note);};
-                    auto slider=[&](const char* id,float& value,float lo,float hi,const char* format){ImGui::SetNextItemWidth(-1);if(ImGui::SliderFloat(id,&value,lo,hi,format))savePreferences();};
-                    ImGui::TextDisabled("GRAFICOS");
-                    ImGui::SetNextItemWidth(-1);if(ImGui::Combo("##Qualidade",&visualSettings.quality,"Qualidade: mais leve\0Qualidade: mais detalhes\0"))savePreferences();
-                    hint("Mais detalhes: ate 2x a resolucao da tela e sombras de 2048 px; carregados ao aproximar.");
-                    check("Antisserrilhado (4x)",preferences.antialias);
-                    check("Telemetria como na transmissão",preferences.broadcast,"Os motores de cada veículo, velocidade, altitude, propelente, o relógio T+ e os eventos da missão.");
-                    check("Painel de interferência",preferences.playground,"Durante um voo: rajadas e empurrões, falhas de motores e de sensores (ou que mentem), aborto e terminação.");
-                    check("Sincronia vertical",preferences.vsync,"Desligada, o quadro sai assim que fica pronto (pode rasgar a imagem).");
-                    {int cap=preferences.frameCap==30?0:preferences.frameCap==60?1:2;ImGui::SetNextItemWidth(-1);
-                        if(ImGui::Combo("##Limite de quadros",&cap,"Limite: 30 quadros/s\0Limite: 60 quadros/s\0Sem limite\0")){preferences.frameCap=cap==0?30:cap==1?60:0;savePreferences();}
-                        hint("30 por segundo aquece e gasta bem menos a placa e o processador.");}
-                    check("Sombras",visualSettings.shadows);
-                    check("Atmosfera",visualSettings.atmosphere);
-                    check("Relevo detalhado",visualSettings.terrain,"Copernicus 30 m na Terra, LOLA na Lua, MOLA em Marte.");
-                    check("Nuvens volumetricas",preferences.volumetricClouds,"Nuvens em 3D: tempo do voo ou clima costeiro em Starbase; satelite nas demais regioes.");
-                    check("Ondas no mar",preferences.oceanWaves,"Ondas pelo vento perto da camera; desligadas, o mar so tem a rugosidade media.");
-                    slider("##Campo de visao",preferences.fov,35,90,"Campo de visao: %.0f graus");
-                    ImGui::Spacing();ImGui::TextDisabled("TERRA");
-                    check("Nuvens em tempo real",visualSettings.clouds,"Observacoes de satelite, com atraso.");
-                    check("Luzes das cidades",visualSettings.nightLights);
-                    check("Fronteiras dos paises",visualSettings.borders);
-                    ImGui::Spacing();ImGui::TextDisabled("VISTA");
-                    check("Caminhos das orbitas",showOrbits);
-                    check("Cinturoes e nuvem de Oort",showDebris);
-                    check("Girar devagar ao chegar",preferences.autoRotate);
-                    check("Segunda vista dos voos",preferences.inset,"Com dois voos ou mais, um quadro no canto mostra o outro; clique nele para trocar.");
-                    check("Efeitos de água e vapor",preferences.deluge,"O dilúvio do pad, as nuvens da decolagem e o vapor, spray e espuma da amerissagem.");
-                    ImGui::SetNextItemWidth(-1);if(ImGui::Combo("##Nuvem de lancamento",&preferences.launchCloudQuality,"Vapor e spray: leve\0Vapor e spray: medio\0Vapor e spray: alto\0"))savePreferences();
-                    slider("##Escala da interface",preferences.uiScale,.8f,1.6f,"Interface: %.1fx");
-                    ImGui::Spacing();ImGui::TextDisabled("CAMERA");
-                    bool free=freeCamera;if(ImGui::Checkbox("Camera livre (F)",&free))toggleFreeCamera(free);
-                    hint("Arraste para olhar; W A S D, Espaco e Ctrl movem; Shift acelera; a roda ajusta a velocidade.");
-                    slider("##Sensibilidade",preferences.sensitivity,.25f,3,"Sensibilidade do mouse: %.2fx");
-                    check("Inverter o olhar vertical",preferences.invertY);
+                    auto hint=albert::menu::hint;
+                    auto check=[&](const char* label,bool& value,const char* note=nullptr){
+                        if(albert::menu::checkbox(label,value))savePreferences();
+                        if(note)hint(note);
+                    };
+                    auto slider=[&](const char* label,float& value,float lo,float hi,const char* format){
+                        ImGui::TextWrapped("%s",label);ImGui::PushID(label);ImGui::SetNextItemWidth(-1);
+                        if(ImGui::SliderFloat("##Valor",&value,lo,hi,format))savePreferences();
+                        ImGui::PopID();
+                    };
+                    hint("Salvo ao alterar.");
+                    if(albert::menu::section("Imagem",true)){
+                        ImGui::TextUnformatted("Qualidade geral");ImGui::SetNextItemWidth(-1);
+                        if(ImGui::Combo("##Qualidade",&visualSettings.quality,"Mais leve\0Mais detalhes\0"))savePreferences();
+                        hint(visualSettings.quality?"Detalhes ao aproximar, sombras de 2048 px e maior resolucao em telas HiDPI.":"Menor resolucao em telas HiDPI, sombras de 1024 px e efeitos simplificados.");
+                        check("Antisserrilhado (4x)",preferences.antialias);
+                        check("Sombras",visualSettings.shadows);
+                        check("Atmosfera",visualSettings.atmosphere);
+                        check("Relevo detalhado",visualSettings.terrain,"Copernicus 30 m na Terra, LOLA na Lua e MOLA em Marte.");
+                    }
+                    if(albert::menu::section("Desempenho",true)){
+                        int cap=preferences.frameCap==30?0:preferences.frameCap==60?1:2;
+                        ImGui::TextUnformatted("Limite de quadros");ImGui::SetNextItemWidth(-1);
+                        if(ImGui::Combo("##Limite de quadros",&cap,"30 quadros/s\0" "60 quadros/s\0Sem limite\0")){
+                            preferences.frameCap=cap==0?30:cap==1?60:0;savePreferences();
+                        }
+                        hint("30 quadros/s reduz o consumo e o aquecimento.");
+                        check("Sincronia vertical",preferences.vsync,"Sincroniza a imagem com a tela para evitar cortes entre quadros.");
+                    }
+                    if(albert::menu::section("Efeitos")){
+                        check("Nuvens volumetricas",preferences.volumetricClouds,"Nuvens em 3D; podem exigir mais da placa de video.");
+                        check("Ondas no mar",preferences.oceanWaves);
+                        check("Efeitos de agua e vapor",preferences.deluge,"Diluvio do pad, nuvem da decolagem e espuma da amerissagem.");
+                        ImGui::TextUnformatted("Vapor e spray");
+                        ImGui::BeginDisabled(!preferences.deluge||visualSettings.quality==0);
+                        int cloudQuality=visualSettings.quality?preferences.launchCloudQuality:0;
+                        ImGui::SetNextItemWidth(-1);
+                        if(ImGui::Combo("##Nuvem de lancamento",&cloudQuality,"Leve\0Medio\0Alto\0")){preferences.launchCloudQuality=cloudQuality;savePreferences();}
+                        ImGui::EndDisabled();
+                        if(!visualSettings.quality)hint("A qualidade geral Mais leve usa vapor e spray leves. Escolha Mais detalhes para liberar Medio e Alto.");
+                    }
+                    if(albert::menu::section("Cena e Terra")){
+                        check("Nuvens em tempo real",visualSettings.clouds,"Observacoes de satelite, com atraso.");
+                        check("Luzes das cidades",visualSettings.nightLights);
+                        check("Fronteiras dos paises",visualSettings.borders);
+                        check("Caminhos das orbitas",showOrbits);
+                        check("Cinturoes e nuvem de Oort",showDebris);
+                    }
+                    if(albert::menu::section("Voo")){
+                        check("Telemetria do voo",preferences.broadcast,"Motores, velocidade, altitude, propelente e eventos da missao.");
+                        check("Painel de interferencia",preferences.playground,"Rajadas, empurroes, falhas de motores e sensores, aborto e terminacao.");
+                        check("Segunda vista dos voos",preferences.inset,"Mostra o outro veiculo no canto. Clique na vista para alternar.");
+                    }
+                    if(albert::menu::section("Camera")){
+                        bool free=freeCamera;if(albert::menu::checkbox("Camera livre (F)",free))toggleFreeCamera(free);
+                        hint("Arraste para olhar. W A S D movem; Espaco e Ctrl sobem e descem; Shift acelera. F ou Esc volta.");
+                        slider("Campo de visao",preferences.fov,35,90,"%.0f graus");
+                        slider("Sensibilidade do mouse",preferences.sensitivity,.25f,3,"%.2fx");
+                        check("Inverter o olhar vertical",preferences.invertY);
+                        check("Girar devagar ao chegar",preferences.autoRotate);
+                    }
+                    if(albert::menu::section("Interface")){
+                        slider("Tamanho dos textos",preferences.uiScale,.8f,1.6f,"%.1fx");
+                    }
 #ifdef ALBERT_HAS_RPC
-                    ImGui::Spacing();ImGui::TextDisabled("SOM");
-                    ImGui::Checkbox("Som do voo",&soundOn);
-                    hint("O ruido do foguete na camera, com o atraso e o ar do caminho. Comeca mudo.");
-                    int volume=static_cast<int>(std::lround(preferences.volume*100));ImGui::SetNextItemWidth(-1);
-                    if(ImGui::SliderInt("##Volume",&volume,0,100,"Volume: %d%%")){preferences.volume=volume/100.f;savePreferences();}
+                    if(albert::menu::section("Som")){
+                        albert::menu::checkbox("Som do voo",soundOn);
+                        hint("O ruido do foguete na camera, com o atraso da distancia. Comeca mudo.");
+                        int volume=static_cast<int>(std::lround(preferences.volume*100));
+                        ImGui::TextUnformatted("Volume");ImGui::SetNextItemWidth(-1);
+                        if(ImGui::SliderInt("##Volume",&volume,0,100,"%d%%")){preferences.volume=volume/100.f;savePreferences();}
+                    }
 #endif
                 } else {
+                    ImGui::TextWrapped("Albert Engine");
+                    albert::menu::hint("Criado por");
+                    ImGui::TextWrapped("Allan Oliveira");
+                    albert::menu::repositoryLink();
+                    ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
                     ImGui::TextWrapped("O universo, na sua tela.");
                     ImGui::TextWrapped("Explore corpos celestes em escala real, com posicoes astronomicas, imagens de observacao e estrelas catalogadas.");
                     std::string included;for(const auto& [id,object]:registry.objects())if(object.builtin){(void)id;if(!included.empty())included+=", ";included+=object.name;}
@@ -1721,6 +1779,8 @@ int albert::runRenderer(int argc, char** argv) {
                         ImGui::TextWrapped("Atmosfera e brilho sao modelos visuais. Nuvens observadas possuem atraso. Imagens da superficie e do Sol sao referencias estaticas. Precisao e limites: documentacao do projeto.");
                     }
                 }
+                ImGui::PopTextWrapPos();
+                ImGui::EndChild();
                 ImGui::End();
                 ImGui::PopStyleVar();
             }
@@ -2838,9 +2898,12 @@ int albert::runRenderer(int argc, char** argv) {
                 const double lon = albert::longitude(std::atan2(earthCamera.z,-earthCamera.x)*180./PI-180.);
                 cloudSync.requestDetail(albert::cloudRegion(lon,latitude,earthCamera.length(),camera->aspect,camera->fov));
             } else cloudSync.requestDetail(std::nullopt);
+            Vector3 focusSurface; // An external object near the ground: launch-site detail around its ground point.
+            const bool nearGround=objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"
+                &&(focusSurface=objects.nodes().at(focus)->position,earth->worldToLocal(focusSurface),focusSurface.length()<1.01f)&&earthCamera.length()<1.05f;
             // A vehicle near a body's ground keeps the detail it asked for (it was released 3 s after each load,
             // as if the camera had left the body, and loaded again).
-            const bool planetReleased=planets.releaseDistantDetails(detailFocus,camera->position,visualSettings.quality,elapsed);
+            const bool planetReleased=planets.releaseDistantDetails(detailFocus,camera->position,visualSettings.quality||nearGround,elapsed);
             const bool solidReleased=solids.takeEviction();
             const bool released=planetReleased||solidReleased;
             if(released)regional.retry();
@@ -2852,9 +2915,6 @@ int albert::runRenderer(int argc, char** argv) {
             }
             if((focus!=lastRegionalFocus&&(solids.contains(focus)||solids.contains(lastRegionalFocus)))||(lastDetailQuality!=static_cast<bool>(visualSettings.quality)&&solids.contains(focus)))regional.retry();
             lastRegionalFocus=focus;lastDetailQuality=visualSettings.quality;
-            Vector3 focusSurface; // An external object near the ground: launch-site detail around its ground point.
-            const bool nearGround=objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"
-                &&(focusSurface=objects.nodes().at(focus)->position,earth->worldToLocal(focusSurface),focusSurface.length()<1.01f)&&earthCamera.length()<1.05f;
             if(!nearGround)siteRegion.reset();
             if(nearGround){
                 const double latitude=albert::geodeticLatitude(std::asin(std::clamp(focusSurface.y/focusSurface.length(),-1.f,1.f)))*180./PI;
