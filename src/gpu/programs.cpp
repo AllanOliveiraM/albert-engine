@@ -188,14 +188,14 @@ fn coastalSun(p: vec3f, sun: vec3f) -> vec3f {
     return select(vec3f(1.0), exp(-vec3f(0.88, 1.0, 1.13) * frame.coastal.x * column), frame.coastal.x > 0.0);
 }
 fn coastalScatter(c: vec3f, ray: vec3f, distance: f32, sun: vec3f, clear: Sky) -> Sky {
-    if (frame.coastal.x <= 0.0) { return clear; }
-    let t = exp(-vec3f(0.88, 1.0, 1.13) * frame.coastal.x * coastalColumn(c, ray, distance));
+    let k = max(frame.coastal.x, 0.0);
+    let t = exp(-vec3f(0.88, 1.0, 1.13) * k * coastalColumn(c, ray, distance));
     let r = clampRadius(length(c) + 0.4); let muS = dot(normalize(c), sun);
     let sunlight = transmittanceToSun(airTransmittance, airSampler, r, muS) * coastalSun(normalize(c) * r, sun);
     let diffuse = lookupIrradiance(airIrradiance, airSampler, r, muS);
     let forward = pow(max(dot(ray, sun), 0.0), 8.0);
     let source = sunlight * (0.14 + 0.22 * forward) + diffuse * 0.22;
-    return Sky(clear.radiance * t + source * (1.0 - t), clear.transmittance * t);
+    return Sky(select(clear.radiance, clear.radiance * t + source * (1.0 - t), k > 0.0), select(clear.transmittance, clear.transmittance * t, k > 0.0));
 }
 fn skySegment(camera: vec3f, ray: vec3f, point: vec3f, sun: vec3f, onGround: bool, finite: bool) -> Sky {
     let e = airEntry(camera, ray); if (!e.hit) { return Sky(vec3f(0.0), vec3f(1.0)); }
