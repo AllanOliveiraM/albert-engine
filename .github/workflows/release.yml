@@ -132,6 +132,9 @@ jobs:
     steps:
       - name: Free hosted runner space for both platforms
         run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
       - uses: actions/download-artifact@v4
         with:
           pattern: portable-*-x64

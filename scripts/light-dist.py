@@ -15,7 +15,7 @@ def light(full,output):
  spec=importlib.util.spec_from_file_location('split',ROOT/'scripts/split-asset-pack.py');split=importlib.util.module_from_spec(spec);spec.loader.exec_module(split)
  with tempfile.TemporaryDirectory() as work:catalog=split.split(pack,work,catalog_only=True)
  shutil.copytree(full,output,symlinks=True,ignore=lambda directory,names:['visuals.pak'] if pathlib.Path(directory).resolve()==full/'assets' else [])
- (output/'assets/catalog.json').write_text(json.dumps(catalog,indent=1)+'\n')
+ (output/'assets/catalog.json').write_text(json.dumps(catalog,indent=1)+'\n',encoding='utf-8',newline='\n')
  return catalog
 
 if __name__=='__main__':

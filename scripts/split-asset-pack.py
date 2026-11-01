@@ -89,7 +89,7 @@ def split(pack,output,catalog_only=False,moons=None,scale=1):
    records.append(dict(file=name,group=group,level=level,essential=group=='essential',priority=priority,bytes=total,sha256=digest,payloads=len(entries),layers=used))
  identity=hashlib.sha256('\n'.join(r['file']+' '+r['sha256'] for r in records).encode()).hexdigest()
  catalog=dict(schema='albert-asset-catalog-v1',id=identity,release='assets-'+identity[:12],total_bytes=sum(r['bytes'] for r in records),containers=records)
- (output/'catalog.json').write_text(json.dumps(catalog,indent=1)+'\n');return catalog
+ (output/'catalog.json').write_text(json.dumps(catalog,indent=1)+'\n',encoding='utf-8',newline='\n');return catalog
 
 if __name__=='__main__':
  parser=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)

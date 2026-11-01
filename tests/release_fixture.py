@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='albert-release-') as directory:
  fixture(source/'assets/visuals.pak')
  spec=importlib.util.spec_from_file_location('light',ROOT/'scripts/light-dist.py');light=importlib.util.module_from_spec(spec);spec.loader.exec_module(light)
  catalog=light.light(source,root/'light')
- assert not (root/'light/assets/visuals.pak').exists() and json.loads((root/'light/assets/catalog.json').read_text())==catalog and catalog['containers'][0]['essential']
+ assert not (root/'light/assets/visuals.pak').exists() and b'\r' not in (root/'light/assets/catalog.json').read_bytes() and json.loads((root/'light/assets/catalog.json').read_text())==catalog and catalog['containers'][0]['essential']
  # Windows file systems record no Unix mode; the light ZIP below still must.
  assert (os.name=='nt' or (root/'light/AlbertEngine').stat().st_mode&stat.S_IXUSR) and (root/'light/licenses/notice.txt').read_bytes()==b'license\n'
  parts=release.package(root/'light',output,'light',65536)
