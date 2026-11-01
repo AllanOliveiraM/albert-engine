@@ -14,8 +14,8 @@ struct Varyings { @builtin(position) clip: vec4f, @location(0) world: vec3f, @lo
     let part = select(2u+(vertex-72u)/6u,vertex/36u,solid); let face = (vertex % 36u) / 6u;
     let corners = array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(1,1),vec2f(-1,-1),vec2f(1,1),vec2f(-1,1));
     let c = corners[vertex % 6u]; let axis = face / 2u; let sign = select(-1.0,1.0,face % 2u == 0u);
-    var n = vec3f(0); n[axis] = sign; var corner = n;
-    corner[(axis+1u)%3u] = c.x*sign; corner[(axis+2u)%3u] = c.y;
+    var n = select(select(vec3f(0,0,sign),vec3f(0,sign,0),axis==1u),vec3f(sign,0,0),axis==0u);
+    var corner = select(select(vec3f(c.x*sign,c.y,sign),vec3f(c.y,sign,c.x*sign),axis==1u),vec3f(sign,c.x*sign,c.y),axis==0u);
     if (!solid) {
         if (people || kind > 4.5) { n=vec3f(0,-1,0); corner=vec3f(c.x,0,c.y); }
         else { n=vec3f(select(-1.0,1.0,part%2u==0u),0,0); corner=vec3f(0,c.x*n.x,c.y); }
