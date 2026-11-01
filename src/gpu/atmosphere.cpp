@@ -53,9 +53,10 @@ fn transmittanceUv(r: f32, mu: f32) -> vec2f {
 fn transmittanceToTop(t: texture_2d<f32>, s: sampler, r: f32, mu: f32) -> vec3f { return textureSampleLevel(t, s, transmittanceUv(r, mu), 0.0).rgb; }
 fn transmittanceAlong(t: texture_2d<f32>, s: sampler, r: f32, mu: f32, d: f32, ground: bool) -> vec3f {
     let rd = clampRadius(sqrt(d * d + 2.0 * r * mu * d + r * r)); let muD = clampCosine((r * mu + d) / rd);
+    let r0 = select(r, rd, ground); let mu0 = select(mu, -muD, ground);
+    let r1 = select(rd, r, ground); let mu1 = select(muD, -mu, ground);
     // Denominators kept above 0: half-float tables (no float32 filtering) underflow near the horizon.
-    if (ground) { return min(transmittanceToTop(t, s, rd, -muD) / max(transmittanceToTop(t, s, r, -mu), vec3f(1e-30)), vec3f(1.0)); }
-    return min(transmittanceToTop(t, s, r, mu) / max(transmittanceToTop(t, s, rd, muD), vec3f(1e-30)), vec3f(1.0));
+    return min(transmittanceToTop(t, s, r0, mu0) / max(transmittanceToTop(t, s, r1, mu1), vec3f(1e-30)), vec3f(1.0));
 }
 fn transmittanceToSun(t: texture_2d<f32>, s: sampler, r: f32, muS: f32) -> vec3f {
     let sinH = bottomRadius() / r; let cosH = -sqrt(max(1.0 - sinH * sinH, 0.0)); let a = atmosphere.solar.w;

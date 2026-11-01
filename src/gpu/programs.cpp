@@ -179,44 +179,54 @@ fn airEntry(camera: vec3f, ray: vec3f) -> AirRay { // From space: moved to the t
 fn coastalColumn(c: vec3f, ray: vec3f, distance: f32) -> f32 {
     let d = clamp(distance, 0.0, 80.0); let h0 = max(length(c) - bottomRadius(), 0.0);
     let mu = dot(normalize(c), ray); let h1 = max(h0 + d * mu + d * d * (1.0 - mu * mu) / (2.0 * bottomRadius()), 0.0);
-    let scale = max(frame.coastal.y, 0.1); let dh = (h1 - h0) / scale;
-    if (abs(dh) < 0.01) { return d * exp(-(h0 + h1) * 0.5 / scale); }
-    return d * (exp(-h0 / scale) - exp(-h1 / scale)) / dh;
+    let scale = max(frame.coastal.y, 0.1); let dh = (h1 - h0) / scale; let safeDh = select(dh, 1.0, abs(dh) < 0.01);
+    return select(d * (exp(-h0 / scale) - exp(-h1 / scale)) / safeDh, d * exp(-(h0 + h1) * 0.5 / scale), abs(dh) < 0.01);
 }
 fn coastalSun(p: vec3f, sun: vec3f) -> vec3f {
-    if (frame.coastal.x <= 0.0) { return vec3f(1.0); }
     let h = max(length(p) - bottomRadius(), 0.0); let mu = dot(normalize(p), sun); let scale = max(frame.coastal.y, 0.1);
     let column = scale * exp(-h / scale) / sqrt(max(mu, 0.0) * max(mu, 0.0) + 0.637 * scale / bottomRadius());
-    return exp(-vec3f(0.88, 1.0, 1.13) * frame.coastal.x * column);
+    return select(vec3f(1.0), exp(-vec3f(0.88, 1.0, 1.13) * frame.coastal.x * column), frame.coastal.x > 0.0);
 }
 fn coastalScatter(c: vec3f, ray: vec3f, distance: f32, sun: vec3f, clear: Sky) -> Sky {
     if (frame.coastal.x <= 0.0) { return clear; }
     let t = exp(-vec3f(0.88, 1.0, 1.13) * frame.coastal.x * coastalColumn(c, ray, distance));
-    let r = max(length(c), bottomRadius()) + 0.4; let muS = dot(normalize(c), sun);
+    let r = clampRadius(length(c) + 0.4); let muS = dot(normalize(c), sun);
     let sunlight = transmittanceToSun(airTransmittance, airSampler, r, muS) * coastalSun(normalize(c) * r, sun);
     let diffuse = lookupIrradiance(airIrradiance, airSampler, r, muS);
     let forward = pow(max(dot(ray, sun), 0.0), 8.0);
     let source = sunlight * (0.14 + 0.22 * forward) + diffuse * 0.22;
     return Sky(clear.radiance * t + source * (1.0 - t), clear.transmittance * t);
 }
-fn skyRadiance(camera: vec3f, ray: vec3f, sun: vec3f) -> Sky { // Along the whole ray (to the ground or space).
+fn skySegment(camera: vec3f, ray: vec3f, point: vec3f, sun: vec3f, onGround: bool, finite: bool) -> Sky {
     let e = airEntry(camera, ray); if (!e.hit) { return Sky(vec3f(0.0), vec3f(1.0)); }
-    let mu = e.rmu / e.r; let muS = dot(e.camera, sun) / e.r; let nu = dot(ray, sun); let ground = intersectsGround(e.r, mu);
-    let s = airScatter(e.r, mu, muS, nu, ground);
-    return coastalScatter(e.camera, ray, distanceToNearest(e.r, mu, ground), sun, Sky(s.rayleigh * rayleighPhase(nu) + s.mie * miePhase(nu), select(transmittanceToTop(airTransmittance, airSampler, e.r, mu), vec3f(0.0), ground)));
+    let r = e.r; let mu = e.rmu / r; let muS = dot(e.camera, sun) / r; let nu = dot(ray, sun); let ground0 = bottomRadius();
+    let disc = r * mu * r * mu - (r - ground0) * (r + ground0);
+    let ground = mu < 0.0 && ((finite && onGround) || disc >= 0.0);
+    var d = distanceToNearest(r, mu, ground);
+    if (finite) {
+        d = length(point - e.camera); if (ground) { d = min(d, -r * mu - safeSqrt(disc)); } // Not past the model's ground.
+    }
+    let rp = clampRadius(sqrt(d * d + 2.0 * r * mu * d + r * r)); let muD = clampCosine((r * mu + d) / rp);
+    let t0 = transmittanceToTop(airTransmittance, airSampler, select(r, rp, finite && ground), select(mu, -muD, finite && ground));
+    var t = select(t0, vec3f(0.0), ground);
+    let a = airScatter(r, mu, muS, nu, ground);
+    var rayleigh = a.rayleigh; var mie = a.mie;
+    if (finite) {
+        let t1 = transmittanceToTop(airTransmittance, airSampler, select(rp, r, ground), select(muD, -mu, ground));
+        t = min(t0 / max(t1, vec3f(1e-30)), vec3f(1.0));
+        let b = airScatter(rp, muD, clampCosine((r * muS + d * nu) / rp), nu, ground);
+        rayleigh = max(a.rayleigh - t * b.rayleigh, vec3f(0.0));
+        mie = max(a.mie - t * b.mie, vec3f(0.0)) * smoothstep(0.0, 0.01, muS); // Bruneton's twilight fix.
+    }
+    return coastalScatter(e.camera, ray, d, sun, Sky(rayleigh * rayleighPhase(nu) + mie * miePhase(nu), t));
+}
+fn skyRadiance(camera: vec3f, ray: vec3f, sun: vec3f) -> Sky { // Along the whole ray (to the ground or space).
+    return skySegment(camera, ray, camera, sun, false, false);
 }
 // A point inside the air; onGround: the point is on the ground, so a downward ray reaches it there
 // (a point on the sphere makes the discriminant ~0, and its sign noise flips the lookups per pixel).
 fn skyRadianceToPoint(camera: vec3f, point: vec3f, sun: vec3f, onGround: bool) -> Sky {
-    let ray = normalize(point - camera); let e = airEntry(camera, ray); if (!e.hit) { return Sky(vec3f(0.0), vec3f(1.0)); }
-    let r = e.r; let mu = e.rmu / r; let muS = dot(e.camera, sun) / r; let nu = dot(ray, sun); let ground0 = bottomRadius();
-    let disc = r * mu * r * mu - (r - ground0) * (r + ground0); let ground = mu < 0.0 && (onGround || disc >= 0.0);
-    var d = length(point - e.camera); if (ground) { d = min(d, -r * mu - safeSqrt(disc)); } // Not past the model's ground.
-    let t = transmittanceAlong(airTransmittance, airSampler, r, mu, d, ground);
-    let a = airScatter(r, mu, muS, nu, ground);
-    let rp = clampRadius(sqrt(d * d + 2.0 * r * mu * d + r * r)); let b = airScatter(rp, clampCosine((r * mu + d) / rp), clampCosine((r * muS + d * nu) / rp), nu, ground);
-    let rayleigh = max(a.rayleigh - t * b.rayleigh, vec3f(0.0)); let mie = max(a.mie - t * b.mie, vec3f(0.0)) * smoothstep(0.0, 0.01, muS); // Bruneton's twilight fix.
-    return coastalScatter(e.camera, ray, d, sun, Sky(rayleigh * rayleighPhase(nu) + mie * miePhase(nu), t));
+    return skySegment(camera, normalize(point - camera), point, sun, onGround, true);
 }
 fn airPoint(world: vec3f) -> vec3f { let p = (frame.planet * vec4f(world, 1.0)).xyz; return p * (1.0 - frame.airSun.w / max(length(p), 1.0)); } // Radii raised by the lowered ground.
 fn horizonPoint(c: vec3f, toward: vec3f) -> vec3f { // The model sphere's horizon seen from c, in the azimuth of `toward`.
@@ -259,13 +269,17 @@ fn skyHitsGround(c: vec3f, ray: vec3f) -> bool { let e = airEntry(c, ray); retur
 // coordinates: far from the planet (Mars: ~1e8 km, f32 steps of ~8 km) point - c would collapse.
 fn airBetween(c: vec3f, segment: vec3f, sun: vec3f) -> Sky {
     var p = c + segment; let r = length(p); let d = length(segment); var onGround = r < bottomRadius() + 0.05;
+    var finite = true; var ray = vec3f(0.0);
     if (r > topRadius()) { // Beyond the air: the whole ray, if the air lies between.
         if (!(d > 0.0)) { return Sky(vec3f(0.0), vec3f(1.0)); }
-        let ray = segment / d; let e = airEntry(c, ray);
+        ray = segment / d; let e = airEntry(c, ray);
         if (!e.hit || (length(c) > topRadius() && length(e.camera - c) >= d)) { return Sky(vec3f(0.0), vec3f(1.0)); }
-        if (!(length(c) <= topRadius() && skyHitsGround(c, ray))) { return skyRadiance(c, ray, sun); }
-        // Below the model's horizon from inside the air (the globe mesh's is lower): the horizon's air.
-        p = horizonPoint(c, ray); onGround = true;
+        if (length(c) <= topRadius() && intersectsGround(e.r, e.rmu / e.r)) {
+            // Below the model's horizon from inside the air (the globe mesh's is lower): the horizon's air.
+            p = horizonPoint(c, ray); onGround = true;
+        } else {
+            finite = false;
+        }
     } else if (onGround) {
         // Ground below the model's sphere (chords of the globe mesh sag up to ~1 km) breaks the lookups,
         // which assume the ground on it: lift such points onto it. The sagging mesh also shows ground past
@@ -274,8 +288,12 @@ fn airBetween(c: vec3f, segment: vec3f, sun: vec3f) -> Sky {
         let b0 = bottomRadius(); p = p * (b0 / min(r, b0)); let rc = max(length(c), b0 + 0.001);
         if (length(p - c) > sqrt((rc - b0) * (rc + b0))) { p = horizonPoint(c, p - c); }
     }
-    if (!(length(p - c) > 0.0)) { return Sky(vec3f(0.0), vec3f(1.0)); } // Within an f32 step of the camera (~0.5 m at the ground).
-    return skyRadianceToPoint(c, p, sun, onGround);
+    if (finite) {
+        let seg = p - c; let segLen = length(seg);
+        if (!(segLen > 0.0)) { return Sky(vec3f(0.0), vec3f(1.0)); } // Within an f32 step of the camera (~0.5 m at the ground).
+        ray = seg / segLen;
+    }
+    return skySegment(c, ray, p, sun, onGround, finite);
 }
 fn airSky(world: vec3f) -> Sky { return airBetween(frame.air.xyz, (frame.planet * vec4f(world - frame.camera.xyz, 0.0)).xyz, frame.airSun.xyz); } // Camera to a world point.
 fn airApply(world: vec3f, colour: vec3f) -> vec3f { // Aerial perspective: an opaque surface seen through the air.
