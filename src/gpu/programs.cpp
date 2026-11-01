@@ -258,21 +258,19 @@ fn skyHitsGround(c: vec3f, ray: vec3f) -> bool { let e = airEntry(c, ray); retur
 // The air between c and c + segment (planet frame, km). The segment comes from camera-relative world
 // coordinates: far from the planet (Mars: ~1e8 km, f32 steps of ~8 km) point - c would collapse.
 fn airBetween(c: vec3f, segment: vec3f, sun: vec3f) -> Sky {
-    var p = c + segment; let r = length(p); let d = length(segment);
+    var p = c + segment; let r = length(p); let d = length(segment); var onGround = r < bottomRadius() + 0.05;
     if (r > topRadius()) { // Beyond the air: the whole ray, if the air lies between.
         if (!(d > 0.0)) { return Sky(vec3f(0.0), vec3f(1.0)); }
         let ray = segment / d; let e = airEntry(c, ray);
         if (!e.hit || (length(c) > topRadius() && length(e.camera - c) >= d)) { return Sky(vec3f(0.0), vec3f(1.0)); }
+        if (!(length(c) <= topRadius() && skyHitsGround(c, ray))) { return skyRadiance(c, ray, sun); }
         // Below the model's horizon from inside the air (the globe mesh's is lower): the horizon's air.
-        if (length(c) <= topRadius() && skyHitsGround(c, ray)) { return skyRadianceToPoint(c, horizonPoint(c, ray), sun, true); }
-        return skyRadiance(c, ray, sun);
-    }
-    // Ground below the model's sphere (chords of the globe mesh sag up to ~1 km) breaks the lookups,
-    // which assume the ground on it: lift such points onto it. The sagging mesh also shows ground past
-    // the sphere's horizon, where the lifted point would get less air than the horizon: use the
-    // horizon point in that azimuth.
-    let onGround = r < bottomRadius() + 0.05;
-    if (onGround) {
+        p = horizonPoint(c, ray); onGround = true;
+    } else if (onGround) {
+        // Ground below the model's sphere (chords of the globe mesh sag up to ~1 km) breaks the lookups,
+        // which assume the ground on it: lift such points onto it. The sagging mesh also shows ground past
+        // the sphere's horizon, where the lifted point would get less air than the horizon: use the
+        // horizon point in that azimuth.
         let b0 = bottomRadius(); p = p * (b0 / min(r, b0)); let rc = max(length(c), b0 + 0.001);
         if (length(p - c) > sqrt((rc - b0) * (rc + b0))) { p = horizonPoint(c, p - c); }
     }

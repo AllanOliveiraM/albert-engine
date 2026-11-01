@@ -67,7 +67,7 @@ int main(){
         std::unique_ptr<Atmosphere> earthPtr;
         for(int orders:{1,4}){
             model.orders=orders;const auto start=std::chrono::steady_clock::now();
-            auto airPtr=std::make_unique<Atmosphere>(*gpu,model);Atmosphere& air=*airPtr;air.precompute(*gpu);wgpuDevicePoll(gpu->device(),true,nullptr);
+            auto airPtr=std::make_unique<Atmosphere>(*gpu,model);Atmosphere& air=*airPtr;air.precompute(*gpu);
             std::printf("orders %d: %.0f ms\n",orders,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
             const auto t=read(*gpu,air.table(0),0); // Texel (0, 0): r = bottom, mu = 1.
             const char* names[]{"T zenith R","T zenith G","T zenith B"};
@@ -91,60 +91,89 @@ int main(){
         }
         { // The render functions (programs.cpp `air`) on known rays: radiance relative to the sun.
             Atmosphere& earth=*earthPtr;const Atmosphere& air=earth;
-            const std::string code=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
-@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
-@compute @workgroup_size(1) fn main() {
+            const std::string skyCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(4) fn main(@builtin(local_invocation_index) i: u32) {
     let b = bottomRadius(); let camera = vec3f(0.0, 0.0, b + 0.01); let sun = vec3f(cos(0.9599), 0.0, sin(0.9599)); // Sun 55 degrees up.
-    for (var i = 0u; i < 4u; i++) {
-        let e = select(select(select(-0.0349, 0.0349, i == 2u), 0.4363, i == 1u), 1.5708, i == 0u); // Zenith, 25 degrees, 2 degrees up, 2 down (ground 0.5 km away? no: the sphere).
-        let s = skyRadiance(camera, vec3f(-cos(e), 0.0, sin(e)), sun); probe[2u * i] = vec4f(s.radiance, 0.0); probe[2u * i + 1u] = vec4f(s.transmittance, 0.0);
-    }
+    let e = select(select(select(-0.0349, 0.0349, i == 2u), 0.4363, i == 1u), 1.5708, i == 0u); // Zenith, 25 degrees, 2 degrees up, 2 down (ground 0.5 km away? no: the sphere).
+    let s = skyRadiance(camera, vec3f(-cos(e), 0.0, sin(e)), sun); probe[2u * i] = vec4f(s.radiance, 0.0); probe[2u * i + 1u] = vec4f(s.transmittance, 0.0);
+}
+)";
+            const std::string betweenCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(2) fn main(@builtin(local_invocation_index) i: u32) {
     // airBetween: a spacecraft 420 km up between a camera 3 radii out and the planet (no air between);
     // from the ground, a body far away 0.5 degrees below the model's horizon (the horizon's air, not black).
+    let b = bottomRadius(); let camera = vec3f(0.0, 0.0, b + 0.01);
     let far = vec3f(0.0, 0.0, 3.0 * b); let craft = vec3f(0.0, 0.0, b + 420.0);
-    let a = airBetween(far, craft - far, sun); probe[8] = vec4f(a.radiance, 0.0); probe[9] = vec4f(a.transmittance, 0.0);
     let dip = acos(b / (b + 0.01)) + 0.0087; let low = camera + vec3f(-cos(dip), 0.0, -sin(dip)) * 384400.0;
-    let m = airBetween(camera, low - camera, vec3f(-cos(0.0), 0.0, -0.02)); probe[10] = vec4f(m.radiance, 0.0); probe[11] = vec4f(m.transmittance, 0.0);
+    let c = select(camera, far, i == 0u);
+    let seg = select(low - camera, craft - far, i == 0u);
+    let sun = select(vec3f(-cos(0.0), 0.0, -0.02), vec3f(cos(0.9599), 0.0, sin(0.9599)), i == 0u);
+    let s = airBetween(c, seg, sun); probe[2u * i] = vec4f(s.radiance, 0.0); probe[2u * i + 1u] = vec4f(s.transmittance, 0.0);
+}
+)";
+            const std::string moonCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(16) fn main(@builtin(local_invocation_index) k: u32) {
     // From near the Moon (as the app's frame: 384 400 km, off-axis) to 4096 points within 50 km, in
     // every direction: the Earth's air never lies between (f32 cancellation once made it).
+    let sun = vec3f(cos(0.9599), 0.0, sin(0.9599));
     let moon = vec3f(-135483.594, -113303.617, -353712.875); var wrong = 0.0; var worst = 1.0; // The camera of the app's frame at Tranquility Base, 20 October 2026.
-    for (var i = 0u; i < 4096u; i++) {
+    for (var j = 0u; j < 256u; j++) {
+        let i = k * 256u + j;
         let u = fract(sin(vec3f(f32(i) * 12.9898, f32(i) * 78.233, f32(i) * 37.719)) * 43758.5453) * 2.0 - 1.0;
         let toward = moon + normalize(u + vec3f(1e-3)) * (1.0 + 49.0 * fract(f32(i) * 0.618034));
         let t = airBetween(moon, toward - moon, sun).transmittance.g; if (t < 0.999999) { wrong += 1.0; worst = min(worst, t); }
     }
-    probe[12] = vec4f(wrong, worst, 0.0, 0.0); probe[13] = vec4f(0.0);
+    probe[k] = vec4f(wrong, worst, 0.0, 0.0);
 }
 )";
-            // Far from the Earth and near its ground, in a module of their own (D3D12's compiler garbled the
-            // first probes of one shader holding every loop): the frame binds the planet ~1.4e8 km away.
-            const std::string farCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
-@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
-@compute @workgroup_size(1) fn main() {
-    let b = bottomRadius(); let sun = vec3f(cos(0.9599), 0.0, sin(0.9599));
+            // Far from the Earth and near its ground, in single-call-site modules of their own (D3D12's compiler
+            // garbled or suspended the device on shaders inlining multiple airBetween loops): the frame binds the planet ~1.4e8 km away.
+            const std::string marsFarCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(16) fn main(@builtin(local_invocation_index) k: u32) {
+    let sun = vec3f(cos(0.9599), 0.0, sin(0.9599));
     // Near Mars (~1.5e8 km from the Earth): segments from 1 m to 50 km keep a direction (no NaN, no air).
     let mars = vec3f(1.21e8, 3.4e7, -6.3e7); var marsWrong = 0.0;
-    for (var i = 0u; i < 4096u; i++) {
+    for (var j = 0u; j < 256u; j++) {
+        let i = k * 256u + j;
         let u = fract(sin(vec3f(f32(i) * 12.9898, f32(i) * 78.233, f32(i) * 37.719)) * 43758.5453) * 2.0 - 1.0;
         let s = airBetween(mars, normalize(u + vec3f(1e-3)) * pow(10.0, -3.0 + 4.7 * fract(f32(i) * 0.618034)), sun);
         if (!(s.transmittance.g == 1.0 && s.radiance.g == 0.0)) { marsWrong += 1.0; }
     }
+    probe[k] = vec4f(marsWrong, 0.0, 0.0, 0.0);
+}
+)";
+            const std::string skyFarCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(16) fn main(@builtin(local_invocation_index) k: u32) {
     // airSky as the app calls it: world points near the camera, the Earth's frame ~1.4e8 km away.
     var skyWrong = 0.0;
-    for (var i = 0u; i < 4096u; i++) {
+    for (var j = 0u; j < 256u; j++) {
+        let i = k * 256u + j;
         let u = fract(sin(vec3f(f32(i) * 12.9898, f32(i) * 78.233, f32(i) * 37.719)) * 43758.5453) * 2.0 - 1.0;
         let s = airSky(normalize(u + vec3f(1e-3)) * pow(10.0, -3.0 + 4.7 * fract(f32(i) * 0.618034)));
         if (!(s.transmittance.g == 1.0 && s.radiance.g == 0.0)) { skyWrong += 1.0; }
     }
+    probe[k] = vec4f(skyWrong, 0.0, 0.0, 0.0);
+}
+)";
+            const std::string groundFarCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(16) fn main(@builtin(local_invocation_index) k: u32) {
     // Near the ground (f32 steps of ~0.5 m at 6380 km), off-axis: segments from 1 cm to 300 m keep finite
     // air (review: a segment under one step made point - camera zero, a NaN direction).
+    let b = bottomRadius(); let sun = vec3f(cos(0.9599), 0.0, sin(0.9599));
     let ground = normalize(vec3f(0.48, -0.61, 0.63)) * (b + 0.002); var lowWrong = 0.0;
-    for (var i = 0u; i < 1024u; i++) {
+    for (var j = 0u; j < 64u; j++) {
+        let i = k * 64u + j;
         let u = fract(sin(vec3f(f32(i) * 12.9898, f32(i) * 78.233, f32(i) * 37.719)) * 43758.5453) * 2.0 - 1.0;
         let s = airBetween(ground, normalize(u + vec3f(1e-3)) * pow(10.0, -5.0 + 4.5 * fract(f32(i) * 0.618034)), sun);
         if (!(s.transmittance.g > 0.85 && s.transmittance.g <= 1.0 && s.radiance.g >= 0.0 && s.radiance.g < 1.0)) { lowWrong += 1.0; } // Ground ratios: ~0.92 at 250 m.
     }
-    probe[0] = vec4f(marsWrong, skyWrong, lowWrong, 0.0);
+    probe[k] = vec4f(lowWrong, 0.0, 0.0, 0.0);
 }
 )";
             WGPUSamplerDescriptor sd{};sd.addressModeU=sd.addressModeV=sd.addressModeW=WGPUAddressMode_ClampToEdge;sd.magFilter=sd.minFilter=WGPUFilterMode_Linear;sd.lodMaxClamp=1;sd.maxAnisotropy=1;
@@ -163,24 +192,25 @@ int main(){
                 WGPUComputePipelineDescriptor pd{};pd.compute.module=module;pd.compute.entryPoint={"main",4};WGPUComputePipeline pipe=wgpuDeviceCreateComputePipeline(gpu->device(),&pd);
                 WGPUBufferDescriptor bd{};bd.size=256;bd.usage=WGPUBufferUsage_Storage|WGPUBufferUsage_CopySrc;WGPUBuffer out=wgpuDeviceCreateBuffer(gpu->device(),&bd);
                 bd.usage=WGPUBufferUsage_MapRead|WGPUBufferUsage_CopyDst;WGPUBuffer back=wgpuDeviceCreateBuffer(gpu->device(),&bd);
-                WGPUBindGroupEntry e0[9]{};e0[0].binding=0;e0[0].buffer=frameIn?frameIn:emptyBuffer;e0[0].size=sizeof frame;
+                WGPUBindGroupEntry e0[10]{};e0[0].binding=0;e0[0].buffer=frameIn?frameIn:emptyBuffer;e0[0].size=sizeof frame;
                 e0[1].binding=3;e0[1].buffer=air.parameters();e0[1].size=Atmosphere::parameterBytes;
                 const WGPUTextureView views[4]{air.transmittance(),air.scattering(),air.mie(),air.irradiance()};for(std::uint32_t i=0;i<4;++i){e0[2+i].binding=4+i;e0[2+i].textureView=views[i];}
-                e0[6].binding=8;e0[6].sampler=sampler;e0[7].binding=9;e0[7].textureView=cloudMap;e0[8].binding=10;e0[8].sampler=cloudSampler;
-                WGPUBindGroupLayout l0=wgpuComputePipelineGetBindGroupLayout(pipe,0),l2=wgpuComputePipelineGetBindGroupLayout(pipe,2);
-                WGPUBindGroupDescriptor g0{};g0.layout=l0;g0.entryCount=cloudMap?9u:7u;g0.entries=e0;WGPUBindGroup group0=wgpuDeviceCreateBindGroup(gpu->device(),&g0);
-                WGPUBindGroupEntry e2{};e2.binding=0;e2.buffer=out;e2.size=256;WGPUBindGroupDescriptor g2{};g2.layout=l2;g2.entryCount=1;g2.entries=&e2;WGPUBindGroup group2=wgpuDeviceCreateBindGroup(gpu->device(),&g2);
+                e0[6].binding=8;e0[6].sampler=sampler;std::uint32_t count=7;
+                if(cloudMap){e0[count].binding=9;e0[count++].textureView=cloudMap;e0[count].binding=10;e0[count++].sampler=cloudSampler;}
+                e0[count].binding=16;e0[count].buffer=out;e0[count++].size=256;
+                WGPUBindGroupLayout l0=wgpuComputePipelineGetBindGroupLayout(pipe,0);
+                WGPUBindGroupDescriptor g0{};g0.layout=l0;g0.entryCount=count;g0.entries=e0;WGPUBindGroup group0=wgpuDeviceCreateBindGroup(gpu->device(),&g0);
                 WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);WGPUComputePassEncoder cp=wgpuCommandEncoderBeginComputePass(en,nullptr);
-                wgpuComputePassEncoderSetPipeline(cp,pipe);wgpuComputePassEncoderSetBindGroup(cp,0,group0,0,nullptr);wgpuComputePassEncoderSetBindGroup(cp,2,group2,0,nullptr);
+                wgpuComputePassEncoderSetPipeline(cp,pipe);wgpuComputePassEncoderSetBindGroup(cp,0,group0,0,nullptr);
                 wgpuComputePassEncoderDispatchWorkgroups(cp,1,1,1);wgpuComputePassEncoderEnd(cp);wgpuCommandEncoderCopyBufferToBuffer(en,out,0,back,0,256);
                 WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);
                 mapRead(*gpu,back,256,label);
                 const auto* f=static_cast<const float*>(wgpuBufferGetConstMappedRange(back,0,256));std::vector<float> values(f,f+64);wgpuBufferUnmap(back);
-                for(auto g:{group0,group2})wgpuBindGroupRelease(g);for(auto l:{l0,l2})wgpuBindGroupLayoutRelease(l);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);wgpuComputePassEncoderRelease(cp);
+                wgpuBindGroupRelease(group0);wgpuBindGroupLayoutRelease(l0);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);wgpuComputePassEncoderRelease(cp);
                 for(auto x:{out,back})wgpuBufferRelease(x);wgpuComputePipelineRelease(pipe);wgpuShaderModuleRelease(module);
                 return values;};
             const std::string groundCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
-@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
 @compute @workgroup_size(1) fn main() { // Radii raised by the lowered ground: the terrain 27 m under the sphere sits on the model's ground.
     let b = bottomRadius(); let up = normalize(vec3f(0.48, -0.61, 0.63));
     probe[0] = vec4f(length(airPoint(up * (b - 0.027))) - b, length(airPoint(up * (b + 1.0))) - b, 0.0, 0.0);
@@ -190,14 +220,13 @@ int main(){
             // Mars: the dust's optical depth above the datum is the model's 0.5 (with CO2's ~0.003 at 550 nm).
             auto marsModel=albert::gpu::marsAtmosphere();marsModel.orders=1;Atmosphere mars(*gpu,marsModel);mars.precompute(*gpu);
             const std::string marsCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
-@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
-@compute @workgroup_size(1) fn main() { // Zenith transmittance from the datum (3396.19 km), and the tables bound as elsewhere.
-    probe[0] = vec4f(transmittanceToTop(airTransmittance, airSampler, 3396.19, 1.0), 0.0);
-    probe[1] = vec4f(skyRadiance(vec3f(0.0, 0.0, 3396.2), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 0.0, 1.0)).radiance, 0.0);
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
+@compute @workgroup_size(3) fn main(@builtin(local_invocation_index) i: u32) { // Zenith transmittance from the datum (3396.19 km), and the tables bound as elsewhere.
+    if (i == 0u) { probe[0] = vec4f(transmittanceToTop(airTransmittance, airSampler, 3396.19, 1.0), 0.0); }
     // Sunset (the sun 2 degrees up): 2 degrees above the sun, and 90 degrees aside 30 degrees up.
-    let ground = vec3f(0.0, 0.0, 3396.2); let sun = vec3f(cos(0.0349), 0.0, sin(0.0349));
-    probe[2] = vec4f(skyRadiance(ground, vec3f(cos(0.0698), 0.0, sin(0.0698)), sun).radiance, 0.0);
-    probe[3] = vec4f(skyRadiance(ground, vec3f(0.0, cos(0.5236), sin(0.5236)), sun).radiance, 0.0);
+    let ground = vec3f(0.0, 0.0, 3396.2); let sun = select(vec3f(cos(0.0349), 0.0, sin(0.0349)), vec3f(0.0, 0.0, 1.0), i == 0u);
+    let ray = select(select(vec3f(0.0, cos(0.5236), sin(0.5236)), vec3f(cos(0.0698), 0.0, sin(0.0698)), i == 1u), vec3f(0.0, 0.0, 1.0), i == 0u);
+    probe[i + 1u] = vec4f(skyRadiance(ground, ray, sun).radiance, 0.0);
 }
 )";
             // Cloud shadows read the layer's map in geodetic latitude (as its shell): a map whose density is v,
@@ -212,15 +241,19 @@ int main(){
             WGPUTextureView cloudView=wgpuTextureCreateView(cloudTexture,nullptr);WGPUSamplerDescriptor cs{};cs.addressModeU=WGPUAddressMode_Repeat;cs.addressModeV=cs.addressModeW=WGPUAddressMode_ClampToEdge;
             cs.magFilter=cs.minFilter=WGPUFilterMode_Linear;cs.lodMaxClamp=1;cs.maxAnisotropy=1;WGPUSampler cloudSampler=wgpuDeviceCreateSampler(gpu->device(),&cs);
             const std::string shadowCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
-@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
 @compute @workgroup_size(1) fn main() {
     let p = normalize(vec3f(1.0, 1.0, 0.0)) * (bottomRadius() + 0.001);
     probe[0] = vec4f(1.0 - cloudShadow(p, length(p)), 0.0, 0.0, 0.0); // The map's v where the sun ray crosses the layer.
     probe[1] = vec4f(skyRadiance(p, normalize(p), normalize(p)).transmittance, 0.0); // The tables bound as elsewhere.
 }
 )";
-            const auto values=run("probe:code",code,nullptr),farValues=run("probe:far",farCode,frameBuffer),groundValues=run("probe:ground",groundCode,loweredBuffer),marsValues=run("probe:mars",marsCode,nullptr,&mars),
-                shadowValues=run("probe:shadow",shadowCode,shadowBuffer,nullptr,cloudView,cloudSampler);const float* v=values.data();
+            const auto values=run("probe:sky",skyCode,nullptr),betweenValues=run("probe:between",betweenCode,nullptr),moonValues=run("probe:moon",moonCode,nullptr),
+                marsFarValues=run("probe:marsFar",marsFarCode,frameBuffer),skyFarValues=run("probe:skyFar",skyFarCode,frameBuffer),groundFarValues=run("probe:groundFar",groundFarCode,frameBuffer),
+                groundValues=run("probe:ground",groundCode,loweredBuffer),marsValues=run("probe:mars",marsCode,nullptr,&mars),
+                shadowValues=run("probe:shadow",shadowCode,shadowBuffer,nullptr,cloudView,cloudSampler);const float* v=values.data();const float* bv=betweenValues.data();
+            float moonWrong=0,moonWorst=1,marsWrong=0,skyWrong=0,lowWrong=0;
+            for(int k=0;k<16;++k){moonWrong+=moonValues[4*k];moonWorst=std::min(moonWorst,moonValues[4*k+1]);marsWrong+=marsFarValues[4*k];skyWrong+=skyFarValues[4*k];lowWrong+=groundFarValues[4*k];}
             {const double geodetic=std::atan2(1.,.5)/3.14159265358979+.5;std::printf("cloud map read at v %.4f (geodetic %.4f, parametric 0.7500)\n",shadowValues[0],geodetic);
              near("Cloud shadows read the layer's map in geodetic latitude",shadowValues[0],geodetic,.006);}
             {const double h=11.1,above=marsModel.top-3396.19,column=h*(1-std::exp(-above/h)),depth=.5*(1-std::exp(-above/h))+2.5e-4*column;
@@ -233,24 +266,24 @@ int main(){
             near("Lowered air ground: the terrain under the camera on the model's ground",groundValues[0],0,1e-3);
             near("... and every radius raised alike",groundValues[1],1.027,1e-3);const char* names[]{"zenith","25 deg","2 deg","-2 deg"};
             for(int i=0;i<4;++i)std::printf("sky %-7s radiance %.4f %.4f %.4f  transmittance %.3f %.3f %.3f\n",names[i],v[8*i],v[8*i+1],v[8*i+2],v[8*i+4],v[8*i+5],v[8*i+6]);
-            std::printf("craft before the air: radiance %.4f transmittance %.3f; body below the horizon at sunset: transmittance %.3g %.3g %.3g\n",v[33],v[37],v[44],v[45],v[46]);
-            near("No air between a camera in space and a craft in front of the air",v[37]+v[33],1,1e-6);
-            std::printf("near the Moon: %.0f of 4096 short segments saw the Earth's air (lowest transmittance %.3g)\n",v[48],v[49]);
-            near("No Earth air between points near the Moon (f32 cancellation)",v[48],0,.5);
-            std::printf("near Mars: %.0f of 4096 segments (1 m to 50 km) not clear\n",farValues[0]);
-            near("Short segments near Mars keep their direction (no NaN, no air)",farValues[0],0,.5);
-            std::printf("airSky near Mars: %.0f of 4096 world points not clear\n",farValues[1]);
-            near("Aerial perspective near Mars: no NaN from the far planet frame (f32 collapse)",farValues[1],0,.5);
-            std::printf("near the ground: %.0f of 1024 short segments not finite\n",farValues[2]);
-            near("Segments shorter than an f32 step at the ground stay finite",farValues[2],0,.5);
-            if(!(v[44]>0&&std::isfinite(v[44])&&std::isfinite(v[40]))){std::printf("FAIL body below the model horizon is black or not finite\n");++failures;}else std::printf("ok   body below the model horizon sees the horizon's air\n");
+            std::printf("craft before the air: radiance %.4f transmittance %.3f; body below the horizon at sunset: transmittance %.3g %.3g %.3g\n",bv[1],bv[5],bv[12],bv[13],bv[14]);
+            near("No air between a camera in space and a craft in front of the air",bv[5]+bv[1],1,1e-6);
+            std::printf("near the Moon: %.0f of 4096 short segments saw the Earth's air (lowest transmittance %.3g)\n",moonWrong,moonWorst);
+            near("No Earth air between points near the Moon (f32 cancellation)",moonWrong,0,.5);
+            std::printf("near Mars: %.0f of 4096 segments (1 m to 50 km) not clear\n",marsWrong);
+            near("Short segments near Mars keep their direction (no NaN, no air)",marsWrong,0,.5);
+            std::printf("airSky near Mars: %.0f of 4096 world points not clear\n",skyWrong);
+            near("Aerial perspective near Mars: no NaN from the far planet frame (f32 collapse)",skyWrong,0,.5);
+            std::printf("near the ground: %.0f of 1024 short segments not finite\n",lowWrong);
+            near("Segments shorter than an f32 step at the ground stay finite",lowWrong,0,.5);
+            if(!(bv[12]>0&&std::isfinite(bv[12])&&std::isfinite(bv[8]))){std::printf("FAIL body below the model horizon is black or not finite\n");++failures;}else std::printf("ok   body below the model horizon sees the horizon's air\n");
             { // Lunar photometry (McEwen's lunar-Lambert) summed over the disc in the shader against the Moon's measured phase curve,
               // normalised at 30 degrees: ROLO (Kieffer and Stone 2005, 553.8 nm, zero libration, from rimopy's coefficients) and
               // Lane and Irvine (1973, Table V, V band); and earthshine from the Earth 384,400 km away (60.27 radii).
                 float shine[232]{};shine[0]=shine[5]=shine[10]=shine[15]=1;shine[40]=1;shine[43]=1;shine[107]=1; // View identity, the sun towards +x, the Earth at the origin.
                 WGPUBuffer shineBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),shineBuffer,0,shine,sizeof shine);
                 const std::string lunarCode=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+albert::gpu::photometry+R"(
-@group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
+@group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
 fn disc(alpha: f32) -> f32 { // A uniform R30 = 0.064 disc seen along +z, the sun `alpha` degrees off the line of sight: I/F summed over its projection.
     let n = 160; let l = vec3f(sin(radians(alpha)), 0.0, cos(radians(alpha))); var sum = 0.0;
     for (var i = 0; i < n; i++) { for (var j = 0; j < n; j++) {
