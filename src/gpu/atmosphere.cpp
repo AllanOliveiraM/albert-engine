@@ -352,7 +352,7 @@ bool Atmosphere::advance(WGPUCommandEncoder encoder,unsigned steps){
     return !plan_;
 }
 void Atmosphere::precompute(Context& context){
-    WGPUCommandEncoder encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);advance(encoder,~0u);
-    WGPUCommandBuffer commands=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(encoder);
+    while(!ready()){WGPUCommandEncoder encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);advance(encoder,context.software()?8u:~0u);
+        WGPUCommandBuffer commands=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(encoder);}
 }
 }

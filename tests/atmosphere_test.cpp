@@ -21,14 +21,20 @@ namespace {
 using albert::gpu::Atmosphere;
 float half(std::uint16_t h){const int e=(h>>10)&31,m=h&1023;const float s=(h>>15)?-1.f:1.f;
     if(e==0)return s*std::ldexp(static_cast<float>(m),-24);if(e==31)return m?NAN:s*INFINITY;return s*std::ldexp(static_cast<float>(m|1024),e-25);}
+struct MapState {bool done=false;WGPUMapAsyncStatus status{};};
+void mapRead(albert::gpu::Context& gpu,WGPUBuffer b,std::size_t size,const char* what){
+    MapState state;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&state;
+    cb.callback=[](WGPUMapAsyncStatus status,WGPUStringView,void* u,void*){auto& s=*static_cast<MapState*>(u);s.status=status;s.done=true;};
+    wgpuBufferMapAsync(b,WGPUMapMode_Read,0,size,cb);while(!state.done){wgpuDevicePoll(gpu.device(),true,nullptr);wgpuInstanceProcessEvents(gpu.instance());}
+    if(state.status!=WGPUMapAsyncStatus_Success)throw std::runtime_error(std::string(what)+" map failed ("+std::to_string(static_cast<int>(state.status))+")");
+}
 // RGBA texels of one layer (z) of a table; formats rgba16float or rgba32float.
 std::vector<float> read(albert::gpu::Context& gpu,WGPUTexture texture,unsigned z){
     const unsigned w=wgpuTextureGetWidth(texture),h=wgpuTextureGetHeight(texture);const bool wide=wgpuTextureGetFormat(texture)==WGPUTextureFormat_RGBA32Float;
     const unsigned texel=wide?16:8,row=(w*texel+255)/256*256;WGPUBufferDescriptor bd{};bd.size=row*h;bd.usage=WGPUBufferUsage_CopyDst|WGPUBufferUsage_MapRead;WGPUBuffer b=wgpuDeviceCreateBuffer(gpu.device(),&bd);
     WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(gpu.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=texture;src.origin={0,0,z};WGPUTexelCopyBufferInfo dst{};dst.buffer=b;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=h;
     const WGPUExtent3D size{w,h,1};wgpuCommandEncoderCopyTextureToBuffer(e,&src,&dst,&size);WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(gpu.queue(),1,&c);
-    bool done=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&done;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
-    wgpuBufferMapAsync(b,WGPUMapMode_Read,0,bd.size,cb);while(!done)wgpuInstanceProcessEvents(gpu.instance());
+    mapRead(gpu,b,bd.size,"table");
     const auto* p=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(b,0,bd.size));std::vector<float> out(static_cast<std::size_t>(w)*h*4);
     for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w*4;++x){float v;if(wide)std::memcpy(&v,p+y*row+x*4,4);else{std::uint16_t q;std::memcpy(&q,p+y*row+x*2,2);v=half(q);}out[static_cast<std::size_t>(y)*w*4+x]=v;}
     wgpuBufferUnmap(b);wgpuBufferRelease(b);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);return out;
@@ -37,8 +43,7 @@ std::vector<unsigned char> readPixels(albert::gpu::Context& gpu,WGPUTexture text
     const unsigned row=(w*4+255)/256*256;WGPUBufferDescriptor bd{};bd.size=row*h;bd.usage=WGPUBufferUsage_CopyDst|WGPUBufferUsage_MapRead;WGPUBuffer b=wgpuDeviceCreateBuffer(gpu.device(),&bd);
     WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(gpu.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=texture;WGPUTexelCopyBufferInfo dst{};dst.buffer=b;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=h;
     const WGPUExtent3D size{w,h,1};wgpuCommandEncoderCopyTextureToBuffer(e,&src,&dst,&size);WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(gpu.queue(),1,&c);
-    bool done=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&done;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
-    wgpuBufferMapAsync(b,WGPUMapMode_Read,0,bd.size,cb);while(!done)wgpuInstanceProcessEvents(gpu.instance());
+    mapRead(gpu,b,bd.size,"pixels");
     const auto* p=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(b,0,bd.size));std::vector<unsigned char> out(static_cast<std::size_t>(w)*h*4);const bool bgra=gpu.format()==WGPUTextureFormat_BGRA8Unorm;
     for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){const auto* q=p+y*row+x*4;auto* d=&out[(static_cast<std::size_t>(y)*w+x)*4];d[0]=bgra?q[2]:q[0];d[1]=q[1];d[2]=bgra?q[0]:q[2];d[3]=q[3];}
     wgpuBufferUnmap(b);wgpuBufferRelease(b);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);return out;
@@ -50,6 +55,7 @@ void near(const char* what,double got,double want,double tolerance){
 }
 }
 int main(){
+    std::setvbuf(stdout,nullptr,_IONBF,0);
     try{
         std::unique_ptr<albert::gpu::Context> gpu;
         try{gpu=std::make_unique<albert::gpu::Context>();}catch(const std::exception& e){std::printf("skipped: %s\n",e.what());return 77;}
@@ -88,7 +94,7 @@ int main(){
 @compute @workgroup_size(1) fn main() {
     let b = bottomRadius(); let camera = vec3f(0.0, 0.0, b + 0.01); let sun = vec3f(cos(0.9599), 0.0, sin(0.9599)); // Sun 55 degrees up.
     for (var i = 0u; i < 4u; i++) {
-        let e = array<f32, 4>(1.5708, 0.4363, 0.0349, -0.0349)[i]; // Zenith, 25 degrees, 2 degrees up, 2 down (ground 0.5 km away? no: the sphere).
+        let e = vec4f(1.5708, 0.4363, 0.0349, -0.0349)[i]; // Zenith, 25 degrees, 2 degrees up, 2 down (ground 0.5 km away? no: the sphere).
         let s = skyRadiance(camera, vec3f(-cos(e), 0.0, sin(e)), sun); probe[2u * i] = vec4f(s.radiance, 0.0); probe[2u * i + 1u] = vec4f(s.transmittance, 0.0);
     }
     // airBetween: a spacecraft 420 km up between a camera 3 radii out and the planet (no air between);
@@ -166,8 +172,7 @@ int main(){
                 wgpuComputePassEncoderSetPipeline(cp,pipe);wgpuComputePassEncoderSetBindGroup(cp,0,group0,0,nullptr);wgpuComputePassEncoderSetBindGroup(cp,2,group2,0,nullptr);
                 wgpuComputePassEncoderDispatchWorkgroups(cp,1,1,1);wgpuComputePassEncoderEnd(cp);wgpuCommandEncoderCopyBufferToBuffer(en,out,0,back,0,256);
                 WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);
-                bool done=false;WGPUBufferMapCallbackInfo mc{};mc.mode=WGPUCallbackMode_AllowProcessEvents;mc.userdata1=&done;mc.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
-                wgpuBufferMapAsync(back,WGPUMapMode_Read,0,256,mc);while(!done)wgpuInstanceProcessEvents(gpu->instance());
+                mapRead(*gpu,back,256,"probe");
                 const auto* f=static_cast<const float*>(wgpuBufferGetConstMappedRange(back,0,256));std::vector<float> values(f,f+64);wgpuBufferUnmap(back);
                 for(auto g:{group0,group2})wgpuBindGroupRelease(g);for(auto l:{l0,l2})wgpuBindGroupLayoutRelease(l);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);wgpuComputePassEncoderRelease(cp);
                 for(auto x:{out,back})wgpuBufferRelease(x);wgpuComputePipelineRelease(pipe);wgpuShaderModuleRelease(module);
@@ -251,9 +256,10 @@ fn disc(alpha: f32) -> f32 { // A uniform R30 = 0.064 disc seen along +z, the su
         if (s < 1.0) { let p = vec3f(x, y, sqrt(1.0 - s)); let mu0 = dot(p, l); if (mu0 > 0.0) { sum += lunarFactor(mu0, p.z, alpha, 0.064); } } } }
     return sum;
 }
-@compute @workgroup_size(1) fn main() {
-    let angles = array<f32, 16>(1.55, 7.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 97.0, 100.0, 110.0, 120.0, 0.0);
-    for (var k = 0; k < 16; k++) { probe[k / 4][k % 4] = disc(angles[k]); }
+@compute @workgroup_size(4) fn main(@builtin(local_invocation_index) k: u32) {
+    let a = select(select(select(vec4f(100.0, 110.0, 120.0, 0.0), vec4f(70.0, 80.0, 90.0, 97.0), k == 2u), vec4f(30.0, 40.0, 50.0, 60.0), k == 1u), vec4f(1.55, 7.0, 10.0, 20.0), k == 0u);
+    probe[k] = vec4f(disc(a.x), disc(a.y), disc(a.z), disc(a.w));
+    if (k > 0u) { return; }
     // Full phase along the equator, 0.5, 0.8 and 0.95 of the radius out, and the centre: no limb darkening.
     probe[4] = vec4f(lunarFactor(0.866, 0.866, 0.0, 0.064), lunarFactor(0.6, 0.6, 0.0, 0.064), lunarFactor(0.3122, 0.3122, 0.0, 0.064), lunarFactor(1.0, 1.0, 0.0, 0.064));
     // Earthshine at full Earth and at quadrature 60.27 radii out, and 1.2 radii out (the air's domain); towards the Earth.
