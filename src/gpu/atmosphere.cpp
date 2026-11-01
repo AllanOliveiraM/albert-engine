@@ -1,4 +1,5 @@
 #include "gpu/atmosphere.hpp"
+#include <webgpu/wgpu.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -353,6 +354,7 @@ bool Atmosphere::advance(WGPUCommandEncoder encoder,unsigned steps){
 }
 void Atmosphere::precompute(Context& context){
     while(!ready()){WGPUCommandEncoder encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);advance(encoder,context.software()?8u:~0u);
-        WGPUCommandBuffer commands=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(encoder);}
+        WGPUCommandBuffer commands=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(encoder);
+        if(context.software())wgpuDevicePoll(context.device(),true,nullptr);}
 }
 }

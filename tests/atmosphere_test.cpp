@@ -21,12 +21,12 @@ namespace {
 using albert::gpu::Atmosphere;
 float half(std::uint16_t h){const int e=(h>>10)&31,m=h&1023;const float s=(h>>15)?-1.f:1.f;
     if(e==0)return s*std::ldexp(static_cast<float>(m),-24);if(e==31)return m?NAN:s*INFINITY;return s*std::ldexp(static_cast<float>(m|1024),e-25);}
-struct MapState {bool done=false;WGPUMapAsyncStatus status{};};
+struct MapState {bool done=false;WGPUMapAsyncStatus status{};std::string message;};
 void mapRead(albert::gpu::Context& gpu,WGPUBuffer b,std::size_t size,const char* what){
     MapState state;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&state;
-    cb.callback=[](WGPUMapAsyncStatus status,WGPUStringView,void* u,void*){auto& s=*static_cast<MapState*>(u);s.status=status;s.done=true;};
+    cb.callback=[](WGPUMapAsyncStatus status,WGPUStringView m,void* u,void*){auto& s=*static_cast<MapState*>(u);s.status=status;s.message=albert::gpu::text(m);s.done=true;};
     wgpuBufferMapAsync(b,WGPUMapMode_Read,0,size,cb);while(!state.done){wgpuDevicePoll(gpu.device(),true,nullptr);wgpuInstanceProcessEvents(gpu.instance());}
-    if(state.status!=WGPUMapAsyncStatus_Success)throw std::runtime_error(std::string(what)+" map failed ("+std::to_string(static_cast<int>(state.status))+")");
+    if(state.status!=WGPUMapAsyncStatus_Success)throw std::runtime_error(std::string(what)+" map failed ("+std::to_string(static_cast<int>(state.status))+"): "+state.message);
 }
 // RGBA texels of one layer (z) of a table; formats rgba16float or rgba32float.
 std::vector<float> read(albert::gpu::Context& gpu,WGPUTexture texture,unsigned z){
@@ -64,9 +64,10 @@ int main(){
         // Optical depths at the zenith from the ground: H (1 - e^(-depth/H)) per exponential layer, 15 km of ozone.
         const double depth=model.top-model.bottom;double tau[3];
         for(int c=0;c<3;++c)tau[c]=model.rayleigh[c]*8*(1-std::exp(-depth/8))+model.mieExtinction[c]*1.2*(1-std::exp(-depth/1.2))+model.absorption[c]*15;
+        std::unique_ptr<Atmosphere> earthPtr;
         for(int orders:{1,4}){
             model.orders=orders;const auto start=std::chrono::steady_clock::now();
-            Atmosphere air(*gpu,model);air.precompute(*gpu);wgpuDevicePoll(gpu->device(),true,nullptr);
+            auto airPtr=std::make_unique<Atmosphere>(*gpu,model);Atmosphere& air=*airPtr;air.precompute(*gpu);wgpuDevicePoll(gpu->device(),true,nullptr);
             std::printf("orders %d: %.0f ms\n",orders,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
             const auto t=read(*gpu,air.table(0),0); // Texel (0, 0): r = bottom, mu = 1.
             const char* names[]{"T zenith R","T zenith G","T zenith B"};
@@ -85,16 +86,17 @@ int main(){
                 const auto e=read(*gpu,air.table(3),0); // Sky irradiance on the ground, mu_s = 1 (last texel of row 0).
                 std::printf("zenith sky radiance factor (no phase) %.5f %.5f %.5f, sky irradiance at noon %.5f %.5f %.5f\n",s[at],s[at+1],s[at+2],e[63*4],e[63*4+1],e[63*4+2]);
                 for(int c=0;c<3;++c){if(!(s[at+c]>=0&&std::isfinite(s[at+c])&&e[63*4+c]>0&&std::isfinite(e[63*4+c])))++failures;}
+                earthPtr=std::move(airPtr);
             }
         }
         { // The render functions (programs.cpp `air`) on known rays: radiance relative to the sun.
-            model.orders=4;Atmosphere earth(*gpu,model);earth.precompute(*gpu);const Atmosphere& air=earth;
+            Atmosphere& earth=*earthPtr;const Atmosphere& air=earth;
             const std::string code=std::string(albert::gpu::prelude)+albert::gpu::atmosphereWgsl+albert::gpu::air+R"(
 @group(2) @binding(0) var<storage, read_write> probe: array<vec4f>;
 @compute @workgroup_size(1) fn main() {
     let b = bottomRadius(); let camera = vec3f(0.0, 0.0, b + 0.01); let sun = vec3f(cos(0.9599), 0.0, sin(0.9599)); // Sun 55 degrees up.
     for (var i = 0u; i < 4u; i++) {
-        let e = vec4f(1.5708, 0.4363, 0.0349, -0.0349)[i]; // Zenith, 25 degrees, 2 degrees up, 2 down (ground 0.5 km away? no: the sphere).
+        let e = select(select(select(-0.0349, 0.0349, i == 2u), 0.4363, i == 1u), 1.5708, i == 0u); // Zenith, 25 degrees, 2 degrees up, 2 down (ground 0.5 km away? no: the sphere).
         let s = skyRadiance(camera, vec3f(-cos(e), 0.0, sin(e)), sun); probe[2u * i] = vec4f(s.radiance, 0.0); probe[2u * i + 1u] = vec4f(s.transmittance, 0.0);
     }
     // airBetween: a spacecraft 420 km up between a camera 3 radii out and the planet (no air between);
@@ -154,7 +156,7 @@ int main(){
             // A frame at the Earth whose air ground is lowered 27 m (the Cape's terrain): identity planet frame.
             float lowered[232]{};lowered[76]=lowered[81]=lowered[86]=lowered[91]=1;lowered[95]=1;lowered[96]=.57f;lowered[98]=.82f;lowered[99]=-.027f;lowered[35]=1;
             WGPUBuffer loweredBuffer=wgpuDeviceCreateBuffer(gpu->device(),&fd);wgpuQueueWriteBuffer(gpu->queue(),loweredBuffer,0,lowered,sizeof lowered);
-            auto run=[&](const std::string& source,WGPUBuffer frameIn,const Atmosphere* tables=nullptr,WGPUTextureView cloudMap=nullptr,WGPUSampler cloudSampler=nullptr){ // One dispatch (with a frame, if given); the 64 floats of its probes.
+            auto run=[&](const char* label,const std::string& source,WGPUBuffer frameIn,const Atmosphere* tables=nullptr,WGPUTextureView cloudMap=nullptr,WGPUSampler cloudSampler=nullptr){ // One dispatch (with a frame, if given); the 64 floats of its probes.
                 const Atmosphere& air=tables?*tables:earth;
                 WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code={source.data(),source.size()};WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;
                 WGPUShaderModule module=wgpuDeviceCreateShaderModule(gpu->device(),&md);
@@ -172,7 +174,7 @@ int main(){
                 wgpuComputePassEncoderSetPipeline(cp,pipe);wgpuComputePassEncoderSetBindGroup(cp,0,group0,0,nullptr);wgpuComputePassEncoderSetBindGroup(cp,2,group2,0,nullptr);
                 wgpuComputePassEncoderDispatchWorkgroups(cp,1,1,1);wgpuComputePassEncoderEnd(cp);wgpuCommandEncoderCopyBufferToBuffer(en,out,0,back,0,256);
                 WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);
-                mapRead(*gpu,back,256,"probe");
+                mapRead(*gpu,back,256,label);
                 const auto* f=static_cast<const float*>(wgpuBufferGetConstMappedRange(back,0,256));std::vector<float> values(f,f+64);wgpuBufferUnmap(back);
                 for(auto g:{group0,group2})wgpuBindGroupRelease(g);for(auto l:{l0,l2})wgpuBindGroupLayoutRelease(l);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);wgpuComputePassEncoderRelease(cp);
                 for(auto x:{out,back})wgpuBufferRelease(x);wgpuComputePipelineRelease(pipe);wgpuShaderModuleRelease(module);
@@ -217,8 +219,8 @@ int main(){
     probe[1] = vec4f(skyRadiance(p, normalize(p), normalize(p)).transmittance, 0.0); // The tables bound as elsewhere.
 }
 )";
-            const auto values=run(code,nullptr),farValues=run(farCode,frameBuffer),groundValues=run(groundCode,loweredBuffer),marsValues=run(marsCode,nullptr,&mars),
-                shadowValues=run(shadowCode,shadowBuffer,nullptr,cloudView,cloudSampler);const float* v=values.data();
+            const auto values=run("probe:code",code,nullptr),farValues=run("probe:far",farCode,frameBuffer),groundValues=run("probe:ground",groundCode,loweredBuffer),marsValues=run("probe:mars",marsCode,nullptr,&mars),
+                shadowValues=run("probe:shadow",shadowCode,shadowBuffer,nullptr,cloudView,cloudSampler);const float* v=values.data();
             {const double geodetic=std::atan2(1.,.5)/3.14159265358979+.5;std::printf("cloud map read at v %.4f (geodetic %.4f, parametric 0.7500)\n",shadowValues[0],geodetic);
              near("Cloud shadows read the layer's map in geodetic latitude",shadowValues[0],geodetic,.006);}
             {const double h=11.1,above=marsModel.top-3396.19,column=h*(1-std::exp(-above/h)),depth=.5*(1-std::exp(-above/h))+2.5e-4*column;
@@ -268,7 +270,7 @@ fn disc(alpha: f32) -> f32 { // A uniform R30 = 0.064 disc seen along +z, the su
     probe[7] = vec4f(skyRadiance(vec3f(0.0, 0.0, 6400.0), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 0.0, 1.0)).transmittance, 0.0); // The tables bound as elsewhere.
 }
 )";
-                const auto lunar=run(lunarCode,shineBuffer);wgpuBufferRelease(shineBuffer);
+                const auto lunar=run("probe:lunar",lunarCode,shineBuffer);wgpuBufferRelease(shineBuffer);
                 const double angles[]{1.55,7,10,20,30,40,50,60,70,80,90,97,100,110,120};
                 auto at=[&](double alpha){for(int k=0;k<15;++k)if(angles[k]==alpha)return -2.5*std::log10(lunar[static_cast<std::size_t>(k)]/lunar[4]);return 1e9;}; // Magnitudes past 30 degrees.
                 const double rolo[][2]{{20,-.263},{40,.262},{50,.530},{60,.810},{70,1.109},{80,1.434},{90,1.793},{97,2.067}};
