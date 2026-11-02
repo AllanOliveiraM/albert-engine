@@ -74,13 +74,13 @@ fn cloudCrop(image: texture_2d<f32>, smp: sampler, bounds: vec4f, enabled: f32, 
     return mix(global, detail.g, smoothstep(0.0, 0.04, min(edge.x, edge.y)) * detail.a);
 }
 fn cloudDensity(uv: vec2f, dx: vec2f, dy: vec2f) -> f32 {
-    let global = textureSampleGrad(cloudMap, cloudSampler, uv, dx, dy).g;
+    let global = textureSampleGrad(cloudMap, cloudSampler, cloudWeatherUv(uv, material.cloudOffset), dx, dy).g;
     return mix(cloudCrop(previousDetailMap, previousSampler, material.previousDetailBounds, material.previousDetailEnabled, uv, dx, dy, global),
         cloudCrop(detailMap, detailSampler, material.detailBounds, material.detailEnabled, uv, dx, dy, global), material.detailBlend);
 }
 )";
-const std::vector<std::pair<std::string,Uniform>> cloudUniforms{{"detailBounds",Uniform::vec4},{"previousDetailBounds",Uniform::vec4},{"detailEnabled",Uniform::f32},{"previousDetailEnabled",Uniform::f32},{"detailBlend",Uniform::f32}};
-const char* const cloudFields="detailBounds: vec4f, previousDetailBounds: vec4f, detailEnabled: f32, previousDetailEnabled: f32, detailBlend: f32";
+const std::vector<std::pair<std::string,Uniform>> cloudUniforms{{"detailBounds",Uniform::vec4},{"previousDetailBounds",Uniform::vec4},{"detailEnabled",Uniform::f32},{"previousDetailEnabled",Uniform::f32},{"detailBlend",Uniform::f32},{"cloudOffset",Uniform::f32}};
+const char* const cloudFields="detailBounds: vec4f, previousDetailBounds: vec4f, detailEnabled: f32, previousDetailEnabled: f32, detailBlend: f32, cloudOffset: f32";
 std::string cloudBindings(int first){ // cloudMap, detailMap, previousDetailMap at texture slots first..first+2.
     std::string s;const char* names[][2]{{"cloudMap","cloudSampler"},{"detailMap","detailSampler"},{"previousDetailMap","previousSampler"}};
     for(int i=0;i<3;++i){const int t=1+2*(first+i);s+="@group(2) @binding("+std::to_string(t)+") var "+names[i][0]+": texture_2d<f32>;\n@group(2) @binding("+std::to_string(t+1)+") var "+names[i][1]+": sampler;\n";}
@@ -241,6 +241,29 @@ struct Material { density: f32, time: f32, seed: f32, flame: f32 };
     for(unsigned k=0;k<4;++k)returning.uniforms.emplace_back("vent"+std::to_string(k),Uniform::vec4);
     for(unsigned k=0;k<20;++k)returning.uniforms.emplace_back("outlet"+std::to_string(k),Uniform::vec4);
     returning.wgsl=std::string(surface)+albert::returnGasShader;albert::gpu::define("albert:return-gas",returning);
+    Program water;water.attributes=surfaceAttributes;water.uniforms={{"flow",Uniform::f32},{"time",Uniform::f32}};
+    water.wgsl=std::string(surface)+R"(
+struct Material { flow: f32, time: f32 };
+@group(2) @binding(0) var<uniform> material: Material;
+@fragment fn fs_main(v: Surface, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+    if (!front || material.flow <= 0.0) { discard; }
+    let along = v.uv.y;
+    let phase = along * 37.0 - material.time * 23.0;
+    let filament = 0.5 + 0.5 * sin(v.uv.x * 94.2478 + sin(phase) * 0.8);
+    let turbulence = 0.5 + 0.5 * sin(phase + sin(v.uv.x * 31.4159 + material.time * 4.0));
+    let breakup = mix(1.0, smoothstep(0.2, 0.7, filament * 0.6 + turbulence * 0.4), smoothstep(0.15, 1.8, along));
+    let normal = normalize(object.normalWorld * v.localNormal);
+    let view = normalize(frame.camera.xyz - v.world);
+    let fresnel = 0.02 + 0.30 * pow(1.0 - abs(dot(normal, view)), 5.0);
+    let air = airLight(v.world, normal);
+    let sky = air.sky * frame.sunColor.rgb + frame.ambient.rgb;
+    let scatter = (air.sun * frame.sunColor.rgb + sky) * vec3f(0.12,0.17,0.19);
+    let highlight = sky * fresnel + frame.sunColor.rgb * air.sun * pow(max(0.0,dot(reflect(-normalize(frame.sun.xyz),normal),view)),96.0) * 0.6;
+    let alpha = material.flow * breakup * (0.12 + 0.22 * fresnel + 0.12 * smoothstep(0.4,2.0,along));
+    return vec4f(finish(airApply(v.world,scatter+highlight)) * alpha, alpha);
+}
+)";
+    albert::gpu::define("albert:deluge-jet",water);
     // Integrate inside the existing depth-tested shells so density stays attached to the vapour.
     Program steam;steam.attributes=surfaceAttributes;steam.uniforms={{"density",Uniform::f32},{"seed",Uniform::f32},{"time",Uniform::f32},{"up",Uniform::vec3},{"hull",Uniform::vec4},{"size",Uniform::vec3},{"kind",Uniform::f32},{"cloud",Uniform::vec4}};
     steam.wgsl=std::string(surface)+R"(
@@ -365,10 +388,15 @@ struct Material { diffuse: vec3f, opacity: f32, emissive: vec3f, roughness: f32,
     let ribPixel = fwidth(v.uv.x) * 251.3274; let bandPixel = fwidth(v.local.y) * 90.0;
     let ribs = cos(v.uv.x * 251.3274) * exp(-ribPixel * ribPixel);
     let bands = cos(v.local.y * 90.0) * exp(-bandPixel * bandPixel);
-    let alloy = material.diffuse * (0.94 + 0.06 * ribs + 0.03 * bands);
+    // The inside is a dark, smooth liner. Keep the etched cooling detail and
+    // most reflected light on the outside so the hull or lip cannot appear
+    // to bleed through the open nozzle.
+    let exterior = select(0.0, 1.0, front);
+    let alloy = material.diffuse * (0.96 + exterior * (0.04 * ribs + 0.02 * bands));
     let air = airLight(v.world, worldNormal);
-    var colour = standardLight(alloy, material.roughness, material.metalness, n, n, position, air.sky * frame.sunColor.rgb, shadowFactor(v.world, worldNormal) * air.sun) + material.emissive + heat;
-    colour += material.diffuse * material.auxiliaryStrength * (1.0 - smoothstep(-0.10, 0.0, dot(n, normalize(material.auxiliarySolarDirection))));
+    let reflected = standardLight(alloy, material.roughness, material.metalness, n, n, position, air.sky * frame.sunColor.rgb, shadowFactor(v.world, worldNormal) * air.sun);
+    var colour = reflected * select(0.24, 1.0, front) + material.emissive * select(0.18, 1.0, front) + heat * select(0.12, 1.0, front);
+    colour += material.diffuse * material.auxiliaryStrength * (1.0 - smoothstep(-0.10, 0.0, dot(n, normalize(material.auxiliarySolarDirection)))) * select(0.18, 1.0, front);
     return vec4f(finish(airApply(v.world, colour)), material.opacity);
 }
 )";
@@ -417,11 +445,33 @@ struct Hardware { @builtin(position) clip: vec4f, @location(0) world: vec3f, @lo
         +cloudBindings(0)+cloudSampling+visibleSun+R"(
 @fragment fn fs_main(v: Surface) -> @location(0) vec4f {
     let density = cloudDensity(v.uv, dpdx(v.uv), dpdy(v.uv));
-    let light = max(0.0, dot(normalize(v.worldNormal), material.solarDirection));
+    let up = normalize(v.worldNormal); let eye = normalize(frame.camera.xyz - v.world);
+    // Sample a finite neighbourhood in weather space. Screen derivatives of
+    // the density produced triangular sparkle on the globe's fine mesh.
+    let dx = dpdx(v.uv); let dy = dpdy(v.uv);
+    let texel = max(2.0 / vec2f(textureDimensions(cloudMap)), abs(dx) + abs(dy));
+    let eastDelta = cloudDensity(v.uv + vec2f(texel.x, 0.0), dx, dy) - cloudDensity(v.uv - vec2f(texel.x, 0.0), dx, dy);
+    let northDelta = cloudDensity(v.uv + vec2f(0.0, texel.y), dx, dy) - cloudDensity(v.uv - vec2f(0.0, texel.y), dx, dy);
+    let east = normalize((object.model * vec4f(v.local.z, 0.0, -v.local.x, 0.0)).xyz + vec3f(1e-12));
+    let north = normalize(cross(up, east));
+    let cosineLatitude = max(length(v.local.xz) / length(v.local), 0.1);
+    let bump = (east * eastDelta / (2.0 * texel.x * 6.2831853 * cosineLatitude) + north * northDelta / (2.0 * texel.y * 3.14159265)) * (4.0 / 6378.137);
+    let normal = normalize(up - bump / max(1.0, length(bump) / 0.35));
+    let light = max(0.0, dot(normal, material.solarDirection));
     let transmission = mix(1.0, visibleSun(v.world, material.eclipseSunPosition, 695700.0 / 6378.137, material.moonPosition, 1737.4 / 6378.137), material.eclipseEnabled);
-    let air = airLight(v.world, v.worldNormal); // Sunlight through the air above the cloud tops, and the sky's light.
-    let lit = vec3f(1.0, 0.98, 0.95) * (0.003 + 2.4 * (light * transmission * air.sun + air.sky)); // 2.4: the sun's intensity at 1 AU.
-    return vec4f(finish(airApply(v.world, lit)), density * 0.88 * material.visibility);
+    // The shell's triangles sag slightly below its nominal height. Receiving
+    // its own ground shadow made every triangle dark with bright vertex dots.
+    let air = airLightAt(v.world, v.worldNormal, false);
+    // Optical thickness increases along grazing rays; dense tops scatter
+    // diffusely, while thin edges transmit a forward lobe (silver lining).
+    let tau = cloudOpticalDepth(density); let mu = max(abs(dot(up, eye)), 0.12);
+    let alpha = 1.0 - exp(-tau / mu);
+    let cosine = dot(-eye, material.solarDirection);
+    let g = 0.76; let phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosine, 1.5);
+    let edge = 0.035 * phase * exp(-tau) * max(dot(up, material.solarDirection), 0.0);
+    let diffuse = (light * 0.90 + 0.10 * max(dot(up, material.solarDirection), 0.0)) / 3.14159265;
+    let lit = frame.sunColor.rgb * (transmission * air.sun * (diffuse + edge) + air.sky / 3.14159265);
+    return vec4f(finish(airApply(v.world, lit)), alpha * material.visibility);
 }
 )";
     albert::gpu::define("albert:clouds",clouds);
@@ -514,9 +564,9 @@ fn extrude(p0: vec4f, q0: vec4f, side: f32, width: f32, nearClip: f32, viewport:
 )";
 void paths(){
     Program orbit;orbit.attributes={{"nextPosition",3},{"orbitTime",1},{"nextTime",1},{"lineSide",1}};
-    orbit.uniforms={{"viewport",Uniform::vec2},{"nearClip",Uniform::f32},{"strokeWidth",Uniform::f32},{"present",Uniform::f32},{"horizon",Uniform::f32},{"dashDays",Uniform::f32},{"visibility",Uniform::f32},{"referenceVisibility",Uniform::f32}};
+    orbit.uniforms={{"viewport",Uniform::vec2},{"nearClip",Uniform::f32},{"strokeWidth",Uniform::f32},{"present",Uniform::f32},{"horizon",Uniform::f32},{"dashDays",Uniform::f32},{"visibility",Uniform::f32},{"referenceVisibility",Uniform::f32},{"pastColor",Uniform::vec3},{"futureColor",Uniform::vec3},{"referenceColor",Uniform::vec3}};
     orbit.wgsl=std::string(lineExtrusion)+R"(
-struct Material { viewport: vec2f, nearClip: f32, strokeWidth: f32, present: f32, horizon: f32, dashDays: f32, visibility: f32, referenceVisibility: f32 };
+struct Material { viewport: vec2f, nearClip: f32, strokeWidth: f32, present: f32, horizon: f32, dashDays: f32, visibility: f32, referenceVisibility: f32, pastColor: vec3f, futureColor: vec3f, referenceColor: vec3f };
 @group(2) @binding(0) var<uniform> material: Material;
 struct Varyings { @builtin(position) clip: vec4f, @location(0) time: f32, @location(1) @interpolate(linear) side: f32 };
 @vertex fn vs_main(@location(0) position: vec3f, @location(1) next: vec3f, @location(2) time: f32, @location(3) nextTime: f32, @location(4) lineSide: f32) -> Varyings {
@@ -536,14 +586,15 @@ fn pulseIntegral(value: f32) -> f32 { return floor(value) * 0.63 + min(fract(val
     let footprint = max(fwidth(phase), 0.0001);
     var dash = (pulseIntegral(phase + footprint * 0.5) - pulseIntegral(phase - footprint * 0.5)) / footprint;
     dash = mix(clamp(dash, 0.0, 1.0), 0.63, smoothstep(0.12, 0.5, footprint));
-    let colour = mix(vec3f(0.29, 0.67, 0.79), vec3f(0.94, 0.70, 0.40), future);
+    let colour = mix(material.pastColor, material.futureColor, future);
     let edge = abs(v.side);
-    var coverage = 1.0 - smoothstep(0.35, 0.75, edge);
-    coverage = max(coverage, 0.12 * (1.0 - smoothstep(0.6, 1.0, edge)));
+    let aa = max(fwidth(edge), 0.035);
+    var coverage = 1.0 - smoothstep(0.55 - aa, 0.55 + aa, edge);
+    coverage = max(coverage, 0.10 * exp(-4.0 * edge * edge));
     let guide = material.referenceVisibility * 0.42 * (1.0 - smoothstep(0.25, 0.95, edge * material.strokeWidth * 0.5));
     let highlight = coverage * fade * mix(0.78, 0.92 * dash, future);
     let alpha = guide + highlight * (1.0 - guide);
-    let ink = mix(vec3f(0.32, 0.48, 0.55), colour, highlight / max(alpha, 0.00001));
+    let ink = mix(material.referenceColor, colour, highlight / max(alpha, 0.00001));
     return vec4f(linearToSrgb(ink), material.visibility * alpha);
 }
 )";

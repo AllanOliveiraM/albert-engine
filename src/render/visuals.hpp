@@ -11,6 +11,7 @@
 #include "uploads.hpp"
 #include "solids.hpp"
 #include "lighting.hpp"
+#include "cloud_weather.hpp"
 #include "terrain.hpp"
 #include "roads.hpp"
 #include <future>
@@ -36,7 +37,7 @@ threepp::Image oceanRoughness(const threepp::Image& image,unsigned maximum=2048)
 
 struct VisualSettings {
     bool atmosphere = true;
-    bool clouds = false;
+    CloudMode clouds = CloudMode::Simulated;
     bool nightLights = true;
     bool moonAssist = false;
     float moonAssistIntensity = .25f;
@@ -64,12 +65,15 @@ public:
     void replaceAssets(DecodedAssets assets);
     // camera: its view limits the terrain's refinement (none: refined all around).
     // earth: the Earth's place in double precision (its terrain placed from it); moonAt: the Moon's position (SceneObjects::exact()).
+    void terrainScreenSpace(float pixels){if(earthTerrain_)earthTerrain_->screenSpace(pixels);if(moonTerrain_)moonTerrain_->screenSpace(pixels);}
     void cullToView(bool on){cullToView_=on;} // The terrain cut to the main camera's view (off while another view draws the scene).
     void update(const threepp::Vector3& solarDirection, const threepp::Vector3& cameraPosition, const VisualSettings& settings, float seconds, threepp::Camera* camera=nullptr,
                 const TerrainFrame* earth=nullptr,const std::array<double,3>* moonAt=nullptr);
     void updateBorderMaterial(threepp::ShaderMaterial& material, const threepp::Vector3& cameraPosition);
     void setCloudImage(threepp::Image image);
     void setCloudDetail(threepp::Image image, const GeoRegion& region);
+    void setCloudTime(double utcSeconds){cloudTime_=utcSeconds;}
+    [[nodiscard]] float cloudOffset()const{return cloudOffset_;}
     void setRegionalImages(RegionalImages images);
     bool releaseDistantDetails(const std::string& focus,const threepp::Vector3& camera,bool enabled,float seconds);
     void updateImageDetail(const threepp::Vector3& camera, bool enabled);
@@ -109,6 +113,10 @@ private:
     std::shared_ptr<threepp::ShaderMaterial> sunMaterial_;
     std::array<std::shared_ptr<threepp::Texture>, 6> textures_;
     std::shared_ptr<threepp::Texture> oceanTexture_, liveCloudTexture_, cloudDetailTexture_;
+    std::shared_ptr<threepp::Texture> simulatedCloudTexture_;
+    std::shared_future<threepp::Image> simulatedClouds_;
+    double cloudTime_=0;float cloudOffset_=0;
+    CloudMode cloudSource_=CloudMode::Simulated;
     std::shared_ptr<threepp::Texture> moonHeightTexture_;
     std::shared_ptr<threepp::Texture> previousCloudDetail_;
     std::optional<GeoRegion> cloudDetailBounds_;
@@ -118,6 +126,7 @@ private:
     std::array<float,2> displayedFill_{};
     float displayedAtmosphere_=1.f, displayedClouds_=0.f, displayedNight_=1.f, cloudShell_=1.f;
     std::optional<GeoRegion> earthDetailBounds_;
+    std::array<double,3> earthDetailOrigin_{};
     std::array<std::shared_ptr<threepp::Texture>,3> imageDetail_;
     struct DetailedImage { int index; std::optional<threepp::Image> image; std::string error; int level=-1; };
     std::future<DetailedImage> pendingImage_;

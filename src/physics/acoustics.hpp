@@ -47,6 +47,7 @@ Spectrum padLevels(const PadNoise& pad,double shift=1); // Estimated acoustic ef
 // arrived. air: the air at a point (humidity unknown: 50% RH). Each emission also carries the body's length and diameter
 // (m), its drag power (W: the flow noise) and its Mach number, sound speed (m/s) and pressure (Pa) where it is (the booms).
 struct Emission {double time=0;V3 position,velocity,plume;RocketNoise noise;bool on=false;double length=0,diameter=0,dragPower=0,mach=0,sound=0,pressure=0,blast=0;PadNoise pad{};}; // blast: TNT kg it exploded with, then.
+void record(std::vector<Emission>& history,const Emission& emission); // Thin steady samples, retain valve edges and short pulses; rewind resets the history.
 struct Heard {Spectrum levels{};double delay=0,doppler=1,distance=0,emitted=0,rocket=-1e9;bool audible=false;}; // rocket: the engines' overall level (dB).
 Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listenerVelocity,const Planet& planet,const std::function<Air(const Geodetic&)>& air);
 // The sonic booms that have reached the listener by `now`, oldest first: where the arrival time t + |listener - source(t)| / c̄

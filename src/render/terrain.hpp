@@ -50,6 +50,10 @@ public:
     // (the coarse faces exist). Without culling every node is refined by distance only.
     // frame: the parent's place in the root's frame, in double precision (else its float matrix).
     bool update(const threepp::Vector3& camera,const threepp::Frustum* frustum=nullptr,bool culling=true,const TerrainFrame* frame=nullptr);
+    // Reuse the same relief and imagery with fewer indices where the measured
+    // geometric deviation projects below the pixel budget. Zero disables it.
+    void screenSpace(float pixelsPerRadian,float pixelError=1.f);
+    [[nodiscard]] std::size_t triangles()const;
     void hide(); // No node drawn (until the next update).
     [[nodiscard]] std::size_t drawn()const;   // Nodes selected by the last update.
     [[nodiscard]] std::size_t pending()const; // Nodes queued or building.

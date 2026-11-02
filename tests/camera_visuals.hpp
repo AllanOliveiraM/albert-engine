@@ -25,6 +25,17 @@ struct CameraFixture {
     }
 };
 void cameraControls(){
+    {albert::SurfaceCamera anchor;albert::TerrainFrame frame;
+        Vector3 eye(1.0001f,0,0),forward(0,0,-1),up(1,0,0);
+        anchor.capture("earth",frame,eye,forward,up);
+        // Quarter turn plus a floating-origin translation, with no user input.
+        frame.linear={0,0,-1,0,1,0,1,0,0};frame.at={2,-3,4};
+        for(int i=0;i<10000;++i)anchor.restore(frame,eye,forward,up);
+        require(eye.distanceTo({2,-3,2.9999f})<1e-6f&&forward.distanceTo({-1,0,0})<1e-6f&&up.distanceTo({0,0,-1})<1e-6f,
+            "Free camera escaped the rotating/translating body or accumulated idle drift");
+        eye.add({.001f,0,0});forward.set(0,1,0);anchor.capture("earth",frame,eye,forward,up);
+        anchor.restore(frame,eye,forward,up);require(std::abs(eye.x-2.001f)<1e-6f&&forward.y>.999f,"Body anchoring discarded deliberate free-camera movement/look");
+        anchor.reset();require(!anchor.follows("earth"),"Free camera retained a stale anchor");}
     using M=albert::core::CameraMode;
     CameraFixture f;albert::BroadcastCamera camera;
     require(!albert::core::cameraMode("typo")&&!albert::core::cameraMode(""),"Unknown camera accepted");

@@ -1,5 +1,5 @@
 {
-  "snapshot": "2026-10-12",
+  "snapshot": "2026-11-02",
   "files": [
     {
       "path": "countries.geojson",
@@ -151,6 +151,13 @@
       "sha256": "242b8bc0c3b018f97d9d5d5a40b4c3182c37cec08a9e7ddd72fb33f9ebad1b59",
       "source": "NASA/JPL/USGS visual resources",
       "license": "Credits and limits in source inventory"
+    },
+    {
+      "path": "clouds/structure.png",
+      "sha256": "d7e2e4c6414f87ee6d2e25f0d96f39449fb9c918e51cc7573eeea99f908458a5",
+      "bytes": 5242928,
+      "source": "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/cloud_combined_8192.tif",
+      "license": "NASA public imagery; historical MODIS structure reference. See README.md and THIRD_PARTY.md."
     }
   ]
 }

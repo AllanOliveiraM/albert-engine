@@ -428,6 +428,8 @@ int main(int argc,char** argv){try{
                 {grpc::ClientContext c;api::StepRequest q;auto* k=q.add_commands();k->set_thruster_duty(1);k->set_index(5);require(flight->Step(&c,q,&x).error_code()==grpc::StatusCode::INVALID_ARGUMENT,"A missing thruster accepted");}
                 {grpc::ClientContext c;api::StepRequest q;q.add_commands()->set_thruster_duty(0);auto* k=q.add_commands();k->set_thruster_duty(.25);k->set_index(2);
                     require(flight->Step(&c,q,&x).ok()&&x.thruster_duty(0)==0&&x.thruster_duty(1)==.25,"Thrusters set directly");}
+                {const auto sounds=server.flightSounds();const auto jets=std::find_if(sounds.begin(),sounds.end(),[](const auto& sound){return sound.id=="flight/jets";});
+                    require(jets!=sounds.end()&&std::abs(jets->emission.pad.ventFlow-.25*500/700)<1e-8,"RCS audio does not follow the actual valve flow");}
             }
         }
         { // Two flights at once: the default and "booster", each its own scene object, data port and steps; ended apart.

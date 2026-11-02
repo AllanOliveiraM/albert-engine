@@ -52,7 +52,13 @@ Não precisa instalar o Albert; mantenha a pasta inteira junta. Requer GPU com *
 
 ## Ver uma missão Starship
 
-O cliente de exemplo precisa ser compilado: `make build` no Linux ou `.\make.cmd build` no Windows, após a preparação descrita em [Compilar](#compilar). Ele não acompanha os pacotes de release.
+Abra o menu lateral do Albert, entre em **Missões** e clique em **Iniciar Starship**. O programa de voo é compilado dentro do executável e acompanha a distribuição padrão (Linux e Windows, com `ALBERT_RPC=ON`). Não precisa abrir um cliente separado nem iniciar o Albert com `--rpc`.
+
+A missão começa no horário exibido na cena. A espera em órbita é acelerada em 1000× por padrão; desmarque a opção para acompanhar em tempo real. Também é possível seguir o booster após a separação. **Encerrar missão** interrompe o programa de voo e remove os veículos e seu cenário; depois é possível iniciar novamente. Por enquanto, Starship é a única missão neste menu.
+
+Durante a missão embarcada, clique no **horário** para pausar, escolher a velocidade ou avançar até decolagem, separação, pouso do booster, reentrada ou pouso da nave. O avanço calcula a física e volta a 1× no marco escolhido. As órbitas dos outros corpos ficam ocultas por padrão; em **Missões**, é possível reexibi-las e abrir **Ver trajetória na Terra**. A linha azul mostra o trecho percorrido, a âmbar tracejada prevê o movimento sem novas queimas nem atmosfera, e a violeta indica o alvo aproximado de 180 × 200 km.
+
+Para desenvolvimento, o cliente externo continua disponível após `make build` no Linux ou `.\make.cmd build` no Windows, com a preparação descrita em [Compilar](#compilar). Esse cliente separado não acompanha os pacotes de release.
 
 Na raiz do projeto, abra o Albert com o servidor de voo e rode o computador de voo de exemplo em outro terminal:
 
@@ -186,8 +192,9 @@ corrompidas são descartadas. Sem tabela para o instante, as posições vêm dos
 modelos analíticos citados acima, sempre identificadas como aproximadas. A
 primeira abertura ainda precisa buscar os dados.
 
-**As nuvens são observações com atraso.** Elas começam desligadas. Quando
-ativadas, o Albert consulta mosaicos de satélite, mostra a data em **Dados** e
+**Há três modos de nuvens em Ajustes:** artificiais realistas (o padrão), reais e desligadas.
+As artificiais são nuvens de cenário animadas sobre uma referência histórica de estrutura do Blue Marble/MODIS da NASA, com deslocamento e deformação suaves. Funcionam offline em qualquer data e não representam o tempo atual nem uma previsão meteorológica.
+As reais são mosaicos de satélite com atraso e lacunas; o Albert mostra a data em **Dados** e
 mantém um cache de downloads. O limite padrão é 2 GB e pode ser ajustado no menu.
 Em **Dados**, você pode consultar o espaço ocupado, limitar ou limpar o cache
 de posições, órbitas, buscas e nuvens sem apagar as imagens incluídas.
@@ -221,7 +228,7 @@ Os formatos e limites disponíveis estão em [RPC.md](docs/RPC.md).
 - Em **Eventos**, no mesmo painel, vá direto a eclipses (2024, 2026, 2027), ao pouso da Apollo 11, à passagem da Giotto pelo Halley ou ao periélio da 67P.
 - Na 67P ou no Halley perto do periélio (por exemplo 2021-11-02 ou 1986-03-13), ative **Realçar coma e caudas** e afaste a câmera.
 - Abra **Menu → Ajustes** para ajustar atmosfera, nuvens, cidades, fronteiras, sombras e órbitas.
-- Ative **Nuvens em tempo real** em **Ajustes** para buscar as observações automaticamente.
+- Escolha **Nuvens → Reais (satélite)** em **Ajustes** para buscar as observações; **Artificiais realistas** gera as nuvens localmente e **Desligadas** remove também as nuvens próximas ao solo.
 - O brilho auxiliar de cada objeto com lado escuro ajuda a enxergar o lado escuro; começa desligado e é ajustável.
 - Em **Dados**, acompanhe as atualizações, retente consultas e gerencie o cache.
 - Em **Dados → Manutenção das nuvens**, recarregue as texturas ou limpe e baixe as nuvens novamente.
@@ -292,15 +299,14 @@ presa ao veículo; um clique nele passa a seguir aquele voo. Como numa transmiss
 e no meio ficam o relógio T± da missão (a contagem regressiva antes da decolagem) e os eventos que o programa de voo informa
 (`StepRequest.milestones`).
 
-Durante um voo, o painel **Interferência** (Ajustes: "Painel de interferência") mexe nele ao vivo, pelos mesmos comandos da
-API:
+Durante um voo, o botão **Interferência**, à direita, abre o painel de falhas e perturbações. Ele começa fechado e fica encaixado entre os controles superiores e a telemetria. Também pode ser aberto em Ajustes: "Painel de interferência". Usa os mesmos comandos da API:
 
 - rajadas de vento e empurrões por dois joysticks (norte/leste) e controles verticais;
 - o mapa de motores do voo escolhido: um clique faz um falhar, falhar calado (ele diz que está bem) ou travar o cardã, como
   escolhido acima dele; o botão direito faz falhar calado; as superfícies (grid fins, flaps) travadas onde estão;
 - cada sensor falhando ou mentindo (morto, travado, com viés, derivando, com ruído), cada unidade de IMU à parte;
 - SEGURAR e RETOMAR a contagem regressiva, ABORTAR (o software de voo toma a saída mais segura para a fase: na contagem,
-  cancela; na ignição, aborta na plataforma), uma mensagem livre e a terminação do voo (com confirmação).
+  cancela; na ignição, aborta na plataforma) e a terminação do voo (com confirmação).
 
 Em Ajustes ficam as opções de gráficos, Terra, vista, câmera e som (guardadas entre execuções), e a câmera livre: F liga,
 arrastar olha, W/A/S/D/Espaço/Ctrl voam, com a velocidade pela altura, como no Kerbal Space Program; F ou Esc volta.

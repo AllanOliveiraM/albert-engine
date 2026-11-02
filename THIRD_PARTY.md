@@ -1,5 +1,7 @@
 # Bibliotecas e dados de terceiros
 
+As nuvens artificiais usam uma referência histórica de estrutura do Blue Marble/MODIS, NASA Goddard Space Flight Center / Reto Stöckli (publicação de 2002), convertida para cinza e reduzida a 4096 × 2048 em `assets/clouds/structure.png`. O cenário aplica animação e deformação; não é meteorologia atual. Fonte: [Blue Marble 2002](https://science.nasa.gov/earth/earth-observatory/the-blue-marble-true-color-global-imagery-at-1km-resolution/) e [textura original NASA](https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/cloud_combined_8192.tif). Imagem pública da NASA; sem alegação de endosso. O hash está no manifesto dos assets.
+
 As versões baixadas são fixadas com SHA-256 em `cmake/Dependencies.cmake` e `cmake/Grpc.cmake`.
 
 | Componente | Versão | Fonte / licença |

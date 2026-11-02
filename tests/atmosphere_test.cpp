@@ -234,7 +234,7 @@ int main(){
 @group(0) @binding(16) var<storage, read_write> probe: array<vec4f>;
 @compute @workgroup_size(1) fn main() {
     let p = normalize(vec3f(1.0, 1.0, 0.0)) * (bottomRadius() + 0.001);
-    probe[0] = vec4f(1.0 - cloudShadow(p, length(p)), 0.0, 0.0, 0.0); // The map's v where the sun ray crosses the layer.
+    probe[0] = vec4f(cloudCover(p), cloudShadow(p, length(p)), 0.0, 0.0); // Density and Beer-Lambert transmission at overhead sun.
     let s = skyRadiance(p, normalize(p), normalize(p)); probe[1] = vec4f(s.radiance, s.transmittance.g); // The tables bound as elsewhere.
 }
 )";
@@ -253,7 +253,8 @@ int main(){
                 if(!(t>.85f&&t<=1.f&&r>=0.f&&r<1.f))lowWrong+=1;
             }
             {const double geodetic=std::atan2(1.,.5)/3.14159265358979+.5;std::printf("cloud map read at v %.4f (geodetic %.4f, parametric 0.7500)\n",shadowValues[0],geodetic);
-             near("Cloud shadows read the layer's map in geodetic latitude",shadowValues[0],geodetic,.006);}
+             near("Cloud shadows read the layer's map in geodetic latitude",shadowValues[0],geodetic,.006);
+             near("Cloud column transmission at overhead sun",shadowValues[1],1-.98*geodetic,.006);}
             {const double h=11.1,above=marsModel.top-3396.19,column=h*(1-std::exp(-above/h)),depth=.5*(1-std::exp(-above/h))+2.5e-4*column;
              std::printf("Mars zenith transmittance from the datum %.4f %.4f %.4f (want %.4f at 550 nm)\n",marsValues[0],marsValues[1],marsValues[2],std::exp(-depth));
              near("Mars: dust optical depth 0.5 above the datum, as the model states",marsValues[1],std::exp(-depth),.003);

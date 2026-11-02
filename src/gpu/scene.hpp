@@ -39,7 +39,7 @@ public:
         threepp::Texture* clouds=nullptr;float cloudKm=12,cloudShadow=0;
         float surfaceWind=0; // m/s: water (texels under 0.5 in the roughness maps of materials named "albert:water") takes Cox-Munk's slopes (0: the maps').
         float polarRatio=1; // Polar/equatorial axis ratio: the cloud map uses geodetic latitude.
-        float hazeExtinction=0,hazeScaleKm=.8f,localCloudCover=-1;} air; // Additional visual aerosol (/km, km); negative cover selects the satellite map.
+        float hazeExtinction=0,hazeScaleKm=.8f,localCloudCover=-1,cloudOffset=0;} air; // Negative cover selects the global map; offset is its longitude drift (turns).
     unsigned airSteps=4;
     // Earthshine on lit materials (earthLight in the photometry module): the Earth and its radius in world units (0: none).
     struct Earthshine {const threepp::Object3D* earth=nullptr;float radius=0;} earthshine;

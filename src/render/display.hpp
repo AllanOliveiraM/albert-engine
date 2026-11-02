@@ -40,7 +40,7 @@ public:
     // build over the first frames; groundKm as SceneRenderer::Air.
     void setAir(const threepp::Object3D* body,float kmPerUnit,float strength,float groundKm=0,bool mars=false);
     // The weather the air shows (SceneRenderer::Air): cloud shadows, the sea's wind roughness.
-    void setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio=1);
+    void setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio=1,float cloudOffset=0);
     void setEarthshine(const threepp::Object3D* earth,float radius); // Radius in world units; 0 or null: none.
     void setSamples(unsigned samples); // Multisampling of the scene pass: 1 or 4.
     // Wind waves on the water near the camera (gpu::Ocean, made when first on): the wind (m/s toward east and north), the

@@ -7,11 +7,25 @@
 #undef near
 #undef far
 #include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <stop_token>
 #include <thread>
 namespace albert::example {
+// The embedded flight computer can be stopped without blocking the render thread.
+// External clients keep the default token and their existing timing behaviour.
+inline thread_local std::stop_token flightStop;
+inline thread_local std::function<double()> flightSpeed; // Embedded playback multiplier; 0 pauses the flight computer.
+inline void checkFlightStop(){if(flightStop.stop_requested())throw std::runtime_error("Missão encerrada");}
+inline void waitFlightUntil(std::chrono::steady_clock::time_point due){
+    checkFlightStop();
+    if(!flightStop.stop_possible()){std::this_thread::sleep_until(due);return;}
+    std::mutex mutex;std::unique_lock lock(mutex);std::condition_variable_any wake;
+    wake.wait_until(lock,flightStop,due,[]{return false;});checkFlightStop();
+}
 inline double paceSim=0,paceSlept=0; // ALBERT_PACE_LOG: the pacer's last simulated time (s) and its sleep since the last RPC (ms).
 inline void check(const grpc::Status& s){if(!s.ok())throw std::runtime_error(s.error_message());}
 // An RPC until the server takes it: a busy server (UNAVAILABLE, RESOURCE_EXHAUSTED) refuses before applying anything, so it
@@ -21,9 +35,11 @@ template<class Rpc> void call(Rpc&& rpc){
     struct Done{std::chrono::steady_clock::time_point sent;std::chrono::steady_clock::time_point& back;~Done(){if(!log)return;const auto now=std::chrono::steady_clock::now();
         const double rpcMs=std::chrono::duration<double,std::milli>(now-sent).count(),clientMs=std::chrono::duration<double,std::milli>(sent-back).count();
         if(rpcMs>100||clientMs-paceSlept>100)std::fprintf(stderr,"PACE rpc %.0f ms, client %.0f ms before it (%.0f asleep) at sim %.2f s\n",rpcMs,clientMs,paceSlept,paceSim);paceSlept=0;back=now;}} done{sent,back};
-    for(int i=0;;++i){grpc::ClientContext c;const grpc::Status s=rpc(c);if(s.ok())return;
+    for(int i=0;;++i){checkFlightStop();grpc::ClientContext c;
+        std::stop_callback cancel(flightStop,[&]{c.TryCancel();});
+        const grpc::Status s=rpc(c);checkFlightStop();if(s.ok())return;
         const bool busy=s.error_code()==grpc::StatusCode::UNAVAILABLE||s.error_code()==grpc::StatusCode::RESOURCE_EXHAUSTED;
-        if(!busy||i>=24)throw std::runtime_error(s.error_message());std::this_thread::sleep_for(std::chrono::milliseconds(50<<std::min(i,4)));}
+        if(!busy||i>=24)throw std::runtime_error(s.error_message());waitFlightUntil(std::chrono::steady_clock::now()+std::chrono::milliseconds(50<<std::min(i,4)));}
 }
 inline Vec vec(const ::albert::v1::Vector3& v){return{v.x(),v.y(),v.z()};}
 inline Reading reading(const ::albert::v1::FlightSample& s){

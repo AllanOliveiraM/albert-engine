@@ -35,9 +35,20 @@ struct Extent {double a0,b0,size;};
 Extent extent(const Key& k){const double size=2./static_cast<double>(1u<<k.level);return{-1+k.x*size,-1+k.y*size,size};}
 // Solid angle of the spherical triangle a, b, c (Van Oosterom and Strackee).
 double triangle(const Vec& a,const Vec& b,const Vec& c){return 2*std::atan2(std::abs(a.dot(b.cross(c))),1+a.dot(b)+b.dot(c)+c.dot(a));}
-struct Built {Key key;Vec centre;float radius=0;std::vector<float> positions,normals,uvs,residuals;std::vector<unsigned> index;bool complete=true;std::uint64_t generation=0;};
+struct Built {Key key;Vec centre;float radius=0;std::vector<float> positions,normals,uvs,residuals;std::vector<unsigned> index;bool complete=true;std::uint64_t generation=0;std::array<double,4> error{};};
 std::uint64_t pack(const Key& k){return static_cast<std::uint64_t>(k.face)<<61|static_cast<std::uint64_t>(k.level)<<56|static_cast<std::uint64_t>(k.x)<<28|k.y;} // Levels ≤ 27.
 struct Shape {Vec centre;double radius=0;std::array<Vec,4> corners;}; // Angular radius (radians).
+const std::vector<unsigned>& terrainIndices(unsigned tier){
+    static const auto all=[](){std::array<std::vector<unsigned>,4> result;
+        for(unsigned level=0;level<4;++level){const int step=1<<level;auto& out=result[level];
+            for(int j=0;j<posts-1;j+=step)for(int i=0;i<posts-1;i+=step){const unsigned a=j*posts+i,c=a+step,d=c+step*posts,f=a+step*posts;out.insert(out.end(),{a,c,d,a,d,f});}
+            const std::array<std::array<int,4>,4> edges{{{0,0,1,0},{posts-1,0,0,1},{posts-1,posts-1,-1,0},{0,posts-1,0,-1}}};
+            unsigned e=0;for(const auto& [x,y,dx,dy]:edges){for(int q=0;q<posts-1;q+=step){
+                const unsigned a=(y+dy*q)*posts+x+dx*q,b=(y+dy*(q+step))*posts+x+dx*(q+step),c=posts*posts+e*posts+q,d=c+step;
+                out.insert(out.end(),{a,c,d,a,d,b});}++e;}
+        }return result;
+    }();return all[tier];
+}
 Shape shapeOf(const Key& k){
     const auto e=extent(k);Shape s;s.centre=direction(k.face,e.a0+e.size/2,e.b0+e.size/2);
     const double a[4]{e.a0,e.a0+e.size,e.a0+e.size,e.a0},b[4]{e.b0,e.b0,e.b0+e.size,e.b0+e.size};
@@ -48,13 +59,13 @@ Shape shapeOf(const Key& k){
 struct Terrain::Impl {
     // Provisional: from coarser data, at that generation. Detail: the region's imagery applied for that version.
     struct Morph {std::vector<float> start,end;double t=0;}; // Vertex positions on the parent's surface and the node's own.
-    struct Node {std::shared_ptr<Mesh> mesh;Vec centre;unsigned lastUsed=0;bool provisional=false;std::uint64_t generation=0;unsigned detailVersion=0;bool detailed=false;std::unique_ptr<Morph> morph;}; // centre: in the parent's frame.
+    struct Node {std::shared_ptr<Mesh> mesh;Vec centre;unsigned lastUsed=0;bool provisional=false;std::uint64_t generation=0;unsigned detailVersion=0;bool detailed=false;std::array<double,4> error{};unsigned indexTier=0;std::unique_ptr<Morph> morph;}; // centre: in the parent's frame.
     Object3D& parent;Object3D* root;std::shared_ptr<Material> material;TerrainBody body;
     Object3D& holder(){return root?*root:parent;} // Where the nodes hang.
     std::unordered_map<std::uint64_t,Node> nodes;std::unordered_map<std::uint64_t,Shape> shapes;std::unordered_set<std::uint64_t> queued;
     std::vector<std::pair<double,Key>> queue; // (priority, key): lower first.
     std::vector<Built> done;mutable std::mutex lock;std::condition_variable wake;bool stop=false;std::thread worker;
-    std::vector<Key> selected;unsigned frame=0;int finest=0;double solidAngle=0;
+    std::vector<Key> selected;float screenPixels=0,pixelError=1;unsigned frame=0;int finest=0;double solidAngle=0;
     std::shared_ptr<Material> detailMaterial;std::optional<Vector4> detailBounds;unsigned detailVersion=1;
     std::chrono::steady_clock::time_point lastUpdate=std::chrono::steady_clock::now();
     // A node replacing its drawn parent starts on the parent's surface: its posts are every other parent
@@ -154,6 +165,16 @@ struct Terrain::Impl {
             for(int s=0;s+1<posts;++s){const unsigned top0=grid(i0+di*s,j0+dj*s),top1=grid(i0+di*(s+1),j0+dj*(s+1)),low0=first+static_cast<unsigned>(s),low1=low0+1;
                 b.index.insert(b.index.end(),{top0,low0,low1,top0,low1,top1});}
         }
+        // Geometric error against the original triangulation, computed once
+        // off the graphics thread. Includes both relief and globe curvature.
+        for(unsigned tier=1;tier<4;++tier){const int stride=1<<tier;
+            for(int j=0;j<posts;++j)for(int i=0;i<posts;++i){const int x=std::min(i/stride*stride,posts-1-stride),y=std::min(j/stride*stride,posts-1-stride);
+                const double u=double(i-x)/stride,v=double(j-y)/stride;
+                const Vec a=p[(y+1)*m+x+1],c=p[(y+1)*m+x+stride+1],d=p[(y+stride+1)*m+x+stride+1],f=p[(y+stride+1)*m+x+1];
+                const Vec coarse=u>=v?a*(1-u)+c*(u-v)+d*v:a*(1-v)+d*u+f*(v-u);
+                b.error[tier]=std::max(b.error[tier],(p[(j+1)*m+i+1]-coarse).length()*body.scale);
+            }
+        }
         return b;
     }
     void adopt(){
@@ -168,7 +189,7 @@ struct Terrain::Impl {
             mesh->castShadow=false;mesh->receiveShadow=true;mesh->renderOrder=0;
             auto& node=nodes[pack(b.key)];
             if(node.mesh){mesh->visible=node.mesh->visible;holder().remove(*node.mesh);node.mesh->geometry()->dispose();}else mesh->visible=false;
-            holder().add(mesh);node.mesh=mesh;node.centre=at;node.lastUsed=frame;node.provisional=!b.complete;node.generation=b.generation;node.detailVersion=0;node.detailed=false;node.morph.reset();
+            holder().add(mesh);node.mesh=mesh;node.centre=at;node.lastUsed=frame;node.provisional=!b.complete;node.generation=b.generation;node.detailVersion=0;node.detailed=false;node.error=b.error;node.indexTier=0;node.morph.reset();
         }
     }
     const Shape& shape(const Key& k){const auto key=pack(k);if(const auto it=shapes.find(key);it!=shapes.end())return it->second;return shapes.emplace(key,shapeOf(k)).first->second;}
@@ -220,6 +241,11 @@ bool Terrain::update(const Vector3& camera,const Frustum* frustum,bool horizonCu
     for(const auto& k:g.selected){auto& n=*g.node(k);n.mesh->visible=true;g.finest=std::max(g.finest,k.level);if(n.detailVersion!=g.detailVersion)g.applyDetail(n);
         if(n.morph)g.stepMorph(n,seconds);else if(!shown.count(pack(k))&&k.level&&shown.count(pack({k.face,k.level-1,k.x/2,k.y/2})))g.beginMorph(k,n);
         if(n.provisional&&n.generation<generation)g.request(k,k.level*1e3,true); // Finer data arrived.
+        if(g.screenPixels>0){unsigned tier=0;
+            const double range=std::max(1e-9,(c*g.body.scale-n.centre).length()-n.mesh->geometry()->boundingSphere->radius);
+            if(!n.morph)for(unsigned next=1;next<4;++next)if(n.error[next]*g.screenPixels/range<g.pixelError*(n.indexTier==next?1.2:.8))tier=next;else break;
+            if(tier!=n.indexTier){n.mesh->geometry()->setIndex(terrainIndices(tier));n.indexTier=tier;}
+        }else if(n.indexTier){n.mesh->geometry()->setIndex(terrainIndices(0));n.indexTier=0;}
         const auto& s=g.shape(k);g.solidAngle+=triangle(s.corners[0],s.corners[1],s.corners[2])+triangle(s.corners[0],s.corners[2],s.corners[3]);}
     static const bool debug=std::getenv("ALBERT_TERRAIN_DEBUG")!=nullptr;
     if(debug&&g.frame%60==0)std::fprintf(stderr,"terrain: %zu drawn (%zu with regional imagery), finest %d, %zu built, %zu pending, camera %.6f, update %.2f ms\n",g.selected.size(),detailed(),g.finest,g.nodes.size(),g.queued.size(),distance,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
@@ -237,6 +263,8 @@ bool Terrain::update(const Vector3& camera,const Frustum* frustum,bool horizonCu
     if(g.root)g.place(frame);
     return covered;
 }
+void Terrain::screenSpace(float pixels,float error){impl_->screenPixels=std::max(0.f,pixels);impl_->pixelError=std::max(.1f,error);}
+std::size_t Terrain::triangles()const{std::size_t n=0;for(const auto& k:impl_->selected)if(const auto* node=impl_->node(k))n+=node->mesh->geometry()->getIndex()->count()/3;return n;}
 void Terrain::hide(){for(const auto& k:impl_->selected)if(auto* n=impl_->node(k))n->mesh->visible=false;impl_->selected.clear();}
 std::size_t Terrain::drawn()const{return impl_->selected.size();}
 std::size_t Terrain::pending()const{std::lock_guard l(impl_->lock);return impl_->queued.size()+impl_->done.size();}

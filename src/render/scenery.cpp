@@ -46,7 +46,10 @@ bool towerGeometry(Pieces& solid,Pieces& fine,const core::SceneryPart& p){
     if(name=="launch tower lattice"){
         const float x=w/2-.36f,y=d/2-.36f,bay=l/16;
         for(float sx:{-1.f,1.f})for(float sy:{-1.f,1.f}){
-            box({sx*x,sy*y,0},{.72f,.72f,l},p.color);
+            // Rolled columns: an open web between two broad flanges, with
+            // enough thickness to catch sunlight and cast a readable shadow.
+            box({sx*x,sy*y,0},{.22f,.68f,l},p.color);
+            for(float flange:{-.30f,.30f})box({sx*x,sy*y+flange,0},{.72f,.12f,l},p.color);
             // Flange edges and splice collars catch the sun without filling the open bays.
             for(float z=-l/2+bay;z<l/2-.1f;z+=bay)box({sx*x,sy*y,z},{.84f,.84f,.24f},edge,true);
         }
@@ -55,7 +58,29 @@ bool towerGeometry(Pieces& solid,Pieces& fine,const core::SceneryPart& p){
             for(int j=0;j<16;++j){const float bottom=-l/2+j*bay+.44f,top=-l/2+(j+1)*bay-.44f;
                 beam(at(-x+.14f,bottom,-.02f),at(x-.14f,top,-.02f),.28f,p.color);
                 beam(at(x-.14f,bottom,.02f),at(-x+.14f,top,.02f),.28f,p.color);
-                for(float side:{-1.f,1.f})for(float z:{bottom,top})box(at(side*(x-.25f),z),face<2?Vector3(.65f,.12f,.55f):Vector3(.12f,.65f,.55f),edge,true);
+                for(float side:{-1.f,1.f})for(float z:{bottom,top}){
+                    box(at(side*(x-.25f),z),face<2?Vector3(.65f,.12f,.55f):Vector3(.12f,.65f,.55f),edge,true);
+                    for(float bolt:{-.16f,.16f})box(at(side*(x-.25f)+bolt,z+.12f,side*.07f),{.075f,.075f,.075f},steel,true);
+                }
+            }
+        }
+    }else if(name=="tower lift and switchback stairs"){
+        box({-w*.28f,0,0},{1.35f,d*.82f,l},p.color);
+        for(float side:{-1.f,1.f})beam({-w*.28f,side*d*.43f,-l/2},{-w*.28f,side*d*.43f,l/2},.12f,edge);
+        const float bay=l/16;const float x=w*.27f;
+        for(int level=0;level<16;++level){const float base=-l/2+level*bay;
+            for(int flight=0;flight<2;++flight){const float z=base+flight*bay/2;
+                const float sign=flight? -1.f:1.f,offset=flight?.40f:-.40f;
+                beam({x+offset,-sign*d*.37f,z},{x+offset,sign*d*.37f,z+bay/2},.10f,edge,true);
+                for(int step=0;step<18;++step){const float t=(step+.5f)/18;
+                    box({x+offset,sign*d*(t-.5f)*.74f,z+t*bay/2},{.72f,d*.74f/18,.07f},steel,true);
+                }
+                beam({x+offset+.38f,-sign*d*.37f,z+1.05f},{x+offset+.38f,sign*d*.37f,z+bay/2+1.05f},.045f,steel,true);
+            }
+            box({x,0,base},{1.65f,d*.85f,.10f},edge);
+            for(float side:{-1.f,1.f}){
+                for(float rail:{.55f,1.05f})beam({x-.82f,side*d*.43f,base+rail},{x+.82f,side*d*.43f,base+rail},.045f,steel,true);
+                for(float end:{-.82f,.82f})beam({x+end,side*d*.43f,base},{x+end,side*d*.43f,base+1.1f},.06f,edge,true);
             }
         }
     }else if(name=="tower cladding panels"){
@@ -71,19 +96,19 @@ bool towerGeometry(Pieces& solid,Pieces& fine,const core::SceneryPart& p){
             for(float z:{.15f,4.2f}){beam({-x,side*y,z},{x,side*y,z},.4f,black);beam({side*x,-y,z},{side*x,y,z},.4f,black);}
             for(float end:{-1.f,1.f})beam({side*x,end*y,0},{side*x,end*y,4.2f},.48f,black);
             beam({-x,side*y,0},{x,side*y,4.2f},.22f,black);
-            beam({-3,side*.85f,4.6f},{17,side*.55f,4.6f},.24f,black);
-            beam({-3,side*.85f,6.3f},{17,side*.55f,5.5f},.24f,black);
-            for(int i=0;i<8;++i){const float a=-3+i*2.5f,b=a+2.5f,t=float(i)/8,u=float(i+1)/8;
-                beam({a,side*(.85f-.3f*t),4.6f},{b,side*(.85f-.3f*u),6.3f-.8f*u},.14f,black);
-                beam({a,side*(.85f-.3f*t),6.3f-.8f*t},{a,side*(.85f-.3f*t),4.6f},.14f,black);}
-            beam({-3,side*1.1f,4.2f},{-1,0,11},.22f,black);
-            beam({-1,0,11},{16,side*.55f,5.55f},.065f,edge,true);
-            beam({-1,0,11},{-7,side*.6f,4.6f},.065f,edge,true);
-            box({-5,side*1.3f,3.8f},{4,1.2f,1.4f},edge);
-            beam({16,side*.55f,4.5f},{16,side*.55f,-.8f},.065f,edge,true);
+            beam({-x,side*y,4.2f},{0,side*y,6.7f},.22f,black);
+            beam({0,side*y,6.7f},{x,side*y,4.2f},.22f,black);
         }
-        beam({0,0,.5f},{0,0,17.5f},.24f,steel);beam({-3,-3,3},{0,0,10},.07f,edge,true);beam({3,3,3},{0,0,10},.07f,edge,true);
-        box({16,0,-.8f},{.7f,1.4f,.6f},black,true);
+        // Roof cross-members are shared by both sides, so emit them once.
+        for(int i=0;i<=6;++i){const float a=-x+i*w/6;
+            beam({a,-y,4.2f},{a,y,4.2f},.16f,edge);
+            beam({a,-y,4.2f},{0,0,6.7f},.10f,edge,true);
+        }
+        beam({0,0,4.2f},{0,0,10.5f},.16f,steel);
+        for(float side:{-1.f,1.f})beam({side*3,-3,4.2f},{0,0,9},.045f,edge,true);
+        // Keep machinery outside the separate drawworks housing. The former
+        // boxes ended at exactly its roof height and shimmered through it.
+        box({-3.8f,0,2.5f},{1.f,2.4f,1.2f},black);
         for(float side:{-1.f,1.f})for(int i=0;i<=8;++i)box({-x+i*w/8,side*y,4.9f},{.08f,.08f,1.3f},steel,true);
         for(float side:{-1.f,1.f})beam({-x,side*y,5.55f},{x,side*y,5.55f},.07f,steel,true);
     }else if(name=="catch carriage frame"){
@@ -112,6 +137,30 @@ bool towerGeometry(Pieces& solid,Pieces& fine,const core::SceneryPart& p){
     }else if(name=="catch inner rail bed"){
         box({0,0,0},{w,d,l},edge);
         for(float z=-l/2+.5f;z<l/2;z+=2){box({0,-.25f,z},{1.05f,.3f,.65f},rubber,true);box({0,.25f,z},{.65f,.3f,.85f},black,true);}
+    }else if(name=="ship QD plate"){
+        // Tower 1's vertical multi-service head: a narrow irregular backing,
+        // projecting guide lugs, and unequal commodities, not a round puck.
+        auto disc=[&](float radius,float depth,Vector3 at,std::uint32_t colour){auto g=CylinderGeometry::create(radius,radius,depth,24);g->rotateX(pi/2);g->translate(at.x,at.y,at.z);add(g,colour,false);};
+        const float front=l/2;
+        box({0,0,front-.18f},{w*.72f,d*.77f,.16f},edge);
+        for(float side:{-1.f,1.f}){
+            beam({side*w*.37f,-d*.58f,front-.20f},{side*w*.37f,d*.58f,front-.20f},.10f,black);
+            for(float h:{-d*.5f,d*.5f}){box({side*w*.35f,h,front-.12f},{.32f,.14f,.30f},steel);disc(.045f,.05f,{side*w*.35f,h,front+.055f},black);}
+        }
+        disc(.31f,.30f,{-.30f,-.27f,front+.015f},steel);disc(.22f,.32f,{.31f,.24f,front+.025f},steel);
+        for(int i=0;i<3;++i)disc(.07f,.19f,{.35f+i*.13f,.70f,front-.04f},rubber);
+        for(float side:{-1.f,1.f})beam({side*.44f,-.3f,-l/2},{side*.44f,-.3f,front-.28f},.18f,black);
+    }else if(name=="ship QD head"){
+        // Raised open forward frame and top links, visible around the two
+        // insulated pipes. The platform below belongs to the service boom.
+        for(float side:{-1.f,1.f}){
+            for(float end:{-l/2,l/2})beam({side*w*.42f,d*.35f,end},{side*w*.42f,-d*.60f,end},.14f,black);
+            for(float h:{d*.35f,-d*.60f})beam({side*w*.42f,h,-l/2},{side*w*.42f,h,l/2},.16f,edge);
+            beam({side*w*.42f,d*.35f,-l/2},{side*w*.42f,-d*.6f,l/2},.11f,black);
+            box({side*w*.42f,-d*.65f,l/2},{.28f,.20f,.35f},steel,true);
+        }
+        beam({-w*.42f,-d*.60f,l/2},{w*.42f,-d*.60f,l/2},.14f,edge);
+        for(int i=0;i<12;++i)box({-w*.45f+(i+.5f)*w*.9f/12,d*.41f,0},{w*.9f/12-.025f,.055f,l},steel,true);
     }else if(name=="ship QD truss"||name=="booster QD truss hood"){
         Pieces pieces;truss(pieces,w,d,l,.17f);for(auto& g:pieces)add(g,black,false);
         if(name=="booster QD truss hood")box({0,0,l/2-.15f},{w,d,.3f},edge); // The connector shield survives, its support stays open.
@@ -240,6 +289,32 @@ Site::Site(const core::Scenery& s){
     industrialFine_=industrial(industrialFine,"tank farm fittings",.4f,.6f);
     auto active=[&](const Vent& s){return std::none_of(vents_.begin(),vents_.end(),[&](const Vent& v){return Vector3(s.centre).sub(v.centre).lengthSq()<120*120;});};
     std::erase_if(sprays_,active);std::erase_if(pools_,active); // Only water the mount served by the exhaust markers.
+    if(!sprays_.empty()){
+        waterMaterial_=ShaderMaterial::create();waterMaterial_->name="albert:deluge-jet";
+        waterMaterial_->transparent=true;waterMaterial_->depthWrite=false;waterMaterial_->side=Side::Double;
+        waterMaterial_->blending=Blending::Custom;waterMaterial_->blendSrc=BlendFactor::One;waterMaterial_->blendDst=BlendFactor::OneMinusSrcAlpha;
+        waterMaterial_->uniforms={{"flow",Uniform(0.f)},{"time",Uniform(0.f)}};
+        float ground=vents_.front().centre.z-vents_.front().height/2;
+        std::map<std::size_t,Pieces> jets;
+        for(const auto& v:sprays_)for(int side:{-1,1}){
+            if(v.height>0&&side<0)continue;
+            const Vector3 velocity=Vector3(v.ahead).multiplyScalar(side*(v.height>0?5.f:7.f)).addScaledVector(v.up,v.height>0?7.f:9.f);
+            const float life=(velocity.z+std::sqrt(velocity.z*velocity.z+19.62f*std::max(0.f,v.centre.z-ground)))/9.81f;
+            std::vector<float> positions,uv;std::vector<unsigned> indices;constexpr unsigned steps=32,sides=8;
+            for(unsigned i=0;i<=steps;++i){const float t=life*float(i)/steps;Vector3 at=Vector3(v.centre).addScaledVector(velocity,t);at.z-=4.905f*t*t;
+                Vector3 tangent=velocity;tangent.z-=9.81f*t;Vector3 normal=Vector3(v.across).cross(tangent).normalize();
+                for(unsigned k=0;k<=sides;++k){const float a=2*pi*float(k)/sides;
+                    const auto p=Vector3(at).addScaledVector(v.across,(.045f+.32f*t)*std::cos(a)).addScaledVector(normal,(.018f+.045f*t)*std::sin(a));
+                    positions.insert(positions.end(),{p.x,p.y,p.z});uv.insert(uv.end(),{float(k)/sides,t});
+                    if(i&&k){const unsigned c=i*(sides+1)+k;indices.insert(indices.end(),{c-1,c,c-sides-1,c-1,c-sides-1,c-sides-2});}
+                }
+            }
+            auto g=BufferGeometry::create();g->setAttribute("position",FloatBufferAttribute::create(std::move(positions),3));g->setAttribute("uv",FloatBufferAttribute::create(std::move(uv),2));g->setIndex(indices);g->computeVertexNormals();
+            jets[v.structure].push_back(relative(v.structure,g));
+        }
+        for(auto& [structure,pieces]:jets){auto mesh=Mesh::create(mergeBufferGeometries(pieces),waterMaterial_);mesh->name="deluge continuous jets";mesh->visible=false;
+            (structure?hinges_[structure-1].pivot:std::static_pointer_cast<Object3D>(root_))->add(mesh);waterJets_.push_back(mesh);}
+    }
     if(!vents_.empty()||!tankVents_.empty()){auto g=SphereGeometry::create(1,20,12);auto pool=[&](auto& puffs){for(auto& p:puffs){
         auto m=ShaderMaterial::create();m->name="albert:steam";m->transparent=true;m->depthTest=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::OneMinusSrcAlpha;
         m->uniforms={{"density",Uniform(0.f)},{"seed",Uniform(0.f)},{"time",Uniform(0.f)},{"up",Uniform(Vector3(0,0,1))},{"kind",Uniform(0.f)},{"size",Uniform(Vector3(1,1,1))},{"cloud",Uniform(Vector4(0,0,0,0))}};p.mesh=Mesh::create(g,m);p.mesh->visible=false;root_->add(p.mesh);}};
@@ -280,6 +355,7 @@ void Site::resetExhaust(){
     if(launchCloud_)launchCloud_->reset();
     for(auto& p:spray_){p.life=0;if(p.mesh)p.mesh->visible=false;}
     sprayPending_=mistPending_=runoffPending_=0;for(auto& v:vents_)v.pending=1;
+    waterTime_=0;for(auto& jet:waterJets_)jet->visible=false;
 }
 void Site::exhaust(float thrust,float above,float seconds,float waterFlow,const Vector3& wind,bool enabled){
     if(!std::isfinite(seconds)||seconds<0||vents_.empty())return;
@@ -294,6 +370,9 @@ void Site::exhaust(float thrust,float above,float seconds,float waterFlow,const 
         if(v.structure){const auto& pivot=*hinges_[v.structure-1].pivot;origin.sub(pivot.position).applyQuaternion(pivot.quaternion).add(pivot.position);ahead.applyQuaternion(pivot.quaternion);across.applyQuaternion(pivot.quaternion);up.applyQuaternion(pivot.quaternion);}}; // A released puff no longer follows a hinge.
     float ground=vents_.front().centre.z-.5f*vents_.front().height;for(const auto& v:vents_)ground=std::min(ground,v.centre.z-.5f*v.height);
     const float wet=enabled?std::sqrt(std::min(1.f,water/16.f)):0.f;
+    waterTime_+=seconds;
+    if(waterMaterial_){waterMaterial_->uniforms.at("flow").setValue(wet);waterMaterial_->uniforms.at("time").setValue(float(std::fmod(waterTime_,4096.)));}
+    for(auto& jet:waterJets_)jet->visible=wet>0;
     auto waterBirth=[&](unsigned kind){auto& sources=kind==1?sprays_:kind==2?pools_:vents_;auto& pending=kind==1?sprayPending_:kind==2?mistPending_:runoffPending_;auto& cursor=kind==1?sprayCursor_:kind==2?poolCursor_:runoffCursor_;const float r=(kind==1?18.f:kind==2?2.f:2.8f)*wet;
         if(sources.empty()||!(r>0)){pending=0;return;}pending=std::min(4.f,pending+seconds*r);
         const std::size_t first=kind==1?0:kind==2?48:64,last=kind==1?48:kind==2?64:72;
@@ -301,12 +380,12 @@ void Site::exhaust(float thrust,float above,float seconds,float waterFlow,const 
             const auto& v=sources[cursor++%sources.size()];auto& p=*slot;Vector3 ahead,across,up;source(v,p.origin,ahead,across,up);
             p.age=std::min(seconds,pending/r);p.seed=random();p.kind=kind;p.ground=ground;p.drift.copy(air);p.strength=wet;p.mesh->visible=enabled;
             if(kind==2){p.origin.add(Vector3(across).multiplyScalar((random()-.5f)*v.width*.8f)).add(Vector3(ahead).multiplyScalar((random()-.5f)*v.height));
-                p.velocity.copy(ahead).multiplyScalar((random()-.5f)*5);p.life=7+2*random();p.width=6+6*random();p.height=1.3f+random();p.mesh->rotation.set(0,0,std::atan2(-ahead.x,ahead.y));}
+                p.velocity.copy(ahead).multiplyScalar((random()-.5f)*5);p.life=4+2*random();p.width=3+3*random();p.height=.6f+.5f*random();p.mesh->rotation.set(0,0,std::atan2(-ahead.x,ahead.y));}
             else if(kind==4){p.origin.z=ground+.9f;p.origin.add(Vector3(across).multiplyScalar((random()-.5f)*v.width*.6f));
-                p.velocity.copy(ahead).multiplyScalar(10+8*random());p.life=2.6f+.6f*random();p.width=4+3*random();p.height=.7f+.6f*random();p.mesh->rotation.set(0,0,std::atan2(-ahead.x,ahead.y));}
+                p.velocity.copy(ahead).multiplyScalar(10+8*random());p.life=2.f+.6f*random();p.width=.7f+.7f*random();p.height=.15f+.15f*random();p.mesh->rotation.set(0,0,std::atan2(-ahead.x,ahead.y));}
             else{const float side=v.height>0?1.f:(random()<.5f?-1.f:1.f);p.origin.add(Vector3(across).multiplyScalar((random()-.5f)*v.width));
-                p.velocity.copy(ahead).multiplyScalar(side*(6+8*random())).add(Vector3(across).multiplyScalar((random()-.5f)*7)).add(Vector3(up).multiplyScalar(v.height>0?11+4*random():14+4*random()));
-                p.life=(p.velocity.z+std::sqrt(p.velocity.z*p.velocity.z+19.62f*std::max(0.f,p.origin.z-ground)))/9.81f+.2f;p.width=.18f+.18f*random();p.height=1.2f+.9f*random();}
+                p.velocity.copy(ahead).multiplyScalar(side*(5+3*random())).add(Vector3(across).multiplyScalar((random()-.5f)*7)).add(Vector3(up).multiplyScalar(v.height>0?7+2*random():9+2*random()));
+                p.life=(p.velocity.z+std::sqrt(p.velocity.z*p.velocity.z+19.62f*std::max(0.f,p.origin.z-ground)))/9.81f+.2f;p.width=.025f+.025f*random();p.height=.12f+.15f*random();}
         }};waterBirth(1);waterBirth(2);waterBirth(4); // Separate quotas preserve dozens of fans, a continuous mist bed and both runoff streams.
     auto uniforms=[&](Puff& p,float density){auto& m=*p.mesh;auto& u=m.material()->as<ShaderMaterial>()->uniforms;
         u.at("density").setValue(density);u.at("seed").setValue(p.seed*97.f);u.at("time").setValue(p.age);u.at("kind").setValue(static_cast<float>(p.kind));u.at("size").setValue(m.scale);
@@ -314,11 +393,11 @@ void Site::exhaust(float thrust,float above,float seconds,float waterFlow,const 
     for(auto& p:spray_)if(p.life>0){const float a=p.age;auto& m=*p.mesh;float density;
         if(p.kind==1){m.position.copy(p.origin).add(Vector3(p.velocity).multiplyScalar(a)).add(Vector3(p.drift).multiplyScalar(.12f*a*a));m.position.z-=4.905f*a*a;
             Vector3 tangent=p.velocity;tangent.z-=9.81f*a;if(tangent.lengthSq()>1e-5f)m.quaternion.setFromUnitVectors(Vector3(0,0,1),tangent.normalize());
-            m.scale.set(p.width+.22f*a,p.width+.38f*a,p.height+.8f*a);density=5*p.strength*fade(a/.08f)*fade((p.life-a)/.45f);}
+            m.scale.set(p.width+.018f*a,p.width+.028f*a,p.height+.07f*a);density=.65f*p.strength*fade(a/.08f)*fade((p.life-a)/.45f);}
         else if(p.kind==4){m.position.copy(p.origin).add(Vector3(p.velocity).multiplyScalar(1.2f*(1-std::exp(-a/1.2f)))).add(Vector3(p.drift).multiplyScalar(.15f*a));
-            m.scale.set(p.width+2*a,7+4*a,p.height+.2f*a);density=3.5f*p.strength*fade(a/.15f)*fade((p.life-a)/.8f);}
+            m.scale.set(p.width+.8f*a,1.8f+1.2f*a,p.height+.12f*a);density=.22f*p.strength*fade(a/.15f)*fade((p.life-a)/.8f);}
         else{m.position.copy(p.origin).add(Vector3(p.velocity).multiplyScalar(a)).add(Vector3(p.drift).multiplyScalar(.2f*a));m.position.z+=.07f*a;
-            m.scale.set(p.width+1.8f*a,1.6f*p.width+2.2f*a,p.height+.35f*a);density=1.8f*p.strength*fade(a/.35f)*fade((p.life-a)/2.f);}
+            m.scale.set(p.width+1.2f*a,1.4f*p.width+1.4f*a,p.height+.25f*a);density=.24f*p.strength*fade(a/.35f)*fade((p.life-a)/2.f);}
         m.visible=enabled;uniforms(p,density);}
 }
 }

@@ -205,6 +205,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets):scene_(
         material->uniforms.emplace("previousDetailBounds",Uniform(Vector4(0,0,1,1)));
         material->uniforms.emplace("previousDetailEnabled",Uniform(0.f));
         material->uniforms.emplace("detailBlend",Uniform(1.f));
+        material->uniforms.emplace("cloudOffset",Uniform(0.f));
     }
     nightMaterial_->uniforms.emplace("cloudOpacity", Uniform(0.f));
     nightMaterial_->uniforms.emplace("visibility",Uniform(1.f));
@@ -368,7 +369,7 @@ void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
     if((images.body=="moon")) {moonMaterial_->alphaMap=surfaceMasks_[bodySlot];moonMaterial_->needsUpdate();}
     else {earthMaterial_->alphaMap=surfaceMasks_[bodySlot];earthMaterial_->needsUpdate();}
     if(oldMask) oldMask->dispose();
-    if(patch) { parent->remove(*patch);patch->geometry()->dispose();patch->material()->dispose(); }
+    if(patch) { if(patch->parent)patch->parent->remove(*patch);patch->geometry()->dispose();patch->material()->dispose(); }
     if(regionalTextures_[slot]) regionalTextures_[slot]->dispose();
     regionalTextures_[slot]=images.gpu[0] ? images.gpu[0] : texture(std::move(*images.day));
     auto geometry=std::move(images.geometry);
@@ -405,7 +406,9 @@ void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
         earthDetailBounds_=region;
         patch=Mesh::create(geometry,material);
     }
-    patch->castShadow=patch->receiveShadow=true;patch->renderOrder=1;parent->add(patch);
+    patch->castShadow=patch->receiveShadow=true;patch->renderOrder=1;
+    if(images.body=="earth"&&images.geometryOrigin!=std::array<double,3>{}){earthDetailOrigin_=images.geometryOrigin;scene_->add(patch);patch->matrixAutoUpdate=false;}
+    else {if(images.body=="earth")earthDetailOrigin_={};parent->add(patch);}
     terrainBounds_[bodySlot]=Vector4(static_cast<float>((region.west+180.)/360.),static_cast<float>((region.south+90.)/180.),
         static_cast<float>((region.east-region.west)/360.),static_cast<float>((region.north-region.south)/180.));
 }
@@ -419,7 +422,7 @@ bool albert::PlanetVisuals::releaseDistantDetails(const std::string& focus,const
         auto& terrain=i?moonTerrain_:earthTerrain_;if(terrain)terrain->detail(nullptr,std::nullopt);terrainBounds_[i].reset();
         if(i){moonMaterial_->alphaMap=opaqueMask_;moonMaterial_->needsUpdate();moonDetailMaterial_.reset();moonTerrainDetail_.reset();}
         else {earthMaterial_->alphaMap=opaqueMask_;earthMaterial_->needsUpdate();earthDetailBounds_.reset();earthTerrainDetail_.reset();nightMaterial_->uniforms.at("nightDetailMap").setValue(textures_[1].get());nightMaterial_->uniforms.at("nightDetailEnabled").setValue(0.f);}
-        parent->remove(*patch);patch->geometry()->dispose();patch->material()->dispose();patch.reset();
+        if(patch->parent)patch->parent->remove(*patch);patch->geometry()->dispose();patch->material()->dispose();patch.reset();
         for(size_t slot:i?std::vector<size_t>{2}:std::vector<size_t>{0,1,3})if(regionalTextures_[slot]){regionalTextures_[slot]->dispose();regionalTextures_[slot].reset();}
         if(regionalHeights_[i]){regionalHeights_[i]->dispose();regionalHeights_[i].reset();}
         if(surfaceMasks_[i]){surfaceMasks_[i]->dispose();surfaceMasks_[i].reset();}
@@ -470,6 +473,25 @@ void albert::PlanetVisuals::updateImageDetail(const Vector3& camera, bool enable
 
 void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3& cameraPosition, const VisualSettings& settings, float seconds, Camera* camera,
                                    const TerrainFrame* earthFrame,const std::array<double,3>* moonAt) {
+    if(settings.clouds!=CloudMode::Off)cloudSource_=settings.clouds;
+    if(cloudSource_==CloudMode::Simulated&&!simulatedCloudTexture_){
+        if(!simulatedClouds_.valid()){
+            // Shared across views; reference decoding never holds the graphics thread.
+            static const auto weather=std::async(std::launch::async,[]{backgroundPriority();return simulatedCloudImage();}).share();
+            simulatedClouds_=weather;
+        }
+        if(simulatedClouds_.wait_for(std::chrono::seconds(0))==std::future_status::ready)
+            simulatedCloudTexture_=texture(simulatedClouds_.get(),ColorSpace::NoColorSpace);
+    }
+    const bool observed=cloudSource_==CloudMode::Observed;
+    auto* map=observed?(liveCloudTexture_?liveCloudTexture_.get():textures_[2].get()):(simulatedCloudTexture_?simulatedCloudTexture_.get():textures_[2].get());
+    cloudOffset_=observed?0.f:static_cast<float>(std::fmod(cloudTime_*12./40075017.,1.));
+    for(auto* mat:{cloudMaterial_.get(),nightMaterial_.get()}){
+        if(mat->uniforms.at("cloudMap").value<Texture*>()!=map){mat->uniforms.at("cloudMap").setValue(map);mat->needsUpdate();}
+        mat->uniforms.at("detailEnabled").setValue(observed&&cloudDetailTexture_?1.f:0.f);
+        mat->uniforms.at("previousDetailEnabled").setValue(observed&&previousCloudDetail_?1.f:0.f);
+        mat->uniforms.at("cloudOffset").setValue(cloudOffset_);
+    }
     cloudDetailBlend_=animateValue(cloudDetailBlend_,1.f,seconds);
     for(auto* mat:{cloudMaterial_.get(),nightMaterial_.get()}) mat->uniforms.at("detailBlend").setValue(cloudDetailBlend_);
     if(cloudDetailBlend_==1.f && previousCloudDetail_) {
@@ -479,7 +501,7 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     displayedFill_[0]=animateValue(displayedFill_[0],settings.earthAssist ? settings.earthAssistIntensity : 0.f,seconds);
     displayedFill_[1]=animateValue(displayedFill_[1],settings.moonAssist ? settings.moonAssistIntensity : 0.f,seconds);
     displayedAtmosphere_=animateValue(displayedAtmosphere_,settings.atmosphere ? 1.f : 0.f,seconds);
-    displayedClouds_=animateValue(displayedClouds_,settings.clouds ? 1.f : 0.f,seconds);
+    displayedClouds_=animateValue(displayedClouds_,settings.clouds!=CloudMode::Off ? 1.f : 0.f,seconds);
     displayedNight_=animateValue(displayedNight_,settings.nightLights ? 1.f : 0.f,seconds);
     atmosphereMaterial_->uniforms.at("visibility").setValue(displayedAtmosphere_);
     cloudMaterial_->uniforms.at("visibility").setValue(displayedClouds_*cloudShell_);
@@ -506,6 +528,13 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     atmosphereMaterial_->uniforms.at("localSun").setValue(localSun);
     atmosphere_->visible = displayedAtmosphere_>0.f;
     clouds_->visible = displayedClouds_*cloudShell_>0.f;
+    if(earthDetail_&&earthDetailOrigin_!=std::array<double,3>{}){
+        earth->updateMatrixWorld();auto& e=earthDetail_->matrix->elements;e=earth->matrixWorld->elements;
+        const auto& m=earth->matrixWorld->elements;
+        for(int row=0;row<3;++row){double at=earthFrame?earthFrame->at[row]:m[12+row];
+            for(int c=0;c<3;++c){const double linear=earthFrame?earthFrame->linear[3*c+row]:m[4*c+row];e[4*c+row]=float(linear);at+=linear*earthDetailOrigin_[c];}e[12+row]=float(at);}
+        earthDetail_->matrixWorldNeedsUpdate=true;
+    }
     if(earthDetail_) earthDetail_->visible=settings.quality && localCamera.length()<2.2f;
     if(moonDetail_) moonDetail_->visible=settings.quality && cameraPosition.distanceTo(moon->position)<.8f;
     const auto earthMask=earthDetail_ && earthDetail_->visible ? surfaceMasks_[0] : opaqueMask_;

@@ -38,6 +38,7 @@ public:
 private:
     struct Gas {std::shared_ptr<threepp::Mesh> mesh;core::Vector origin,velocity,flow;threepp::Quaternion attitude;double born=-1e30;float life=0,radius=0,speed=0,air=0;unsigned kind=0;bool pending=false;};
     struct Engine {std::shared_ptr<threepp::Object3D> pivot,detached;std::array<std::shared_ptr<threepp::Mesh>,2> plume,remnant;core::Vector direction;double radius=.5,releasedUtc=-1e30;float heat=0,exitY=0,remnantLife=0,remnantWidth=0;std::shared_ptr<threepp::Mesh> hot,exit,torch;std::shared_ptr<threepp::ShaderMaterial> bell;
+        std::array<std::shared_ptr<threepp::Object3D>,2> actuators;std::array<threepp::Vector3,2> anchors,lugs;
         EngineCycle cycle;core::Vector released,velocity,inherited,flow;threepp::Quaternion attitude;std::array<float,2> remnantStrength{};std::array<Gas,6> gas;};
     struct Part {std::shared_ptr<threepp::Object3D> pivot;threepp::Quaternion base;threepp::Vector3 axis,tip;double gain=1,offset=0;unsigned surface=0;bool trail=false;};
     struct Jet {std::shared_ptr<threepp::Mesh> mesh;};

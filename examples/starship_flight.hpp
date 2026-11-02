@@ -21,6 +21,9 @@
 #include <thread>
 #include <tuple>
 namespace albert::example::starship {
+enum class MissionPhase {Countdown,Ascent,Separated,BoosterLanding,Orbit,Entry,ShipLanding,Finished};
+inline thread_local std::function<void(MissionPhase)> missionProgress;
+inline void progress(MissionPhase phase){if(missionProgress)missionProgress(phase);}
 // The pad at Starbase: Pad 1 as rebuilt for V3 (a flame trench and a mount on legs over it, as Pad 2's), its tower (Tower 1, where
 // OpenStreetMap has it) 22 m west of the mount; the ground's height there (WGS 84; ~1 m over the mean sea by the Copernicus relief it is
 // drawn from, whose geoid is 25.1 m under the ellipsoid: the site stood 29 m over its drawn ground), the arms' height over it, the bars' radius; the mount's deck the stack
@@ -82,18 +85,21 @@ inline void addStarbase(api::CreateFlightRequest& create){
         for(const double z:{2.4,4.9})for(int i=0;i<3;++i)part("service building window",Shape::BOX,p(-12.78,-7.5+i*2.5,z),{.08,1.5,.9},0x344e60,bearing);}
         // Render markers expand into merged steel, panel seams and fittings, never contact structures.
         part("launch tower lattice",Shape::TRUSS,p(0,0,height/2),{9.5,9.5,height},galvanised,bearing);
-        part("tower cladding panels",Shape::BOX,p(0,0,height/6+.8),{9.74,9.74,height/3},0x858e95,bearing);
+        // The launch tower is open steel, including its lower bays. Only the
+        // narrow lift shaft is clad; a solid skirt hid the reference silhouette.
         part("tower crane crown",Shape::TRUSS,p(0,0,height),{9.5,9.5,4.5},armSteel,bearing);
-        for(const Vec at:{p(-4.6,-4.6,height+4.8),p(4.6,4.6,height+4.8),p(0,0,height+17.5)})part("tower aviation beacon",Shape::CYLINDER,at,{.28,.28,.32},0xff2210);
-        part("enclosed lift and stairs",Shape::BOX,p(-2.9,-3.2,height/2),{1.7,2.2,height-.06},0x85898c,bearing);
+        for(const Vec at:{p(-4.6,-4.6,height+4.8),p(4.6,4.6,height+4.8),p(0,0,height+10.5)})part("tower aviation beacon",Shape::CYLINDER,at,{.28,.28,.32},0xff2210);
+        part("tower lift and switchback stairs",Shape::BOX,p(-2.1,-2.1,height/2),{3.4,4.3,height-.06},0x85898c,bearing);
         for(const int level:{3,6,9,12,15,16}){const double z=level*section-.28;
             part("tower service landing",Shape::BOX,p(0,-3.65,z),{9.12,1.6,.18},dark,bearing);
             for(const double h:{.64,1.19})bar("landing handrail",p(-4.48,-4.39,z+h),p(4.48,-4.39,z+h),.065,white);
             for(const double x:{-4.48,-1.5,1.5,4.48})bar("landing rail post",p(x,-4.39,z+.06),p(x,-4.39,z+1.22),.125,dark);
             for(const double side:{-1.,1.})bar("landing return rail",p(side*4.48,-4.39,z+1.22),p(side*4.48,-2.9,z+1.22),.065,white);
             if(level==16)for(int face=0;face<3;++face){const bool end=face==0;const double side=face==1?-1.:1.;
-                part("crown access deck",Shape::BOX,p(end?0:side*3.8,end?3.65:0,z-.03*(face+1)),end?Vec{9.06,1.6,.18}:Vec{1.6,5.76,.18},dark,bearing);
-                guard(p(end?-4.48:side*4.39,end?4.39:-2.85,z+.06-.03*face),p(end?4.48:side*4.39,end?4.39:4.39,z+.06-.03*face),1,0,.2);}} // Landings sit within the original column footprint.
+                // The three crown decks meet edge-to-edge at one elevation.
+                // Small overlaps and stepped z offsets caused z-fighting.
+                part("crown access deck",Shape::BOX,p(end?0:side*3.8,end?3.65:0,z),end?Vec{9.06,1.6,.18}:Vec{1.6,5.7,.18},dark,bearing);
+                guard(p(end?-4.48:side*4.39,end?4.39:-2.85,z+.06),p(end?4.48:side*4.39,end?4.39:4.39,z+.06),1,0,.2);}} // Landings sit within the original column footprint.
         for(int i=0;i<5;++i)pipe("tower service pipe",p(-1.6+i*.8,-3.92,.12),p(-1.6+i*.8,-3.92,height-.12),i<2?.55:i==2?.42:.3);
         for(const double side:{-1.,1.})part("tower cable tray",Shape::BOX,p(side*2.35,-4.5,height/2),{.45,.3,height-.12},dark,bearing);
         for(int z=10;z<height;z+=10)part("service bank clamp",Shape::BOX,p(0,-4.25,z),{5.3,.42,.16},tankSteel,bearing); // Shared clamp bars retain the whole service bank.
@@ -115,28 +121,61 @@ inline void addStarbase(api::CreateFlightRequest& create){
         for(const double along:{railFrom,railTo}){part("catch rail shock bumper",Shape::CYLINDER,p(along,-side*.8,.38),{.75,.75,1.1},wet);onPart(on);}
     };
     auto flex=[&](Vec a,Vec b,double diameter,double sag,unsigned on){auto p=[&](double t){return a+(b+a*-1.)*t+Vec{0,0,-sag*std::sin(t*std::numbers::pi)};};
-        for(int i=0;i<4;++i){const Vec from=p(i*.25),to=p((i+1)*.25),d=to+from*-1.;pipe("QD flexible hose",from,to,diameter);create.mutable_scenery(create.scenery_size()-1)->set_color(wet);onPart(on);
+        for(int i=0;i<12;++i){const Vec from=p(i/12.),to=p((i+1)/12.),d=to+from*-1.;pipe("QD flexible hose",from,to,diameter);create.mutable_scenery(create.scenery_size()-1)->set_color(wet);onPart(on);
             part("QD braided sleeve ferrule",Shape::CYLINDER,(from+to)*.5,{diameter+.06,diameter+.06,norm(d)-.06},tankSteel,std::atan2(d.x,d.y)/deg,std::atan2(std::hypot(d.x,d.y),d.z)/deg,diameter-.03);onPart(on);
-            if(i==1||i==2){part("QD diagonal braid binding",Shape::CYLINDER,(from+to)*.5,{diameter+.12,diameter+.12,.08},dark,std::atan2(d.x,d.y)/deg,std::atan2(std::hypot(d.x,d.y),d.z)/deg+(i==1?18:-18),diameter+.04);onPart(on);}}}; // Opposed bindings break the silver sleeve into a woven flex run.
+            if(i%3==1){part("QD diagonal braid binding",Shape::CYLINDER,(from+to)*.5,{diameter+.12,diameter+.12,.06},dark,std::atan2(d.x,d.y)/deg,std::atan2(std::hypot(d.x,d.y),d.z)/deg+(i%2?18:-18),diameter+.04);onPart(on);}}};
     tower({towerX,0,0},0,146);
     part("catch carriage frame",Shape::BOX,{towerX,0,armHeight-armRadius-depth/2},{2*half+3.04,2*half+3,depth+3},armSteel);
     for(const double side:{-1.,1.}){const double y=side*(pinOut+.8);const double from=armPivot,to=13;const unsigned on=side>0?3:1; // The catch arms, under their rails.
         part("tapered catch truss",Shape::TRUSS,{(from+to)/2,y,armHeight-armRadius-(depth+.33)/2},{beam-.1,depth-.33,to-from},armSteel,90,90);onPart(on);
         part("catch arm walkway",Shape::BOX,{(from+to)/2,y,armHeight-armRadius-.15},{beam,.3,to-from},armSteel,90,90);onPart(on);
         armDetail({from,y,armHeight-armRadius},{1,0,0},{0,1,0},to-from,side,on,-10-from,10-from);}
+    // Tower 1 SQD silhouette: Jenny Hautmann's 22 Apr 2023 close-up
+    // (Commons: SpaceX_Starbase_integration_tower_quick_disconnect_arm.jpg).
+    // Photographic proportions, not surveyed dimensions or a Pad 2 replica.
     auto shipArm=[&](Vec shipRoot,Vec shipAxis,Vec shipAcross,double shipReach,unsigned on){const double bearing=std::atan2(shipAxis.x,shipAxis.y)/deg;
-        auto shipPart=[&](){create.mutable_scenery(create.scenery_size()-1)->set_structure(on);};const double girderEnd=shipReach-3.5;
-        part("ship QD truss",Shape::TRUSS,shipRoot+shipAxis*((girderEnd+.03)/2),{3,3,girderEnd-.03},armSteel,bearing,90);shipPart();
-        part("ship arm hinge",Shape::CYLINDER,shipRoot,{2.5,2.5,3.4},dark);shipPart();
-        pipe("ship arm brace",shipRoot+Vec{0,0,-6},shipRoot+shipAxis*(girderEnd*.72)+Vec{0,0,-1.47},.8);shipPart();
-        part("ship QD head",Shape::BOX,shipRoot+shipAxis*(shipReach-2.28),{3.5,2,2.5},0x777c80,bearing,90);shipPart(); // Overlap girder 3 cm; clear plate 3 cm.
-        part("ship QD head pivot",Shape::CYLINDER,shipRoot+shipAxis*(girderEnd+.37),{1.05,1.05,2.46},dark);shipPart();
-        part("ship QD plate",Shape::BOX,shipRoot+shipAxis*shipReach,{3,3,2},dark,bearing,90);shipPart(); // Preserve hull contact.
-        for(int i=-1;i<=1;++i){const Vec offset=shipAcross*2.02+Vec{0,0,i*.75},bend=shipRoot+shipAxis*(girderEnd-.4)+offset;
-            pipe("ship QD hose",shipRoot+shipAxis*.6+offset,bend,.6);create.mutable_scenery(create.scenery_size()-1)->set_color(wet);shipPart();
-            pipe("ship QD hose droop",bend,shipRoot+shipAxis*(shipReach-2.28)+offset+Vec{0,0,-.25},.6);create.mutable_scenery(create.scenery_size()-1)->set_color(wet);shipPart();} // Hoses enter the head's side.
-        for(int i=0;i<3;++i)flex(shipRoot+shipAxis*(shipReach-2.28)+shipAcross*-1.72+Vec{0,0,.65-i*.6},shipRoot+shipAcross*(-2.05-i*.48)+Vec{0,0,-4.8},i==2?.22:.38,1.8,on);
-        part("SQD tower valve cabinet",Shape::BOX,shipRoot+shipAcross*-2.65+Vec{0,0,-5.15},{2.1,1.5,1.6},tankSteel,bearing);shipPart(); // The cabinet and hose tails follow the arm hinge.
+        auto shipPart=[&](){onPart(on);};
+        auto p=[&](double along,double across,double z){return shipRoot+shipAxis*along+shipAcross*across+Vec{0,0,z};};
+        auto servicePipe=[&](const char* name,Vec a,Vec b,double diameter,std::uint32_t colour){pipe(name,a,b,diameter);create.mutable_scenery(create.scenery_size()-1)->set_color(colour);shipPart();};
+        const double girderEnd=shipReach-2.8;
+        part("ship QD truss",Shape::TRUSS,p(girderEnd/2,0,-2.75),{3.8,2.5,girderEnd},armSteel,bearing,90);shipPart();
+        part("ship arm hinge",Shape::CYLINDER,p(0,0,-2.4),{2.6,2.6,7.2},dark);shipPart();
+        for(double side:{-1.,1.}){
+            servicePipe("SQD lower knee brace",p(.2,side*1.5,-6),p(girderEnd*.72,side*1.5,-3.9),.38,armSteel);
+            servicePipe("SQD shoulder brace",p(.2,side*1.5,-5.7),p(girderEnd*.43,side*1.5,-1.4),.30,armSteel);
+            servicePipe("SQD shoulder top chord",p(.1,side*1.8,-1.5),p(girderEnd,side*1.8,-1.5),.23,armSteel);
+        }
+        part("SQD service platform",Shape::BOX,p(shipReach-3.2,0,-1.38),{4.6,.16,4.7},galvanised,bearing,90);shipPart();
+        for(double side:{-1.,1.})guard(p(girderEnd*.4,side*1.85,-1.25),p(shipReach-1.1,side*1.85,-1.25),3,on,0);
+        part("ship QD head",Shape::BOX,p(shipReach-2.28,0,-1.1),{3.5,3.4,2.5},dark,bearing,90);shipPart();
+        part("ship QD plate",Shape::BOX,p(shipReach,0,0),{1.8,2.7,2},dark,bearing,90);shipPart();
+        // Insulated main lines run on the service boom, rise through the
+        // forward frame, then feed the plate horizontally. Small control
+        // hoses lie beside them, with slack confined to the articulated head.
+        for(int i=0;i<2;++i){const double side=i?-.63:.63,diameter=i?.38:.55;
+            servicePipe("SQD insulated main line",p(.6,side,-2.0),p(girderEnd-1,side,-2.0),diameter,white);
+            // Rounded elbow sampled as a quarter turn, not disconnected sticks.
+            const double bendAt=girderEnd-1,rad=.65;
+            for(int k=0;k<10;++k){auto elbow=[&](double a){return p(bendAt+rad*std::sin(a),side,-2.0+rad*(1-std::cos(a)));};
+                servicePipe("SQD insulated elbow",elbow(k*std::numbers::pi/20),elbow((k+1)*std::numbers::pi/20),diameter,white);}
+            servicePipe("SQD raised feed",p(bendAt+rad,side,-1.35),p(bendAt+rad,side,-.2+i*.45),diameter,white);
+            flex(p(bendAt+rad,side,-.2+i*.45),p(shipReach+.35,side*.55,-.2+i*.45),diameter,.12,on);
+            // The inlet of each articulated line meets the swivel on its axis.
+            flex(p(0,0,-2.0+i*.65),p(.6,side,-2.0),diameter,.12,on);
+        }
+        for(int i=0;i<3;++i){const double across=1.18+i*.17;
+            servicePipe("SQD control conduit",p(.3,across,-1.75),p(girderEnd-.3,across,-1.75),.065,wet);
+            flex(p(girderEnd-.3,across,-1.75),p(shipReach+.32,.45+i*.12,-.7),.065,.25,on);}
+        // Fixed tower-side equipment and a vertical swivel stack. Everything
+        // downstream of its axis turns; the supply and landing stay on steel.
+        const Vec cabinet=p(0,0,-5.6)+Vec{-1,-1,0};
+        part("SQD tower valve cabinet",Shape::BOX,cabinet,{2.1,1.5,1.6},tankSteel,0);
+        pipe("SQD fixed supply riser",cabinet+Vec{0,0,.8},p(0,0,-1.1)+Vec{-1,-1,0},.55);
+        pipe("SQD fixed supply elbow",p(0,0,-1.1)+Vec{-1,-1,0},p(0,0,-1.1),.55);
+        pipe("SQD swivel feed",p(0,0,-2.1),p(0,0,-1.1),.55);
+        for(int i=0;i<2;++i)part("SQD rotary coupling",Shape::CYLINDER,p(0,0,-2.0+i*.65),{.8,.8,.22},tankSteel);
+        part("SQD cabinet service landing",Shape::BOX,cabinet+Vec{0,0,-.95},{2.8,2.6,.18},armSteel);
+        for(double side:{-1.,1.})pipe("SQD cabinet tower bracket",cabinet+Vec{side*.9,0,-1.05},shipRoot+Vec{side*.9-1,-2,-2.9},.16);
     };
     const Vec shipRoot{towerX+half,half,deck+78},shipAxis{1/std::sqrt(2.),1/std::sqrt(2.),0},shipAcross{shipAxis.y,-shipAxis.x,0};
     shipArm(shipRoot,shipAxis,shipAcross,std::hypot(shipRoot.x,shipRoot.y)-5.56,8); // Preserve the existing QD plate and hinge positions.
@@ -345,11 +384,17 @@ inline void profile(std::FILE* f,double t,const char* who,const api::FlightSampl
 struct Pacer {
     bool fast=false;std::chrono::steady_clock::time_point start=std::chrono::steady_clock::now();double wall=0,last=0;
     double hurry=1; // --landings: every phase but the landings this many times faster (1: as they happen).
-    void operator()(double sim,double rate){if(fast){last=sim;return;}wall+=(sim-last)/rate;last=sim;paceSim=sim;
+    void operator()(double sim,double rate){if(fast){last=sim;return;}
+        if(flightSpeed){const auto paused=std::chrono::steady_clock::now();double speed=flightSpeed();
+            while(speed<=0){waitFlightUntil(std::chrono::steady_clock::now()+std::chrono::milliseconds(25));speed=flightSpeed();}
+            if(std::chrono::steady_clock::now()-paused>std::chrono::milliseconds(10))start+=std::chrono::steady_clock::now()-paused;
+            rate*=speed;
+        }
+        wall+=(sim-last)/rate;last=sim;paceSim=sim;
         const auto due=start+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(wall)),now=std::chrono::steady_clock::now();
         static const bool log=std::getenv("ALBERT_PACE_LOG")!=nullptr;if(log&&now-due>std::chrono::milliseconds(150))std::fprintf(stderr,"PACE late %.0f ms at sim %.1f s\n",std::chrono::duration<double,std::milli>(now-due).count(),sim);
         if(now-due>std::chrono::milliseconds(250))start+=now-due; // Behind (a slow or hot machine): on from now, never sprinting to catch up (the scene ran in pulses at 2x).
-        else{std::this_thread::sleep_until(due);paceSlept+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-now).count();}}
+        else{waitFlightUntil(due);paceSlept+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-now).count();}}
 };
 // along, across: where it rests on the arms, along their rails (east) and across them (north) from the tower's axis (m).
 // down: the catch given up (gaveUp: why), the ship down at sea or on the ground `away` m from the tower's axis.
@@ -419,9 +464,10 @@ inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pac
     double csvAt=0;
     std::vector<std::string> marks; // Events seen since the last step, for the timeline.
     for(;;){
+        progress(back.phase()>=ShipReturn::Phase::flip?MissionPhase::ShipLanding:back.phase()>=ShipReturn::Phase::entry?MissionPhase::Entry:MissionPhase::Orbit);
         const double t=(ship.elapsed_seconds()-zero);if(csv&&t>=csvAt){csvAt=std::floor(t)+1;profile(csv,t,"ship",ship,names[static_cast<int>(back.phase())]);}back.armsClosed=armsClosed(ship);armAngles(back,ship);const Command c=back.step(t,nav.state(ship));out.handoff=back.handoff();out.handoffMiss=back.handoffMiss();
         const bool quick=back.phase()==ShipReturn::Phase::orbit||back.phase()==ShipReturn::Phase::glide;
-        const double ahead=quick?back.nextStep():std::min(back.nextStep(),.25); // In real time: short steps, so the scene's clock never waits on one (a 10 s step showed it paused).
+        const double ahead=quick&&warp>1?std::min(back.nextStep(),10.):std::min(back.nextStep(),.25); // Short real-time steps also keep embedded pause/speed controls responsive.
         api::StepRequest q;q.set_ticks(static_cast<unsigned>(std::clamp(std::llround(ahead*1000),1LL,600000LL)));apply(q,c);
         if(!pending.first.empty()){decide(q,pending.first,pending.second);pending={};}
         {static const char* phases[]{"orbit","orient","deorbit","glide","entry","flip","landing","hover","descend","caught","divert","down"};inject(faults,"ship",t,phases[static_cast<int>(back.phase())],q);}
@@ -502,6 +548,7 @@ struct Mission {double meco=0,mecoHeight=0,seco=0,perigee=0,apoapsis=0,maxQ=0,ma
     bool clear()const{return downEast<-110-boosterLength||downEast>60+boosterLength||downNorth<-115-boosterLength||downNorth>55+boosterLength;}
     bool onRails()const{return std::abs(across)<.2&&along>-5&&along<9;}}; // The booster's pins in the grooves (along, across: as Home's).
 inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=1000,bool orbitOnly=false,const std::function<void()>& onSpawn={},std::vector<Fault> faults={},double utc=0,double hurry=1){
+    progress(MissionPhase::Countdown);
     Mission out;Pacer pace;pace.fast=fast;pace.hurry=hurry;
     api::CreateFlightRequest create;create.set_vehicle(api::CUSTOM);*create.mutable_definition()=stack();create.set_focus_camera(true);create.set_heading_degrees(heading);
     create.set_weather(api::CreateFlightRequest::STANDARD_ATMOSPHERE);addTower(create,true);if(utc>0)create.set_utc_unix_seconds(utc); // Unset: the scene's instant.
@@ -525,6 +572,7 @@ inline Mission mission(api::FlightService::Stub& flight,bool fast,double warp=10
     static const char* names[]{"wait","flip","boostback","coast","landing","final","hover","descend","caught","divert","down"}; // For the failures.
     for(;;){
         const double t=clock();
+        progress(t<0?MissionPhase::Countdown:!spawned?MissionPhase::Ascent:back.phase()>=BoosterReturn::Phase::landing?MissionPhase::BoosterLanding:MissionPhase::Separated);
         api::StepRequest step;step.set_ticks(20);inject(faults,spawned?"ship":"stack",t,nullptr,step);
         if(!pending.first.empty()){decide(step,pending.first,pending.second);pending={};}
         if(count.phase()!=Countdown::Phase::launched){ // On the pad: the count, until the clamps let go.

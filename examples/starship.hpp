@@ -27,6 +27,14 @@ namespace api=::albert::v1;
 constexpr double pi=3.14159265358979323846,deg=pi/180,g0=9.80665,radius=4.5,shipLength=52.1,boosterLength=72.3;
 constexpr double raptorSea=280e3*g0,raptorExit=1.33,raptorVacuum=raptorSea+101325*raptorExit,raptorExhaust=350*g0,rvacThrust=258e3*g0*280/230,rvacExhaust=380*g0;
 constexpr double pinOut=radius+1; // The catch pins' ends off the axis (m): 1 m out of the hull.
+// The V3 aft reference shows the gimballed inner engines just proud of the fixed outer ring. The small axial steps below are
+// an image-based estimate (outer 0, middle 0.12 m, centre 0.24 m aft), not a claim of published manufacturing dimensions.
+constexpr double boosterMiddleAft=.12,boosterCentreAft=.24;
+struct BoosterEngineSite {double radial,angle,aft;};
+inline constexpr auto boosterEngineSites=[] {std::array<BoosterEngineSite,33> sites{};
+    for(int i=0;i<3;++i)sites[i]={.75,i*120*deg,boosterCentreAft};
+    for(int i=0;i<10;++i)sites[i+3]={2.2,i*36*deg,boosterMiddleAft};
+    for(int i=0;i<20;++i)sites[i+13]={3.9,(i*18+9)*deg,0};return sites;}();
 // The axial drag coefficient engines first, by Mach: a blunt base, near a flat disc's above Mach 2 (~1.6), as the descents'
 // telemetry shows (Flight 3's booster: 1206 m/s at 25 km down to 858 m/s at 10 km).
 constexpr double dragMach[]{0,.8,1.2,2,5},baseDragTable[]{1,1.1,1.5,1.65,1.6};
@@ -34,18 +42,22 @@ constexpr double dragMach[]{0,.8,1.2,2,5},baseDragTable[]{1,1.1,1.5,1.65,1.6};
 // 13.5 km at ~3100 km/h and 7.4 km at ~2000 (the base table alone, from Flight 3's V1: ~3860 and ~2600).
 constexpr double descentDrag=1.8;
 constexpr double boosterEmpty=275e3,boosterPropellant=3800e3,shipEmpty=100e3,shipPropellant=1600e3,engineMass=1.72e3,reserve=.1*boosterPropellant;
-// A solid cylinder from `from` to `to` m aft of the nose: mass, its centre, and principal moments about that centre.
-struct Part {double mass,from,to;};
+// Bulk components use a solid-cylinder approximation; engine clusters add their station radius and axial span for mass moments.
+struct Part {double mass,from,to,radial=radius;bool engine=false;};
 struct MassProperties {double mass=0,cg=0;double ix=0,iy=0;};
 inline MassProperties combine(const std::vector<Part>& parts,double shift=0){ // shift: added to every position.
     MassProperties m;for(const auto& p:parts){m.mass+=p.mass;m.cg+=p.mass*((p.from+p.to)/2+shift);}if(m.mass>0)m.cg/=m.mass;
-    for(const auto& p:parts){const double l=p.to-p.from,c=(p.from+p.to)/2+shift-m.cg;m.ix+=.5*p.mass*radius*radius;m.iy+=p.mass*((3*radius*radius+l*l)/12+c*c);}
+    for(const auto& p:parts){const double l=p.to-p.from,c=(p.from+p.to)/2+shift-m.cg;
+        if(p.engine){ // Engine mass follows its ring station; distribute azimuthally for the booster-level inertia estimate.
+            m.ix+=p.mass*p.radial*p.radial;m.iy+=p.mass*(l*l/12+c*c+.5*p.radial*p.radial);
+        }else{m.ix+=.5*p.mass*p.radial*p.radial;m.iy+=p.mass*((3*p.radial*p.radial+l*l)/12+c*c);}}
     return m;
 }
 // The ship's parts and the booster's, from each one's own nose; full or empty of propellant.
 inline std::vector<Part> ship(bool full){std::vector<Part> p{{shipEmpty-6*engineMass,0,shipLength},{6*engineMass,shipLength-3.3,shipLength}};
     if(full){p.push_back({.78*shipPropellant,30,48});p.push_back({.22*shipPropellant,14,30});}return p;}
-inline std::vector<Part> booster(bool full){std::vector<Part> p{{boosterEmpty-33*engineMass,0,boosterLength},{33*engineMass,boosterLength-3.3,boosterLength}};
+inline std::vector<Part> booster(bool full){std::vector<Part> p{{boosterEmpty-33*engineMass,0,boosterLength}};
+    for(const auto& site:boosterEngineSites){const double from=boosterLength-3.3+site.aft;p.push_back({engineMass,from,from+3.3,site.radial,true});}
     if(full){p.push_back({.78*boosterPropellant,35.6,69.3});p.push_back({.22*boosterPropellant,6,35.6});}return p;}
 inline void put(api::Vector3* o,double x,double y,double z){o->set_x(x);o->set_y(y);o->set_z(z);}
 // Coefficients on the 9 m disc (π r²) for a cylinder of this length: axial drag nose-first or base-first by Mach, and the
@@ -74,18 +86,21 @@ inline double dragOf(double length,double angle,double mach){ // angle: the tota
     auto f=[&](double x){const double r=x*deg,c=std::cos(r),s=std::sin(r);return (c>=0?n:b)*c*c+side*s*s*s;};return hi>lo?f(lo)+(f(hi)-f(lo))*(a-lo)/(hi-lo):f(lo);
 }
 inline void raptors(api::StageDefinition* st,double base,bool boosterRings){
-    auto add=[&](const std::string& name,double r,double angle,double gimbal,double thrust,double exhaust,double exit){auto* e=st->add_engines();e->set_name(name);
-        put(e->mutable_position_meters(),base,r*std::cos(angle),r*std::sin(angle));e->set_vacuum_thrust_newtons(thrust);e->set_exhaust_velocity_meters_per_second(exhaust);
+    auto add=[&](const std::string& name,double axial,double r,double angle,double gimbal,double thrust,double exhaust,double exit){auto* e=st->add_engines();e->set_name(name);
+        put(e->mutable_position_meters(),axial,r*std::cos(angle),r*std::sin(angle));e->set_vacuum_thrust_newtons(thrust);e->set_exhaust_velocity_meters_per_second(exhaust);
         e->set_exit_area_meters2(exit);e->set_min_throttle(.4);e->set_gimbal_radians(gimbal);e->set_gimbal_rate_radians_per_second(20*deg);e->set_start_kilograms(100); // A start's spin-up,
         e->set_spool_seconds(.35);}; // and its chamber filling: ~95% of the thrust a second after ignition (an estimate).
-    if(boosterRings){ // 3 centre and 10 middle gimballed, 20 outer fixed.
-        for(int i=0;i<3;++i)add("centre "+std::to_string(i+1),.75,i*120*deg,15*deg,raptorVacuum,raptorExhaust,raptorExit);
-        for(int i=0;i<10;++i)add("middle "+std::to_string(i+1),2.2,i*36*deg,15*deg,raptorVacuum,raptorExhaust,raptorExit);
-        for(int i=0;i<20;++i)add("outer "+std::to_string(i+1),3.9,(i*18+9)*deg,0,raptorVacuum,raptorExhaust,raptorExit);
+    if(boosterRings){ // Same sites drive thrust, mass distribution, guidance and the rendered support geometry.
+        for(int i=0;i<static_cast<int>(boosterEngineSites.size());++i){const auto& site=boosterEngineSites[i];
+            const bool gimballed=i<13;const std::string ring=i<3?"centre ":i<13?"middle ":"outer ";
+            const int number=i<3?i+1:i<13?i-2:i-12;
+            add(ring+std::to_string(number),base+site.aft,site.radial,site.angle,gimballed?15*deg:0,
+                raptorVacuum,raptorExhaust,raptorExit);
+        }
     }else{ // The ship: 3 sea-level Raptors gimballed in the centre (the first on body z, square to the catch pins: hovering on it
         // alone the ship leans about the pins' line, both pins level), 3 Raptor Vacuum fixed outside between them.
-        for(int i=0;i<3;++i)add("raptor "+std::to_string(i+1),1,(90+i*120)*deg,15*deg,raptorVacuum,raptorExhaust,raptorExit);
-        for(int i=0;i<3;++i)add("vacuum "+std::to_string(i+1),3.2,(30+i*120)*deg,0,rvacThrust,rvacExhaust,4.15);
+        for(int i=0;i<3;++i)add("raptor "+std::to_string(i+1),base,1,(90+i*120)*deg,15*deg,raptorVacuum,raptorExhaust,raptorExit);
+        for(int i=0;i<3;++i)add("vacuum "+std::to_string(i+1),base,3.2,(30+i*120)*deg,0,rvacThrust,rvacExhaust,4.15);
     }
 }
 // The cryogens as the tanks hold them (estimates): 1% of what is left boiled off a day, the residuals the engines cannot draw.
@@ -227,8 +242,8 @@ struct State {Vec position,velocity,rate,contact,specific,thrustBody,wind;Mat to
 // gimbals: engines given their own deflection (rad) past the common one, after it (a roll by differential gimbal).
 struct Command {std::vector<int> ignite,cutoff;double throttle=-1,gimbalPitch=0,gimbalYaw=0,vent=-1;std::vector<double> surfaces;Vec torque;bool torqueOn=false,terminate=false; // vent: kg/s (negative: unchanged).
     struct Gimbal {int engine;double pitch,yaw;};std::vector<Gimbal> gimbals;};
-// Where an engine's nozzle sits off the axis (body y, z; m), by its number (1-based), as raptors() lays them out.
-inline Vec boosterNozzle(int i){const double r=i<=3?.75:i<=13?2.2:3.9,a=(i<=3?(i-1)*120.:i<=13?(i-4)*36.:(i-14)*18+9.)*deg;return{0,r*std::cos(a),r*std::sin(a)};}
+// Engine lever arms relative to the fixed outer ring (body x aft, y, z; m), using the same sites as raptors().
+inline Vec boosterNozzle(int i){const auto& site=boosterEngineSites.at(static_cast<std::size_t>(i-1));return{site.aft,site.radial*std::cos(site.angle),site.radial*std::sin(site.angle)};}
 inline Vec shipNozzle(int i){const double r=i<=3?1:3.2,a=(i<=3?90+(i-1)*120.:30+(i-4)*120.)*deg;return{0,r*std::cos(a),r*std::sin(a)};}
 // The engines a burn uses: the first n still working of an order of preference (1-based), lit and put out by commands; one
 // that fails while lit (the engines report it) is left out and the next working one lit in its place on the next use(). Up to
@@ -252,7 +267,7 @@ public:
     int working(const State& s,int n)const{if(trim_)return static_cast<int>(choose(s,n).size());int k=0;for(int e:order_)k+=k<n&&!failed(s,e);return k;} // Only thrust it can balance counts.
     int balanced(const State& s)const{int k=0;for(std::size_t i=0;i<order_.size()&&i<balance_;++i)k+=!failed(s,order_[i]);return k;} // Working among the steering ones.
     int gimballed()const{int n=0;for(int e:lit_)n+=steers(e);return n;}
-    Vec centre()const{Vec c;for(int e:lit_)c=c+nozzle_(e);return lit_.empty()?c:c*(1./static_cast<double>(lit_.size()));} // Thrust centre (body y, z).
+    Vec centre()const{Vec c;for(int e:lit_)c=c+nozzle_(e);return lit_.empty()?c:c*(1./static_cast<double>(lit_.size()));} // Mean engine lever arm, including the small axial stagger.
     // A roll torque (N m) by turning each lit engine across its place about their thrust centre: (y - ȳ, z - z̄) k in pitch and
     // yaw, the least deflections that give it with no net force across (so no pitch or yaw with it, whatever the set), T k Σ
     // |(y, z) - (ȳ, z̄)|² about x; at most `limit` (rad) and what the common gimbal leaves of the 15°, net of the roll the common

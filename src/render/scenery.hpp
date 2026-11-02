@@ -41,7 +41,8 @@ private:
     float night_=0;int quality_=1,cloudQuality_=1;
     std::shared_ptr<threepp::Mesh> detail_,industrialFine_;std::shared_ptr<threepp::ShaderMaterial> concrete_;
     std::vector<std::shared_ptr<threepp::Mesh>> towerDetails_;
-    std::vector<Vent> vents_,tankVents_,sprays_,pools_;std::unique_ptr<LaunchCloud> launchCloud_;std::array<Puff,72> spray_;std::array<Puff,24> boiloff_;std::uint32_t seed_=0x73a91b5du,tankSeed_=0xd19bc273u;std::size_t tankCursor_=0,sprayCursor_=0,poolCursor_=0,runoffCursor_=0;float sprayPending_=0,mistPending_=0,runoffPending_=0;
+    std::vector<Vent> vents_,tankVents_,sprays_,pools_;
+    std::shared_ptr<threepp::ShaderMaterial> waterMaterial_;std::vector<std::shared_ptr<threepp::Mesh>> waterJets_;double waterTime_=0;std::unique_ptr<LaunchCloud> launchCloud_;std::array<Puff,72> spray_;std::array<Puff,24> boiloff_;std::uint32_t seed_=0x73a91b5du,tankSeed_=0xd19bc273u;std::size_t tankCursor_=0,sprayCursor_=0,poolCursor_=0,runoffCursor_=0;float sprayPending_=0,mistPending_=0,runoffPending_=0;
     double ventUtc_=0;bool ventTimed_=false;
 };
 }

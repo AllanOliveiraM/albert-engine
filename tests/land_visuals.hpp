@@ -66,6 +66,22 @@ void landCaptures(const std::string& directory,bool production=false,bool indust
             const auto* program=albert::gpu::program(child->material()->name);std::cout<<"  "<<child->name<<": "<<child->geometry()->drawRange.count<<" instances, "<<(program?program->instanceVertices/3:0)<<" triangles each\n";}}
     };
     auto frame=[&](Vector3 at,Vector3 eye,float fov){aim=at;auto c=PerspectiveCamera::create(fov,4.f/3,.1,30000);c->up.set(0,0,1);if(eye.x==at.x&&eye.y==at.y)c->up.set(0,1,0);c->position.copy(eye);camera=c;};
+    if(std::getenv("ALBERT_DELUGE_REVIEW")){
+        renderer.shadowMetersPerUnit=1;renderer.shadowHigh=true;site.cloudQuality(2);
+        frame({0,0,8},{85,-115,70},48);
+        for(int i=0;i<120;++i)site.exhaust(0,14,1.f/30,41,{3,-1,0});shot("deluge-water-overview");
+        frame({0,0,8},{25,-32,18},54);shot("deluge-water-close");
+        for(int i=0;i<30;++i)site.exhaust(0,14,1.f/30,0,{3,-1,0});shot("deluge-off-residual");
+        wgpuTextureViewRelease(view);wgpuTextureRelease(target);require(albert::gpu::errors()==0,"Deluge review produced GPU validation errors");return;
+    }
+    if(std::getenv("ALBERT_TOWER_REVIEW")){
+        renderer.shadowMetersPerUnit=1;renderer.shadowHigh=true;
+        frame({-10,0,78},{155,-245,30},43);shot("tower-open-steel");
+        frame({-22,0,151},{-2,-20,165},48);shot("tower-crown");
+        frame({-8,0,89},{-38,38,97},32);shot("sqd-connected");
+        angles[7]=0;site.animate(&angles);shot("sqd-retracted");
+        wgpuTextureViewRelease(view);wgpuTextureRelease(target);require(albert::gpu::errors()==0,"Tower review produced GPU validation errors");return;
+    }
     if(crowdCheck){
         renderer.shadowMetersPerUnit=1;renderer.shadowHigh=false;renderer.sea.enabled=false;site.launchDay(-30,false);
         auto* layer=site.node()->getObjectByName("launch day crowd");require(layer&&layer->visible,"Capture failed to enable launch crowd");

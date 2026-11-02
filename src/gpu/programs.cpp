@@ -30,7 +30,7 @@ struct Frame {
     oceanSlopes: vec4f,      // Mean square slope in each cascade's band (512, 128, 32 m).
     localPosition: array<vec4f, 4>, // World position and range; zero range disables the slot.
     localColour: array<vec4f, 4>,   // Radiance divided by range squared.
-    coastal: vec4f, // Additional marine aerosol extinction (/km), scale height (km), local cloud cover (-1: map), reserved.
+    coastal: vec4f, // Marine aerosol extinction (/km), scale height (km), local cloud cover (-1: map), cloud longitude drift (turns).
     shadowLevels: array<mat4x4f, 3>,
     shadowScale: vec4f, // Level count, metres/world unit, depth span, caster level.
     contactMatrix: mat4x4f, // World to site-local metres.
@@ -237,20 +237,30 @@ fn horizonPoint(c: vec3f, toward: vec3f) -> vec3f { // The model sphere's horizo
 // The cloud map's coordinates over a point (planet frame): its v is geodetic (as its shell's map), tan φ = tan β · a / b
 // from the frame's parametric β.
 fn cloudUv(p: vec3f) -> vec2f { return vec2f(atan2(p.z, -p.x) / (2.0 * AIR_PI), atan2(p.y, length(p.xz) * frame.weather.w) / AIR_PI + 0.5); }
+// Gentle differential advection, periodic at the longitude wrap. Zero drift
+// leaves observed clouds unchanged. Scenario fronts retain their fine detail.
+fn cloudWeatherUv(uv: vec2f, drift: f32) -> vec2f {
+    let phase = 2.0 * AIR_PI * drift;
+    let shear = 0.025 * sin(4.0 * AIR_PI * uv.y) * sin(phase);
+    let north = 0.002 * sin(2.0 * AIR_PI * uv.x + phase) * sin(phase) * pow(sin(AIR_PI * uv.y), 2.0);
+    return uv + vec2f(drift + shear, north);
+}
+fn cloudOpticalDepth(cover: f32) -> f32 { return -log(max(1.0 - 0.98 * cover, 0.02)); }
 // Sunlight through the cloud layer over a point (planet frame, radius r): the layer's opacity where the
 // ray toward the sun crosses it (1 above it, or without clouds).
 fn cloudCover(p: vec3f) -> f32 {
     if (frame.coastal.z >= 0.0) { return frame.coastal.z; }
-    return textureSampleLevel(airClouds, airCloudSampler, cloudUv(p), 0.0).g;
+    return textureSampleLevel(airClouds, airCloudSampler, cloudWeatherUv(cloudUv(p), frame.coastal.w), 0.0).g;
 }
 fn cloudShadow(p: vec3f, r: f32) -> f32 {
     let top = bottomRadius() + frame.weather.x; let sun = frame.airSun.xyz;
     if (frame.weather.y <= 0.0 || r >= top) { return 1.0; }
     let rmu = dot(p, sun); let crossing = p + sun * (-rmu + sqrt(max(rmu * rmu - (r - top) * (r + top), 0.0)));
-    return 1.0 - frame.weather.y * cloudCover(crossing);
+    let mu = max(dot(normalize(crossing), sun), 0.15);
+    return mix(1.0, exp(-cloudOpticalDepth(cloudCover(crossing)) / mu), frame.weather.y);
 }
 struct AirLight { sun: vec3f, sky: vec3f }; // Sunlight reaching a point (fraction of the sun's colour); sky irradiance (relative to it).
-fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {
+fn airLightAt(world: vec3f, worldNormal: vec3f, receiveCloudShadow: bool) -> AirLight {
     if (frame.air.w <= 0.0) { return AirLight(vec3f(1.0), vec3f(0.0)); }
     let p = airPoint(world); let r = length(p); if (r >= topRadius()) { return AirLight(vec3f(1.0), vec3f(0.0)); }
     let up = p / r; let muS = dot(up, frame.airSun.xyz); let rc = max(r, bottomRadius());
@@ -262,8 +272,10 @@ fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight {
         sky += (marineSun * 0.4 + sky * 0.5) * (1.0 - exp(-4.0 * frame.coastal.x * frame.coastal.y));
     }
     sky *= (1.0 + dot(n, up)) * 0.5;
-    return AirLight(mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, muS) * coastalSun(p, frame.airSun.xyz), frame.air.w) * cloudShadow(p, r), sky * frame.air.w);
+    var shadow = 1.0; if (receiveCloudShadow) { shadow = cloudShadow(p, r); }
+    return AirLight(mix(vec3f(1.0), transmittanceToSun(airTransmittance, airSampler, rc, muS) * coastalSun(p, frame.airSun.xyz), frame.air.w) * shadow, sky * frame.air.w);
 }
+fn airLight(world: vec3f, worldNormal: vec3f) -> AirLight { return airLightAt(world, worldNormal, true); }
 fn skyHitsGround(c: vec3f, ray: vec3f) -> bool { let e = airEntry(c, ray); return e.hit && intersectsGround(e.r, e.rmu / e.r); }
 // The air between c and c + segment (planet frame, km). The segment comes from camera-relative world
 // coordinates: far from the planet (Mars: ~1e8 km, f32 steps of ~8 km) point - c would collapse.

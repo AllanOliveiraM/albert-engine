@@ -6,14 +6,72 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import statistics
 import subprocess
 import threading
 import time
+import unicodedata
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def mission_stage(line, current):
+    text = ''.join(c for c in unicodedata.normalize('NFKD', line.lower()) if not unicodedata.combining(c))
+    if 'contagem:' in text:
+        return 'countdown'
+    if 'booster:' in text and '(h ' in text:
+        return 'booster/' + text.split('booster:', 1)[1].split(' (h ', 1)[0].strip()
+    if 'nave:' in text and '(h ' in text:
+        return 'ship/' + text.split('nave:', 1)[1].split(' (h ', 1)[0].strip()
+    if 'separacao' in text and 'quente' in text:
+        return 'hot_staging'
+    match = re.match(r'\s*(-?\d+(?:\.\d+)?)\s+s\s', text)
+    if match and float(match[1]) >= 0 and current in ('client_loading', 'countdown'):
+        return 'ascent'
+    return current
+
+
+class LogCapture:
+    """Timestamp diagnostics as they arrive, without changing the client or renderer's output."""
+    def __init__(self, process, raw, events, started, client=False):
+        self.stage = 'client_loading' if client else ''
+        self.building = ''
+        self.metrics = {}
+        self.thread = threading.Thread(target=self.run, args=(process, raw, events, started, client), daemon=True)
+        self.thread.start()
+
+    def run(self, process, raw, events, started, client):
+        with events.open('w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['elapsed_s', 'event'])
+            for line in process.stdout:
+                raw.write(line)
+                raw.flush()
+                writer.writerow([round(time.monotonic()-started, 3), line.rstrip()])
+                file.flush()
+                if client:
+                    self.stage = mission_stage(line, self.stage)
+                elif line.startswith('BUILD begin '):
+                    self.building = line.strip().removeprefix('BUILD begin ')
+                elif line.startswith('BUILD done '):
+                    self.building = ''
+                elif line.startswith('GPU passes '):
+                    values = re.findall(r'([\w/-]+)=([\d.]+)ms', line)
+                    self.metrics['gpu_scene_ms'] = sum(float(ms) for _, ms in values)
+                elif line.startswith('frames:'):
+                    match = re.search(r'\(work ([\d.]+),', line)
+                    if match:
+                        self.metrics['cpu_frame_work_ms'] = float(match[1])
+                elif line.startswith('UPLOAD '):
+                    match = re.search(r'UPLOAD 2s ([\d.]+)MB', line)
+                    if match:
+                        self.metrics['upload_mb_window'] = float(match[1])
+
+    def close(self):
+        self.thread.join(timeout=5)
 
 
 def cpu_temperatures():
@@ -135,6 +193,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=['idle', 'pad', 'mission'], default='pad')
     parser.add_argument('--seconds', type=int, default=45)
+    parser.add_argument('--until-complete', action='store_true', help='End on client completion; seconds remains a hard ceiling')
+    parser.add_argument('--mission-speed', type=float, default=4, help='Acceleration outside landing phases')
     parser.add_argument('--quality', choices=['low', 'high'], default='low')
     parser.add_argument('--scale', type=float, default=.6)
     parser.add_argument('--fps', type=int, choices=[30, 60], default=30)
@@ -153,8 +213,10 @@ def main():
     args = parser.parse_args()
     if not Path('/proc').is_dir() or not cpu_temperatures():
         parser.error('This monitor requires Linux and readable CPU temperature sensors')
-    if not 1 <= args.seconds <= 600 or not .25 <= args.scale <= 1 or not .8 <= args.ui_scale <= 1.6 or not 1 <= args.port <= 65535:
-        parser.error('Use 1–600 seconds, render scale .25–1, UI scale .8–1.6, and a valid port')
+    if not 1 <= args.seconds <= 1800 or not .25 <= args.scale <= 1 or not .8 <= args.ui_scale <= 1.6 or not 1 <= args.port <= 65535:
+        parser.error('Use 1–1800 seconds, render scale .25–1, UI scale .8–1.6, and a valid port')
+    if not 1 <= args.mission_speed <= 60 or (args.until_complete and args.mode != 'mission'):
+        parser.error('Mission speed must be 1–60; until-complete requires mission mode')
     if args.cpu_stop <= 0 or args.gpu_stop <= 0 or args.rss_stop <= 0:
         parser.error('Monitoring limits must be positive')
     if not .1 <= args.loading_duty <= 1 or not .1 <= args.runtime_duty <= 1:
@@ -179,7 +241,9 @@ def main():
                ALBERT_PACK_PATH=str(ROOT / 'build/linux/imagery/visuals-v2.pak'), ALBERT_WINDOW=args.size,
                ALBERT_MAXIMIZED='0', ALBERT_AUDIO='0', ALBERT_RENDER_SCALE=str(args.scale),
                ALBERT_FRAME_STATS='1', ALBERT_GPU_TIMING='1', ALBERT_UPLOAD_STATS='1', ALBERT_LOAD_STATS='1')
+    env['ALBERT_CSV'] = str(out / 'flight.csv')
     app = client = limiter = client_limiter = None
+    app_trace = client_trace = None
     rows = []
     reason = 'completed'
     app_log = out.joinpath('app.log').open('w')
@@ -196,7 +260,9 @@ def main():
     signal.signal(signal.SIGTERM, interrupt)
     try:
         app = subprocess.Popen([str(args.executable.resolve()), f'--rpc-port={args.port}'],
-                               cwd=ROOT, env=env, stdout=app_log, stderr=app_log, start_new_session=True)
+                               cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               text=True, encoding='utf-8', errors='replace', bufsize=1, start_new_session=True)
+        app_trace = LogCapture(app, app_log, out / 'app-events.csv', started)
         limiter = DutyCycle(app, args.loading_duty)
         with out.joinpath('samples.csv').open('w', newline='') as file:
             writer = None
@@ -222,18 +288,25 @@ def main():
                     running_at = now
                     if args.mode != 'idle':
                         command = [str(ROOT / 'build/linux/src/rpc/albert_flight_client'), f'127.0.0.1:{args.port}']
-                        command += ['--pad'] if args.mode == 'pad' else ['--starship', '--landings=4']
-                        client = subprocess.Popen(command, cwd=ROOT, env=env, stdout=client_log,
-                                                  stderr=client_log, start_new_session=True)
+                        command += ['--pad'] if args.mode == 'pad' else ['--starship', f'--landings={args.mission_speed:g}']
+                        client = subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                                  text=True, encoding='utf-8', errors='replace', bufsize=1, start_new_session=True)
+                        client_trace = LogCapture(client, client_log, out / 'client-events.csv', started, client=True)
+                        if args.mode == 'pad':
+                            client_trace.stage = 'pad'
                         client_limiter = DutyCycle(client, args.runtime_duty)
                 phase = 'running' if running_at else 'warmup' if ready_at else 'loading'
                 row = dict(elapsed_s=round(now-started, 2), phase=phase, cpu_temp_c=max(temperatures), available_mib=available)
+                row['mission_stage'] = ('building/' + app_trace.building if app_trace.building else
+                                        client_trace.stage if client_trace else phase)
+                row.update(app_trace.metrics)
                 for prefix, stats in [('app', app_stats), ('client', client_stats), ('gpu', gpu)]:
                     for name, value in stats.items():
                         row[prefix + '_' + name] = value
                 # Fixed columns also retain missing GPU sensors as empty, rather than fabricated zeros.
                 if writer is None:
-                    columns = ['elapsed_s', 'phase', 'cpu_temp_c', 'available_mib']
+                    columns = ['elapsed_s', 'phase', 'mission_stage', 'cpu_temp_c', 'available_mib',
+                               'gpu_scene_ms', 'cpu_frame_work_ms', 'upload_mb_window']
                     columns += [prefix + '_' + name for prefix in ('app', 'client') for name in
                                 ('cpu_pct', 'rss_mib', 'minor_faults', 'major_faults', 'read_mib', 'write_mib')]
                     columns += ['gpu_' + name for name in ('temp_c', 'util_pct', 'memory_util_pct', 'memory_mib', 'clock_mhz', 'power_w')]
@@ -262,7 +335,12 @@ def main():
                 if client is not None and client.poll() not in (None, 0):
                     reason = f'Client exited ({client.returncode})'
                     break
+                if args.until_complete and client is not None and client.poll() == 0:
+                    reason = 'mission completed'
+                    break
                 if running_at and now-running_at >= args.seconds:
+                    if args.until_complete:
+                        reason = 'mission duration limit'
                     break
                 if ready_at is None and now-started >= 240:
                     reason = 'Startup timeout'
@@ -277,6 +355,10 @@ def main():
             client_limiter.close()
         stop(client)
         stop(app)
+        if client_trace:
+            client_trace.close()
+        if app_trace:
+            app_trace.close()
         app_log.close()
         client_log.close()
     summary = {'reason': reason, 'arguments': {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
@@ -291,9 +373,19 @@ def main():
     for field in ('cpu_temp_c', 'gpu_temp_c', 'app_cpu_pct', 'client_cpu_pct', 'app_rss_mib', 'gpu_memory_mib'):
         values = [row[field] for row in rows if row['phase'] == 'running' and field in row]
         summary[field] = {'max': max(values), 'median': statistics.median(values)} if values else None
+    summary['mission_completed'] = reason == 'mission completed'
+    summary['stages'] = {}
+    for stage in dict.fromkeys(row['mission_stage'] for row in rows):
+        selected = [row for row in rows if row['mission_stage'] == stage]
+        entry = {'samples': len(selected)}
+        for field in ('app_cpu_pct', 'client_cpu_pct', 'app_rss_mib', 'gpu_temp_c', 'cpu_temp_c', 'gpu_scene_ms', 'cpu_frame_work_ms', 'upload_mb_window'):
+            values = [row[field] for row in selected if field in row]
+            if values:
+                entry[field] = {'max': max(values), 'median': statistics.median(values)}
+        summary['stages'][stage] = entry
     out.joinpath('summary.json').write_text(json.dumps(summary, indent=2) + '\n')
     print(f'Stopped: {reason}. Results: {out}', flush=True)
-    return 0 if reason == 'completed' else 2
+    return 0 if reason in ('completed', 'mission completed') else 2
 
 
 if __name__ == '__main__':

@@ -14,6 +14,9 @@ std::shared_ptr<ShaderMaterial> albert::orbitMaterial(float horizon) {
     material->uniforms.emplace("dashDays",Uniform(.25f));
     material->uniforms.emplace("horizon",Uniform(horizon));
     material->uniforms.emplace("visibility",Uniform(1.f));
+    material->uniforms.emplace("pastColor",Uniform(Vector3(.29f,.67f,.79f)));
+    material->uniforms.emplace("futureColor",Uniform(Vector3(.94f,.70f,.40f)));
+    material->uniforms.emplace("referenceColor",Uniform(Vector3(.32f,.48f,.55f)));
     material->transparent=true;
     material->depthTest=true;
     material->depthWrite=false;

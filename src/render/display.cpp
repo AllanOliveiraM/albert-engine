@@ -59,12 +59,12 @@ void albert::Display::setShadowScale(float metersPerUnit,bool high){impl_->scene
 void albert::Display::setShadows(bool enabled){impl_->scene->shadows=enabled;}
 void albert::Display::setExposure(float value){impl_->scene->exposure=value;}
 void albert::Display::setFisheye(bool enabled){impl_->scene->fisheye=enabled;}
-void albert::Display::setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio){
-    auto& d=*impl_;auto& a=d.scene->air;a.clouds=clouds;a.cloudKm=cloudKm;a.cloudShadow=clouds?cloudOpacity:0.f;a.surfaceWind=surfaceWind;a.polarRatio=polarRatio;}
+void albert::Display::setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio,float cloudOffset){
+    auto& d=*impl_;auto& a=d.scene->air;a.clouds=clouds;a.cloudKm=cloudKm;a.cloudShadow=clouds?cloudOpacity:0.f;a.surfaceWind=surfaceWind;a.polarRatio=polarRatio;a.cloudOffset=cloudOffset;}
 void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength,float groundKm,bool mars){
     auto& d=*impl_;auto& air=mars?d.marsAir:d.earthAir; // Each precomputed once, when first needed.
     if(!air&&body&&strength>0){air=std::make_unique<gpu::Atmosphere>(*d.context,mars?gpu::marsAtmosphere():gpu::earthAtmosphere());d.scene->airSteps=d.context->software()?1:4;}
-    auto weather=d.scene->air;d.scene->air={air.get(),body,kmPerUnit,strength,groundKm,weather.clouds,weather.cloudKm,weather.cloudShadow,weather.surfaceWind,weather.polarRatio,weather.hazeExtinction,weather.hazeScaleKm,weather.localCloudCover};
+    auto weather=d.scene->air;d.scene->air={air.get(),body,kmPerUnit,strength,groundKm,weather.clouds,weather.cloudKm,weather.cloudShadow,weather.surfaceWind,weather.polarRatio,weather.hazeExtinction,weather.hazeScaleKm,weather.localCloudCover,weather.cloudOffset};
 }
 void albert::Display::setSea(bool on,double seconds,float east,float north,const Vector3& anchor,const Vector3& eastAxis,const Vector3& northAxis,float metersPerUnit){
     auto& d=*impl_;on=on&&!d.context->software(); // CPU adapters: too slow, and WARP loses the device on the cascades.

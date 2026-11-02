@@ -83,6 +83,13 @@ Spectrum padLevels(const PadNoise& p,double shift){
     for(int b=0;b<bands;++b){const auto k=static_cast<std::size_t>(b);const double s=std::pow(10.,vent[k]/10)+std::pow(10.,water[k]/10);l[k]=s>0?10*std::log10(s):-1e9;}
     return l;
 }
+void record(std::vector<Emission>& history,const Emission& emission){
+    if(!history.empty()&&emission.time<history.back().time)history.clear();
+    if(history.empty()){history.push_back(emission);return;}
+    auto& last=history.back();if(emission.time==last.time){last=emission;return;}
+    const auto changed=[](double a,double b){return (a>0)!=(b>0)||std::abs(a-b)>.1*std::max({std::abs(a),std::abs(b),1e-6});};
+    if(emission.time>=last.time+.05||emission.on!=last.on||changed(emission.pad.ventFlow,last.pad.ventFlow)||changed(emission.pad.waterFlow,last.pad.waterFlow)||changed(emission.noise.thrust,last.noise.thrust))history.push_back(emission);
+}
 Heard hear(const std::vector<Emission>& history,double now,V3 listener,V3 listenerVelocity,const Planet& planet,const std::function<Air(const Geodetic&)>& air){
     Heard h;if(history.empty())return h;
     auto at=[&](double t){ // Interpolated position and velocity; the rest from the sample before.

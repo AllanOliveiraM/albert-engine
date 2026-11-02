@@ -25,6 +25,11 @@ void vehicleGeometryControls(){
     require(booster.engineCount()==33&&std::count_if(look.parts.begin(),look.parts.end(),[](const auto& p){return p.grid;})==3,"V3 drawn engine or fin count");
     unsigned centre=0,middle=0,outer=0;for(const auto& e:look.engines){const double r=std::hypot(e.position.y,e.position.z);if(r<1)++centre;else if(r<3)++middle;else ++outer;}
     require(centre==3&&middle==10&&outer==20,"Booster engine ring ordering changed");
+    const double centreAft=look.engines[0].position.x,middleAft=look.engines[3].position.x,outerAft=look.engines[13].position.x;
+    require(std::abs((centreAft-outerAft)-ex::boosterCentreAft)<1e-6&&
+            std::abs((middleAft-outerAft)-ex::boosterMiddleAft)<1e-6&&
+            centreAft>middleAft&&middleAft>outerAft,
+            "Visual engine exits and physical booster engine stations lost their small centre/middle aft stagger");
     auto* lod=booster.node()->getObjectByName("vehicle detail LOD")->as<LOD>();require(lod&&lod->getLevels().size()==2,"Vehicle geometry LOD missing");
     auto* near=lod->getLevels()[0].object->as<Mesh>();auto* far=lod->getLevels()[1].object->as<Mesh>();
     require(near->geometry()->getIndex()->count()>far->geometry()->getIndex()->count()*2,"Coarse vehicle geometry did not reduce triangles");
@@ -112,6 +117,8 @@ void vehicleGeometryCaptures(const std::string& directory){
     view(booster,{-3,bh-43,0},{-28,bh-40,-30},50);report("booster-chine-opposite");
     view(ship,{-4,sh-8,-1},{-18,sh-3,-17},47);report("ship-forward-flap");
     view(ship,{-6,sh-44.5f,1},{-14,sh-41,12},50);report("ship-aft-flap");
+    view(ship,{-4.5f,static_cast<float>(sh-ex::shipPinAt),0},
+        {-7.5f,static_cast<float>(sh-ex::shipPinAt+1.2),2.0f},58);report("ship-catch-pin");
     view(ship,{0,sh-26,4.5f},{2,sh-24,12},50);report("ship-tiles-8m");view(ship,{0,sh-26,0},{8,sh-20,30},40);report("ship-tiles-30m");view(ship,{0,sh-30,4.5f},{3.5f,sh-22,7},60);report("ship-tiles-grazing");
     sun->position.set(10,-35,20);view(booster,{0,-bh+1,0},{4,-bh-12,5},54);report("booster-engine-bay");
     bs[1]=.16f;bs[2]=-.12f;booster.animate(&bs,1);report("booster-engine-gimbal");

@@ -101,9 +101,24 @@ struct Material { size: f32 };
             require(lum2(.20f,.5f)>200&&lum2(.32f,.5f)<lum2(.20f,.5f)/3&&albert::gpu::errors()==0,"Shadow after the map is recreated");
             renderer.shadows=false;
         }
-        auto frameOf=[&](Scene& sc,Camera& cam){WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);renderer.render(sc,cam,view,w,h,en);
-            WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);
-            const auto shot=read(*gpu,target,w,h);const auto* p=&shot[(static_cast<std::size_t>(h/2)*w+w/2)*4];return std::array<int,3>{p[0],p[1],p[2]};};
+        auto imageOf=[&](Scene& sc,Camera& cam){WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);renderer.render(sc,cam,view,w,h,en);
+            WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);return read(*gpu,target,w,h);};
+        auto frameOf=[&](Scene& sc,Camera& cam){const auto shot=imageOf(sc,cam);const auto* p=&shot[(static_cast<std::size_t>(h/2)*w+w/2)*4];return std::array<int,3>{p[0],p[1],p[2]};};
+        { // Terrain LOD replaces an index attribute on an existing geometry; new attributes start at version zero.
+            Scene sc;sc.background=Color(0);OrthographicCamera cam(-1,1,1,-1,.1f,10);cam.position.set(0,0,5);
+            std::vector<float> positions(576*3);const float vertices[]{-.9f,-.8f,0,-.1f,-.8f,0,-.5f,.8f,0,.1f,-.8f,0,.9f,-.8f,0,.5f,.8f,0};
+            std::copy(std::begin(vertices),std::end(vertices),positions.begin());auto geometry=BufferGeometry::create();
+            geometry->setAttribute("position",FloatBufferAttribute::create(std::move(positions),3));geometry->setIndex(std::vector<unsigned>{0,1,2});geometry->name="index replacement regression";
+            auto material=MeshBasicMaterial::create();material->color=Color(1,0,0);sc.add(Mesh::create(geometry,material));
+            const auto redPixel=[&](const std::vector<unsigned char>& shot,unsigned x){return shot[(static_cast<std::size_t>(h/2)*w+x)*4];};
+            const auto left=imageOf(sc,cam);require(redPixel(left,24)>200&&redPixel(left,72)<20,"Initial indexed triangle did not draw on the left");
+            geometry->setIndex(std::vector<unsigned>{3,4,5});const auto right=imageOf(sc,cam);
+            require(redPixel(right,24)<20&&redPixel(right,72)>200,"Replacing a zero-version index attribute kept the stale GPU index buffer");
+            geometry->setIndex(std::vector<unsigned>{0,1,26112});const auto rejected=imageOf(sc,cam);
+            require(albert::gpu::errors()==0&&redPixel(rejected,72)<20,"Out-of-range geometry index reached WebGPU instead of being rejected");
+            geometry->setIndex(std::vector<unsigned>{3,4,5});const auto recovered=imageOf(sc,cam);
+            require(redPixel(recovered,72)>200&&albert::gpu::errors()==0,"Indexed draw did not recover after a rejected replacement");
+        }
         { // Textures: a small one replaced every frame (bind groups follow each new view), then a 16 MB
           // one whose update streams over two frames while the old copy keeps drawing.
             Scene sc;OrthographicCamera cam(-1,1,1,-1,.1f,10);cam.position.set(0,0,5);

@@ -17,6 +17,13 @@ void near(double got,double want,double tolerance,const std::string& what){
 constexpr double pi=3.14159265358979323846,deg=pi/180;
 }
 int main(){try{
+    { // A 20 ms RCS pulse must survive the 50 ms steady-source thinning.
+        std::vector<ac::Emission> history;ac::Emission e;e.time=10;ac::record(history,e);
+        e.time=10.02;e.pad.ventFlow=1;ac::record(history,e);e.time=10.04;e.pad.ventFlow=0;ac::record(history,e);
+        near(static_cast<double>(history.size()),3,0,"Short valve pulse retains both edges");
+        e.time=10.04;e.pad.ventFlow=2;ac::record(history,e);near(static_cast<double>(history.size()),3,0,"Same-time valve update replaces sample");
+        e.time=5;ac::record(history,e);near(static_cast<double>(history.size()),1,0,"Rewind resets emission history");
+    }
     std::printf("ISO 9613-2 Table 2, 10 °C and 70%% RH (dB/km, octave bands at the exact centres):\n");
     {const double table[]{.1,.4,1.0,1.9,3.7,9.7,32.8,117};
      for(int i=0;i<8;++i){const double f=1000*std::pow(10.,(3*i-12)/10.),a=ac::absorption(f,283.15,101325,ac::molarFromRelative(70,283.15,101325))*1e3;

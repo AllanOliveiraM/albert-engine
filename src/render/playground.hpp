@@ -10,5 +10,5 @@
 #include "rpc/server.hpp"
 #include <imgui.h>
 namespace albert {
-void drawPlayground(rpc::Server& server,ImVec2 display,float margin);
+void drawPlayground(rpc::Server& server,ImVec2 display,float margin,float top,float bottom,bool& open);
 }

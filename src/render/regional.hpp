@@ -16,6 +16,7 @@ struct RegionalImages {
     float lift=20;unsigned segments=0; // Height bias (m) over the base sphere; mesh resolution (0: from the imagery).
     std::optional<threepp::Image> day,night,roughness,height,surfaceMask;
     std::shared_ptr<threepp::BufferGeometry> geometry;
+    std::array<double,3> geometryOrigin{}; // Small Earth patches retain local float vertices, placed in double precision.
     std::array<std::shared_ptr<threepp::Texture>,5> gpu;
     std::string error;
 };

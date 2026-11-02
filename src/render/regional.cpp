@@ -53,11 +53,17 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
                 const auto heights=providers::copernicusDem().heights(region.west,region.south,region.east,region.north,posts,posts,progress);
                 const float geoid=static_cast<float>(physics::geoidHeight((region.south+region.north)*std::numbers::pi/360.,(region.west+region.east)*std::numbers::pi/360.));
                 std::vector<float> relief(static_cast<std::size_t>(posts)*posts*4,1.f);for(std::size_t i=0;i<heights.size();++i)relief[4*i]=heights[i]+geoid; // Ellipsoidal.
-                result.height=Image(std::move(relief),posts,posts);result.lift=.5f;result.segments=posts-1;site=true;
+                result.height=Image(std::move(relief),posts,posts);result.lift=0;result.segments=posts-1;site=true;
             }catch(const std::exception& e){if(progress.cancelled)throw;std::cerr<<"Terreno do sitio indisponivel: "<<e.what()<<std::endl;}
             result.day=pack->image(body+"-day",region,4096,progress);
             if(body=="earth") result.night=pack->image("earth-night",region,4096,progress);
-            if(!site)result.height=pack->contains(body+"-height")?pack->image(body+"-height",region,1024,progress):Image(std::vector<float>{0,0,0,1},1,1);
+            if(!site){result.height=pack->contains(body+"-height")?pack->image(body+"-height",region,1024,progress):Image(std::vector<float>{0,0,0,1},1,1);
+                if(body=="earth"){
+                    const float geoid=static_cast<float>(physics::geoidHeight((region.south+region.north)*std::numbers::pi/360.,(region.west+region.east)*std::numbers::pi/360.));
+                    auto& values=result.height->data<float>();for(std::size_t i=0;i<values.size();i+=4)values[i]+=geoid;
+                    result.lift=0;
+                }
+            }
             // The Earth's roughness from its colour (water: bluer than red; smooth, for the sun's glint and the waves), at half the
             // image's resolution (a quarter of the memory).
             const auto roughness=[](const Image& image){const auto& rgba=image.data();const unsigned width=std::max(1u,image.width()/2),height=std::max(1u,image.height()/2);
@@ -111,6 +117,11 @@ void albert::prepareRegionalImages(RegionalImages& images) {
     auto geometry=SphereGeometry::create(radius,segments,segments,
         static_cast<float>(region.west+180.)*radians,static_cast<float>(region.east-region.west)*radians,
         static_cast<float>(90.-region.north)*radians,static_cast<float>(region.north-region.south)*radians);
+    const bool localEarth=images.body=="earth"&&region.east-region.west<=2.;
+    if(localEarth){
+        const double lat=albert::parametricLatitude((region.north+region.south)*pi/360.),lon=(region.west+region.east+360)*pi/360.;
+        images.geometryOrigin={-std::cos(lon)*std::cos(lat),std::sin(lat),std::sin(lon)*std::cos(lat)};
+    }
     if(images.height) {
         const auto& height=*images.height;
         auto* position=geometry->getAttribute<float>("position");
@@ -132,7 +143,13 @@ void albert::prepareRegionalImages(RegionalImages& images) {
                     static_cast<float>(std::sin(phi)*std::cos(latitude)));
             }
             point.normalize().multiplyScalar(radius+(meters+images.lift)/6378137.f);
-            position->setXYZ(i,point.x,point.y,point.z);
+            if(localEarth){ // Never round an Earth-radius position before subtracting its regional origin.
+                const double lat=albert::parametricLatitude((region.north-double(y)*(region.north-region.south)/segments)*pi/180.);
+                const double lon=(region.west+180.+double(x)*(region.east-region.west)/segments)*pi/180.;
+                const double scale=1.+double(meters+images.lift)/6378137.;
+                position->setXYZ(i,float(-std::cos(lon)*std::cos(lat)*scale-images.geometryOrigin[0]),
+                    float(std::sin(lat)*scale-images.geometryOrigin[1]),float(std::sin(lon)*std::cos(lat)*scale-images.geometryOrigin[2]));
+            }else position->setXYZ(i,point.x,point.y,point.z);
         }
         geometry->computeVertexNormals();geometry->computeBoundingSphere();
     }
@@ -144,5 +161,10 @@ void albert::prepareRegionalImages(RegionalImages& images) {
         globalUv.push_back(static_cast<float>((region.south+90.+uv->getY(i)*(region.north-region.south))/180.));
     }
     geometry->setAttribute("uv2",FloatBufferAttribute::create(std::move(globalUv),2));
+    if(localEarth){std::vector<float> residual;const auto* global=geometry->getAttribute<float>("uv2");
+        for(unsigned y=0;y<=segments;++y)for(unsigned x=0;x<=segments;++x){const auto i=y*(segments+1)+x;
+            const double u=(region.west+180.+double(x)*(region.east-region.west)/segments)/360.,v=(region.north+90.-double(y)*(region.north-region.south)/segments)/180.;
+            residual.insert(residual.end(),{float(u-global->getX(i)),float(v-global->getY(i))});}
+        geometry->setAttribute("geoResidual",FloatBufferAttribute::create(std::move(residual),2));}
     images.geometry=std::move(geometry);
 }

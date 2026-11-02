@@ -9,6 +9,8 @@ install(FILES
     DESTINATION assets COMPONENT Runtime)
 install(FILES ${PROJECT_SOURCE_DIR}/assets/fonts/Inter.ttf
     DESTINATION assets/fonts COMPONENT Runtime)
+install(FILES ${PROJECT_SOURCE_DIR}/assets/clouds/structure.png
+    DESTINATION assets/clouds COMPONENT Runtime)
 install(FILES ${PROJECT_SOURCE_DIR}/assets/branding/albert.png
     DESTINATION assets/branding COMPONENT Runtime)
 install(FILES ${PROJECT_SOURCE_DIR}/assets/fonts/OFL.txt

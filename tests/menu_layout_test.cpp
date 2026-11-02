@@ -21,7 +21,7 @@ void layout(float width,float height,float scale){
         ImGui::NewFrame();
         ImGui::SetNextWindowPos({0,0});ImGui::SetNextWindowSize({width,height});
         ImGui::Begin("Menu",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoScrollbar);
-        const char* pages[]{"Cena","Dados","Fisica","Ajustes","Sobre"};int selected=3;
+        const char* pages[]{"Cena","Dados","Fisica","Ajustes","Missões","Sobre"};int selected=3;
         albert::menu::pages(pages,selected);
         const auto* window=ImGui::GetCurrentWindow();
         require(window->DC.CursorMaxPos.x<=window->WorkRect.Max.x+1,"Page navigation exceeds the panel width");

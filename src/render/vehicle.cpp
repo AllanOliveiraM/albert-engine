@@ -7,8 +7,6 @@
 #include <cmath>
 #include <map>
 #include <tuple>
-#include "threepp/extras/core/Shape.hpp"
-#include "threepp/geometries/ShapeGeometry.hpp"
 using namespace threepp;
 namespace albert {
 namespace {
@@ -94,18 +92,26 @@ Vehicle::Vehicle(const core::VehicleLook& look){
     // No per-cell, per-pipe or per-bell draw. The coarse tier retains open silhouettes.
     auto hardware=[&](const std::shared_ptr<BufferGeometry>& g,Object3D* frame,Color colour,float rough=.45f,float metal=.8f,int tier=-1){
         for(int i=0;i<2;++i)if(tier<0||tier==i)hardware_[i].add(g,frame,colour,rough,metal);};
-    const Color steel(.43f,.45f,.47f),dark(.075f,.078f,.085f);
+    const Color steel(.43f,.45f,.47f),dark(.075f,.078f,.085f),carrierSteel(.24f,.26f,.28f);
     using HullKey=std::tuple<std::uint32_t,float>;std::map<HullKey,std::vector<std::shared_ptr<BufferGeometry>>> hulls;
     std::map<HullKey,std::shared_ptr<ShaderMaterial>> hullMaterials;
-    // The engine bay: the aft skirt open, a heat shield across it where the bells come out (most of each below it).
-    double base=0,bay=1e9;for(const auto& e:look.engines){base=std::max(base,e.position.x);bay=std::min(bay,(e.exitRadius>1?2.6:2.2)*e.exitRadius*.85);} // The shortest bell's.
+    // V3 has no engine skirt, individual shrouds or broad base heat shield; derive the hull endpoint from its shell, not the
+    // slightly aft-staggered inner-engine exits. Keep the aft opening clear around every bell.
+    double base=0,bay=1e9;for(const auto& s:look.sections)base=std::max(base,s.to);
+    for(const auto& e:look.engines)bay=std::min(bay,(e.exitRadius>1?2.6:2.2)*e.exitRadius*.85); // Shortest bell's open envelope.
     auto surface=[&](Color colour,float metal,float rough,float kind,Vector4 hull={},float width=0,float span=0,bool open=false){
         auto m=assistedMaterial(colour,metal,rough,false,open);m->name="albert:vehicle";
         m->uniforms.emplace("vehicleHull",Uniform(hull));m->uniforms.emplace("vehicleSurface",Uniform(Vector4(kind,width,span,0.f)));
         m->uniforms.emplace("waterPlane",Uniform(Vector4()));m->uniforms.emplace("entryLight",Uniform(Vector4(0,0,0,0)));m->uniforms.emplace("vehicleQuality",Uniform(1.f));m->uniforms.emplace("vehicleSoot",Uniform(0.f));m->uniforms.emplace("frostHeight",Uniform(1.f));surfaces_.push_back(m);return m;};
     for(const auto& s:look.sections){ // One frustum: the shader joins the wavy tile edge to the steel without overlapping shells.
-        const float top=static_cast<float>(s.radiusFrom),bottom=static_cast<float>(s.radiusTo),height=static_cast<float>(s.to-s.from),y=static_cast<float>(half-(s.from+s.to)/2);
-        const float tiles=static_cast<float>(std::clamp(s.tiles,0.,2*3.14159265358979));const bool skirt=!look.engines.empty()&&s.to>=base-.01;
+        const bool engineEndSection=!look.engines.empty()&&s.to>=base-.01;
+        // The declared engine position is the nozzle exit. Stop the hull
+        // above the exits; the engine bells remain exposed below it.
+        const double end=engineEndSection?std::max(s.from,std::min(s.to,base-bay)):s.to;
+        const double fraction=(end-s.from)/std::max(1e-9,s.to-s.from);
+        const float top=static_cast<float>(s.radiusFrom),bottom=static_cast<float>(std::lerp(s.radiusFrom,s.radiusTo,fraction)),height=static_cast<float>(end-s.from),y=static_cast<float>(half-(s.from+end)/2);
+        if(height<=0)continue;
+        const float tiles=static_cast<float>(std::clamp(s.tiles,0.,2*3.14159265358979));
         const auto vents=std::count_if(look.parts.begin(),look.parts.end(),[&](const auto& p){return p.name=="vent"&&p.hinge.x>=s.from&&p.hinge.x<s.to;});
         if(vents){ // Real apertures: rims, ligaments and an inset dished tank dome. No opaque vent cylinder.
             const float r=bottom;
@@ -127,15 +133,17 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         }
         const HullKey key{s.color,tiles};auto& m=hullMaterials[key];if(!m){m=surface(Color(s.color).multiplyScalar(.79f),1.f,.3f,0.f,
             Vector4(tiles,static_cast<float>(look.diameter/2),static_cast<float>(half-base),tiles>0?0.f:7.f));if(tiles>0)tiles_.push_back(m);}
-        if(skirt){m->side=Side::Double;m->uniforms.at("doubleSided").setValue(1.f);if(tiles==0)aft_.push_back(m);}
-        auto g=CylinderGeometry::create(top,bottom,height,64,1,skirt);g->translate(0,y,0);hulls[key].push_back(g);curtain(*g,sheathPositions,sheathNormals);
-        if(skirt){ // A perforated heat shield, not a disc obstructing every bell throat.
-            const float shieldY=static_cast<float>(half-(base-bay));Shape shape;shape.absarc(0,0,bottom*.995f,0,2*pi,false);
-            for(const auto& e:look.engines){const float length=static_cast<float>((e.exitRadius>1?2.6:2.2)*e.exitRadius),t=std::clamp((length-static_cast<float>(bay))/length,0.f,1.f);
-                const float hole=static_cast<float>(e.exitRadius)*(.2f+.8f*std::sqrt(t))+.09f;auto path=std::make_shared<Path>();path->absarc(static_cast<float>(-e.position.y),static_cast<float>(-e.position.z),hole,0,2*pi,true);shape.holes.push_back(path);}
-            auto thermal=assistedMaterial(dark,.4f,.68f);thermal->uniforms.at("emissive").setValue(Vector3());aft_.push_back(thermal);
-            for(int tier=0;tier<2;++tier){auto shield=ShapeGeometry::create(shape,tier==0?12:4);shield->rotateX(-pi/2);shield->translate(0,shieldY,0);hardware_[tier].add(shield,nullptr,dark,.68f,.4f,thermal);}
-            hardware(collar(bottom-.08f,.07f,static_cast<float>(half-base)+.06f),nullptr,steel);
+        if(engineEndSection){m->side=Side::Double;m->uniforms.at("doubleSided").setValue(1.f);if(tiles==0)aft_.push_back(m);}
+        auto g=CylinderGeometry::create(top,bottom,height,64,1,engineEndSection);g->translate(0,y,0);hulls[key].push_back(g);curtain(*g,sheathPositions,sheathNormals);
+        if(engineEndSection){
+            const float aftEdgeY=static_cast<float>(half-(base-bay));
+            if(tiles>0&&base>end){ // Continue Ship's windward tiles along the hull; leave the engine plane open.
+                const float extension=static_cast<float>(base-end);
+                auto tps=CylinderGeometry::create(bottom,bottom,extension,64,1,true,-pi/2,pi);
+                tps->translate(0,aftEdgeY-extension*.5f,0);hulls[key].push_back(tps);curtain(*tps,sheathPositions,sheathNormals);
+            }
+            // No plate or broad ring spans the aft opening. The individual
+            // engine mounts carry the exposed bells.
         }
     }
     for(auto& [key,geometries]:hulls){auto mesh=part(joined(geometries),hullMaterials.at(key));mesh->name="vehicle hull";root_->add(mesh);}
@@ -153,10 +161,22 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         x.pivot->name=p.name;
         x.pivot->quaternion.copy(x.base);
         if(!p.grid){std::shared_ptr<BufferGeometry> g;
-            if(p.tipSpan<0&&p.tipShift==0&&p.tipThickness<0){g=BoxGeometry::create(w,t,span);g->translate(w/2,0,0);}
+            if(p.name=="pin"){
+                // The catch pin is a round boss and shaft. A square block
+                // read as a mesh clash against the cylindrical hull.
+                for(int tier=0;tier<2;++tier){const int segments=tier==0?24:12;
+                    auto boss=CylinderGeometry::create(.38f,.42f,.18f,segments);boss->rotateZ(pi/2);boss->translate(.09f,0,0);
+                    hardware(boss,x.pivot.get(),steel,.34f,.88f,tier);
+                    auto shaft=CylinderGeometry::create(.22f,.25f,.78f,segments);shaft->rotateZ(pi/2);shaft->translate(.55f,0,0);
+                    hardware(shaft,x.pivot.get(),Color(.58f,.60f,.61f),.3f,.9f,tier);
+                    auto tip=collar(.25f,.045f,0,segments);tip->rotateZ(pi/2);tip->translate(.94f,0,0);
+                    hardware(tip,x.pivot.get(),steel,.32f,.9f,tier);
+                }
+            }
+            else if(p.tipSpan<0&&p.tipShift==0&&p.tipThickness<0){g=BoxGeometry::create(w,t,span);g->translate(w/2,0,0);}
             else{const float along=Vector3(static_cast<float>(-p.axis.y),static_cast<float>(-p.axis.x),static_cast<float>(p.axis.z)).dot(x.axis)<0?-1.f:1.f;
                 g=plate(w,t,span,static_cast<float>(p.tipSpan<0?p.span:p.tipSpan),along*static_cast<float>(p.tipShift),static_cast<float>(p.tipThickness<0?p.thickness:p.tipThickness));}
-            if(flap)x.pivot->add(part(g,m));else hardware(g,x.pivot.get(),Color(p.color).multiplyScalar(.65f));
+            if(p.name!="pin"){if(flap)x.pivot->add(part(g,m));else hardware(g,x.pivot.get(),Color(p.color).multiplyScalar(.65f));}
         }else{ // The radial spindle, root plate and knuckle turn; the buried actuator and smooth hood do not.
             auto [it,fresh]=grids.try_emplace({w,span,t});if(fresh)for(int tier=0;tier<2;++tier)it->second[tier]=gridFin(w,span,t,tier);
             for(int tier=0;tier<2;++tier)hardware(it->second[tier].geometry,x.pivot.get(),Color(.105f,.11f,.12f),.29f,.92f,tier);
@@ -188,6 +208,11 @@ Vehicle::Vehicle(const core::VehicleLook& look){
     }
     for(const auto& e:look.engines){ // The bell from its throat (the gimbal's pivot) to the exit, and its plume beyond.
         Engine x;x.direction=e.direction;x.radius=e.exitRadius;const float r=static_cast<float>(e.exitRadius),vacuum=r>1?1.f:0.f,length=(2.2f+.4f*vacuum)*r;
+        // The 20 fixed outer engines sit only 1.22 m apart. Their real nozzle
+        // envelopes interleave; a clean render keeps a small visible gap at
+        // the lips while preserving the throat and the exhaust's physical area.
+        const bool tightRing=vacuum<.5f&&std::hypot(e.position.y,e.position.z)>3.3;
+        const float mouth=r*(tightRing?.90f:1.f);
         const Vector3 along=axisOf(e.direction).normalize();x.pivot=Object3D::create();x.pivot->position.copy(point(e.position)).add(Vector3(along).multiplyScalar(length));
         // An open divergent nozzle with rolled lips, chamber and external feed lines.
         const float throat=r*(vacuum?.12f:.18f);
@@ -197,16 +222,48 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         // Retain the named joint marker for gimballing() and engine diagnostics. It has no draw.
         auto marker=part(BufferGeometry::create(),x.bell);marker->visible=false;x.pivot->add(marker);
         for(int tier=0;tier<2;++tier){std::vector<Vector2> points;
-            for(int i=0;i<=int(tier==0?16:6);++i){const float t=float(i)/(tier==0?16:6);points.emplace_back(throat+(r-throat)*std::sqrt(t),-length*t);}
+            for(int i=0;i<=int(tier==0?16:6);++i){const float t=float(i)/(tier==0?16:6);points.emplace_back(throat+(mouth-throat)*std::sqrt(t),-length*t);}
             hardware_[tier].add(LatheGeometry::create(points,tier==0?32:12),x.pivot.get(),Color(vacuum?.25f:.21f,vacuum?.23f:.22f,.23f),.45f,.75f,x.bell);
-            // Rolled mouth and throat rims, chamber, fuel/oxidizer feed elbows and shield shrouds.
-            hardware(collar(r-.012f,.022f,-length,tier==0?32:12),x.pivot.get(),steel,.35f,.85f,tier);
+            // Rolled mouth and throat rims, chamber, and fuel/oxidizer feed elbows.
+            hardware(collar(mouth-.012f,.022f,-length,tier==0?32:12),x.pivot.get(),steel,.35f,.85f,tier);
             auto chamber=CylinderGeometry::create(throat*.82f,throat,.35f*r,tier==0?16:8);chamber->translate(0,.16f*r,0);hardware(chamber,x.pivot.get(),dark,.46f,.75f,tier);
             if(tier==0){for(float side:{-1.f,1.f}){
                 const float elbow=throat+(r-throat)*.5f+.08f*r,end=throat+(r-throat)*std::sqrt(.55f)+.08f*r;
                 hardware(bar({side*(throat+.08f*r),.28f*r,0},{side*elbow,-.25f*length,.08f*r},.055f*r,8),x.pivot.get(),steel,.4f,.9f,tier);
                 hardware(bar({side*elbow,-.25f*length,.08f*r},{side*end,-length*.55f,.12f*r},.045f*r,8),x.pivot.get(),steel,.4f,.9f,tier);}
                 for(int i=0;i<3;++i)hardware(collar(throat+(r-throat)*std::sqrt(.25f+i*.21f)+.05f*r,.016f*r,-length*(.25f+i*.21f),16),x.pivot.get(),dark,.48f,.7f,tier);}
+        }
+        // Fixed thrust frame and articulated engine-side yoke. Hardware is
+        // batched with the other engine pieces at both distance tiers.
+        const bool steerable=vacuum<.5f&&std::hypot(e.position.y,e.position.z)<3;
+        for(int tier=0;tier<2;++tier){
+            const int segments=tier==0?24:10;
+            auto mount=collar(throat*1.5f,.055f*r,.27f*r,segments);mount->translate(x.pivot->position.x,x.pivot->position.y,x.pivot->position.z);hardware(mount,nullptr,steel,.4f,.8f,tier);
+            hardware(collar(throat*1.2f,.055f*r,.03f*r,segments),x.pivot.get(),dark,.45f,.7f,tier);
+            for(int i=0;i<4;++i){const float a=pi*(.25f+.5f*i);const Vector3 near(throat*1.4f*std::cos(a),.27f*r,throat*1.4f*std::sin(a));
+                const Vector3 far((throat+.26f*r)*std::cos(a),.52f*r,(throat+.26f*r)*std::sin(a));
+                hardware(bar(Vector3(near).add(x.pivot->position),Vector3(far).add(x.pivot->position),.07f*r,tier==0?10:6),nullptr,steel,.5f,.8f,tier);
+                if(tier==0){auto bolt=CylinderGeometry::create(.045f*r,.045f*r,.12f*r,6);bolt->translate(near.x,near.y+.04f*r,near.z);hardware(bolt,x.pivot.get(),steel,.35f,.85f,tier);}
+            }
+            if(tier==0){
+                // Unequal feed diameters and short welded elbows, rather than
+                // identical straight decoration around every nozzle.
+                for(int line=0;line<3;++line){const float a=.7f+line*2.1f,radius=throat+.10f*r,thickness=(line==0?.075f:.042f)*r;
+                    const Vector3 p0(radius*std::cos(a),.38f*r,radius*std::sin(a)),p1((radius+.18f*r)*std::cos(a),-.08f*length,(radius+.18f*r)*std::sin(a));
+                    const Vector3 p2((radius+.32f*r)*std::cos(a),-.25f*length,(radius+.32f*r)*std::sin(a));
+                    hardware(bar(p0,p1,thickness,10),x.pivot.get(),steel,.35f,.85f,tier);hardware(bar(p1,p2,thickness,10),x.pivot.get(),dark,.48f,.6f,tier);
+                    auto flange=collar(throat+.10f*r,.025f*r,-.08f*length,24);if(line==0)hardware(flange,x.pivot.get(),steel,.45f,.7f,tier);
+                }
+            }
+        }
+        if(steerable)for(unsigned k=0;k<2;++k){const float a=float(k)*pi/2+.35f;
+            x.anchors[k]=Vector3((throat+.35f*r)*std::cos(a),.42f*r,(throat+.35f*r)*std::sin(a)).add(x.pivot->position);
+            x.lugs[k]={(throat+.16f*r)*std::cos(a),-.24f*length,(throat+.16f*r)*std::sin(a)};
+            x.actuators[k]=Object3D::create();x.actuators[k]->name="engine gimbal actuator";root_->add(x.actuators[k]);
+            for(int tier=0;tier<2;++tier){auto housing=CylinderGeometry::create(.055f*r,.055f*r,.52f,tier==0?12:6);housing->translate(0,-.18f,0);hardware(housing,x.actuators[k].get(),dark,.42f,.7f,tier);
+                auto piston=CylinderGeometry::create(.028f*r,.028f*r,.48f,tier==0?12:6);piston->translate(0,.23f,0);hardware(piston,x.actuators[k].get(),steel,.22f,.92f,tier);}
+            const Vector3 lug=Vector3(x.lugs[k]).add(x.pivot->position),delta=Vector3(lug).sub(x.anchors[k]);
+            x.actuators[k]->position.copy(lug).add(x.anchors[k]).multiplyScalar(.5f);x.actuators[k]->scale.y=delta.length();x.actuators[k]->quaternion.setFromUnitVectors({0,1,0},delta.clone().normalize());
         }
         // Two shells suffice: a long envelope and a short core; the shader widens only their downstream ends.
         for(std::size_t k=0;k<x.plume.size();++k){
@@ -220,6 +277,49 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         for(std::size_t k=0;k<x.remnant.size();++k){auto p=Mesh::create(x.plume[k]->geometry(),plumeMaterial());p->frustumCulled=false;p->renderOrder=10+static_cast<int>(k);x.detached->add(p);x.remnant[k]=p;}
         auto cloud=SphereGeometry::create(1,12,8);for(auto& p:x.gas){p.mesh=Mesh::create(cloud,engineCloud());p.mesh->name="engine puff";p.mesh->visible=false;p.mesh->renderOrder=9;p.mesh->frustumCulled=false;root_->add(p.mesh);}
         x.pivot->quaternion.setFromUnitVectors(Vector3(0,1,0),along);root_->add(x.pivot);engines_.push_back(std::move(x));
+    }
+    const auto enginesInRing=[&](double inner,double outer){return std::count_if(look.engines.begin(),look.engines.end(),[&](const auto& e){const double r=std::hypot(e.position.y,e.position.z);return r>=inner&&r<outer;});};
+    if(look.engines.size()==33&&enginesInRing(0,1)==3&&enginesInRing(1,3)==10&&enginesInRing(3,5)==20){ // Open V3 aft carrier, built around the measured engine sites rather than a closed base plate.
+        // The user-supplied underside photo shows a short annular carrier with repeated mount brackets. NASA confirms this
+        // version has no skirt, individual shrouds or large-scale base heat shield; the sparse truss below is an image-based
+        // interpretation of the visible support, not a claim about hidden internal plumbing or exact member dimensions.
+        struct Site {float radius,angle,mountY;unsigned ring;};std::array<std::vector<Site>,3> rings;
+        for(const auto& e:look.engines){const float r=static_cast<float>(e.exitRadius),radial=std::hypot(static_cast<float>(e.position.y),static_cast<float>(e.position.z));
+            const float bellLength=(2.2f+.4f*(r>1?1.f:0.f))*r;const Vector3 axis=axisOf(e.direction).normalize();
+            const Vector3 pivot=point(e.position).add(Vector3(axis).multiplyScalar(bellLength));
+            const unsigned group=radial<1?0:radial<3?1:2;const float angle=std::atan2(static_cast<float>(e.position.z),static_cast<float>(e.position.y));
+            rings[group].push_back({radial,angle,pivot.y+.27f*r,group});}
+        const std::array<float,3> carrierRadius{1.12f,2.83f,4.28f};std::array<float,3> carrierY{};
+        for(unsigned g=0;g<rings.size();++g){for(const auto& site:rings[g])carrierY[g]+=site.mountY;carrierY[g]/=static_cast<float>(rings[g].size());
+            const float inner=carrierRadius[g]-.11f,outer=carrierRadius[g]+.11f;
+            // Two narrow circumferential rails form an open band; the repeated ties are the short vertical brackets visible
+            // around the photographed engine carrier. No surface spans the nozzle exits.
+            for(int tier=0;tier<2;++tier){const float y=carrierY[g]+(tier==0?.24f:-.24f);
+                hardware(collar(inner,.055f,y,g==2?80:56),nullptr,dark,.62f,.62f,tier);
+                hardware(collar(outer,.055f,y,g==2?80:56),nullptr,carrierSteel,.62f,.72f,tier);}
+            for(std::size_t i=0;i<rings[g].size();++i){const auto& site=rings[g][i];const float c=std::cos(site.angle),s=std::sin(site.angle);
+                const Vector3 mount(-site.radius*c,site.mountY,site.radius*s),inside(-inner*c,carrierY[g],inner*s),outside(-outer*c,carrierY[g],outer*s);
+                hardware(bar(Vector3(mount).add(Vector3(-.16f*c,0,.16f*s)),inside,.055f,8),nullptr,steel,.35f,.9f);
+                hardware(bar(inside,outside,.065f,8),nullptr,dark,.62f,.62f);
+                hardware(strut(Vector3(outside).add(Vector3(0,.24f,0)),Vector3(outside).add(Vector3(0,-.24f,0)),.052f,8),nullptr,carrierSteel,.48f,.72f);
+                if(g==2){ // Short radial ties seat the outer carrier against the booster's aft hull ring.
+                    const Vector3 hull(-4.48f*c,carrierY[g],4.48f*s);
+                    hardware(strut(outside,hull,.055f,8),nullptr,dark,.62f,.62f);}
+                // A second diagonal makes each bracket read as a load path into the ring, while remaining above the bell mouth.
+                const float next=site.angle+(2*pi/static_cast<float>(rings[g].size()));
+                const Vector3 nextInside(-inner*std::cos(next),carrierY[g],inner*std::sin(next));
+                hardware(strut(inside,nextInside,.038f,6),nullptr,steel,.4f,.82f);
+            }
+        }
+        // Open radial braces connect the three carriers at their actual, slightly staggered mount planes.
+        for(unsigned i=0;i<10;++i){const auto& mid=rings[1][i];const auto& out=rings[2][2*i];
+            const float cm=std::cos(mid.angle),sm=std::sin(mid.angle),co=std::cos(out.angle),so=std::sin(out.angle);
+            hardware(strut({-2.94f*cm,carrierY[1]+.18f,2.94f*sm},{-4.12f*co,carrierY[2]-.18f,4.12f*so},.045f,8),nullptr,dark,.52f,.7f);
+        }
+        for(unsigned i=0;i<3;++i){const auto& centre=rings[0][i];const auto& mid=rings[1][(i*10+1)/3];
+            const float cc=std::cos(centre.angle),sc=std::sin(centre.angle),cm=std::cos(mid.angle),sm=std::sin(mid.angle);
+            hardware(strut({-1.23f*cc,carrierY[0]+.18f,1.23f*sc},{-2.72f*cm,carrierY[1]-.18f,2.72f*sm},.045f,8),nullptr,dark,.52f,.7f);
+        }
     }
     if(engines_.size()>1){
         for(unsigned k=0;k<exhaust_.size();++k){std::vector<std::shared_ptr<BufferGeometry>> geometry;std::vector<float> index;
@@ -405,6 +505,10 @@ void Vehicle::animate(const std::vector<float>* parts,double utc,core::Vector po
         }
         const double cy=std::cos(yaw),sy=std::sin(yaw),cp=std::cos(pitch),sp=std::sin(pitch);const core::Vector yawed{d.x*cy+d.y*sy,-d.x*sy+d.y*cy,d.z};
         e.pivot->quaternion.setFromUnitVectors(Vector3(0,1,0),axisOf({yawed.x*cp-yawed.z*sp,yawed.y,yawed.x*sp+yawed.z*cp}).normalize());
+        for(unsigned k=0;k<e.actuators.size();++k)if(e.actuators[k]){
+            const Vector3 lug=Vector3(e.lugs[k]).applyQuaternion(e.pivot->quaternion).add(e.pivot->position),delta=Vector3(lug).sub(e.anchors[k]);
+            e.actuators[k]->position.copy(lug).add(e.anchors[k]).multiplyScalar(.5f);e.actuators[k]->scale.y=delta.length();e.actuators[k]->quaternion.setFromUnitVectors({0,1,0},delta.clone().normalize());
+        }
         const float throttle=cycle.burning(),flow=std::sqrt(throttle),mainAge=static_cast<float>(utc-cycle.started),rich=cycle.rich();const bool on=throttle>1e-5f;
         if(on&&mainAge>=0&&mainAge<1.1f)startFlash+=std::min(1.f,mainAge/.09f)*std::pow(1-mainAge/1.1f,2.f)*throttle;
         const float flash=cycle.on&&cycle.main?std::max(0.f,1-mainAge/.065f):0,torch=cycle.torching()?(.6f+.4f*std::sin(static_cast<float>(utc-cycle.started)*pi/.24f)):0;
@@ -417,11 +521,11 @@ void Vehicle::animate(const std::vector<float>* parts,double utc,core::Vector po
         if(cycle.ignition&&air>.05f)release(e.gas[0],cycle.started,.32f,0); // Flow attachment pushes a little vapour out of the lip.
         if(cycle.shutdown){release(e.gas[0],utc,.18f,1);for(std::size_t k=1;k<e.gas.size();++k)release(e.gas[k],utc+.14+.26*(k-1),air>.05f?.8f:.45f,2);}
         e.heat+=(on?flow-e.heat:-e.heat)*(1-std::exp(-dt/(on?8.f:45.f))); // Thermal inertia leaves a red lip for roughly 30-60 seconds after a long burn.
-        auto& bell=e.bell->uniforms;bell.at("burn").setValue(blackBody(300+1000*e.heat).add(Vector3(1,.3f,.04f).multiplyScalar(.7f*torch+2*flash)));bell.at("lip").setValue(blackBody(300+1350*e.heat));bell.at("emissive").setValue(aftGlow_);
+        auto& bell=e.bell->uniforms;bell.at("burn").setValue(blackBody(300+(vacuum>0?800.f:500.f)*e.heat).add(Vector3(1,.3f,.04f).multiplyScalar(.7f*torch+2*flash)));bell.at("lip").setValue(blackBody(300+(vacuum>0?1000.f:750.f)*e.heat));bell.at("emissive").setValue(aftGlow_);
         if(e.hot){e.hot->visible=quality_>0&&e.heat>.4f;e.hot->material()->as<MeshBasicMaterial>()->opacity=.35f*std::max(0.f,(e.heat-.4f)/.6f);} // Keep the radiatively cooled vacuum extension warm between burns.
         e.exit->visible=on||flash>0;auto& exit=e.exit->material()->as<ShaderMaterial>()->uniforms;exit.at("strength").setValue((obstruction_>0?1.4f*hit*std::sqrt(crowd):.95f*(1-.9f*vacuum))*throttle+flash);exit.at("time").setValue(time+static_cast<float>(i)*1.73f);exit.at("flash").setValue(4*flash);
         e.exit->position.y=e.plume[0]->position.y-(obstruction_>0?obstruction_:.008f*r);const float splash=obstruction_>0?5+3*hit:1;e.exit->scale.set(splash,1,splash); // Reuse the axial glow where the gas spreads over the obstruction.
-        exit.at("core").setValue(obstruction_>0?Vector3(1,.75f,.3f):Vector3(5.f,4.6f,3.8f).lerp(Vector3(1,.7f,.2f),rich));exit.at("edge").setValue(obstruction_>0?Vector3(1,.55f,.15f):Vector3(1,.28f,.19f).lerp(Vector3(1,.48f,.06f),rich));
+        exit.at("core").setValue(obstruction_>0?Vector3(1,.75f,.3f):Vector3(5.f,4.6f,3.8f).lerp(Vector3(1,.7f,.2f),rich));exit.at("edge").setValue(obstruction_>0?Vector3(1,.55f,.15f):Vector3(.55f,.48f,1.15f).lerp(Vector3(1,.48f,.06f),rich));
         for(std::size_t k=0;k<e.plume.size();++k){auto& p=*e.plume[k];const bool core=k==1;
             const float rare=std::clamp((4000.f-pressure)/3500.f,0.f,1.f);
             const float strength=(core?2.8f*(.2f+.8f*air)*std::sqrt(crowd):(.48f*air+.045f+.09f*(1-expansion))*crowd)*throttle*(1+rich*.8f)*(1-.88f*vacuum)*(core?1.f:1-rare);p.visible=on&&(core||rare<1);
@@ -431,7 +535,7 @@ void Vehicle::animate(const std::vector<float>* parts,double utc,core::Vector po
             p.scale.set(width,metres,width);
             auto& u=p.material()->as<ShaderMaterial>()->uniforms;u.at("strength").setValue(strength);u.at("time").setValue(time+static_cast<float>(i)*1.73f);
             u.at("radii").setValue(Vector2(nozzle,nozzle+(spread-nozzle)*std::min(1.f,metres/std::max(free,.001f))));u.at("metres").setValue(metres);
-            u.at("core").setValue((core?Vector3(5.f,4.6f,3.8f):Vector3(1.8f-.9f*expansion,.65f-.12f*expansion,.3f+.9f*expansion)).lerp(Vector3(1,.72f,.18f),rich));u.at("edge").setValue((core?Vector3(2.8f,1.6f,.65f):Vector3(1.5f-expansion,.28f+.1f*expansion,.07f+1.13f*expansion)).lerp(Vector3(1,.36f,.03f),rich));
+            u.at("core").setValue((core?Vector3(5.f,4.6f,3.8f):Vector3(1.8f-.9f*expansion,.65f-.12f*expansion,.3f+.9f*expansion)).lerp(Vector3(1,.72f,.18f),rich));u.at("edge").setValue((core?Vector3(2.4f,2.1f,3.8f):Vector3(.55f-.3f*expansion,.40f-.15f*expansion,.9f+.3f*expansion)).lerp(Vector3(1,.36f,.03f),rich));
             const float chamber=std::clamp((throttle-.12f)/.25f,0.f,1.f)*std::clamp((mainAge-.12f)/.25f,0.f,1.f);u.at("diamonds").setValue(diamonds*chamber*chamber*(3-2*chamber));u.at("inner").setValue(core?1.f:0.f);u.at("spacing").setValue(r*(2.4f+1.2f*flow));u.at("falloff").setValue(core?2.6f:1.2f-.85f*expansion);u.at("rarefied").setValue(expansion);u.at("vacuum").setValue(vacuum);u.at("impingement").setValue(hit);u.at("flash").setValue(flash);}
         const float offAge=static_cast<float>(utc-e.releasedUtc);e.detached->visible=e.remnantLife>0&&offAge>=0&&offAge<e.remnantLife;
         if(e.detached->visible){const float fade=1-offAge/e.remnantLife; // Gas leaves the bell and loses its feed, rather than switching off with thrust.

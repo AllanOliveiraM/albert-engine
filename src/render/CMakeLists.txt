@@ -39,6 +39,9 @@ endif()
 add_library(albert_render STATIC application.cpp broadcast_camera.cpp display.cpp sound.cpp webgpu_programs.cpp window_icon.cpp lighting.cpp site_lighting.cpp layers.cpp solids.cpp ring_systems.cpp comets.cpp shapes.cpp objects.cpp vehicle.cpp return_effects.cpp scenery.cpp launch_crowd.cpp launch_crowd_detail.cpp launch_cloud.cpp splashdown.cpp contact_shading.cpp industrial.cpp production.cpp roads.cpp broadcast.cpp rocks.cpp eclipses.cpp debris.cpp visuals.cpp uploads.cpp paths.cpp borders.cpp clouds.cpp asset_pack.cpp asset_downloads.cpp cache.cpp regional.cpp wms.cpp terrain.cpp terrain_heights.cpp)
 target_include_directories(albert_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${threepp_SOURCE_DIR}/src/external/stb)
+target_sources(albert_render PRIVATE cloud_weather.cpp flight_paths.cpp)
+set_source_files_properties(cloud_weather.cpp PROPERTIES COMPILE_DEFINITIONS
+    "ALBERT_DEVELOPMENT_CLOUD_PATH=\"${PROJECT_SOURCE_DIR}/assets/clouds/structure.png\"")
 target_link_libraries(albert_render PRIVATE threepp::threepp albert_gpu
     nlohmann_json::nlohmann_json albert_imgui albert_download
     Threads::Threads albert_erfa albert_providers albert_catalog albert_miniaudio)
@@ -55,7 +58,8 @@ else()
 endif()
 
 if(ALBERT_RPC)
-    target_sources(albert_render PRIVATE playground.cpp) # The interference panel drives flights through the API.
+    target_sources(albert_render PRIVATE playground.cpp missions.cpp mission_time.cpp) # Built-in missions share the external flight API.
+    target_include_directories(albert_render PRIVATE ${PROJECT_SOURCE_DIR}/examples)
     target_link_libraries(albert_render PRIVATE albert_rpc)
     target_compile_definitions(albert_render PRIVATE ALBERT_HAS_RPC=1)
 endif()

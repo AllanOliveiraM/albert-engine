@@ -33,7 +33,7 @@ struct State {
         {"IMU 3 acelerômetro",api::SensorFault::ACCELEROMETER,2,"m/s²",true},{"IMU 3 giroscópio",api::SensorFault::GYROSCOPE,2,"rad/s",true},
         {"GNSS",api::SensorFault::GNSS,0,"m (N, L, B)",true},{"Altímetro radar",api::SensorFault::RADAR_ALTIMETER,0,"m",false},
         {"Rastreador de estrelas",api::SensorFault::STAR_TRACKER,0,"rad (corpo)",true},{"Medidor de propelante",api::SensorFault::PROPELLANT_GAUGE,0,"kg",false}}};
-    char message[65]{};Clock::time_point armed{};std::string notice;Clock::time_point noticeAt{};int click=0; // click: what a click on an engine does.
+    Clock::time_point armed{};std::string notice;Clock::time_point noticeAt{};int click=0; // click: what a click on an engine does.
 };
 State& state(){static State s;return s;}
 // The engine map from below, as the broadcast draws it: a click does what is chosen above it (fail, fail silently, jam its
@@ -63,18 +63,19 @@ void engineMap(rpc::Server& server,const std::string& id,const rpc::FlightServic
             try{server.inject(id,c);st.notice="Motor "+std::to_string(over+1)+": "+actions[a];}catch(const std::exception& x){st.notice=x.what();}st.noticeAt=Clock::now();}}
 }
 }
-void drawPlayground(rpc::Server& server,ImVec2 display,float margin){
+void drawPlayground(rpc::Server& server,ImVec2 display,float margin,float top,float bottom,bool& open){
     const auto ids=server.flights();if(ids.empty())return;
     State& st=state();st.flight=std::clamp(st.flight,0,static_cast<int>(ids.size())-1);const std::string id=ids[static_cast<std::size_t>(st.flight)];
-    const float above=std::max(display.y*.82f-230.f*std::clamp(display.x/1600.f,.7f,1.4f),200.f); // Opens above the broadcast's panels (its lower band: open, it covered the ship's).
-    ImGui::SetNextWindowPos(ImVec2(display.x-margin,display.y*.18f),ImGuiCond_FirstUseEver,ImVec2(1,0));ImGui::SetNextWindowSize(ImVec2(360,above),ImGuiCond_FirstUseEver);ImGui::SetNextWindowBgAlpha(.8f);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(240,160),ImVec2(display.x-2*margin,display.y-2*margin)); // Then as large as the user drags it.
-    if(!ImGui::Begin("Interferência",nullptr,ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoFocusOnAppearing)){ImGui::End();return;}
+    const float scale=std::max(1.f,ImGui::GetFontSize()/16.f),width=std::min(360.f*scale,std::max(1.f,display.x-2*margin));
+    ImGui::SetNextWindowPos(ImVec2(display.x-margin,top),ImGuiCond_Always,ImVec2(1,0));
+    ImGui::SetNextWindowSize(ImVec2(width,std::max(ImGui::GetFrameHeight()*2,bottom-top)),ImGuiCond_Always);ImGui::SetNextWindowBgAlpha(.91f);
+    if(!ImGui::Begin("Interferência",&open,ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoFocusOnAppearing|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoCollapse)){ImGui::End();return;}
     auto send=[&](const api::FlightCommand& c,const std::string& what){try{server.inject(id,c);if(!what.empty()){st.notice=what;st.noticeAt=Clock::now();}}catch(const std::exception& x){st.notice=x.what();st.noticeAt=Clock::now();}};
     // The flight.
     {std::string items;for(const auto& f:ids){items+=f;items.push_back('\0');}ImGui::SetNextItemWidth(-1);ImGui::Combo("##voo",&st.flight,items.c_str());}
     if(ImGui::CollapsingHeader("Vento e forças",ImGuiTreeNodeFlags_DefaultOpen)){
-        constexpr float size=120,gustReach=25,pushReach=600; // m/s; kN.
+        const float size=std::min(120.f*scale,(ImGui::GetContentRegionAvail().x-ImGui::GetStyle().ItemSpacing.x)*.5f);
+        constexpr float gustReach=25,pushReach=600; // m/s; kN.
         ImGui::BeginGroup();ImGui::TextDisabled("Rajada (m/s)");if(joystick("##rajada",st.gust[0],st.gust[1],gustReach,size))st.gustDirty=true;
         ImGui::SetNextItemWidth(size);if(ImGui::SliderFloat("##rajada_v",&st.gust[2],-10,10,"vertical %.1f"))st.gustDirty=true; // NED down positive.
         if(ImGui::Button("Zerar##rajada")){st.gust[0]=st.gust[1]=st.gust[2]=0;st.gustDirty=true;}
@@ -90,7 +91,7 @@ void drawPlayground(rpc::Server& server,ImVec2 display,float margin){
     }
     if(ImGui::CollapsingHeader("Motores",ImGuiTreeNodeFlags_DefaultOpen)){
         const auto gauges=server.flightGauges();const std::string scene=id=="flight"?id:"flight."+id;bool drawn=false;
-        ImGui::RadioButton("Falha",&st.click,0);ImGui::SameLine();ImGui::RadioButton("Calada",&st.click,1);ImGui::SameLine();ImGui::RadioButton("Gimbal travado",&st.click,2);
+        ImGui::SetNextItemWidth(-1);ImGui::Combo("##Ação no motor",&st.click,"Falha\0Falha silenciosa\0Gimbal travado\0");
         for(const auto& g:gauges)if(g.id==scene&&!g.engines.empty()){engineMap(server,id,g,170,st);drawn=true;break;}
         if(!drawn)ImGui::TextDisabled("Sem motores neste estágio.");
         for(const auto& g:gauges)if(g.id==scene&&!g.surfaces.empty()){ImGui::TextDisabled("Superfícies (travar onde estão):"); // Grid fins, flaps.
@@ -100,7 +101,7 @@ void drawPlayground(rpc::Server& server,ImVec2 display,float margin){
     }
     if(ImGui::CollapsingHeader("Sensores")){
         static const char* modes="honesto\0morto\0travado\0viés\0deriva\0ruído\0";
-        for(auto& r:st.sensors){ImGui::PushID(r.name);ImGui::TextUnformatted(r.name);ImGui::SameLine(170);ImGui::SetNextItemWidth(-1);ImGui::Combo("##modo",&r.mode,modes);
+        for(auto& r:st.sensors){ImGui::PushID(r.name);ImGui::TextWrapped("%s",r.name);ImGui::SetNextItemWidth(-1);ImGui::Combo("##modo",&r.mode,modes);
             if(r.mode>=3){ImGui::SetNextItemWidth(-60);if(r.vector)ImGui::InputFloat3("##valor",r.value,"%.4g");else ImGui::InputFloat("##valor",r.value,0,0,"%.4g");
                 ImGui::SameLine();ImGui::TextDisabled("%s",r.unit_text);}
             if(ImGui::SmallButton("Aplicar")){api::FlightCommand c;auto* f=c.mutable_sensor_fault();f->set_sensor(r.sensor);f->set_unit(r.unit);f->set_mode(static_cast<api::SensorFault::Mode>(r.mode));
@@ -116,13 +117,9 @@ void drawPlayground(rpc::Server& server,ImVec2 display,float margin){
         if(ImGui::IsItemHovered())ImGui::SetTooltip("Retoma do ponto de espera: T-40 s após espera tardia ou RECICLAR; nos demais casos, de onde parou.");
         if(ImGui::Button("RECICLAR (T-40)",ImVec2(-1,0))){api::FlightCommand c;c.set_uplink("RECYCLE");send(c,"Reciclo para T-40 pedido");}
         if(ImGui::IsItemHovered())ImGui::SetTooltip("Segura em T-40 s e reconecta o QD da nave; RETOMAR (GO) continua dali. Na ignição, aborta na plataforma; após decolar ou cancelar, ignora.");
-        if(ImGui::Button("PULAR REENTRADA",ImVec2(-1,0))){api::FlightCommand c;c.set_uplink("SKIP_ENTRY");send(c,"Reentrada acelerada pedida");}
-        if(ImGui::IsItemHovered())ImGui::SetTooltip("No planeio até o ar ou na reentrada da nave: acelera o tempo (até 60x, o voo é o mesmo) até a queda de barriga, que segue em tempo real. Fora delas, ignora.");
         ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.75f,.45f,.08f,1));
         if(ImGui::Button("ABORTAR",ImVec2(-1,0))){api::FlightCommand c;c.set_uplink("ABORT");send(c,"Aborto enviado ao voo");}ImGui::PopStyleColor();
         if(ImGui::IsItemHovered())ImGui::SetTooltip("O software de voo toma a saída mais segura para a sua fase (na contagem, cancela; na ignição, aborta na plataforma).");
-        ImGui::SetNextItemWidth(-70);ImGui::InputText("##mensagem",st.message,sizeof st.message);ImGui::SameLine();
-        if(ImGui::Button("Enviar")&&st.message[0]){api::FlightCommand c;c.set_uplink(st.message);send(c,"Mensagem enviada");st.message[0]=0;}
         const bool armed=Clock::now()-st.armed<std::chrono::seconds(3);
         ImGui::PushStyleColor(ImGuiCol_Button,armed?ImVec4(.85f,.12f,.12f,1):ImVec4(.35f,.08f,.08f,1));
         if(ImGui::Button(armed?"Confirmar: terminar o voo":"Terminação do voo (FTS)",ImVec2(-1,0))){

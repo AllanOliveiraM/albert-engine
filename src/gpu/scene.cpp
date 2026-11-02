@@ -169,7 +169,7 @@ struct SceneRenderer::Impl {
     WGPUBindGroupLayout frameLayout=nullptr,objectLayout=nullptr;WGPUBindGroup frameGroup=nullptr,objectGroup=nullptr;
     WGPUBuffer zeros=nullptr;WGPUTexture whiteTexture=nullptr,blackTexture=nullptr;WGPUTextureView white=nullptr,black=nullptr;WGPUSampler linear=nullptr;
     struct Buffer {WGPUBuffer buffer=nullptr;std::size_t bytes=0;unsigned version=~0u;};
-    struct Geometry {Buffer index;unsigned used=0;}; // Index buffers belong to one geometry; attributes may be shared.
+    struct Geometry {Buffer index;unsigned attributesVersion=~0u,sourceIndexVersion=~0u,used=0;bool validIndex=true;}; // Index buffers belong to one geometry; attributes may be shared.
     struct Attribute {std::weak_ptr<BufferAttribute> owner;Buffer buffer;unsigned used=0;};
     // A texture's GPU copy. Large images stream in row slices (~8 MB a frame) into `pending` while
     // the previous copy (or nothing) keeps drawing; mipmaps are rendered on the GPU at the end.
@@ -311,6 +311,18 @@ struct SceneRenderer::Impl {
         if(bytes%4==0)wgpuQueueWriteBuffer(queue,b.buffer,0,data,bytes);
         else{std::vector<std::byte> padded(align(bytes,4));std::memcpy(padded.data(),data,bytes);wgpuQueueWriteBuffer(queue,b.buffer,0,padded.data(),padded.size());}
         b.version=version;
+    }
+    bool uploadIndex(Geometry& cached,BufferGeometry& geometry,IntBufferAttribute& index,unsigned vertices){
+        // setIndex() installs a new attribute whose content version starts at zero. Terrain swaps
+        // index tiers this way, so the content version alone cannot identify the GPU copy.
+        if(cached.attributesVersion!=geometry.attributesVersion()||cached.sourceIndexVersion!=index.version){
+            cached.attributesVersion=geometry.attributesVersion();cached.sourceIndexVersion=index.version;cached.index.version=~0u;
+            const auto& values=index.array();const auto largest=values.empty()?0u:*std::max_element(values.begin(),values.end());
+            cached.validIndex=values.empty()||largest<vertices;
+            if(!cached.validIndex)report("invalid index in geometry '"+geometry.name+"' (#"+std::to_string(geometry.id)+"): "+std::to_string(largest)+" exceeds "+std::to_string(vertices)+" vertices; draw skipped");
+        }
+        if(!cached.validIndex)return false;
+        upload(cached.index,index.data(),index.byteLength(),WGPUBufferUsage_Index,index.version);return true;
     }
     const Compiled* program(const std::string& name){
         if(const auto it=compiled.find(name);it!=compiled.end())return &it->second;
@@ -682,7 +694,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         Vector3 toward=sun;toward.transformDirection(planet); // Linear part, normalised: the ellipsoid maps to the model's sphere.
         f[92]=eye.x;f[93]=eye.y;f[94]=eye.z;f[95]=std::min(air.strength,1.f);f[96]=toward.x;f[97]=toward.y;f[98]=toward.z;
     }
-    f[156]=airTables?std::max(air.hazeExtinction,0.f):0.f;f[157]=air.hazeScaleKm;
+    f[156]=airTables?std::max(air.hazeExtinction,0.f):0.f;f[157]=air.hazeScaleKm;f[159]=air.cloudOffset;
     f[158]=air.localCloudCover;
     // Cloud shadows: the layer's map (its GPU copy is the cloud material's), its height and opacity.
     std::uint64_t cloudSerial=2;WGPUTextureView cloudView=g.black;
@@ -780,7 +792,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
             ++g.shadowDrawn;auto* positions=geometry->getAttribute<float>("position");WGPUBuffer b=g.vertices(*geometry,"position",3);if(!b)continue;
             auto& geo=g.geometries[geometry->id];geo.used=g.frame;
             wgpuRenderPassEncoderSetBindGroup(sp,1,g.objectGroup,1,&casterOffsets[i]);wgpuRenderPassEncoderSetVertexBuffer(sp,0,b,0,WGPU_WHOLE_SIZE);
-            if(auto* idx=geometry->getIndex()){g.upload(geo.index,idx->array().data(),idx->array().size()*4,WGPUBufferUsage_Index,idx->version);
+            if(auto* idx=geometry->getIndex()){if(!g.uploadIndex(geo,*geometry,*idx,static_cast<unsigned>(positions->count())))continue;
                 wgpuRenderPassEncoderSetIndexBuffer(sp,geo.index.buffer,WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE);wgpuRenderPassEncoderDrawIndexed(sp,static_cast<std::uint32_t>(idx->array().size()),1,0,0,0);}
             else wgpuRenderPassEncoderDraw(sp,static_cast<std::uint32_t>(positions->count()),1,0,0);
         }
@@ -848,7 +860,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         const auto range=item.geometry->drawRange;
         if(item.points){const unsigned first=static_cast<unsigned>(std::max(0,range.start)),n=std::min<unsigned>(vertices-std::min(first,vertices),static_cast<unsigned>(range.count));if(n)wgpuRenderPassEncoderDraw(pass,item.program->program.instanceVertices,n,0,first);}
         else if(auto* idx=item.geometry->getIndex()){
-            g.upload(geo.index,idx->array().data(),idx->array().size()*4,WGPUBufferUsage_Index,idx->version);
+            if(!g.uploadIndex(geo,*item.geometry,*idx,vertices))continue;
             const unsigned total=static_cast<unsigned>(idx->array().size()),first=std::min(total,static_cast<unsigned>(std::max(0,range.start))),n=std::min(total-first,static_cast<unsigned>(range.count));
             if(g.reallocations!=seenReallocations){lastIndex=nullptr;seenReallocations=g.reallocations;lastBuffers.fill(nullptr);}
             if(geo.index.buffer!=lastIndex){wgpuRenderPassEncoderSetIndexBuffer(pass,geo.index.buffer,WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE);lastIndex=geo.index.buffer;}

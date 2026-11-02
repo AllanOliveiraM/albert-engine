@@ -17,7 +17,7 @@ NASA/JHUAPL/CIW/USGS MESSENGER.
 São referências estáticas, com os limites e resoluções descritos na documentação.
 O mosaico lunar conserva iluminação da aquisição; o relevo vem de DEM separado.
 A imagem solar é instrumental, representa um hemisfério observado e não mostra
-atividade atual. Sem observações meteorológicas válidas, não são inventadas nuvens.
+atividade atual. O modo de nuvens reais mantém apenas observações disponíveis; o modo artificial usa um cenário animado, explicitamente separado do tempo observado.
 
 Além das partes do pacote, este diretório mantém dados auxiliares versionados. `manifest.json`
 declara seus hashes, verificados pelo CMake antes de compilar. Caminhos são
@@ -38,6 +38,12 @@ permitem selecionar diretório e pacote explicitamente no desenvolvimento.
   https://gibs.earthdata.nasa.gov/colormaps/v1.3/MODIS_Cloud_Fraction.xml
   em tuplas `[fração_percentual, R, G, B]`. Decodifica a fração observada;
   cores desconhecidas e pixels sem dados permanecem sem cobertura.
+- `clouds/structure.png`: referência histórica de estrutura de nuvens Blue Marble/MODIS,
+  NASA Goddard Space Flight Center / Reto Stöckli, publicada em 2002.
+  Fonte: https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/cloud_combined_8192.tif.
+  Convertida para cinza e reduzida de 8192 × 4096 para 4096 × 2048; acompanha também a distribuição leve.
+  O modo artificial anima essa referência, sem representar meteorologia atual.
+  Reprodução: `scripts/prepare-cloud-structure.py`; integridade em `manifest.json`.
 - `fonts/Inter.ttf`: Inter, © 2020 The Inter Project Authors,
   https://github.com/rsms/inter, SIL Open Font License 1.1.
   Licença completa em `fonts/OFL.txt`. Distribuído sem alterações.

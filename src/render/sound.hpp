@@ -2,7 +2,16 @@
 #include "physics/acoustics.hpp"
 #include <cstdint>
 #include <memory>
+#include <cmath>
 namespace albert {
+// Playback balance only: propagation, acoustic telemetry and valve timing retain
+// their physical levels. Apply before voice ranking and hearing adaptation.
+inline physics::acoustics::Spectrum playbackLevels(physics::acoustics::Spectrum levels,float gain){
+    const double db=gain>0?20*std::log10(gain):-1e9;
+    for(auto& band:levels)band+=db;
+    return levels;
+}
+
 // What the camera hears: noise through all the acoustics' one-third-octave bands, each at the heard level,
 // on miniaudio's default playback device (none, or ALBERT_AUDIO=0: silent but still rendered on demand). Levels above
 // 95 dB SPL come down over ~1.5 s, as hearing protects itself, and 95 dB plays at -14 dBFS: a launch at the pad and one
@@ -12,7 +21,7 @@ namespace albert {
 class Sound {
 public:
     static constexpr unsigned rate=48000;
-    static constexpr unsigned voices=4;
+    static constexpr unsigned voices=6; // Engines, RCS, pad, stack vents and tank farm can coexist.
     struct Voice {std::uint64_t id=0;physics::acoustics::Spectrum levels{};bool audible=false;float pan=0,crackle=0;};
     explicit Sound(bool device=true);
     ~Sound();

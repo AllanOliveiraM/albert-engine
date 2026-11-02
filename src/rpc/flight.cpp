@@ -227,7 +227,7 @@ template<class T> struct Board {
     void put(const std::string& id,std::shared_ptr<const T> s){std::lock_guard l(lock);if(s)by[id]=std::move(s);else by.erase(id);}
     std::vector<T> all(){std::vector<T> out;std::lock_guard l(lock);for(const auto& [id,s]:by)out.push_back(*s);return out;}
 };
-struct Boards {Board<FlightServices::Sound> sounds;Board<FlightServices::Gauge> gauges;void drop(const std::string& id){sounds.put(id,nullptr);sounds.put(id+"/stack-vents",nullptr);sounds.put(id+"/farm",nullptr);gauges.put(id,nullptr);}};
+struct Boards {Board<FlightServices::Sound> sounds;Board<FlightServices::Gauge> gauges;void drop(const std::string& id){sounds.put(id,nullptr);sounds.put(id+"/jets",nullptr);sounds.put(id+"/stack-vents",nullptr);sounds.put(id+"/farm",nullptr);gauges.put(id,nullptr);}};
 struct Slot {
     using Sound=FlightServices::Sound;using Gauge=FlightServices::Gauge;
     struct Command {std::uint32_t kind;double a=0,b=0,c=0;};
@@ -469,6 +469,7 @@ struct Slot {
         {static const bool log=std::getenv("ALBERT_PACE_LOG")!=nullptr;if(log&&published.time_since_epoch().count()&&now-published>std::chrono::milliseconds(200))std::fprintf(stderr,"PACE publish gap %.0f ms\n",std::chrono::duration<double,std::milli>(now-published).count());}
         published=now;const core::Sample s=scene();const ph::V3 at=origin(flight->state().time).position;
         boards.sounds.put(sceneId,center==ph::Center::earth?std::make_shared<const Sound>(heardSound()):nullptr); // Read by the frame loop without the flight's lock.
+        publishJetSounds();
         publishPadSounds();
         boards.gauges.put(sceneId,std::make_shared<const Gauge>(gauge()));
         // The stack got shorter, or the same instant again (the keeper; appending would be refused as
@@ -505,6 +506,24 @@ struct Slot {
         if(flight->breakup()!=ph::Flight::Breakup::none)e.blast=.03*flight->state().propellant+1e3; // Broken up: what was left going off, ~3% of it as TNT (an estimate).
         return s;
     }
+    void publishJetSounds(){
+        const auto& stage=flight->vehicle().stages[flight->state().stage];
+        if(center!=ph::Center::earth||stage.rcs.empty()){boards.sounds.put(sceneId+"/jets",nullptr);return;}
+        Sound source=heardSound();source.id+="/jets";auto& e=source.emission;
+        e.on=false;e.noise={};e.dragPower=e.blast=0;e.pad={};
+        const auto valves=flight->firing();double weightedSpeed=0;ph::V3 offset{};
+        for(std::size_t i=0;i<stage.rcs.size();++i){const auto& jet=stage.rcs[i];const double flow=valves[i]*jet.thrust/jet.exhaust;
+            e.pad.ventFlow+=flow;weightedSpeed+=flow*jet.exhaust;
+            offset+=ph::V3{flight->centreOfMass()-jet.position.x,jet.position.y,jet.position.z}*flow;
+        }
+        if(e.pad.ventFlow>0){
+            e.pad.ventSpeed=weightedSpeed/e.pad.ventFlow;
+            const auto rotation=flight->environment().rotation.at(flight->state().time).fixed*ph::matrix(flight->state().attitude);
+            e.position+=rotation*(offset*(1/e.pad.ventFlow));
+        }
+        e.pad.ventDiameter=.08; // A cold-gas jet: broadband flow noise, rather than a main-engine roar.
+        const auto id=source.id;boards.sounds.put(id,std::make_shared<const Sound>(std::move(source)));
+    }
     void publishPadSounds(){
         if(!padAt){boards.sounds.put(siteId,nullptr);boards.sounds.put(siteId+"/stack-vents",nullptr);boards.sounds.put(siteId+"/farm",nullptr);return;}
         const Sound pad=padSound();boards.sounds.put(siteId,std::make_shared<const Sound>(pad));
@@ -536,7 +555,8 @@ struct Slot {
         s.windEnu={wind.y,wind.x,0}; // The pad mast (or its ground air model), never the vehicle's wind aloft.
         if(!st.clamped&&!released)released=s.utc;const double after=released?s.utc-*released:0;
         if(st.clamped&&st.propellant>0&&st.stage==0){e.pad.ventFlow=1;e.pad.ventSpeed=80;} // Plumbing stays quiet beside the actual outlets.
-        if(st.clamped&&st.propellant>0&&!stopped&&zero&&s.utc>=*zero-9&&s.utc<*zero-7&&std::any_of(flight->environment().structures.begin(),flight->environment().structures.end(),[](const auto& x){return x.name=="ship quick disconnect";})){
+        const double count=zero?(countState=="HOLD"?countTime:s.utc-*zero):-1e9;
+        if(st.clamped&&st.propellant>0&&!stopped&&countState!="SCRUB"&&count>=-9&&count< -7&&std::any_of(flight->environment().structures.begin(),flight->environment().structures.end(),[](const auto& x){return x.name=="ship quick disconnect";})){
             e.pad.ventFlow+=120;e.pad.ventSpeed=350;} // Depressurise for two count seconds before the SQD swings (T-9 to T-7); preserve boil-off.
         const bool lit=st.burning||released;e.pad.waterFlow=lit?41e3*std::clamp(1-(after-15)/10,0.,1.):zero&&s.utc>=*zero-17?16e3:0;
         return s;
@@ -1086,6 +1106,7 @@ grpc::Status FlightServices::Step(grpc::ServerContext* context,const api::StepRe
     }
     slot->note(r->milestones(),now);
     if(r->stop_clock()&&!slot->stopped)slot->stopped=now;
+    slot->publishJetSounds(); // Direct valve commands also apply on zero-tick requests.
     slot->publishPadSounds(); // Valve state must include this request's count and scrub, after its ticks commit.
     slot->boards.gauges.put(slot->sceneId,std::make_shared<const Gauge>(slot->gauge())); // Publish this request's clock after its ticks commit.
     slot->fill(out);

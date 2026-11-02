@@ -1,6 +1,7 @@
 #include "animation.hpp"
 #include "grid_fin.hpp"
 #include "broadcast_camera.hpp"
+#include "surface_camera.hpp"
 #include "physics/atmosphere.hpp"
 #include "borders.hpp"
 #include "paths.hpp"
@@ -188,13 +189,19 @@ void controls() {
     require(albert::framingDistance(1e10f,4.f,1.f)==4.f&&albert::framingDistance(4.f,1e10f,1.f)==1e10f,"Extreme framing endpoint lost precision");
     require(!albert::AuxiliaryLight{}.enabled,"Generic auxiliary light must start disabled");
     require(!settings.earthAssist && !settings.moonAssist,"Auxiliary lights must start disabled");
-    require(!settings.clouds,"Live clouds must start disabled");
+    require(settings.clouds==albert::CloudMode::Simulated,"Artificial clouds must be the default");
     albert::RegionalImages slope;slope.body="moon";slope.region={-10,-10,10,10};
     slope.day=Image(std::vector<unsigned char>(4,255),1,1);
     slope.height=Image(std::vector<float>{0,0,0,1,1000,1000,1000,1,0,0,0,1,1000,1000,1000,1},2,2);
     albert::prepareRegionalImages(slope);const auto* terrainVertices=slope.geometry->getAttribute<float>("position");
     const unsigned center=96*193+96;const float radius=std::hypot(terrainVertices->getX(center),terrainVertices->getY(center),terrainVertices->getZ(center));
     require(std::abs(radius-(1737400.f+520.f)/6378137.f)<1e-7f,"Regional terrain introduced nearest-neighbour terraces");
+    {albert::RegionalImages site;site.region={-97.156,25.995,-97.153,25.998};site.segments=32;site.lift=0;
+        site.day=Image(std::vector<unsigned char>(4,255),1,1);site.height=Image(std::vector<float>{-24,0,0,1},1,1);
+        albert::prepareRegionalImages(site);const auto* p=site.geometry->getAttribute<float>("position");
+        double error=0;for(int i=0;i<p->count();++i){const double x=site.geometryOrigin[0]+p->getX(i),y=site.geometryOrigin[1]+p->getY(i),z=site.geometryOrigin[2]+p->getZ(i);
+            error=std::max(error,std::abs((std::sqrt(x*x+y*y+z*z)-1)*6378137+24));}
+        require(error<.0001,"Fallback regional ground lost sub-millimetre elevation before rotation");}
     require(albert::regionRelevant({170,-10,190,10},{-185,-10,-175,10}),"Moving across the date line cancelled a useful crop");
     require(albert::regionSufficient({170,-10,190,10},{-189,-9,-171,9}),"Existing overlapping detail was not reused");
     require(!albert::regionSufficient({-30,-30,30,30},{-5,-5,5,5}),"Zooming did not request finer detail");
@@ -450,6 +457,7 @@ void towerGraphics(Target& renderer){
 #include "ascent_visuals.hpp"
 #include "grid_fin_captures.hpp"
 #include "media_captures.hpp"
+#include "earth_captures.hpp"
 #include "media_visuals.hpp"
 void graphics(Target& renderer) {
     mediaGraphics();nightGraphics(renderer);
@@ -477,7 +485,7 @@ void graphics(Target& renderer) {
     scene->add(AmbientLight::create(Color(0xffffff),1.f));
     albert::PlanetVisuals planets(*scene,assets());
     planets.earth->position.set(100,0,0);planets.sun->position.set(250,0,0);
-    albert::VisualSettings settings;settings.atmosphere=settings.clouds=settings.nightLights=settings.shadows=false;settings.terrain=false; // The globe mesh and its patches: terrain nodes would join their children asynchronously.
+    albert::VisualSettings settings;settings.atmosphere=settings.nightLights=settings.shadows=false;settings.clouds=albert::CloudMode::Off;settings.terrain=false; // The globe mesh and its patches: terrain nodes would join their children asynchronously.
     albert::RegionalImages region;region.body="moon";region.region={-135,-45,-45,45};
     region.day=rgba(255,128);region.height=height(-1200.f);
     planets.stageRegionalImages(std::move(region));
@@ -541,7 +549,9 @@ void graphics(Target& renderer) {
     scene->add(stroke(borders,points));renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
     require(cyanPixels(pixels,86,106,93,100)==0,"Borders showed through the far hemisphere");
     const int plain=pixels[3*(96*192+96)];
-    planets.setCloudDetail(rgba(255),{-135,-45,-45,45});settings.clouds=true;
+    // Cloud radiance now uses the scene's solar irradiance, like the surface and air.
+    auto cloudSun=DirectionalLight::create(Color(0xffffff),2.4f);cloudSun->position.set(0,0,100);scene->add(cloudSun);
+    planets.setCloudDetail(rgba(255),{-135,-45,-45,45});settings.clouds=albert::CloudMode::Observed;
     planets.update(Vector3(0,0,1),camera->position,settings,1.f);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
     const int cloudy=pixels[3*(96*192+96)];require(cloudy>plain+40,"Live cloud detail shader did not render");
     planets.setCloudDetail(rgba(0),{-135,-45,-45,45});
@@ -555,7 +565,7 @@ void graphics(Target& renderer) {
     require(!planets.releaseDistantDetails("sun",camera->position,false,1.f),"Detail eviction ignored its grace interval");
     require(planets.releaseDistantDetails("sun",camera->position,false,3.f),"Distant Earth/Moon details stayed resident");
     require(planets.earth->children.size()+1==earthChildren&&planets.moon->children.size()+1==moonChildren&&oldEarthDetail.expired()&&oldMoonDetail.expired(),"Evicted terrain retained mesh resources");
-    settings.clouds=false;planets.update(Vector3(0,0,1),camera->position,settings,1.f);planets.updateBorderMaterial(*borders,camera->position);
+    settings.clouds=albert::CloudMode::Off;planets.update(Vector3(0,0,1),camera->position,settings,1.f);planets.updateBorderMaterial(*borders,camera->position);
     scene->add(behind);renderer.render(*scene,*camera);pixels=renderer.readRGBPixels();
     require(cyanPixels(pixels,83,109,91,101)==0&&pixels[3*(96*192+96)]>0,"Eviction left a hole in the global Earth surface");scene->remove(*behind);
     albert::RegionalImages reloaded;reloaded.day=rgba(64,128);reloaded.height=height(1000);planets.setRegionalImages(std::move(reloaded));
@@ -604,7 +614,7 @@ void graphics(Target& renderer) {
     };
     require(annotation(0)==annotation(1e11),"Spatial layers lost precision at astronomical distances");
     auto surfaceWorld=Scene::create();surfaceWorld->background=Color(0x000000);albert::PlanetVisuals surfacePlanets(*surfaceWorld,assets());surfacePlanets.moon->visible=false;surfacePlanets.sun->visible=false;
-    auto surfaceCamera=OrthographicCamera::create(-.04f,.04f,.04f,-.04f,.01f,10.f);surfaceCamera->position.set(0,0,3);surfaceCamera->lookAt(Vector3());albert::VisualSettings surfaceSettings;surfaceSettings.atmosphere=surfaceSettings.clouds=surfaceSettings.nightLights=false;surfacePlanets.update(Vector3(0,0,1),surfaceCamera->position,surfaceSettings,1.f);
+    auto surfaceCamera=OrthographicCamera::create(-.04f,.04f,.04f,-.04f,.01f,10.f);surfaceCamera->position.set(0,0,3);surfaceCamera->lookAt(Vector3());albert::VisualSettings surfaceSettings;surfaceSettings.atmosphere=surfaceSettings.nightLights=false;surfaceSettings.clouds=albert::CloudMode::Off;surfacePlanets.update(Vector3(0,0,1),surfaceCamera->position,surfaceSettings,1.f);
     albert::core::Scene surfaceRegistry;albert::SceneObjects surfaceObjects(*surfaceWorld);surfaceObjects.bind("earth",surfacePlanets.earth);albert::VectorLayers surfaceLayers(*surfaceWorld);
     albert::core::Layer surfaceLine;surfaceLine.id="surface-line";surfaceLine.name="Surface line";surfaceLine.kind=albert::core::LayerKind::Polyline;surfaceLine.frame=albert::core::LayerFrame::EarthSurface;surfaceLine.widthPixels=3;
     std::vector<albert::core::Geographic> coordinates{{-91,0},{-89,0}};surfaceRegistry.createLayer(albert::core::prepareLayer(surfaceLine,{},coordinates));
@@ -737,7 +747,7 @@ void graphics(Target& renderer) {
         albert::PlanetVisuals bodies(*world,assets());bodies.earth->position.set(0,0,0);bodies.moon->position.set(0,0,60);bodies.sun->position.set(0,0,-23455);
         light->setTarget(*bodies.moon);
         auto view=PerspectiveCamera::create(60,1,.001f,100000);view->position.set(0,0,58.9f);view->lookAt(bodies.moon->position);
-        albert::VisualSettings settings;settings.atmosphere=settings.clouds=settings.nightLights=false;settings.terrain=false;
+        albert::VisualSettings settings;settings.atmosphere=settings.nightLights=false;settings.clouds=albert::CloudMode::Off;settings.terrain=false;
         bodies.update(Vector3(0,0,-1),view->position,settings,1.f);
         albert::EclipseVisuals eclipses(bodies.earth,bodies.moon,bodies.sun);eclipses.update(true);renderer.render(*world,*view);auto total=renderer.readRGBPixels();
         const size_t center=3*(96*192+96);
@@ -840,6 +850,10 @@ void orbitPaths() {
 // The sound's synthesis, offline: one band at 95 dB SPL plays at -14 dBFS around its centre, 135 dB comes down to the same
 // over ~10 s (loudness adaptation), silence when not audible, the pan sends it to one side; crackle and booms.
 void soundLevels(){
+    {albert::physics::acoustics::Spectrum physical;physical.fill(110);
+        const auto mixed=albert::playbackLevels(physical,.15f),silent=albert::playbackLevels(physical,0);
+        require(physical[20]==110&&std::abs(mixed[20]-93.521825)<.0001,"Tank-farm playback balance changed physical telemetry or gain");
+        require(silent[20]<-1e8,"Muted tank farm retained audible bands");}
     namespace ac=albert::physics::acoustics;albert::Sound s(false);ac::Spectrum levels;levels.fill(-1e9);levels[29]=95; // 1 kHz.
     auto play=[&](double seconds,bool audible,float pan){s.hear(levels,audible,pan,seconds);std::vector<float> out(static_cast<std::size_t>(seconds*albert::Sound::rate)*2);
         s.render(out.data(),static_cast<unsigned>(out.size()/2),2);return out;};
@@ -890,6 +904,7 @@ int main(int argc,char** argv) {
         if(argc>1&&std::string_view(argv[1])=="media-check"){mediaGraphics();return 0;}
         keepGoing=argc>1&&std::string_view(argv[1])=="webgpu-keep-going";
 #ifdef ALBERT_TEST_RPC
+        if(argc>2&&std::string_view(argv[1])=="earth-captures"){earthCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="media-captures"){mediaCaptures(argv[2]);return 0;}
         if(argc>2&&std::string_view(argv[1])=="crowd-captures"){landCaptures(argv[2],false,false,false,false,false,true);return 0;}
         if(argc>2&&std::string_view(argv[1])=="camera-diagnostics"){cameraCaptures(argv[2],true);return 0;}
