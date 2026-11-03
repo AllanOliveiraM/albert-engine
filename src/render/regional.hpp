@@ -1,5 +1,6 @@
 #pragma once
 #include "geography.hpp"
+#include "regional_refresh.hpp"
 #include "download.hpp"
 #include "threepp/textures/Image.hpp"
 #include "threepp/core/BufferGeometry.hpp"
@@ -35,7 +36,7 @@ private:
     std::optional<GeoRegion> working_;
     std::string workingBody_="earth",body_="earth",loadedBody_="earth";
     int level_=0,loadedLevel_=-1;
-    std::chrono::steady_clock::time_point changed_{},next_{};
+    RegionalRefreshSchedule refresh_;
     std::future<RegionalImages> pending_;
 };
 }

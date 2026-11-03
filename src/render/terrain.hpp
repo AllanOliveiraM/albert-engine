@@ -31,7 +31,7 @@ TerrainHeights moonTerrainHeights(const threepp::Image& global);  // LOLA LDEM_1
 TerrainHeights marsTerrainHeights(const threepp::Image& global);  // MOLA MEGDR from level 7.
 // Level-of-detail terrain on a cube-sphere quadtree: nodes of 65×65 posts with skirts, built on a
 // worker and drawn with the body's material as children of its mesh, refined by distance to the
-// camera (CDLOD-style ranges); a parent stays until its four children are built, which then morph
+// camera (CDLOD-style ranges with separate split/merge thresholds); a parent stays until its four children are built, which then morph
 // from its surface to their own. Positions are
 // radial in the mesh's local frame, as the globe's relief: scale × (1 + h / radius) × the direction. With a root, the nodes
 // hang there instead, each placed from the parent's orientation and its position in double precision (update's `at`): as the
@@ -53,8 +53,11 @@ public:
     // Reuse the same relief and imagery with fewer indices where the measured
     // geometric deviation projects below the pixel budget. Zero disables it.
     void screenSpace(float pixelsPerRadian,float pixelError=1.f);
+    // Cap refinement without discarding the cache: simplified terrain still follows
+    // the globe and carries the same imagery, without requesting the fine DEM.
+    void refinement(int maximumLevel);
     [[nodiscard]] std::size_t triangles()const;
-    void hide(); // No node drawn (until the next update).
+    void hide(); // No node drawn; discard waiting builds, keep the cache/current build until the next update.
     [[nodiscard]] std::size_t drawn()const;   // Nodes selected by the last update.
     [[nodiscard]] std::size_t pending()const; // Nodes queued or building.
     [[nodiscard]] int finestLevel()const;     // Of the last selection.
@@ -66,7 +69,7 @@ public:
     // Visible nodes change immediately, so the caller may release the old textures before the next update.
     void detail(std::shared_ptr<threepp::Material> material,std::optional<threepp::Vector4> bounds);
     [[nodiscard]] std::size_t detailed()const; // Drawn nodes with the region's imagery.
-    // Radius of the drawn relief toward a point in the parent's local frame (its finest built node,
+    // Radius of the drawn relief toward a point in the parent's local frame (its finest visible node,
     // bilinear between posts), in that frame's units; none while nothing is drawn.
     [[nodiscard]] std::optional<double> ground(const threepp::Vector3& local)const;
 private:

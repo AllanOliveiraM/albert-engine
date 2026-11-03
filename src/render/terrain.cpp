@@ -58,39 +58,91 @@ Shape shapeOf(const Key& k){
 }
 struct Terrain::Impl {
     // Provisional: from coarser data, at that generation. Detail: the region's imagery applied for that version.
-    struct Morph {std::vector<float> start,end;double t=0;}; // Vertex positions on the parent's surface and the node's own.
-    struct Node {std::shared_ptr<Mesh> mesh;Vec centre;unsigned lastUsed=0;bool provisional=false;std::uint64_t generation=0;unsigned detailVersion=0;bool detailed=false;std::array<double,4> error{};unsigned indexTier=0;std::unique_ptr<Morph> morph;}; // centre: in the parent's frame.
+    struct Morph {std::vector<float> start,end,normalStart,normalEnd;double t=0;bool fresh=false;}; // Outgoing and incoming positions/lighting normals.
+    struct Node {std::shared_ptr<Mesh> mesh;Vec centre;unsigned lastUsed=0;bool provisional=false,refined=false;std::uint64_t generation=0;unsigned detailVersion=0;bool detailed=false;std::array<double,4> error{};unsigned indexTier=0;std::unique_ptr<Morph> morph;}; // centre: in the parent's frame.
     Object3D& parent;Object3D* root;std::shared_ptr<Material> material;TerrainBody body;
     Object3D& holder(){return root?*root:parent;} // Where the nodes hang.
-    std::unordered_map<std::uint64_t,Node> nodes;std::unordered_map<std::uint64_t,Shape> shapes;std::unordered_set<std::uint64_t> queued;
+    std::unordered_map<std::uint64_t,Node> nodes;std::unordered_map<std::uint64_t,Shape> shapes;std::unordered_set<std::uint64_t> queued,wanted;
     std::vector<std::pair<double,Key>> queue; // (priority, key): lower first.
     std::vector<Built> done;mutable std::mutex lock;std::condition_variable wake;bool stop=false;std::thread worker;
-    std::vector<Key> selected;float screenPixels=0,pixelError=1;unsigned frame=0;int finest=0;double solidAngle=0;
+    std::vector<Key> selected;float screenPixels=0,pixelError=1;unsigned frame=0;int finest=0,maximumLevel=27;double solidAngle=0;
     std::shared_ptr<Material> detailMaterial;std::optional<Vector4> detailBounds;unsigned detailVersion=1;
     std::chrono::steady_clock::time_point lastUpdate=std::chrono::steady_clock::now();
+    // Sample the triangle actually drawn, including its index decimation and an
+    // in-progress morph. Interpolating unused posts produces a jump at LOD changes.
+    Vector3 surfaceAt(const Node& n,double x,double y,const char* attribute="position")const{
+        const int stride=1<<n.indexTier;
+        const int i=std::min(int(x)/stride*stride,posts-1-stride),j=std::min(int(y)/stride*stride,posts-1-stride);
+        const float u=float((x-i)/stride),v=float((y-j)/stride);
+        const auto* p=n.mesh->geometry()->getAttribute<float>(attribute);
+        auto at=[&](int a,int b){const int k=b*posts+a;return Vector3(p->getX(k),p->getY(k),p->getZ(k));};
+        Vector3 s=at(i,j).multiplyScalar(1-std::max(u,v));s.addScaledVector(at(i+stride,j+stride),std::min(u,v));
+        if(u>=v)s.addScaledVector(at(i+stride,j),u-v);else s.addScaledVector(at(i,j+stride),v-u);return s;
+    }
+    std::unique_ptr<Morph> morphOf(const BufferGeometry& geometry)const{
+        auto m=std::make_unique<Morph>();m->end=geometry.getAttribute<float>("position")->array();m->start=m->end;
+        m->normalEnd=geometry.getAttribute<float>("normal")->array();m->normalStart=m->normalEnd;return m;
+    }
+    void morphSample(Morph& m,std::size_t at,const Vector3& point,Vector3 normal)const{
+        normal.normalize();m.start[at]=point.x;m.start[at+1]=point.y;m.start[at+2]=point.z;
+        m.normalStart[at]=normal.x;m.normalStart[at+1]=normal.y;m.normalStart[at+2]=normal.z;
+    }
+    void writeMorphStart(BufferGeometry& geometry,const Morph& m)const{
+        auto* positions=geometry.getAttribute<float>("position");auto* normals=geometry.getAttribute<float>("normal");
+        std::copy(m.start.begin(),m.start.end(),positions->array().begin());positions->needsUpdate();
+        std::copy(m.normalStart.begin(),m.normalStart.end(),normals->array().begin());normals->needsUpdate();
+    }
+    void morphSkirts(Morph& m)const{
+        const std::array<std::array<int,4>,4> edges{{{0,0,1,0},{posts-1,0,0,1},{posts-1,posts-1,-1,0},{0,posts-1,0,-1}}};
+        for(std::size_t e=0;e<4;++e)for(int q=0;q<posts;++q){const auto& [i,j,di,dj]=edges[e];
+            const auto v=3*(static_cast<std::size_t>(posts*posts)+e*posts+q),top=static_cast<std::size_t>(3*((j+dj*q)*posts+i+di*q));
+            for(std::size_t c=0;c<3;++c){m.start[v+c]=m.start[top+c]+(m.end[v+c]-m.end[top+c]);m.normalStart[v+c]=m.normalStart[top+c];}}
+    }
     // A node replacing its drawn parent starts on the parent's surface: its posts are every other parent
     // post or between two (a quad's centre on the diagonal its triangles share), skirts keep their drop.
     void beginMorph(const Key& k,Node& n){
         const Node* p=k.level?node({k.face,k.level-1,k.x/2,k.y/2}):nullptr;if(!p||!(body.morphSeconds>0))return;
-        auto* positions=n.mesh->geometry()->getAttribute<float>("position");const auto* parent=p->mesh->geometry()->getAttribute<float>("position");
         const Vec d=p->centre-n.centre;const Vector3 offset(static_cast<float>(d.x),static_cast<float>(d.y),static_cast<float>(d.z)); // In double: a float difference of two ~1 unit centres.
-        auto at=[&](int i,int j){const int v=j*posts+i;return Vector3(parent->getX(v),parent->getY(v),parent->getZ(v)).add(offset);};
         const int ox=(k.x&1)*posts/2*2,oy=(k.y&1)*posts/2*2; // In half parent posts: 0 or 64.
-        auto m=std::make_unique<Morph>();const auto& own=positions->array();m->end.assign(own.begin(),own.end());m->start=m->end;
-        for(int j=0;j<posts;++j)for(int i=0;i<posts;++i){const int x=ox+i,y=oy+j,px=x/2,py=y/2;Vector3 s=at(px,py);
-            if(x&1&&y&1)s.add(at(px+1,py+1)).multiplyScalar(.5f);else if(x&1)s.add(at(px+1,py)).multiplyScalar(.5f);else if(y&1)s.add(at(px,py+1)).multiplyScalar(.5f);
-            const auto v=static_cast<std::size_t>(3*(j*posts+i));m->start[v]=s.x;m->start[v+1]=s.y;m->start[v+2]=s.z;}
-        const std::array<std::array<int,4>,4> edges{{{0,0,1,0},{posts-1,0,0,1},{posts-1,posts-1,-1,0},{0,posts-1,0,-1}}}; // As build's skirts.
-        for(std::size_t e=0;e<4;++e)for(int q=0;q<posts;++q){const auto& [i0,j0,di,dj]=edges[e];
-            const auto v=3*(static_cast<std::size_t>(posts*posts)+e*posts+static_cast<std::size_t>(q)),top=static_cast<std::size_t>(3*((j0+dj*q)*posts+i0+di*q));
-            for(std::size_t c=0;c<3;++c)m->start[v+c]=m->start[top+c]+(m->end[v+c]-m->end[top+c]);}
-        std::copy(m->start.begin(),m->start.end(),positions->array().begin());positions->needsUpdate();n.morph=std::move(m);
+        auto m=morphOf(*n.mesh->geometry());
+        for(int j=0;j<posts;++j)for(int i=0;i<posts;++i){const Vector3 s=surfaceAt(*p,(ox+i)*.5,(oy+j)*.5).add(offset);
+            const auto index=static_cast<std::size_t>(3*(j*posts+i));morphSample(*m,index,s,surfaceAt(*p,(ox+i)*.5,(oy+j)*.5,"normal"));}
+        morphSkirts(*m);
+        writeMorphStart(*n.mesh->geometry(),*m);n.morph=std::move(m);
+    }
+    void beginMerge(const Key& k,Node& n,const std::unordered_set<std::uint64_t>& shown){
+        if(!(body.morphSeconds>0)||k.level>=body.maxLevel)return;
+        const bool hadChildren=std::any_of(shown.begin(),shown.end(),[&](std::uint64_t old){
+            const int level=int((old>>56)&31),difference=level-k.level;
+            return int(old>>61)==k.face&&difference>0&&((old>>28&0x0fffffffu)>>difference)==k.x&&((old&0x0fffffffu)>>difference)==k.y;});
+        if(!hadChildren)return;
+        const auto e=extent(k);auto m=morphOf(*n.mesh->geometry());bool sampled=false;
+        for(int j=0;j<posts;++j)for(int i=0;i<posts;++i){const double a=e.a0+e.size*i/(posts-1),b=e.b0+e.size*j/(posts-1);
+            for(int level=k.level+1;level<=body.maxLevel;++level){const unsigned cells=1u<<level;
+                auto cell=[&](double c){return std::min(cells-1,unsigned(std::max(0.,(c+1)*.5*cells)));};
+                const Key key{k.face,level,cell(a),cell(b)};if(!shown.count(pack(key)))continue;
+                const auto* old=node(key);if(!old)break;const auto oldExtent=extent(key);
+                const double x=std::clamp((a-oldExtent.a0)/oldExtent.size*(posts-1),0.,posts-1.),y=std::clamp((b-oldExtent.b0)/oldExtent.size*(posts-1),0.,posts-1.);
+                Vector3 point=surfaceAt(*old,x,y);
+                const Vec d=old->centre-n.centre;point.add(Vector3(float(d.x),float(d.y),float(d.z)));
+                const std::size_t at=3*(j*posts+i);morphSample(*m,at,point,surfaceAt(*old,x,y,"normal"));sampled=true;break;
+            }
+        }
+        if(!sampled)return;
+        morphSkirts(*m);
+        writeMorphStart(*n.mesh->geometry(),*m);n.morph=std::move(m);
     }
     void stepMorph(Node& n,double seconds){ // Smoothstep from the parent's surface; done: the node's own.
-        auto& m=*n.morph;m.t=std::min(1.,m.t+seconds/body.morphSeconds);const float w=static_cast<float>(m.t*m.t*(3-2*m.t));
+        auto& m=*n.morph;if(m.fresh){seconds=0;m.fresh=false;}
+        m.t=std::min(1.,m.t+seconds/body.morphSeconds);const float w=static_cast<float>(m.t*m.t*(3-2*m.t));
         auto& out=n.mesh->geometry()->getAttribute<float>("position")->array();
         if(m.t>=1)std::copy(m.end.begin(),m.end.end(),out.begin());else for(std::size_t i=0;i<out.size();++i)out[i]=m.start[i]+(m.end[i]-m.start[i])*w;
-        n.mesh->geometry()->getAttribute<float>("position")->needsUpdate();if(m.t>=1)n.morph.reset();
+        auto* normals=n.mesh->geometry()->getAttribute<float>("normal");auto& normal=normals->array();
+        if(m.t>=1)std::copy(m.normalEnd.begin(),m.normalEnd.end(),normal.begin());else for(std::size_t i=0;i<normal.size();i+=3){
+            Vector3 v(std::lerp(m.normalStart[i],m.normalEnd[i],w),std::lerp(m.normalStart[i+1],m.normalEnd[i+1],w),std::lerp(m.normalStart[i+2],m.normalEnd[i+2],w));
+            if(v.lengthSq()>1e-20f)v.normalize();else v.set(m.normalEnd[i],m.normalEnd[i+1],m.normalEnd[i+2]);
+            normal[i]=v.x;normal[i+1]=v.y;normal[i+2]=v.z;}
+        normals->needsUpdate();n.mesh->geometry()->getAttribute<float>("position")->needsUpdate();if(m.t>=1)n.morph.reset();
     }
     // The region's material and coordinates on a node wholly inside it (the date line: its u unwrapped
     // by whole turns), else the body's; uv2 holds the global coordinates.
@@ -188,14 +240,32 @@ struct Terrain::Impl {
             auto mesh=Mesh::create(g,material);if(root)mesh->matrixAutoUpdate=false;else mesh->position.set(static_cast<float>(at.x),static_cast<float>(at.y),static_cast<float>(at.z));
             mesh->castShadow=false;mesh->receiveShadow=true;mesh->renderOrder=0;
             auto& node=nodes[pack(b.key)];
-            if(node.mesh){mesh->visible=node.mesh->visible;holder().remove(*node.mesh);node.mesh->geometry()->dispose();}else mesh->visible=false;
-            holder().add(mesh);node.mesh=mesh;node.centre=at;node.lastUsed=frame;node.provisional=!b.complete;node.generation=b.generation;node.detailVersion=0;node.detailed=false;node.error=b.error;node.indexTier=0;node.morph.reset();
+            std::unique_ptr<Morph> replacement;
+            if(node.mesh){mesh->visible=node.mesh->visible;
+                if(mesh->visible&&body.morphSeconds>0){
+                    replacement=morphOf(*g);replacement->fresh=true;
+                    const Vec delta=node.centre-at;
+                    for(int j=0;j<posts;++j)for(int i=0;i<posts;++i){const auto p=surfaceAt(node,i,j).add(Vector3(float(delta.x),float(delta.y),float(delta.z)));const std::size_t v=3*(j*posts+i);
+                        morphSample(*replacement,v,p,surfaceAt(node,i,j,"normal"));}
+                    morphSkirts(*replacement);
+                    writeMorphStart(*g,*replacement);
+                }
+                holder().remove(*node.mesh);node.mesh->geometry()->dispose();}else mesh->visible=false;
+            holder().add(mesh);node.mesh=mesh;node.centre=at;node.lastUsed=frame;node.provisional=!b.complete;node.generation=b.generation;node.detailVersion=0;node.detailed=false;node.error=b.error;node.indexTier=0;node.morph=std::move(replacement);
         }
     }
     const Shape& shape(const Key& k){const auto key=pack(k);if(const auto it=shapes.find(key);it!=shapes.end())return it->second;return shapes.emplace(key,shapeOf(k)).first->second;}
     Node* node(const Key& k){const auto it=nodes.find(pack(k));return it==nodes.end()?nullptr:&it->second;}
     void request(const Key& k,double priority,bool rebuild=false){
-        std::lock_guard l(lock);if((!rebuild&&nodes.count(pack(k)))||!queued.insert(pack(k)).second)return;queue.emplace_back(priority,k);wake.notify_one();
+        std::lock_guard l(lock);const auto id=pack(k);if(!rebuild&&nodes.count(id))return;
+        wanted.insert(id);if(!queued.insert(id).second)return;queue.emplace_back(priority,k);wake.notify_one();
+    }
+    void discardUnrequested(){
+        // Only waiting work is removed: the worker's current build and completed
+        // nodes retain their deduplication keys until adopt(). Camera jumps or
+        // disabling relief must not leave a backlog for the old view.
+        std::lock_guard l(lock);
+        std::erase_if(queue,[&](const auto& work){const auto id=pack(work.second);if(wanted.count(id))return false;queued.erase(id);return true;});
     }
     // Hidden behind the body's horizon from the camera (mountains up to body.relief), or outside the
     // view frustum (in the parent's frame), which then neither draws nor refines it.
@@ -207,28 +277,32 @@ struct Terrain::Impl {
         const double horizon=std::acos(1/distance)+std::acos(1/(1+body.relief/body.radius));
         return std::acos(std::clamp(camera.dot(s.centre)/distance,-1.,1.))-s.radius>horizon;
     }
-    // Children replace a node closer than 1.25 chords past its own (CDLOD-style), once all their
-    // visible ones are built; a node evicted earlier is drawn by its children meanwhile.
+    // Children replace a node closer than 1.25 chords past its own (CDLOD-style),
+    // once their visible nodes are built. Keep them until 1.4 chords: jitter at
+    // the split boundary must not toggle meshes and restart their morphs.
+    // A node evicted earlier is drawn by its children meanwhile.
     void visit(const Key& k,const Vec& camera,double distance,bool cull,const Frustum* frustum){
         const Shape& s=shape(k);if(cull&&culled(s,camera,distance,frustum))return;
-        if(auto* n=node(k))n->lastUsed=frame; // Every node the selection passes, drawn or not: one whose children are all out of view drew nothing, went unused, was released, and its parent then stopped refining (every 2 s the ground fell to coarse nodes for a few frames).
+        auto* current=node(k);
+        if(current)current->lastUsed=frame; // Every node the selection passes, drawn or not: one whose children are all out of view drew nothing, went unused, was released, and its parent then stopped refining (every 2 s the ground fell to coarse nodes for a few frames).
         const double size=2*std::sin(s.radius); // Chord across the node.
-        const bool split=k.level<body.maxLevel&&std::max(0.,(camera-s.centre).length()-size)<1.25*size;
+        const double threshold=current&&current->refined?1.4:1.25;
+        const bool split=k.level<std::min(body.maxLevel,maximumLevel)&&std::max(0.,(camera-s.centre).length()-size)<threshold*size;
         std::array<Key,4> children;int n=0;for(std::uint32_t dy:{0u,1u})for(std::uint32_t dx:{0u,1u})children[static_cast<std::size_t>(n++)]={k.face,k.level+1,k.x*2+dx,k.y*2+dy};
         bool ready=k.level<body.maxLevel;
         if(ready||split)for(const auto& c:children){const Shape& cs=shape(c);if(cull&&culled(cs,camera,distance,frustum))continue;
             if(!node(c)){ready=false;if(split)request(c,c.level*1e3+(camera-cs.centre).length());}}
-        const bool have=node(k)!=nullptr;
+        const bool have=current!=nullptr;
         if(!have)request(k,k.level*1e3+(camera-s.centre).length());
-        if(ready&&(split||!have)){for(const auto& c:children)visit(c,camera,distance,cull,frustum);return;}
-        if(have)selected.push_back(k);
+        if(ready&&(split||!have)){if(current)current->refined=true;for(const auto& c:children)visit(c,camera,distance,cull,frustum);return;}
+        if(current){current->refined=false;selected.push_back(k);}
     }
 };
 Terrain::Terrain(Object3D& parent,std::shared_ptr<Material> material,TerrainBody body,Object3D* root):impl_(std::make_unique<Impl>(parent,root,std::move(material),std::move(body))){}
 Terrain::~Terrain()=default;
 bool Terrain::update(const Vector3& camera,const Frustum* frustum,bool horizonCulling,const TerrainFrame* frame){
     const auto started=std::chrono::steady_clock::now();
-    auto& g=*impl_;++g.frame;g.adopt();const double seconds=std::chrono::duration<double>(started-g.lastUpdate).count();g.lastUpdate=started;
+    auto& g=*impl_;++g.frame;g.wanted.clear();g.adopt();const double seconds=std::chrono::duration<double>(started-g.lastUpdate).count();g.lastUpdate=started;
     std::unordered_set<std::uint64_t> shown;for(const auto& k:g.selected)if(auto* n=g.node(k)){n->mesh->visible=false;shown.insert(pack(k));}
     const auto previous=std::move(g.selected);g.selected.clear();const Vec c=Vec{camera.x,camera.y,camera.z}*(1/g.body.scale);const double distance=c.length(); // In reference radii.
     bool covered=true;
@@ -237,16 +311,24 @@ bool Terrain::update(const Vector3& camera,const Frustum* frustum,bool horizonCu
     g.finest=0;g.solidAngle=0;
     const std::uint64_t generation=g.body.generation?g.body.generation():0;
     std::unordered_set<std::uint64_t> now;for(const auto& k:g.selected)now.insert(pack(k));
-    for(const auto& k:previous)if(auto* n=g.node(k);n&&n->morph&&!now.count(pack(k))){n->morph->t=1;g.stepMorph(*n,0);} // Hidden mid-way: its own shape.
     for(const auto& k:g.selected){auto& n=*g.node(k);n.mesh->visible=true;g.finest=std::max(g.finest,k.level);if(n.detailVersion!=g.detailVersion)g.applyDetail(n);
-        if(n.morph)g.stepMorph(n,seconds);else if(!shown.count(pack(k))&&k.level&&shown.count(pack({k.face,k.level-1,k.x/2,k.y/2})))g.beginMorph(k,n);
+        if(n.morph)g.stepMorph(n,seconds);else if(!shown.count(pack(k))){
+            if(k.level&&shown.count(pack({k.face,k.level-1,k.x/2,k.y/2})))g.beginMorph(k,n);
+            else g.beginMerge(k,n,shown);
+        }
         if(n.provisional&&n.generation<generation)g.request(k,k.level*1e3,true); // Finer data arrived.
         if(g.screenPixels>0){unsigned tier=0;
             const double range=std::max(1e-9,(c*g.body.scale-n.centre).length()-n.mesh->geometry()->boundingSphere->radius);
-            if(!n.morph)for(unsigned next=1;next<4;++next)if(n.error[next]*g.screenPixels/range<g.pixelError*(n.indexTier==next?1.2:.8))tier=next;else break;
+            // Retaining a coarse tier must pass through all finer tiers using
+            // the retention tolerance too. Testing it only at the final tier
+            // could jump straight back to full detail inside the stable band.
+            if(!n.morph)for(unsigned next=1;next<4;++next)if(n.error[next]*g.screenPixels/range<g.pixelError*(next<=n.indexTier?1.2:.8))tier=next;else break;
             if(tier!=n.indexTier){n.mesh->geometry()->setIndex(terrainIndices(tier));n.indexTier=tier;}
         }else if(n.indexTier){n.mesh->geometry()->setIndex(terrainIndices(0));n.indexTier=0;}
         const auto& s=g.shape(k);g.solidAngle+=triangle(s.corners[0],s.corners[1],s.corners[2])+triangle(s.corners[0],s.corners[2],s.corners[3]);}
+    // Keep the outgoing surface intact until incoming nodes have sampled it.
+    for(const auto& k:previous)if(auto* n=g.node(k);n&&n->morph&&!now.count(pack(k))){n->morph->t=1;g.stepMorph(*n,0);}
+    g.discardUnrequested();
     static const bool debug=std::getenv("ALBERT_TERRAIN_DEBUG")!=nullptr;
     if(debug&&g.frame%60==0)std::fprintf(stderr,"terrain: %zu drawn (%zu with regional imagery), finest %d, %zu built, %zu pending, camera %.6f, update %.2f ms\n",g.selected.size(),detailed(),g.finest,g.nodes.size(),g.queued.size(),distance,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
     if(g.frame%120==0){ // Unused for ~10 s: released (the faces stay); shapes of unbuilt nodes forgotten.
@@ -264,13 +346,15 @@ bool Terrain::update(const Vector3& camera,const Frustum* frustum,bool horizonCu
     return covered;
 }
 void Terrain::screenSpace(float pixels,float error){impl_->screenPixels=std::max(0.f,pixels);impl_->pixelError=std::max(.1f,error);}
+void Terrain::refinement(int level){impl_->maximumLevel=std::clamp(level,0,impl_->body.maxLevel);}
 std::size_t Terrain::triangles()const{std::size_t n=0;for(const auto& k:impl_->selected)if(const auto* node=impl_->node(k))n+=node->mesh->geometry()->getIndex()->count()/3;return n;}
-void Terrain::hide(){for(const auto& k:impl_->selected)if(auto* n=impl_->node(k))n->mesh->visible=false;impl_->selected.clear();}
+void Terrain::hide(){for(const auto& k:impl_->selected)if(auto* n=impl_->node(k))n->mesh->visible=false;impl_->selected.clear();impl_->wanted.clear();impl_->discardUnrequested();}
 std::size_t Terrain::drawn()const{return impl_->selected.size();}
-std::size_t Terrain::pending()const{std::lock_guard l(impl_->lock);return impl_->queued.size()+impl_->done.size();}
+std::size_t Terrain::pending()const{std::lock_guard l(impl_->lock);return impl_->queued.size();} // Includes builds waiting, running and ready to adopt.
 int Terrain::finestLevel()const{return impl_->finest;}
 double Terrain::coveredSolidAngle()const{return impl_->solidAngle;}
-void Terrain::material(std::shared_ptr<Material> material){auto& g=*impl_;if(g.material==material)return;g.material=std::move(material);++g.detailVersion;}
+void Terrain::material(std::shared_ptr<Material> material){auto& g=*impl_;if(g.material==material)return;g.material=std::move(material);++g.detailVersion;
+    for(const auto& key:g.selected)if(auto* n=g.node(key))g.applyDetail(*n);}
 void Terrain::detail(std::shared_ptr<Material> material,std::optional<Vector4> bounds){
     auto& g=*impl_;if(material==g.detailMaterial&&bounds==g.detailBounds)return;g.detailMaterial=std::move(material);g.detailBounds=bounds;++g.detailVersion;
     // Quality can release regional textures after update(), before this frame's render.
@@ -283,9 +367,9 @@ std::optional<double> Terrain::ground(const Vector3& local)const{
     const Vec u=d*(1/length);std::size_t face=0;for(std::size_t f=1;f<6;++f)if(u.dot(faces[f][0])>u.dot(faces[face][0]))face=f;
     const auto& f=faces[face];const double n=u.dot(f[0]),a=std::atan(u.dot(f[1])/n)*4/pi,b=std::atan(u.dot(f[2])/n)*4/pi; // direction() inverted.
     const Impl::Node* found=nullptr;Key key;
-    for(int level=0;level<=g.body.maxLevel;++level){ // Down to the finest built node there.
+    for(int level=0;level<=g.body.maxLevel;++level){ // Finest drawn node, even when finer cached nodes are hidden.
         const std::uint32_t cells=1u<<level;auto cell=[cells](double c){return std::min(cells-1,static_cast<std::uint32_t>(std::max(0.,(c+1)/2*cells)));};
-        const Key k{static_cast<int>(face),level,cell(a),cell(b)};const auto it=g.nodes.find(pack(k));if(it==g.nodes.end())break;found=&it->second;key=k;}
+        const Key k{static_cast<int>(face),level,cell(a),cell(b)};const auto it=g.nodes.find(pack(k));if(it!=g.nodes.end()&&it->second.mesh->visible){found=&it->second;key=k;}}
     if(!found)return std::nullopt;
     const auto e=extent(key);const double step=e.size/(posts-1),x=std::clamp((a-e.a0)/step,0.,posts-1.),y=std::clamp((b-e.b0)/step,0.,posts-1.);
     const int i=std::min(static_cast<int>(x),posts-2),j=std::min(static_cast<int>(y),posts-2);const double s=x-i,t=y-j;

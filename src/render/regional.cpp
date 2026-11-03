@@ -18,13 +18,24 @@ using namespace threepp;
 #include <mutex>
 
 albert::RegionalImagery::~RegionalImagery() {progress.cancelled=true;if(pending_.valid()) pending_.wait();}
-void albert::RegionalImagery::retry() {loaded_.reset();next_={};error.clear();}
+void albert::RegionalImagery::retry() {
+    // An asset upgrade/release during a load invalidates that result too. It
+    // must not repopulate loaded_ and suppress the requested fresh load.
+    if(pending_.valid())progress.cancelled=true;
+    loaded_.reset();refresh_.reset();error.clear();
+}
 void albert::RegionalImagery::request(std::optional<GeoRegion> region,std::string body,int level) {
-    if(region!=desired_ || body!=body_ || level!=level_) {
-        if(pending_.valid() && (!region || workingBody_!=body || level!=level_ || (working_ && !regionRelevant(*working_,*region)))) progress.cancelled=true;
-        desired_=region;body_=std::move(body);level_=level;next_={};
+    // Losing sight of the surface pauses requests; it is not a switch back to
+    // the default Earth source and must not bypass that body's failure delay.
+    if(!region){desired_.reset();progress.cancelled=true;refresh_.clearChanges();return;}
+    const bool sourceChanged=body!=body_||level!=level_;
+    if(region!=desired_ || sourceChanged) {
+        if(pending_.valid() && (workingBody_!=body || level!=level_ || (working_ && !regionRelevant(*working_,*region)))) progress.cancelled=true;
+        if(sourceChanged){refresh_.reset();error.clear();}
+        else if(loaded_||pending_.valid())refresh_.changed(RegionalRefreshSchedule::Clock::now());
+        else refresh_.clearChanges();
+        desired_=region;body_=std::move(body);level_=level;
     }
-    if(!region) progress.cancelled=true;
 }
 std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
     const auto now=std::chrono::steady_clock::now();
@@ -33,11 +44,16 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
         auto result=pending_.get();
         working_.reset();
         if(progress.cancelled || !desired_ || !regionRelevant(result.region,*desired_) || result.body!=body_ || result.level!=level_) return std::nullopt;
-        error=result.error;next_=error.empty() ? now+std::chrono::milliseconds(80) : now+std::chrono::minutes(2);
+        error=result.error;refresh_.finished(now,!error.empty());
         if(result.day || result.night) {loaded_=result.region;loadedBody_=result.body;loadedLevel_=result.level;}
         return result;
     }
-    if(!desired_ || (loaded_ && regionSufficient(*loaded_,*desired_) && loadedBody_==body_ && loadedLevel_==level_ && error.empty()) || now<next_) return std::nullopt;
+    if(!desired_)return std::nullopt;
+    if(loaded_ && regionSufficient(*loaded_,*desired_) && loadedBody_==body_ && loadedLevel_==level_ && error.empty()) {
+        refresh_.clearChanges();return std::nullopt;
+    }
+    if(!refresh_.ready(now))return std::nullopt;
+    refresh_.clearChanges();
     progress.cancelled=false;
     const auto region=*desired_;const auto body=body_;const int level=level_;
     working_=region;workingBody_=body;
@@ -45,25 +61,13 @@ std::optional<albert::RegionalImages> albert::RegionalImagery::poll() {
         RegionalImages result;result.region=region;result.body=body;result.level=level;
         try {
             const auto pack=visualAssetPack();
-            result.textureOnly=pack->hasPayload("v1/"+body+"/shape.bin");
+            result.textureOnly=body=="earth"||pack->hasPayload("v1/"+body+"/shape.bin");
             progress.stage("Lendo detalhes incluidos",0);
-            bool site=false;
-            if(body=="earth"&&region.east-region.west<=2.)try{ // A launch site's relief: Copernicus 30 m over the EGM2008 geoid (its imagery the pack's, as everywhere).
-                progress.stage("Baixando relevo Copernicus",0);constexpr unsigned posts=385;
-                const auto heights=providers::copernicusDem().heights(region.west,region.south,region.east,region.north,posts,posts,progress);
-                const float geoid=static_cast<float>(physics::geoidHeight((region.south+region.north)*std::numbers::pi/360.,(region.west+region.east)*std::numbers::pi/360.));
-                std::vector<float> relief(static_cast<std::size_t>(posts)*posts*4,1.f);for(std::size_t i=0;i<heights.size();++i)relief[4*i]=heights[i]+geoid; // Ellipsoidal.
-                result.height=Image(std::move(relief),posts,posts);result.lift=0;result.segments=posts-1;site=true;
-            }catch(const std::exception& e){if(progress.cancelled)throw;std::cerr<<"Terreno do sitio indisponivel: "<<e.what()<<std::endl;}
             result.day=pack->image(body+"-day",region,4096,progress);
             if(body=="earth") result.night=pack->image("earth-night",region,4096,progress);
-            if(!site){result.height=pack->contains(body+"-height")?pack->image(body+"-height",region,1024,progress):Image(std::vector<float>{0,0,0,1},1,1);
-                if(body=="earth"){
-                    const float geoid=static_cast<float>(physics::geoidHeight((region.south+region.north)*std::numbers::pi/360.,(region.west+region.east)*std::numbers::pi/360.));
-                    auto& values=result.height->data<float>();for(std::size_t i=0;i<values.size();i+=4)values[i]+=geoid;
-                    result.lift=0;
-                }
-            }
+            // Earth's geometry/DEM belongs to its quadtree. Regional colour
+            // must not wait for an unrelated 385² DEM download or duplicate it.
+            if(body!="earth")result.height=pack->contains(body+"-height")?pack->image(body+"-height",region,1024,progress):Image(std::vector<float>{0,0,0,1},1,1);
             // The Earth's roughness from its colour (water: bluer than red; smooth, for the sun's glint and the waves), at half the
             // image's resolution (a quarter of the memory).
             const auto roughness=[](const Image& image){const auto& rgba=image.data();const unsigned width=std::max(1u,image.width()/2),height=std::max(1u,image.height()/2);

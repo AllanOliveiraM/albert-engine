@@ -23,8 +23,9 @@ public:
     // 1900-01-01 00:00:00 to 2100-12-31 23:59:59 UTC: inside the DE440 planetary
     // ephemerides; before 1960 ERFA treats UTC as uniform time (seconds of error).
     static constexpr double earliestUtc=-2208988800.,latestUtc=4133980799.;
-    // One week per second: Mercury and the Moon still fit tables fetched ahead of playback.
-    static constexpr double maximumRate=7.*86400.;
+    // One Julian year per second. The renderer uses analytic positions above
+    // its table-playback budget; UI and RPC share this validated limit.
+    static constexpr double maximumRate=365.25*86400.;
     using Now=std::function<double()>;
     // Both clocks are injectable for deterministic tests.
     explicit Simulation(Now utc={},Now monotonic={});

@@ -52,11 +52,15 @@ Não precisa instalar o Albert; mantenha a pasta inteira junta. Requer GPU com *
 
 ## Ver uma missão Starship
 
+Para observar a região, use **Cena → Locais → Starbase · vista geral**. O atalho preserva a data e a velocidade do tempo; torre e veículos aparecem quando a missão está ativa. No Linux, também é possível abrir diretamente nessa vista com `./build/linux/bin/AlbertEngine --look-at=starbase`.
+
 Abra o menu lateral do Albert, entre em **Missões** e clique em **Iniciar Starship**. O programa de voo é compilado dentro do executável e acompanha a distribuição padrão (Linux e Windows, com `ALBERT_RPC=ON`). Não precisa abrir um cliente separado nem iniciar o Albert com `--rpc`.
 
 A missão começa no horário exibido na cena. A espera em órbita é acelerada em 1000× por padrão; desmarque a opção para acompanhar em tempo real. Também é possível seguir o booster após a separação. **Encerrar missão** interrompe o programa de voo e remove os veículos e seu cenário; depois é possível iniciar novamente. Por enquanto, Starship é a única missão neste menu.
 
-Durante a missão embarcada, clique no **horário** para pausar, escolher a velocidade ou avançar até decolagem, separação, pouso do booster, reentrada ou pouso da nave. O avanço calcula a física e volta a 1× no marco escolhido. As órbitas dos outros corpos ficam ocultas por padrão; em **Missões**, é possível reexibi-las e abrir **Ver trajetória na Terra**. A linha azul mostra o trecho percorrido, a âmbar tracejada prevê o movimento sem novas queimas nem atmosfera, e a violeta indica o alvo aproximado de 180 × 200 km.
+Durante a missão embarcada, clique no **horário** para pausar, escolher a velocidade no slider logarítmico de 0,5× a 60× ou avançar até decolagem, separação, pouso do booster, reentrada ou pouso da nave. Retomar conserva a velocidade escolhida; **Tempo normal** retorna a 1×. O avanço calcula a física e volta a 1× no marco escolhido. As órbitas dos outros corpos ficam ocultas por padrão; em **Missões**, é possível reexibi-las e abrir **Ver trajetória na Terra**. A linha azul mostra o trecho percorrido, a âmbar tracejada prevê o movimento sem novas queimas nem atmosfera, e a violeta indica o alvo aproximado de 180 × 200 km.
+
+Durante um avanço automático, a costa orbital e a queda da nave após a saída de órbita são calculadas sem esperas artificiais: a velocidade depende do custo da simulação, sem limite de 60× nessa espera. Pausa e cancelamento continuam disponíveis. Fora desse avanço, permanece a aceleração orbital escolhida em Missões.
 
 Para desenvolvimento, o cliente externo continua disponível após `make build` no Linux ou `.\make.cmd build` no Windows, com a preparação descrita em [Compilar](#compilar). Esse cliente separado não acompanha os pacotes de release.
 
@@ -154,7 +158,7 @@ as amostras para manter o movimento contínuo. A orientação dos corpos usa
 transformações astronômicas; a Terra considera o modelo WGS84.
 
 **A data pode ser escolhida.** Clique no horário, no canto superior direito, para
-pausar, voltar no tempo, acelerar até uma semana por segundo ou ir a um instante de
+pausar, voltar no tempo, acelerar por um slider logarítmico até um ano por segundo ou ir a um instante de
 1900 a 2100 (UTC); **Agora** retorna ao tempo real. Sol, Lua e planetas usam as
 efemérides do Horizons para a data escolhida. Enquanto as tabelas chegam, e acima
 de 6 horas por segundo, eles seguem modelos analíticos do ERFA ajustados às
@@ -192,7 +196,7 @@ corrompidas são descartadas. Sem tabela para o instante, as posições vêm dos
 modelos analíticos citados acima, sempre identificadas como aproximadas. A
 primeira abertura ainda precisa buscar os dados.
 
-**Há três modos de nuvens em Ajustes:** artificiais realistas (o padrão), reais e desligadas.
+**Há três modos de nuvens em Cena:** artificiais realistas (o padrão), reais e desligadas.
 As artificiais são nuvens de cenário animadas sobre uma referência histórica de estrutura do Blue Marble/MODIS da NASA, com deslocamento e deformação suaves. Funcionam offline em qualquer data e não representam o tempo atual nem uma previsão meteorológica.
 As reais são mosaicos de satélite com atraso e lacunas; o Albert mostra a data em **Dados** e
 mantém um cache de downloads. O limite padrão é 2 GB e pode ser ajustado no menu.
@@ -227,9 +231,11 @@ Os formatos e limites disponíveis estão em [RPC.md](docs/RPC.md).
 - Clique no horário, no canto superior direito, para escolher data e velocidade; **Agora** volta ao tempo real.
 - Em **Eventos**, no mesmo painel, vá direto a eclipses (2024, 2026, 2027), ao pouso da Apollo 11, à passagem da Giotto pelo Halley ou ao periélio da 67P.
 - Na 67P ou no Halley perto do periélio (por exemplo 2021-11-02 ou 1986-03-13), ative **Realçar coma e caudas** e afaste a câmera.
-- Abra **Menu → Ajustes** para ajustar atmosfera, nuvens, cidades, fronteiras, sombras e órbitas.
-- Escolha **Nuvens → Reais (satélite)** em **Ajustes** para buscar as observações; **Artificiais realistas** gera as nuvens localmente e **Desligadas** remove também as nuvens próximas ao solo.
+- Abra **Menu → Cena → Terra e céu** para ajustar atmosfera, relevo, nuvens, cidades, fronteiras e órbitas. Qualidade, sombras e desempenho ficam em **Ajustes**.
+- Na Terra, desligar **Relevo detalhado** mantém uma superfície curva simplificada, com as mesmas imagens; os detalhes locais se misturam ao entorno na própria malha do terreno.
+- Escolha **Nuvens → Reais (satélite)** em **Cena → Terra e céu** para buscar as observações; **Artificiais realistas** gera as nuvens localmente e **Desligadas** remove também as nuvens próximas ao solo.
 - O brilho auxiliar de cada objeto com lado escuro ajuda a enxergar o lado escuro; começa desligado e é ajustável.
+- **Ajustes → Efeitos → Reflexos de lente** controla os reflexos fotográficos sutis do Sol, atenuados pela atmosfera, pelas nuvens e pela oclusão de objetos.
 - Em **Dados**, acompanhe as atualizações, retente consultas e gerencie o cache.
 - Em **Dados → Manutenção das nuvens**, recarregue as texturas ou limpe e baixe as nuvens novamente.
 
@@ -308,8 +314,9 @@ Durante um voo, o botão **Interferência**, à direita, abre o painel de falhas
 - SEGURAR e RETOMAR a contagem regressiva, ABORTAR (o software de voo toma a saída mais segura para a fase: na contagem,
   cancela; na ignição, aborta na plataforma) e a terminação do voo (com confirmação).
 
-Em Ajustes ficam as opções de gráficos, Terra, vista, câmera e som (guardadas entre execuções), e a câmera livre: F liga,
-arrastar olha, W/A/S/D/Espaço/Ctrl voam, com a velocidade pela altura, como no Kerbal Space Program; F ou Esc volta.
+Em Ajustes ficam as opções de qualidade, desempenho, vista, câmera e som (guardadas entre execuções), e a câmera livre: **F** liga e captura o mouse para olhar sem segurar botão.
+W/A/S/D deslocam no plano local, Espaço sobe, Shift desce, Ctrl acelera e Q/E guinam em torno da vertical local. O movimento acelera e freia gradualmente, com inércia; o mouse também tem suavização curta. A roda ajusta a velocidade.
+**Esc** libera o cursor para usar a interface; clique na cena ou em **Capturar mouse** para voltar a olhar. **F**, um segundo Esc com o cursor livre ou **Sair da câmera livre** encerra o modo. Uma dica com as teclas permanece na tela enquanto a câmera livre está ativa.
 
 Com "Som do voo" ligado no menu (o Albert começa mudo), a câmera ouve os foguetes: ruído pelo modelo da NASA (SP-8072),
 com o atraso da distância, a absorção do ar do caminho e o Doppler; a 1, 5 e 10 km de um Starship o nível fica a menos de

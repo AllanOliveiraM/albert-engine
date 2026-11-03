@@ -46,7 +46,7 @@ struct VisualSettings {
     AuxiliaryLights auxiliary;
     bool shadows = true;
     bool borders = false;
-    bool terrain = true; // Quadtree relief near the Earth (Copernicus 30 m close by).
+    bool terrain = true; // Fine relief; Earth retains a simpler curved surface when disabled.
     int quality = 1; // 0: one framebuffer pixel per logical pixel; 1: up to 2x.
 };
 
@@ -93,7 +93,7 @@ private:
     TextureUploads uploads_;
     std::optional<RegionalImages> uploadingRegion_;
     std::shared_ptr<threepp::Texture> uploadingSun_;
-    std::shared_ptr<threepp::Mesh> clouds_, atmosphere_, night_, earthDetail_, moonDetail_;
+    std::shared_ptr<threepp::Mesh> clouds_, atmosphere_, night_, moonDetail_;
     std::array<std::shared_ptr<threepp::Texture>,4> regionalTextures_;
     std::array<std::shared_ptr<threepp::Texture>,2> regionalHeights_;
     std::array<std::shared_ptr<threepp::Texture>,2> surfaceMasks_;
@@ -102,8 +102,9 @@ private:
     std::shared_ptr<threepp::MeshStandardMaterial> earthMaterial_, earthTerrainMaterial_;
     std::unique_ptr<Terrain> earthTerrain_, moonTerrain_; // Replace the globe meshes near the Earth and the Moon (their children).
     std::shared_ptr<threepp::MeshPhongMaterial> moonTerrainMaterial_;
-    // The regional imagery on the terrain's nodes (the patches' materials without bump: the relief is geometry).
+    // Earth blends the region into its global material; Moon assigns it to fully covered nodes.
     std::shared_ptr<threepp::MeshStandardMaterial> earthTerrainDetail_;
+    int terrainQuality_=1; // Last presented quality, including atomic imagery publication/eviction.
     bool cullToView_=true;std::shared_ptr<threepp::MeshPhongMaterial> moonTerrainDetail_;
     std::array<std::optional<threepp::Vector4>,2> terrainBounds_; // Earth, Moon: the region in texture coordinates.
     DownloadProgress demProgress_;std::jthread demFetcher_; // Downloads the Copernicus pieces the terrain noted.
@@ -125,8 +126,6 @@ private:
     std::array<threepp::Vector3,2> surfaceFillDirections_;
     std::array<float,2> displayedFill_{};
     float displayedAtmosphere_=1.f, displayedClouds_=0.f, displayedNight_=1.f, cloudShell_=1.f;
-    std::optional<GeoRegion> earthDetailBounds_;
-    std::array<double,3> earthDetailOrigin_{};
     std::array<std::shared_ptr<threepp::Texture>,3> imageDetail_;
     struct DetailedImage { int index; std::optional<threepp::Image> image; std::string error; int level=-1; };
     std::future<DetailedImage> pendingImage_;

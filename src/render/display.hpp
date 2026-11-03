@@ -3,6 +3,7 @@
 #include "threepp/input/PeripheralsEventSource.hpp"
 #include "threepp/math/Vector3.hpp"
 #include <filesystem>
+#include <array>
 #include <functional>
 #include <memory>
 #include <string>
@@ -19,6 +20,9 @@ public:
     threepp::PeripheralsEventSource& events();
     [[nodiscard]] bool isOpen()const;
     [[nodiscard]] bool focused()const; // The window has the input focus.
+    void captureMouse(bool enabled); // FPS look; releases on focus loss or camera/UI changes.
+    [[nodiscard]] bool mouseCaptured()const;
+    std::array<double,2> mouseDelta(); // Relative motion; first sample after capture is discarded.
     void close();
     [[nodiscard]] float aspect()const;
     void onResize(std::function<void(threepp::WindowSize)> f);
@@ -32,6 +36,7 @@ public:
     void ui();                                     // In work, after the scene.
     void setExposure(float value);
     void setFisheye(bool enabled);
+    void setSolarFlare(bool enabled);
     void setShadowScale(float metersPerUnit,bool high);
     void setShadows(bool enabled); // Sun shadow map, every frame.
     [[nodiscard]] float exposure()const;
@@ -49,10 +54,11 @@ public:
     void setSea(bool on,double seconds,float east,float north,const threepp::Vector3& anchor,const threepp::Vector3& eastAxis,const threepp::Vector3& northAxis,float metersPerUnit);
     void setVsync(bool on);
     // Volumetric clouds on the cloud map or local coastal cover (gpu::Clouds), at strength 0-1 over the scene;
-    // 32 steps and at most ~80k rays; noise drifts with the wind (m/s toward east and north). Never on a CPU adapter.
+    // 32 steps, with a bounded low/high ray budget; noise drifts with the wind (m/s east/north). Never on a CPU adapter.
     void setCoastalLight(const CoastalLight& light);
-    void setClouds(bool on,float strength,double seconds,float east,float north);
+    void setClouds(bool on,float strength,double seconds,float east,float north,bool highQuality=true);
     [[nodiscard]] bool cloudsShown()const; // The last frame drew them (the air ready, a cloud map): only then may the shell give way.
+    [[nodiscard]] std::string gpuMemory()const; // Owned scene caches, for diagnostics; not total adapter memory.
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

@@ -64,7 +64,7 @@ void playbackWindows(){
     require(same(playbackWindow(t,1.,planet),t-86400,t+86400,"1 d")&&same(playbackWindow(t,604800.,planet),t-432000,t+4200*86400.,"5 d"),"Planetary step floor and cap");
     rejects([&]{playbackWindow(t,1.,{86400.,600.,1000,86400.,3600.});});rejects([&]{playbackWindow(t,1.,{86400.,600.,1000,4000.,5000.});});
     require(same(playbackWindow(t,86400.,satellites),t-1800,t+240*1800.,"30 min"),"Satellite step limit shrinks the span");
-    for(double rate:{1.,-1.,60.,3600.,-86400.,604800.,2592000.,0.}){const auto w=playbackWindow(t,rate);horizonsURL({499,"500@399",w.startUtc,w.endUtc,w.step});
+    for(double rate:{1.,-1.,60.,3600.,-86400.,604800.,2592000.,31557600.,-31557600.,0.}){const auto w=playbackWindow(t,rate);horizonsURL({499,"500@399",w.startUtc,w.endUtc,w.step});
         const auto c=playbackWindow(t,rate,satellites);horizonsURL({501,"500@399",c.startUtc,c.endUtc,c.step});}
     const auto live=playbackWindow(t,1.);
     require(!expiring(live,t+40000,1.)&&expiring(live,t+44000,1.),"Refresh at half of the planned coverage");

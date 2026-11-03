@@ -21,6 +21,7 @@ public:
     float exposure=1;
     bool toneMapping=true; // ACES filmic (threepp's ACESFilmic); false: none, as threepp's default.
     bool fisheye=false; // Equidistant 150 degree diagonal lens; supply a 145 degree vertical perspective camera.
+    float solarFlare=0; // Weak photographic ghosts, 0 disables; measured against opaque depth and atmospheric/cloud transmission.
     float renderScale=1; // The scene drawn at this fraction of the target's size and resampled onto it (its pixels, the GPU's cost).
     bool shadows=false; // Sun shadow map for castShadow meshes on receiveShadow ones.
     // Four fixed, camera-centred light-space levels; metres/world unit (0: the light's legacy map).
@@ -47,7 +48,7 @@ public:
     // and north) and the waves' clock (s); the pattern's anchor and east/north axes (world) and metres per world unit.
     struct Sea {Ocean* ocean=nullptr;bool enabled=false;double seconds=0;float east=0,north=0,metersPerUnit=6378137;threepp::Vector3 anchor,eastAxis,northAxis;} sea;
     // Volumetric clouds (gpu::Clouds) on the air's cloud map (air.clouds, with air.cloudShadow > 0), marched before the pass
-    // and laid over the opaque objects (gpu::Clouds::View; divisor 0: the march's resolution kept near 300 000 rays, 2 to 4);
+    // and laid over the opaque objects (gpu::Clouds::View; divisor 0: target the configured ray budget for the display size);
     // wind: m/s toward east and north (the noise's drift), seconds its clock; maxRays bounds the reduced-resolution target (0: no additional limit).
     struct Volume {bool enabled=false;float strength=1,baseKm=1.5f,topKm=5.5f,extinction=75,windEast=0,windNorth=0;double seconds=0;unsigned divisor=2,steps=64;bool flat=false;unsigned maxRays=0;} volume;
     [[nodiscard]] const Clouds* clouds()const; // The last march's (for tests); null before the first.
@@ -60,6 +61,10 @@ public:
     [[nodiscard]] std::size_t shadowBytes()const;
     [[nodiscard]] unsigned drawn()const; // Draw calls in the last render.
     [[nodiscard]] std::string memory()const; // What the GPU copies hold: counts and MB of index buffers, attributes, textures and materials.
+    // Owned texture-cache copies, including in-progress uploads; not total
+    // adapter VRAM (render targets, driver allocations and bindings are separate).
+    struct TextureCacheStats {std::size_t textures=0,bytes=0,materialGroups=0;};
+    [[nodiscard]] TextureCacheStats textureCacheStats()const;
     [[nodiscard]] std::size_t vertexBytes()const; // Vertex buffers resident on the GPU.
     [[nodiscard]] double gpuMilliseconds()const; // GPU time of a recent scene pass (timestamp queries), or -1; see cloudsShown.
     [[nodiscard]] const std::map<std::string,double>& gpuPassMilliseconds()const; // ALBERT_GPU_TIMING=1, last completed readback.

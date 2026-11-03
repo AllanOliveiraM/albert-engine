@@ -80,7 +80,8 @@ acelerar, voltar no tempo ou escolher uma data, ele passa a ser um instante
 escolhido que avança `rate` segundos simulados por segundo do relógio monotônico
 (`core/simulation`). Correções NTP não movem uma data escolhida; uma pausa superior a
 30 segundos do programa (suspensão) a mantém onde estava. Intervalo: 1900-01-01
-00:00:00 a 2100-12-31 23:59:59 UTC; `|rate|` até uma semana por segundo. Nos
+00:00:00 a 2100-12-31 23:59:59 UTC; `|rate|` até um ano juliano por segundo
+(365,25 dias/s, 31.557.600×), compartilhado pelo painel e pela API. Nos
 limites, a simulação para e informa `limited`. A geração muda ao escolher uma data
 e ao voltar para **Agora**, não ao mudar a velocidade. Datas civis usam o calendário
 gregoriano proléptico implementado no projeto, porque a biblioteca C do Windows não
@@ -99,6 +100,16 @@ Terra), pouso da Apollo 11 (20/7/1969 20:17:40 UTC), passagem da Giotto pelo Hal
 liga e a câmera enquadra coma e cauda. Os eclipses usam o máximo em TD das cartas de
 F. Espenak (NASA GSFC) menos o ΔT observado (~69 s). No eclipse de 2027 a sombra cai
 sobre o Egito, perto de Luxor, como no ponto de máximo publicado (25°29′N, 33°13′E).
+
+**Missão embarcada.** Durante Starship, esse painel controla o computador de voo:
+slider logarítmico de 0,5× a 60×, pausa com retomada na velocidade escolhida e
+avanço até um marco futuro. O slider multiplica o ritmo próprio da fase; a espera
+orbital conserva sua aceleração configurada. Um avanço explícito percorre a costa
+orbital e a queda após a saída de órbita sem esperas de relógio, à velocidade que
+os cálculos permitirem. Não muda os passos físicos nem salta estados. A chegada
+ao marco cancela o avanço e restaura 1×; pausa, mudança de velocidade ou
+cancelamento também encerram esse avanço. Os destinos de pouso indicam o início
+da queima do booster ou a manobra de giro da nave, não uma captura já concluída.
 
 **Efemérides por data.** Cada tabela do Horizons cobre ao menos um dia simulado e
 os próximos 600 s de reprodução, mais o tempo medido da última consulta, com no

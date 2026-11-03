@@ -181,7 +181,8 @@ void albert::SolidBodies::update(PerspectiveCamera& camera,const Vector3& sun,do
             s.mesh->updateMatrixWorld();Vector3 local=camera.position;s.mesh->worldToLocal(local);const float radius=static_cast<float>(core::surfaceRadius(id)/core::earthRadiusMeters);
             Matrix4 m;m.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);m.multiply(*s.mesh->matrixWorld);Frustum view;view.setFromProjectionMatrix(m);
             s.terrain->detail(details?s.terrainDetail:nullptr,s.terrainBounds); // The region's imagery on its nodes.
-            const bool covers=terrain&&local.length()<3*radius&&s.terrain->update(local,&view);if(!covers)s.terrain->hide();
+            const bool active=terrain&&local.length()<3*radius;
+            const bool covers=active&&s.terrain->update(local,&view);if(!active)s.terrain->hide();
             s.material->visible=!covers;if(s.patch)s.patch->visible=!covers;
         }
         const auto aid=auxiliary.find(id);s.fill=animateValue(s.fill,aid!=auxiliary.end()&&aid->second.enabled?std::clamp(aid->second.intensity,0.f,1.5f):0.f,dt);

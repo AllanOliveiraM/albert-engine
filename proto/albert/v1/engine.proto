@@ -95,7 +95,7 @@ service CameraService {
 service TimeService {
   // Same immutable frame snapshot as GetScene. No OS clock modification.
   rpc GetTime(Empty) returns (ClockStatus);
-  // Simulated date from 1900-01-01 to 2100-12-31 UTC, |rate| up to 7 days per
+  // Simulated date from 1900-01-01 to 2100-12-31 UTC, |rate| up to 365.25 days per
   // second. External objects are evaluated at the simulated instant, so states
   // must be timestamped in simulated time to follow it.
   rpc SetTime(SetTimeRequest) returns (Applied);

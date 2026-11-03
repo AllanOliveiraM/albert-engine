@@ -668,7 +668,8 @@ velocidade `rate` em segundos simulados por segundo (0 pausado, negativa para tr
 ou voltar ao vivo) e `approximate_positions` (Sol, Lua e planetas por modelos
 analíticos enquanto as tabelas do JPL não cobrem o instante). `SetTime` escolhe
 `utc_unix_seconds` e/ou `rate`; campos ausentes são mantidos e `live=true` volta ao
-tempo real. Valores fora de 1900–2100 ou acima de uma semana por segundo retornam
+tempo real. Valores fora de 1900–2100 ou com `|rate|` acima de 31.557.600
+(um ano juliano por segundo) retornam
 `INVALID_ARGUMENT`. O exemplo `albert_demo_client` carimba seu voo no tempo
 simulado.
 

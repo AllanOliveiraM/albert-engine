@@ -35,15 +35,17 @@ inline bool regionSufficient(GeoRegion crop,const GeoRegion& view) {
     return (crop.east-crop.west>=360. || (crop.west<=view.west && crop.east>=view.east)) && crop.south<=view.south && crop.north>=view.north &&
         crop.east-crop.west<=1.35*(view.east-view.west) && crop.north-crop.south<=1.35*(view.north-view.south);
 }
-// A circular bound around the entire camera frustum/sphere intersection.
-// Including diagonal rays also covers wide windows and rotated views. Quantize
-// with an overlap margin, so a cell boundary never cuts through the viewport.
+// A circular bound for a nadir-facing view. Actual tilted terrestrial views use
+// surfaceRegion's rays; clouds and the other bodies retain this approximation.
+// Quantize with an overlap margin around the diagonal field of view.
 inline GeoRegion viewRegion(double lon,double lat,double distance,double radius,double aspect=16./9.,double fov=60.,double grid=11.25) {
     constexpr double radians=std::numbers::pi/180.;
     const double d=std::max(1.000001,distance/radius);
     const double theta=std::atan(std::tan(fov*radians*.5)*std::sqrt(1.+aspect*aspect));
     const double angle=(d*std::sin(theta)>=1. ? std::acos(1./d) : std::asin(d*std::sin(theta))-theta)/radians;
-    const double half=std::min(90.,angle*1.08);
+    // Keep imagery around the full view, with enough lead for camera motion
+    // and vehicle-follow shots before the next regional crop is ready.
+    const double half=std::min(90.,angle*1.2);
     const double snap=grid/8.;
     const double latitude=std::clamp(std::round(lat/snap)*snap,-90.,90.);
     const double center=std::round(longitude(lon)/snap)*snap;

@@ -135,6 +135,38 @@ struct Material { size: f32 };
             require(during[0]>during[1]+80,"An update larger than the frame budget keeps the old copy while it streams");
             require(after[1]>after[0]+50&&albert::gpu::errors()==0,"The streamed copy replaces the old one");
         }
+        { // Streaming terrain images can be shared by visible and hidden
+          // materials. Disposal must retire every version, not just the view
+          // most recently drawn by the visible material.
+            albert::gpu::SceneRenderer cache(*gpu);cache.samples=1;
+            Scene sc;OrthographicCamera cam(-1,1,1,-1,.1f,10);cam.position.set(0,0,5);
+            constexpr unsigned side=4096;constexpr std::size_t bytes=std::size_t(side)*side*4;
+            auto tex=DataTexture::create(ImageData(std::vector<unsigned char>(bytes)),side,side);tex->generateMipmaps=false;
+            auto a=MeshBasicMaterial::create(),b=MeshBasicMaterial::create();a->map=b->map=tex;
+            auto left=Mesh::create(PlaneGeometry::create(1,2),a),right=Mesh::create(PlaneGeometry::create(1,2),b);
+            left->position.x=-.5f;right->position.x=.5f;sc.add(left);sc.add(right);
+            auto paint=[&](bool green){auto& data=tex->image().data();for(std::size_t i=0;i<data.size();i+=4){data[i]=green?0:255;data[i+1]=green?255:0;data[i+2]=0;data[i+3]=255;}tex->needsUpdate();};
+            auto draw=[&](){WGPUCommandEncoder en=wgpuDeviceCreateCommandEncoder(gpu->device(),nullptr);cache.render(sc,cam,view,w,h,en);
+                WGPUCommandBuffer cb=wgpuCommandEncoderFinish(en,nullptr);wgpuQueueSubmit(gpu->queue(),1,&cb);cache.submitted();wgpuCommandBufferRelease(cb);wgpuCommandEncoderRelease(en);
+                const auto pixels=read(*gpu,target,w,h);const auto* p=&pixels[(std::size_t(h/2)*w+w/4)*4];return std::array<int,3>{p[0],p[1],p[2]};};
+            for(int cycle=0;cycle<3;++cycle){
+                paint(false);right->visible=true;draw();const auto loaded=cache.textureCacheStats();
+                require(loaded.textures==1&&loaded.bytes==bytes&&loaded.materialGroups==2,"Shared tile allocated duplicate textures or missing materials");
+                right->visible=false;paint(true);std::array<int,3> pixel{};for(int frame=0;frame<8;++frame)pixel=draw();
+                require(pixel[1]>pixel[0]+50,"Streamed tile did not finish while the other material was hidden");
+                tex->dispose();const auto disposed=cache.textureCacheStats();
+                std::printf("disposed tile cycle %d: %zu textures, %zu bytes, %zu material groups\n",cycle,disposed.textures,disposed.bytes,disposed.materialGroups);
+                require(disposed.textures==0&&disposed.bytes==0&&disposed.materialGroups==0,"Disposed tile retained an older view in a hidden material");
+                right->visible=true;const auto restored=draw();
+                require(restored[1]>restored[0]+50&&cache.textureCacheStats().materialGroups==2,"Disposed tile did not rebuild valid bindings when shown again");
+                paint(false);draw();const auto streaming=cache.textureCacheStats();
+                require(streaming.bytes==2*bytes,"Texture-cache metrics omitted a pending tile upload");
+                tex->dispose();const auto cancelled=cache.textureCacheStats();
+                require(cancelled.textures==0&&cancelled.bytes==0&&cancelled.materialGroups==0,"Cancelled tile upload retained a GPU copy or bindings");
+            }
+            draw();a->map.reset();b->map.reset();tex.reset();
+            require(cache.textureCacheStats().textures==0&&cache.textureCacheStats().materialGroups==0&&albert::gpu::errors()==0,"Texture destruction retained a cached tile or caused a WebGPU error");
+        }
         { // A 1x1 placeholder (TextureUploads) replaced by a large image: the image shows at once, not the placeholder.
             Scene sc;OrthographicCamera cam(-1,1,1,-1,.1f,10);cam.position.set(0,0,5);
             auto tex=DataTexture::create(ImageData(std::vector<unsigned char>{0,0,0,255}),1,1);auto mat=MeshBasicMaterial::create();mat->map=tex;sc.add(Mesh::create(PlaneGeometry::create(4,4),mat));

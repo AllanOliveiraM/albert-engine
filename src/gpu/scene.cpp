@@ -2,6 +2,7 @@
 #include "gpu/pass_timing.hpp"
 #include "gpu/local_media.hpp"
 #include "gpu/fisheye.hpp"
+#include "gpu/solar_flare.hpp"
 #include "gpu/shadows.hpp"
 #include "gpu/clouds.hpp"
 #include "gpu/ocean.hpp"
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <future>
 #include <map>
+#include <optional>
 #include <set>
 #include <string_view>
 #include <unordered_map>
@@ -162,6 +164,7 @@ Program surfaceProgram(){Program p;p.wgsl=builtinWgsl;p.attributes={{"normal",3}
 struct SceneRenderer::Impl {
     Context& gpu;WGPUDevice device;WGPUQueue queue;
     std::unique_ptr<Fisheye> lens,scaler;
+    std::unique_ptr<SolarFlare> solarFlare;
     // Depth and multisampled colour (resolved into the target) by size, two kept: a second, smaller view keeps its own.
     struct Targets {WGPUTexture depth=nullptr,colour=nullptr;WGPUTextureView depthView=nullptr,colourView=nullptr;unsigned width=0,height=0,samples=0;std::uint64_t used=0;} slots[2];
     WGPUTextureView depthView=nullptr,colourView=nullptr; // This render's.
@@ -174,9 +177,10 @@ struct SceneRenderer::Impl {
     // A texture's GPU copy. Large images stream in row slices (~8 MB a frame) into `pending` while
     // the previous copy (or nothing) keeps drawing; mipmaps are rendered on the GPU at the end.
     struct Texture {WGPUTexture texture=nullptr;WGPUTextureView view=nullptr;WGPUSampler sampler=nullptr;unsigned version=~0u,used=0;
-        WGPUTexture pending=nullptr;unsigned pendingVersion=~0u,row=0,width=0,height=0,levels=1;std::size_t texel=0;std::vector<std::byte> converted;std::uint64_t serial=0;unsigned shownWidth=0,shownHeight=0;};
+        WGPUTexture pending=nullptr;unsigned pendingVersion=~0u,row=0,width=0,height=0,levels=1;std::size_t texel=0;std::vector<std::byte> converted;std::uint64_t serial=0;unsigned shownWidth=0,shownHeight=0;
+        std::size_t shownBytes=0,pendingBytes=0;threepp::Subscription disposal;};
     // Bind groups are keyed by view serials: a released view's address may come back for a new one.
-    struct MaterialState {Buffer uniforms;WGPUBindGroup group=nullptr;std::vector<std::uint64_t> serials;std::string program;unsigned used=0;};
+    struct MaterialState {Buffer uniforms;WGPUBindGroup group=nullptr;std::vector<std::uint64_t> serials;std::vector<unsigned> textureIds;std::string program;unsigned used=0;};
     struct Compiled {WGPUShaderModule module=nullptr;WGPUBindGroupLayout layout=nullptr;WGPUPipelineLayout pipelineLayout=nullptr;Program program;};
     std::unordered_map<unsigned,Geometry> geometries;std::unordered_map<const BufferAttribute*,Attribute> attributes;std::unordered_map<unsigned,Texture> textures;std::uint64_t serials=2;std::unordered_map<unsigned,MaterialState> materials; // Serials 1, 2: white, black.
     std::unordered_map<std::string,Compiled> compiled;std::map<std::array<std::int64_t,24>,WGPURenderPipeline> pipelines;std::set<std::string> reported;
@@ -243,6 +247,7 @@ struct SceneRenderer::Impl {
         define("albert:builtin",surfaceProgram());
     }
     ~Impl(){
+        solarFlare.reset();
         clouds.reset();if(cloudNoise.valid())cloudNoise.wait();
         for(auto& [k,p]:pipelines)wgpuRenderPipelineRelease(p);for(auto& [k,p]:mipPipelines)wgpuRenderPipelineRelease(p);
         if(mipModule){wgpuShaderModuleRelease(mipModule);wgpuBindGroupLayoutRelease(mipLayout);wgpuPipelineLayoutRelease(mipPipelineLayout);}
@@ -304,6 +309,24 @@ struct SceneRenderer::Impl {
     }
     void release(Texture& t){if(t.view)wgpuTextureViewRelease(t.view);if(t.texture)wgpuTextureRelease(t.texture);if(t.sampler)wgpuSamplerRelease(t.sampler);if(t.pending)wgpuTextureRelease(t.pending);}
     void release(MaterialState& m){if(m.uniforms.buffer)wgpuBufferRelease(m.uniforms.buffer);if(m.group)wgpuBindGroupRelease(m.group);}
+    void disposeTexture(unsigned id){
+        const auto it=textures.find(id);if(it==textures.end())return;
+        const auto serial=it->second.serial;
+        // Hidden materials may still hold an older version of this texture.
+        // Invalidate by source identity, not only the latest view's serial.
+        for(auto& material:materials){auto& state=material.second;
+            if(std::find(state.textureIds.begin(),state.textureIds.end(),id)==state.textureIds.end())continue;
+            if(state.group)wgpuBindGroupRelease(state.group);
+            state.group=nullptr;state.serials.clear();state.textureIds.clear();state.used=0;
+        }
+        if(serial){
+            if(frameGroup&&(boundClouds==serial||boundContact==serial)){
+                wgpuBindGroupRelease(frameGroup);frameGroup=nullptr;
+                boundFrame=~0ull;boundAir=nullptr;boundClouds=0;boundOcean=nullptr;boundContact=~0ull;
+            }
+        }
+        release(it->second);textures.erase(it);
+    }
     void report(const std::string& what){if(reported.insert(what).second)std::fprintf(stderr,"WebGPU renderer: %s\n",what.c_str());}
     void upload(Buffer& b,const void* data,std::size_t bytes,WGPUBufferUsage usage,unsigned version){
         if(b.version==version&&b.buffer)return;
@@ -409,7 +432,9 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
     // frame budget while the previous copy, a valid stand-in, keeps drawing.
     WGPUTextureView view(threepp::Texture* source,bool blank,std::uint64_t& serial,bool exact=false){ // blank: black instead of white when absent.
         serial=blank?2:1;if(!source)return blank?black:white;
-        auto& t=textures[source->id];t.used=frame;if(t.view)serial=t.serial;
+        auto textureIt=textures.try_emplace(source->id).first;auto& t=textureIt->second;
+        if(!t.disposal.active())t.disposal=source->subscribe("dispose",[this,id=source->id](threepp::Event&){disposeTexture(id);});
+        t.used=frame;if(t.view)serial=t.serial;
         if(t.version==source->version()&&t.view)return t.view;
         const auto fallback=[&]{return t.view?t.view:blank?black:white;};
         if(source->images().empty())return fallback();
@@ -432,6 +457,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
             WGPUTextureDescriptor d{};d.size={w,h,1};d.format=f;
             d.usage=WGPUTextureUsage_TextureBinding|WGPUTextureUsage_CopyDst|(t.levels>1?WGPUTextureUsage_RenderAttachment:WGPUTextureUsage_None);
             d.mipLevelCount=t.levels;d.sampleCount=1;d.dimension=WGPUTextureDimension_2D;t.pending=wgpuDeviceCreateTexture(device,&d);
+            t.pendingBytes=0;unsigned mw=w,mh=h;for(unsigned level=0;level<t.levels;++level){t.pendingBytes+=std::size_t(mw)*mh*texel;mw=std::max(1u,mw/2);mh=std::max(1u,mh/2);}
         }
         const std::byte* data=rgba(*source,t.converted,exact);const std::size_t rowBytes=static_cast<std::size_t>(t.width)*t.texel;
         const bool whole=!t.view||rowBytes*t.height<=(4u<<20)||t.shownWidth!=t.width||t.shownHeight!=t.height;
@@ -446,6 +472,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         mipmaps(t.pending,f,t.levels);
         if(t.view)wgpuTextureViewRelease(t.view);if(t.texture)wgpuTextureRelease(t.texture);if(t.sampler)wgpuSamplerRelease(t.sampler);
         t.texture=t.pending;t.pending=nullptr;t.version=t.pendingVersion;t.converted.clear();t.converted.shrink_to_fit();t.view=wgpuTextureCreateView(t.texture,nullptr);serial=t.serial=++serials;t.shownWidth=t.width;t.shownHeight=t.height;
+        t.shownBytes=t.pendingBytes;t.pendingBytes=0;
         auto address=[](TextureWrapping m){return m==TextureWrapping::Repeat?WGPUAddressMode_Repeat:m==TextureWrapping::MirroredRepeat?WGPUAddressMode_MirrorRepeat:WGPUAddressMode_ClampToEdge;};
         WGPUSamplerDescriptor s{};s.addressModeU=address(source->wrapS);s.addressModeV=address(source->wrapT);s.addressModeW=WGPUAddressMode_ClampToEdge;
         s.magFilter=source->magFilter!=Filter::Nearest?WGPUFilterMode_Linear:WGPUFilterMode_Nearest;
@@ -497,6 +524,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         wgpuQueueWriteBuffer(queue,state.uniforms.buffer,0,bytes.data(),bytes.size());
         const bool shader=dynamic_cast<ShaderMaterial*>(&m)!=nullptr;std::vector<WGPUTextureView> views;std::vector<std::uint64_t> serials(maps.size());
         for(std::size_t i=0;i<maps.size();++i)views.push_back(view(maps[i],shader||i>0,serials[i],std::find(c.program.exactTextures.begin(),c.program.exactTextures.end(),c.program.textures[i])!=c.program.exactTextures.end()));
+        state.textureIds.clear();for(const auto* map:maps)if(map)state.textureIds.push_back(map->id);
         if(state.group&&serials==state.serials&&state.program==m.name)return state.group;
         if(state.group)wgpuBindGroupRelease(state.group);state.serials=serials;state.program=m.name;
         std::vector<WGPUBindGroupEntry> e(1+2*maps.size());e[0].binding=0;e[0].buffer=state.uniforms.buffer;e[0].size=state.uniforms.bytes;
@@ -546,7 +574,7 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
     void evict(){
         for(auto it=geometries.begin();it!=geometries.end();)if(frame-it->second.used>evictAfter){release(it->second);it=geometries.erase(it);}else ++it;
         for(auto it=attributes.begin();it!=attributes.end();)if(frame-it->second.used>evictAfter||it->second.owner.expired()){release(it->second);it=attributes.erase(it);}else ++it;
-        for(auto it=textures.begin();it!=textures.end();)if(frame-it->second.used>evictAfter){release(it->second);it=textures.erase(it);}else ++it;
+        for(auto it=textures.begin();it!=textures.end();)if(frame-it->second.used>evictAfter){const unsigned id=(it++)->first;disposeTexture(id);}else ++it;
         for(auto it=materials.begin();it!=materials.end();)if(frame-it->second.used>evictAfter){release(it->second);it=materials.erase(it);}else ++it;
         // Past the budget, the least recently used buffers not drawn in the last frame go now, down to three quarters of it: a scene
         // that makes geometry fast (the planet turning under the camera at a high rate) would fill the GPU's memory well within
@@ -572,10 +600,16 @@ std::string SceneRenderer::memory()const{
     const auto& g=*impl_;double index=0,vertex=0,texels=0,uniform=0;
     for(const auto& [k,x]:g.geometries)index+=static_cast<double>(x.index.bytes);
     for(const auto& [k,x]:g.attributes)vertex+=static_cast<double>(x.buffer.bytes);
-    for(const auto& [k,x]:g.textures)texels+=static_cast<double>(x.width)*x.height*static_cast<double>(x.texel)*(x.levels>1?4./3:1.)*((x.texture?1:0)+(x.pending?1:0));
+    texels=static_cast<double>(textureCacheStats().bytes);
     for(const auto& [k,x]:g.materials)uniform+=static_cast<double>(x.uniforms.bytes);
     char out[256];std::snprintf(out,sizeof out,"GPU: %zu index %.1f MB, %zu attributes %.1f MB, %zu textures %.1f MB, %zu materials %.1f MB",
         g.geometries.size(),index/1048576,g.attributes.size(),vertex/1048576,g.textures.size(),texels/1048576,g.materials.size(),uniform/1048576);return out;
+}
+SceneRenderer::TextureCacheStats SceneRenderer::textureCacheStats()const{
+    TextureCacheStats stats;stats.textures=impl_->textures.size();
+    for(const auto& [id,t]:impl_->textures)stats.bytes+=(t.texture?t.shownBytes:0)+(t.pending?t.pendingBytes:0);
+    for(const auto& [id,m]:impl_->materials)stats.materialGroups+=m.group!=nullptr;
+    return stats;
 }
 std::size_t SceneRenderer::vertexBytes()const{std::size_t n=0;for(const auto& [k,a]:impl_->attributes)n+=a.buffer.bytes;return n;}
 double SceneRenderer::gpuMilliseconds()const{if(impl_->passTiming.enabled()){double ms=0;for(const auto&[name,time]:impl_->passTiming.latest())ms+=time;return impl_->passTiming.latest().empty()?-1:ms;}return impl_->gpuMs;}
@@ -632,6 +666,21 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     std::stable_sort(background.begin(),background.end(),[](const Item& a,const Item& b){return a.order<b.order;});
     std::stable_sort(opaque.begin(),opaque.end(),[](const Item& a,const Item& b){return a.order!=b.order?a.order<b.order:a.z<b.z;});
     std::stable_sort(blended.begin(),blended.end(),[](const Item& a,const Item& b){return a.order!=b.order?a.order<b.order:a.z>b.z;});
+    // The resolved luminous disc, rather than every directional light, drives
+    // the optical effect. No source in this view means no flare work or ghosts.
+    std::optional<std::array<float,12>> flare;
+    if(solarFlare>0&&dynamic_cast<PerspectiveCamera*>(&camera))for(const auto& item:opaque)if(item.material->name=="albert:sun"){
+        Vector3 centre;centre.setFromMatrixPosition(*item.object->matrixWorld);const float distance=centre.distanceTo(camera.position);
+        Vector3 view=centre;view.applyMatrix4(camera.matrixWorldInverse);if(view.z>=0)break;
+        if(!item.geometry->boundingSphere)item.geometry->computeBoundingSphere();
+        const float radius=item.geometry->boundingSphere->radius*Vector3().setFromMatrixColumn(*item.object->matrixWorld,0).length();
+        const float x=view.x*pe[0]/-view.z,y=view.y*pe[5]/-view.z;
+        flare=std::array<float,12>{x*.5f+.5f,.5f-y*.5f,camera.nearPlane/std::max(-view.z-radius,camera.nearPlane),distance,
+            float(width),float(height),std::clamp(solarFlare,0.f,.08f),0,
+            radius*pe[0]/(-view.z*2),radius*pe[5]/(-view.z*2),std::min(8.f,std::pow(radius/std::max(distance,1e-9f)/.00465047f,2.f)),0};
+        if(!g.solarFlare)g.solarFlare=std::make_unique<SolarFlare>(g.gpu,g.frameLayout);
+        break;
+    }
     // Screen footprint of the shell, including the inside/near-plane case. Keep small features
     // at native resolution; half/quarter targets never fall below 240 rows.
     struct MediaFootprint {bool reduced=false;float samples=1;unsigned divisor=2;int face=0;std::array<unsigned,4> rect{};};
@@ -660,7 +709,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         footprint.samples=nativeMedia?1.f:(inside?.85f:area>.65f?.9f:1.f);
     }
     const bool hasReduced=std::any_of(footprints.begin(),footprints.end(),[](const auto& f){return f.second.reduced;});
-    const bool splitPasses=hasReduced||g.passTiming.enabled();
+    const bool splitPasses=hasReduced||g.passTiming.enabled()||flare.has_value();
     for(const auto&[o,footprint]:footprints)if(footprint.reduced){auto& media=g.media[footprint.divisor==4?1:0];if(!media)media=std::make_unique<LocalMedia>(g.gpu);media->ensure(width,height,footprint.divisor,msaa,g.depthView);}
     // Frame uniforms.
     float f[232]{};std::memcpy(f,camera.matrixWorldInverse.elements.data(),64);std::memcpy(f+16,projection.elements.data(),64);
@@ -749,8 +798,9 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
         const double ux=f[92],uy=f[93],uz=f[94],ul=std::sqrt(ux*ux+uy*uy+uz*uz),el=std::hypot(uz,ux);
         if(ul>0&&el>1e-6*ul){const double up[3]{ux/ul,uy/ul,uz/ul},east[3]{uz/el,0,-ux/el},north[3]{up[1]*east[2]-up[2]*east[1],up[2]*east[0]-up[0]*east[2],up[0]*east[1]-up[1]*east[0]};
             for(int i=0;i<3;++i){double& d=g.cloudDrift[static_cast<std::size_t>(i)];d=std::fmod(d+(east[i]*volume.windEast+north[i]*volume.windNorth)*step*1e-3,Clouds::tile);if(d<0)d+=Clouds::tile;}}
-        Clouds::View v;v.width=width;v.height=height;v.divisor=volume.divisor?volume.divisor:std::clamp(static_cast<unsigned>(std::ceil(std::sqrt(width*height/3e5))),2u,4u); // ~300 000 rays.
-        if(volume.maxRays)v.divisor=std::max(v.divisor,static_cast<unsigned>(std::ceil(std::sqrt(static_cast<double>(width)*height/volume.maxRays))));
+        Clouds::View v;v.width=width;v.height=height;
+        const unsigned rayBudget=volume.maxRays?volume.maxRays:300000u;
+        v.divisor=volume.divisor?volume.divisor:static_cast<unsigned>(std::max(1.0,std::ceil(std::sqrt(static_cast<double>(width)*height/rayBudget))));
         v.steps=volume.steps;v.strength=std::min(volume.strength,1.f);v.baseKm=volume.baseKm;v.topKm=volume.topKm;
         v.extinction=volume.extinction;v.flat=volume.flat;for(std::size_t i=0;i<3;++i)v.drift[i]=static_cast<float>(g.cloudDrift[i]);
         WGPUPassTimestampWrites start{};start.querySet=g.timestamps;start.beginningOfPassWriteIndex=0;start.endOfPassWriteIndex=WGPU_QUERY_SET_INDEX_UNDEFINED;
@@ -805,7 +855,7 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     WGPURenderPassDepthStencilAttachment depth{};depth.view=g.depthView;depth.depthLoadOp=WGPULoadOp_Clear;depth.depthStoreOp=splitPasses?WGPUStoreOp_Store:WGPUStoreOp_Discard;depth.depthClearValue=0;
     WGPURenderPassDescriptor pd{};pd.colorAttachmentCount=1;pd.colorAttachments=&colour;pd.depthStencilAttachment=&depth;
     WGPUPassTimestampWrites times{};
-    if(timing){times.querySet=g.timestamps;times.beginningOfPassWriteIndex=clouded||shadowing?WGPU_QUERY_SET_INDEX_UNDEFINED:0;times.endOfPassWriteIndex=hasReduced?WGPU_QUERY_SET_INDEX_UNDEFINED:1;
+    if(timing){times.querySet=g.timestamps;times.beginningOfPassWriteIndex=clouded||shadowing?WGPU_QUERY_SET_INDEX_UNDEFINED:0;times.endOfPassWriteIndex=hasReduced||flare?WGPU_QUERY_SET_INDEX_UNDEFINED:1;
         if(times.beginningOfPassWriteIndex!=WGPU_QUERY_SET_INDEX_UNDEFINED||times.endOfPassWriteIndex!=WGPU_QUERY_SET_INDEX_UNDEFINED)pd.timestampWrites=&times;}
     WGPUPassTimestampWrites detailed{};if(auto t=g.passTiming.pass("scene",detailed))pd.timestampWrites=t;
     WGPURenderPassEncoder pass=wgpuCommandEncoderBeginRenderPass(encoder,&pd);
@@ -819,7 +869,18 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
     auto resetState=[&](){lastPipe=nullptr;lastGroup=nullptr;lastIndex=nullptr;lastBuffers.fill(nullptr);};
     auto scenePass=[&](const std::string& label){colour.loadOp=WGPULoadOp_Load;depth.depthLoadOp=WGPULoadOp_Load;pd.timestampWrites=g.passTiming.pass(label,detailed);pass=wgpuCommandEncoderBeginRenderPass(encoder,&pd);wgpuRenderPassEncoderSetBindGroup(pass,0,g.frameGroup,0,nullptr);resetState();};
     auto flushMedia=[&](){endPass();scenePass("media-composite");wgpuRenderPassEncoderSetScissorRect(pass,mediaRect[0],mediaRect[1],mediaRect[2]-mediaRect[0],mediaRect[3]-mediaRect[1]);currentMedia->composite(pass);wgpuRenderPassEncoderSetScissorRect(pass,0,0,width,height);wgpuRenderPassEncoderSetBindGroup(pass,0,g.frameGroup,0,nullptr);resetState();reducedPass=false;};
-    for(auto* list:{&background,&opaque,&blended})for(auto& item:*list){
+    for(auto* list:{&background,&opaque,&blended}){
+      if(list==&blended&&flare){
+        // Read opaque depth before clouds write theirs, then attenuate with
+        // the continuous volumetric transmittance (no 50%-opacity popping).
+        endPass();WGPUTextureView cloudView=clouded?wgpuTextureCreateView(g.clouds->colour(),nullptr):g.white;
+        (*flare)[7]=clouded?volume.strength:0;
+        WGPUPassTimestampWrites optical{};
+        g.solarFlare->measure(encoder,g.frameGroup,g.depthView,msaa,cloudView,g.linear,*flare,g.passTiming.pass("solar-visibility",optical));
+        if(clouded)wgpuTextureViewRelease(cloudView);
+        scenePass("scene");
+      }
+      for(auto& item:*list){
         std::string category=list==&background?"background":list==&opaque?"opaque":"transparent";
         const auto name=g.programName(*item.material);
         if(name=="albert:return-gas")category="gas-"+std::to_string(int(item.material->as<ShaderMaterial>()->uniforms.at("kind").value<float>()));
@@ -867,14 +928,20 @@ void SceneRenderer::render(Scene& scene,Camera& camera,WGPUTextureView target,un
             if(n)wgpuRenderPassEncoderDrawIndexed(pass,n,1,first,0,0);
         }else{const unsigned first=std::min(vertices,static_cast<unsigned>(std::max(0,range.start))),n=std::min(vertices-first,static_cast<unsigned>(range.count));if(n)wgpuRenderPassEncoderDraw(pass,n,1,first,0);}
         ++g.drawn;
+      }
     }
     if(reducedPass)flushMedia();
     if(clouded&&blended.empty())g.clouds->composite(pass,g.gpu.format(),msaa);
     wgpuRenderPassEncoderEnd(pass);wgpuRenderPassEncoderRelease(pass);
-    if(timing&&hasReduced){ // End the aggregate interval after the final transparent/composite pass.
+    if(timing&&hasReduced&&!flare){ // End the aggregate interval after the final transparent/composite pass.
         colour.loadOp=WGPULoadOp_Load;depth.depthLoadOp=WGPULoadOp_Load;
         times.querySet=g.timestamps;times.beginningOfPassWriteIndex=WGPU_QUERY_SET_INDEX_UNDEFINED;times.endOfPassWriteIndex=1;pd.timestampWrites=&times;
         auto end=wgpuCommandEncoderBeginRenderPass(encoder,&pd);wgpuRenderPassEncoderEnd(end);wgpuRenderPassEncoderRelease(end);
+    }
+    if(flare){
+        WGPUPassTimestampWrites optical{};const auto* stamp=g.passTiming.pass("solar-flare",optical);
+        if(timing){times.querySet=g.timestamps;times.beginningOfPassWriteIndex=WGPU_QUERY_SET_INDEX_UNDEFINED;times.endOfPassWriteIndex=1;stamp=&times;}
+        g.solarFlare->draw(encoder,target,stamp);
     }
     if(timing){ // Resolve now; map once this frame's commands have run (the callback fires on a later poll).
         wgpuCommandEncoderResolveQuerySet(encoder,g.timestamps,0,2,g.resolved,0);wgpuCommandEncoderCopyBufferToBuffer(encoder,g.resolved,0,g.readback,0,16);g.mapping=true;

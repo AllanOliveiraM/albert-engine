@@ -20,6 +20,7 @@
 #include "clouds.hpp"
 #include "cache.hpp"
 #include "regional.hpp"
+#include "surface_region.hpp"
 #include "animation.hpp"
 #include "memory.hpp"
 #include "paths.hpp"
@@ -32,6 +33,7 @@
 #include "broadcast.hpp"
 #include "broadcast_camera.hpp"
 #include "surface_camera.hpp"
+#include "free_camera_motion.hpp"
 #ifdef ALBERT_HAS_RPC
 #include "playground.hpp"
 #include "missions.hpp"
@@ -688,6 +690,7 @@ std::string civilClock(double utc) {
 
 struct SpeedPreset {double rate;const char* label;};
 constexpr SpeedPreset SPEEDS[]{{1.,"1x"},{60.,"1 min/s"},{3600.,"1 h/s"},{21600.,"6 h/s"},{86400.,"1 dia/s"},{604800.,"1 sem/s"}};
+constexpr double MAX_TIME_RATE=albert::time::Simulation::maximumRate;
 
 // Moments to visit: paused there, with the camera arriving from the side that shows it.
 // Eclipse instants are greatest eclipse in TD from F. Espenak (NASA GSFC) minus the
@@ -704,7 +707,14 @@ constexpr SimulationEvent EVENTS[]{
 
 std::string speedLabel(double rate) {
     for (const auto& speed : SPEEDS) if (std::abs(rate) == speed.rate) return speed.label;
-    char text[32];std::snprintf(text, sizeof text, "%.0fx", std::abs(rate));
+    const double value=std::abs(rate);char text[32];
+    if(value>=365.25*86400.)std::snprintf(text,sizeof text,"%.2g anos/s",value/(365.25*86400.));
+    else if(value>=30.*86400.)std::snprintf(text,sizeof text,"%.2g meses/s",value/(30.*86400.));
+    else if(value>=7.*86400.)std::snprintf(text,sizeof text,"%.2g sem/s",value/(7.*86400.));
+    else if(value>=86400.)std::snprintf(text,sizeof text,"%.2g dias/s",value/86400.);
+    else if(value>=3600.)std::snprintf(text,sizeof text,"%.2g h/s",value/3600.);
+    else if(value>=60.)std::snprintf(text,sizeof text,"%.2g min/s",value/60.);
+    else std::snprintf(text, sizeof text, "%.2g×", value);
     return text;
 }
 
@@ -966,13 +976,17 @@ struct CameraTransition {
 } // namespace
 
 int albert::runRenderer(int argc, char** argv) {
-    bool smokeTest = false,demo=false;
+    bool smokeTest = false,demo=false,reviewEarth=false,lookAtStarbase=false;
     std::optional<unsigned> rpcPort;
     try {
         for (int i = 1; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--smoke-test") {
                 smokeTest = true;
+            } else if (argument == "--review-earth") {
+                reviewEarth = true;
+            } else if (argument == "--look-at=starbase") {
+                lookAtStarbase = true;
             } else if (argument == "--renderer=webgpu") { // The only renderer (OpenGL was removed); kept for scripts.
             } else if (argument == "--rpc" || argument.starts_with("--rpc-port=")) {
                 size_t consumed=0;const auto text=argument=="--rpc" ? std::string("50051") : argument.substr(11);
@@ -986,6 +1000,8 @@ int albert::runRenderer(int argc, char** argv) {
             } else if (argument == "--help") {
                 std::cout << "Albert Engine\n"
                           << "  --smoke-test  Carrega dados reais, renderiza 5 quadros e encerra\n"
+                          << "  --review-earth  Diagnóstico de 180 s: aproximações da Terra e abertura do menu\n"
+                          << "  --look-at=starbase  Abre uma vista local de Starbase, preservando o horário\n"
                           << "  --rpc         Ativa gRPC local na porta 50051 (ou --rpc-port=N)\n"
                           << "  --demo        Adiciona um objeto de exemplo simulado\n"
                           << "  --help        Mostra esta ajuda\n";
@@ -1270,11 +1286,11 @@ int albert::runRenderer(int argc, char** argv) {
 
         // Ajustes, kept in settings.json across runs (the sound always starts muted). The volumetric clouds and the ocean's
         // waves are the costly effects: on by default, a weaker machine turns them off.
-        struct Preferences {bool volumetricClouds=true,oceanWaves=true,antialias=true,vsync=true,autoRotate=true,invertY=false,inset=true,broadcast=true,playground=false,deluge=true;int frameCap=60,launchCloudQuality=1;float fov=60,uiScale=1,sensitivity=1,volume=.8f,farmVolume=.15f;
+        struct Preferences {bool volumetricClouds=true,oceanWaves=true,solarFlare=true,antialias=true,vsync=true,autoRotate=true,invertY=false,inset=true,broadcast=true,playground=false,deluge=true;int frameCap=60,launchCloudQuality=1;float fov=60,uiScale=1,sensitivity=1,volume=.8f,farmVolume=.15f;
             bool thirdBodies=true,relativity=true,flightAir=true,wind=true,solarPressure=true;float turbulence=0;} preferences; // The last six: the Fisica page's defaults for new flights.
         const auto preferencesFile=albert::dataDirectory()/"settings.json";
         try{std::ifstream in(preferencesFile);if(in){const auto j=json::parse(in);auto& p=preferences;auto& v=visualSettings;
-            p.volumetricClouds=j.value("volumetric_clouds",p.volumetricClouds);p.oceanWaves=j.value("ocean_waves",p.oceanWaves);p.antialias=j.value("antialias",p.antialias);
+            p.volumetricClouds=j.value("volumetric_clouds",p.volumetricClouds);p.oceanWaves=j.value("ocean_waves",p.oceanWaves);p.solarFlare=j.value("solar_flare",p.solarFlare);p.antialias=j.value("antialias",p.antialias);
             p.vsync=j.value("vsync",p.vsync);p.autoRotate=j.value("auto_rotate",p.autoRotate);p.invertY=j.value("invert_y",p.invertY);p.inset=j.value("flight_inset",p.inset);p.deluge=j.value("deluge_effects",p.deluge);p.broadcast=j.value("broadcast_panels",p.broadcast);p.frameCap=std::clamp(j.value("frame_cap",p.frameCap),0,240);
             p.launchCloudQuality=std::clamp(j.value("launch_cloud_quality",p.launchCloudQuality),0,2);
             p.fov=std::clamp(j.value("field_of_view",p.fov),35.f,90.f);p.uiScale=std::clamp(j.value("interface_scale",p.uiScale),.8f,1.6f);
@@ -1290,7 +1306,7 @@ int albert::runRenderer(int argc, char** argv) {
             showOrbits=j.value("orbits",showOrbits);showDebris=j.value("debris",showDebris);}}
         catch(const std::exception&){} // A damaged preference never prevents startup.
         auto savePreferences=[&]{try{const auto& p=preferences;const auto& v=visualSettings;std::filesystem::create_directories(preferencesFile.parent_path());std::ofstream out(preferencesFile);
-            out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},{"flight_inset",p.inset},{"deluge_effects",p.deluge},{"broadcast_panels",p.broadcast},{"frame_cap",p.frameCap},
+            out<<json{{"volumetric_clouds",p.volumetricClouds},{"ocean_waves",p.oceanWaves},{"solar_flare",p.solarFlare},{"antialias",p.antialias},{"vsync",p.vsync},{"auto_rotate",p.autoRotate},{"invert_y",p.invertY},{"flight_inset",p.inset},{"deluge_effects",p.deluge},{"broadcast_panels",p.broadcast},{"frame_cap",p.frameCap},
                 {"launch_cloud_quality",p.launchCloudQuality},{"field_of_view",p.fov},{"interface_scale",p.uiScale},{"mouse_sensitivity",p.sensitivity},{"volume",p.volume},{"tank_farm_volume",p.farmVolume},{"quality",v.quality},{"shadows",v.shadows},
                 {"atmosphere",v.atmosphere},{"terrain",v.terrain},{"cloud_mode",v.clouds==albert::CloudMode::Observed?"observed":v.clouds==albert::CloudMode::Off?"off":"simulated"},{"city_lights",v.nightLights},{"borders",v.borders},{"orbits",showOrbits},{"debris",showDebris},
                 {"physics_third_bodies",p.thirdBodies},{"physics_relativity",p.relativity},{"physics_atmosphere",p.flightAir},{"physics_wind",p.wind},{"physics_solar_pressure",p.solarPressure},{"physics_turbulence",p.turbulence}}.dump(2)<<'\n';}
@@ -1304,12 +1320,13 @@ int albert::runRenderer(int argc, char** argv) {
             m.set_turbulence_meters_per_second(p.turbulence);rpc->physicsDefaults(m);
 #endif
         };
-        // Free camera (Ajustes, or F): flies from the current view; dragging looks, W/A/S/D, Space/E and Ctrl/Q move, Shift is
-        // five times faster, the wheel scales the speed, which follows the height over the nearest surface.
-        bool freeCamera=false;float freeSpeed=1.f;albert::SurfaceCamera freeAnchor;
+        // Free camera (Ajustes, or F): mouse drag looks, WASD walks on the local horizontal plane,
+        // Space rises, Shift descends, Ctrl boosts speed, and the wheel scales the height-based speed.
+        bool freeCamera=false,freeMouseLook=true;float freeSpeed=1.f;albert::SurfaceCamera freeAnchor;albert::FreeCameraMotion freeMotion;
         float zoomTarget = 3.5f, zoomDisplayed = 3.5f;
         albert::BroadcastCamera broadcastCamera;bool broadcastActive=false;
         auto selectCamera=[&](albert::core::CameraMode mode){
+            freeMotion.reset();graphics.captureMouse(false);
             broadcastCamera.select(mode);freeCamera=false;transition.active=false;automaticOrbit=false;controls.autoRotate=false;
             controls.dampingFactor=1;controls.update();camera->up.set(0,1,0);camera->fov=preferences.fov;
             zoomTarget=zoomDisplayed=camera->position.distanceTo(controls.target);registry.cameraChanged();
@@ -1347,13 +1364,13 @@ int albert::runRenderer(int argc, char** argv) {
             transition.duration = albert::flightDuration(scaleChange,
                 travel/std::max(.01f,radiusFor(next)),resetZoom);
             if(!resetZoom)transition.duration*=1.15f;
-            freeCamera=false;camera->up.set(0,1,0); // A programmed flight ends the free camera.
+            freeCamera=false;freeMotion.reset();graphics.captureMouse(false);camera->up.set(0,1,0); // A programmed flight ends the free camera.
 
             focus = next;registry.cameraChanged();
         };
         // Into the free camera from the current view; out of it, a flight back to the focus from where the eye is.
         auto toggleFreeCamera=[&](bool on){
-            if(on==freeCamera)return;freeAnchor.reset();
+            if(on==freeCamera)return;freeAnchor.reset();freeMotion.reset();freeMouseLook=on;graphics.captureMouse(false);
             if(on){broadcastCamera.select(albert::core::CameraMode::Orbit);transition.active=false;automaticOrbit=false;automaticOrbitAge=0.f;controls.autoRotate=false;freeCamera=true;return;}
             freeCamera=false;camera->up.set(0,1,0);Vector3 back=camera->position;back.sub(targetFor(focus));setFocus(focus,false,back);
         };
@@ -1367,7 +1384,8 @@ int albert::runRenderer(int argc, char** argv) {
         // Time panel: last chosen speed, kept while paused or reversed.
         double chosenSpeed = 1.;
         bool backwards = false;
-        std::array<char,32> dateText{};
+        int selectedYear=1970,selectedMonth=1,selectedDay=1;
+        int selectedHour=0,selectedMinute=0;
         std::string dateError;
         // A chosen event waits for positions at its date before flying there.
         struct PendingEvent {const SimulationEvent* event;std::uint64_t generation;};
@@ -1382,6 +1400,9 @@ int albert::runRenderer(int argc, char** argv) {
         float resetZoomProgress = 0.f;
         float detailLoaderAge=0.f,detailLoaderAlpha=0.f;
         int menuPage = 0;
+        bool pendingStarbaseView=lookAtStarbase;
+        constexpr double starbaseEyeLatitude=26.007,starbaseEyeLongitude=-97.180,starbaseEyeAltitudeKm=.900;
+        const auto starbaseEyeFixed=geodetic(starbaseEyeLatitude,starbaseEyeLongitude,starbaseEyeAltitudeKm),starbaseAimFixed=geodetic(25.996128,-97.154517,.060);
 
         std::array<char,96> focusSearch{};bool uiPopupWasOpen=false;
         // Start with the day/terminator visible, independent of UTC season.
@@ -1399,7 +1420,7 @@ int albert::runRenderer(int argc, char** argv) {
         drawInterface = [&] {
             const auto display = ImGui::GetIO().DisplaySize;
             const bool earthControls=focus==targets::Earth || focus==targets::EarthMoon;
-            std::array<std::pair<ImVec2,ImVec2>,5> protectedPanels;
+            std::array<std::pair<ImVec2,ImVec2>,8> protectedPanels;
             size_t panelCount=0;
             auto protectPanel=[&]{const auto p=ImGui::GetWindowPos(),s=ImGui::GetWindowSize();if(panelCount<protectedPanels.size())protectedPanels[panelCount++]={p,ImVec2(p.x+s.x,p.y+s.y)};};
             auto covered=[&](ImVec2 lo,ImVec2 hi){for(size_t i=0;i<panelCount;++i){const auto& [a,b]=protectedPanels[i];if(lo.x<b.x&&hi.x>a.x&&lo.y<b.y&&hi.y>a.y)return true;}return false;};
@@ -1410,8 +1431,12 @@ int albert::runRenderer(int argc, char** argv) {
             }
             constexpr auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize;
-            if(freeCamera&&!menuOpen&&!uiPopupWasOpen&&ImGui::IsKeyPressed(ImGuiKey_Escape,false))toggleFreeCamera(false);
-            else if(!ImGui::GetIO().WantCaptureKeyboard&&ImGui::IsKeyPressed(ImGuiKey_F,false))toggleFreeCamera(!freeCamera);
+            if(freeCamera&&!menuOpen&&!uiPopupWasOpen&&ImGui::IsKeyPressed(ImGuiKey_Escape,false)){
+                if(freeMouseLook){freeMouseLook=false;graphics.captureMouse(false);freeMotion.reset();}else toggleFreeCamera(false);
+            }else if(!input.WantTextInput&&!uiPopupWasOpen&&ImGui::IsKeyPressed(ImGuiKey_F,false)){
+                toggleFreeCamera(!freeCamera);if(freeCamera)menuOpen=false;
+            }
+            if(freeCamera&&!freeMouseLook&&!menuOpen&&!uiPopupWasOpen&&!input.WantCaptureMouse&&ImGui::IsMouseClicked(ImGuiMouseButton_Left))freeMouseLook=true;
             if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !uiPopupWasOpen) {
                 if (menuOpen) menuOpen = false;
             }
@@ -1547,6 +1572,33 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::BeginChild(pages[menuPage],ImVec2(0,0),0,ImGuiWindowFlags_AlwaysVerticalScrollbar);
                 ImGui::PushTextWrapPos(0);
                 if (menuPage == 0) {
+                    auto hint=albert::menu::hint;
+                    auto check=[&](const char* label,bool& value,const char* note=nullptr){
+                        if(albert::menu::checkbox(label,value))savePreferences();
+                        if(note)hint(note);
+                    };
+                    if(albert::menu::section("Locais",true)){
+                        if(ImGui::Button("Starbase · vista geral",ImVec2(-1,0))){
+                            setFocus(targets::Earth);freeCamera=false;freeAnchor.reset();
+                            pendingEvent.reset();pendingStarbaseView=true;menuOpen=false;
+                        }
+                        hint("Visita a região com a câmera livre, mantendo data e velocidade. Veículos e estruturas aparecem durante a missão.");
+                    }
+                    if(albert::menu::section("Terra e céu",true)){
+                        check("Atmosfera",visualSettings.atmosphere);
+                        check("Relevo detalhado",visualSettings.terrain,"Copernicus 30 m na Terra, LOLA na Lua e MOLA em Marte. Desligado, a Terra mantém uma superfície curva simplificada.");
+                        ImGui::TextUnformatted("Nuvens");ImGui::SetNextItemWidth(-1);
+                        int mode=visualSettings.clouds==albert::CloudMode::Observed?0:visualSettings.clouds==albert::CloudMode::Simulated?1:2;
+                        if(ImGui::Combo("##Modo de nuvens",&mode,"Reais (satélite)\0Artificiais realistas\0Desligadas\0")){
+                            visualSettings.clouds=mode==0?albert::CloudMode::Observed:mode==1?albert::CloudMode::Simulated:albert::CloudMode::Off;savePreferences();
+                        }
+                        hint(mode==0?"Mosaico observado, com atraso e lacunas; disponível perto do presente.":mode==1?"Nuvens de cenário animadas sobre uma referência histórica da NASA. Funcionam offline em qualquer data; não representam o tempo atual.":"Sem nuvens no globo ou perto do solo.");
+                        check("Nuvens volumetricas",preferences.volumetricClouds,"Nuvens em 3D; podem exigir mais da placa de video.");
+                        check("Luzes das cidades",visualSettings.nightLights);
+                        check("Fronteiras dos paises",visualSettings.borders);
+                        check("Caminhos das orbitas",showOrbits);
+                        check("Cinturoes e nuvem de Oort",showDebris);
+                    }
                     if(focus.front()!='@' && albert::core::localOrbit(focus)) {
                         ImGui::TextDisabled("Orbita aproximada offline");
                         const auto* surface=albert::core::surfaceBody(focus);
@@ -1571,10 +1623,10 @@ int albert::runRenderer(int argc, char** argv) {
                         const auto state=registry.evaluate(focus,simulatedUtc);
                         ImGui::TextDisabled(state.stale ? "Dados interrompidos: ultima posicao mantida" : registry.get(focus).providerManaged ? "Posicoes reais; visual simplificado" : "Dados fornecidos pelo integrador");
                     }
-                    ImGui::TextDisabled(freeCamera?"Camera livre: arraste para olhar, W A S D movem. F ou Esc volta.":"Arraste para girar. Role para aproximar.");
+                    albert::menu::hint(freeCamera?"Camera livre: mouse olha; WASD move, Espaco sobe, Shift desce, Ctrl acelera, Q/E guina. Esc libera o cursor; F sai.":"Arraste para girar. Role para aproximar.");
                     ImGui::Spacing();
                     ImGui::TextWrapped("Personalize sua vista");
-                    ImGui::TextDisabled("Graficos, Terra, camera e som ficam em Ajustes.");
+                    albert::menu::hint("Qualidade da imagem, desempenho, camera e som ficam em Ajustes.");
                     ImGui::Spacing();
                     if(showDebris&&systemView(focus))ImGui::TextDisabled("Populacoes ilustrativas, visiveis ao afastar.");
                     if (showOrbits) {
@@ -1616,7 +1668,7 @@ int albert::runRenderer(int argc, char** argv) {
                     if(earthControls){
                     ImGui::Spacing();
                     ImGui::TextDisabled("NUVENS EM TEMPO REAL");
-                    if (visualSettings.clouds!=albert::CloudMode::Observed) ImGui::TextWrapped(visualSettings.clouds==albert::CloudMode::Simulated?"Nuvens artificiais selecionadas. Escolha nuvens reais em Ajustes para buscar observações.":"Nuvens desligadas. Escolha nuvens reais em Ajustes para buscar observações.");
+                    if (visualSettings.clouds!=albert::CloudMode::Observed) ImGui::TextWrapped(visualSettings.clouds==albert::CloudMode::Simulated?"Nuvens artificiais selecionadas. Escolha nuvens reais em Cena para buscar observações.":"Nuvens desligadas. Escolha nuvens reais em Cena para buscar observações.");
                     else if (cloudSync.date.empty()) ImGui::TextWrapped("Aguardando observacoes de satelite.");
                     else ImGui::TextWrapped("Observacoes: %s", cloudSync.date.c_str());
                     if (cloudSync.active) {
@@ -1722,8 +1774,6 @@ int albert::runRenderer(int argc, char** argv) {
                         hint(visualSettings.quality?"Detalhes ao aproximar, sombras de 2048 px e maior resolucao em telas HiDPI.":"Menor resolucao em telas HiDPI, sombras de 1024 px e efeitos simplificados.");
                         check("Antisserrilhado (4x)",preferences.antialias);
                         check("Sombras",visualSettings.shadows);
-                        check("Atmosfera",visualSettings.atmosphere);
-                        check("Relevo detalhado",visualSettings.terrain,"Copernicus 30 m na Terra, LOLA na Lua e MOLA em Marte.");
                     }
                     if(albert::menu::section("Desempenho",true)){
                         int cap=preferences.frameCap==30?0:preferences.frameCap==60?1:2;
@@ -1735,8 +1785,8 @@ int albert::runRenderer(int argc, char** argv) {
                         check("Sincronia vertical",preferences.vsync,"Sincroniza a imagem com a tela para evitar cortes entre quadros.");
                     }
                     if(albert::menu::section("Efeitos")){
-                        check("Nuvens volumetricas",preferences.volumetricClouds,"Nuvens em 3D; podem exigir mais da placa de video.");
                         check("Ondas no mar",preferences.oceanWaves);
+                        check("Reflexos de lente",preferences.solarFlare,"Reflexos sutis quando o Sol aparece na imagem.");
                         check("Efeitos de agua e vapor",preferences.deluge,"Diluvio do pad, nuvem da decolagem e espuma da amerissagem.");
                         ImGui::TextUnformatted("Vapor e spray");
                         ImGui::BeginDisabled(!preferences.deluge||visualSettings.quality==0);
@@ -1746,26 +1796,14 @@ int albert::runRenderer(int argc, char** argv) {
                         ImGui::EndDisabled();
                         if(!visualSettings.quality)hint("A qualidade geral Mais leve usa vapor e spray leves. Escolha Mais detalhes para liberar Medio e Alto.");
                     }
-                    if(albert::menu::section("Cena e Terra")){
-                        ImGui::TextUnformatted("Nuvens");ImGui::SetNextItemWidth(-1);
-                        int mode=visualSettings.clouds==albert::CloudMode::Observed?0:visualSettings.clouds==albert::CloudMode::Simulated?1:2;
-                        if(ImGui::Combo("##Modo de nuvens",&mode,"Reais (satélite)\0Artificiais realistas\0Desligadas\0")){
-                            visualSettings.clouds=mode==0?albert::CloudMode::Observed:mode==1?albert::CloudMode::Simulated:albert::CloudMode::Off;savePreferences();
-                        }
-                        hint(mode==0?"Mosaico observado, com atraso e lacunas; disponível perto do presente.":mode==1?"Nuvens de cenário animadas sobre uma referência histórica da NASA. Funcionam offline em qualquer data; não representam o tempo atual.":"Sem nuvens no globo ou perto do solo.");
-                        check("Luzes das cidades",visualSettings.nightLights);
-                        check("Fronteiras dos paises",visualSettings.borders);
-                        check("Caminhos das orbitas",showOrbits);
-                        check("Cinturoes e nuvem de Oort",showDebris);
-                    }
                     if(albert::menu::section("Voo")){
                         check("Telemetria do voo",preferences.broadcast,"Motores, velocidade, altitude, propelente e eventos da missao.");
                         check("Painel de interferencia",preferences.playground,"Rajadas, empurroes, falhas de motores e sensores, aborto e terminacao.");
                         check("Segunda vista dos voos",preferences.inset,"Mostra o outro veiculo no canto. Clique na vista para alternar.");
                     }
                     if(albert::menu::section("Camera")){
-                        bool free=freeCamera;if(albert::menu::checkbox("Camera livre (F)",free))toggleFreeCamera(free);
-                        hint("Arraste para olhar. W A S D movem; Espaco e Ctrl sobem e descem; Shift acelera. F ou Esc volta.");
+                        bool free=freeCamera;if(albert::menu::checkbox("Camera livre (F)",free)){toggleFreeCamera(free);if(free)menuOpen=false;}
+                        hint("Arraste para olhar. W A S D movem; Espaco sobe, Shift desce e Ctrl acelera. F ou Esc volta.");
                         slider("Campo de visao",preferences.fov,35,90,"%.0f graus");
                         slider("Sensibilidade do mouse",preferences.sensitivity,.25f,3,"%.2fx");
                         check("Inverter o olhar vertical",preferences.invertY);
@@ -1858,9 +1896,9 @@ int albert::runRenderer(int argc, char** argv) {
             }
 
             const float zoomRatio = camera->position.distanceTo(controls.target) / distanceFor(focus);
-            const bool resetZoomVisible = !transition.active && std::abs(std::log(std::max(1e-9f, zoomRatio))) > .03f;
+            const bool resetZoomVisible = !freeCamera&&!transition.active && std::abs(std::log(std::max(1e-9f, zoomRatio))) > .03f;
             resetZoomProgress = std::clamp(resetZoomProgress + (resetZoomVisible ? 1.f : -1.f) * ImGui::GetIO().DeltaTime / .22f, 0.f, 1.f);
-            if (resetZoomProgress > 0.f) {
+            if (resetZoomProgress > 0.f&&!freeCamera) {
                 const float reveal = smoothstep(resetZoomProgress);
                 ImGui::SetNextWindowPos(ImVec2(display.x - margin,
                     display.y - margin + 18.f * (1.f - reveal) - (broadcasting ? 210.f*std::clamp(display.x/1600.f,.7f,1.4f) : 0.f)),
@@ -1877,6 +1915,21 @@ int albert::runRenderer(int argc, char** argv) {
                 ImGui::EndDisabled();
                 ImGui::End();
                 ImGui::PopStyleVar(4);
+            }
+            if(freeCamera&&!menuOpen){
+                ImGui::SetNextWindowPos(ImVec2(display.x-margin,display.y-margin-(broadcasting?210.f*std::clamp(display.x/1600.f,.7f,1.4f):0.f)),ImGuiCond_Always,ImVec2(1,1));
+                ImGui::SetNextWindowSize(ImVec2(std::min(380.f*preferences.uiScale,display.x-2*margin),0),ImGuiCond_Always);
+                ImGui::SetNextWindowBgAlpha(.85f);
+                ImGui::Begin("Ajuda da câmera livre",nullptr,flags|ImGuiWindowFlags_NoNav|ImGuiWindowFlags_NoFocusOnAppearing);
+                protectPanel();ImGui::TextUnformatted("Câmera livre");
+                albert::menu::hint("WASD move · Espaço/Shift sobe/desce · Ctrl acelera · Q/E guina");
+                if(freeMouseLook)albert::menu::hint("Mouse olha · Esc libera o cursor · F sai");
+                else{
+                    albert::menu::hint("Clique na cena para capturar o mouse. F sai; Esc novamente também sai.");
+                    if(ImGui::Button("Capturar mouse",ImVec2(-1,0)))freeMouseLook=true;
+                    if(ImGui::Button("Sair da câmera livre (F)",ImVec2(-1,0)))toggleFreeCamera(false);
+                }
+                ImGui::End();
             }
 
             if(insetTexture&&!insetId.empty()){ // The second view, bottom left; a click follows that flight instead.
@@ -2031,21 +2084,22 @@ int albert::runRenderer(int argc, char** argv) {
                 else ImGui::TextColored(calm, "Dados sincronizados");
 
                 if (openTime) {
-                    const auto text = albert::time::formatUtc(simulatedUtc).substr(0, 16);
-                    std::snprintf(dateText.data(), dateText.size(), "%s", text.c_str());
+                    const auto civil=albert::time::civil(simulatedUtc);
+                    selectedYear=civil.year;selectedMonth=civil.month;selectedDay=civil.day;
+                    selectedHour=civil.hour;selectedMinute=civil.minute;
                     dateError.clear();
                     ImGui::OpenPopup("Tempo da simulacao");
                 }
-                const float popupWidth = std::min(360.f, display.x - margin * 2), popupTop = wide ? margin+88 : margin+154;
+                const float popupWidth = std::min(400.f*std::max(1.f,ImGui::GetFontSize()/16.f), display.x - margin * 2), popupTop = wide ? margin+88 : margin+154;
                 ImGui::SetNextWindowPos(wide ? ImVec2(display.x-margin,popupTop) : ImVec2(margin,popupTop),ImGuiCond_Appearing,wide ? ImVec2(1,0) : ImVec2(0,0));
                 // Below the panel; scrolls instead of covering it on short windows.
                 ImGui::SetNextWindowSizeConstraints(ImVec2(popupWidth,0),ImVec2(popupWidth,std::max(120.f,display.y-popupTop-margin)));
                 if (ImGui::BeginPopup("Tempo da simulacao")) {
                     protectPanel();
                     // Follow changes made elsewhere (API) while the panel is open.
-                    if (shown.rate != 0.) {chosenSpeed = std::abs(shown.pace);backwards = shown.pace < 0;}
+                    if (shown.rate != 0.) {chosenSpeed = std::clamp(std::abs(shown.pace),1.,MAX_TIME_RATE);backwards = shown.pace < 0;}
                     const float spacing = ImGui::GetStyle().ItemSpacing.x, full = ImGui::GetContentRegionAvail().x;
-                    const float half = (full - spacing) / 2, third = (full - 2 * spacing) / 3, quarter = (full - 3 * spacing) / 4;
+                    const float half = (full - spacing) / 2, quarter = (full - 3 * spacing) / 4;
                     auto selectable = [&](const char* label, bool selected, ImVec2 size) {
                         if (selected) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.09f,.29f,.36f,1));
                         const bool pressed = ImGui::Button(label, size);
@@ -2053,7 +2107,7 @@ int albert::runRenderer(int argc, char** argv) {
                         return pressed;
                     };
                     ImGui::TextDisabled("TEMPO DA SIMULACAO");
-                    ImGui::Text("%s   %s UTC", civilDate(simulatedUtc).c_str(), civilClock(simulatedUtc).c_str());
+                    ImGui::TextWrapped("%s   %s UTC", civilDate(simulatedUtc).c_str(), civilClock(simulatedUtc).c_str());
                     if (shown.live) ImGui::TextColored(calm, "Ao vivo");
                     else ImGui::TextDisabled("%s", offsetLabel(simulatedUtc - timing.utcSeconds).c_str());
                     ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
@@ -2071,44 +2125,49 @@ int albert::runRenderer(int argc, char** argv) {
                         backwards = !backwards;
                         if (!paused) simulation.setRate(backwards ? -chosenSpeed : chosenSpeed);
                     }
-                    for (size_t i = 0; i < std::size(SPEEDS); ++i) {
-                        if (i % 3) ImGui::SameLine();
-                        if (selectable(SPEEDS[i].label, chosenSpeed == SPEEDS[i].rate, ImVec2(third, 32))) {
-                            chosenSpeed = SPEEDS[i].rate;
-                            simulation.setRate(backwards ? -chosenSpeed : chosenSpeed);
-                        }
+                    ImGui::Spacing();ImGui::TextDisabled("VELOCIDADE DO TEMPO");
+                    double sliderRate=std::clamp(chosenSpeed,1.,MAX_TIME_RATE),minimumRate=1.,maximumRate=MAX_TIME_RATE;
+                    ImGui::SetNextItemWidth(-1);
+                    if(albert::menu::rateSlider("##VelocidadeDoTempo",sliderRate,minimumRate,maximumRate)){
+                        chosenSpeed=sliderRate;simulation.setRate(backwards?-chosenSpeed:chosenSpeed);
                     }
+                    ImGui::Text("%s",speedLabel(sliderRate).c_str());
+                    albert::menu::hint("Escala logarítmica, de tempo normal até um ano por segundo.");
                     ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
 
                     ImGui::TextDisabled("IR PARA (UTC)");
                     auto choose = [&](double utc) {
                         try {
                             simulation.jump(utc);dateError.clear();
-                            const auto text = albert::time::formatUtc(utc).substr(0, 16);
-                            std::snprintf(dateText.data(), dateText.size(), "%s", text.c_str());
+                            const auto civil=albert::time::civil(utc);
+                            selectedYear=civil.year;selectedMonth=civil.month;selectedDay=civil.day;
+                            selectedHour=civil.hour;selectedMinute=civil.minute;
                         } catch (const std::invalid_argument&) {dateError = "Escolha uma data de 1900 a 2100.";}
                     };
-                    ImGui::SetNextItemWidth(full - 80 - spacing);
-                    const bool entered = ImGui::InputTextWithHint("##Data", "AAAA-MM-DD HH:MM", dateText.data(), dateText.size(), ImGuiInputTextFlags_EnterReturnsTrue);
-                    ImGui::SameLine();
-                    if (ImGui::Button("Ir", ImVec2(80, 0)) || entered) {
-                        if (const auto utc = albert::time::parseUtc(dateText.data())) choose(*utc);
-                        else dateError = "Use o formato AAAA-MM-DD HH:MM.";
+                    ImGui::TextDisabled("ESCOLHER DATA E HORA (UTC)");
+                    albert::menu::utcFields(selectedYear,selectedMonth,selectedDay,selectedHour,selectedMinute);
+                    albert::menu::hint("Aplicar preserva a taxa atual da simulação.");
+                    if(ImGui::Button("Aplicar data e hora",ImVec2(full,36))){
+                        try {
+                            const double utc=albert::time::unixSeconds({selectedYear,selectedMonth,selectedDay,selectedHour,selectedMinute,0});
+                            simulation.jump(utc);dateError.clear();
+                        } catch(const std::invalid_argument&) {dateError="Data ou horário inválido. Use 1900–2100 e valores válidos para o calendário.";}
                     }
                     constexpr std::pair<const char*, double> steps[]{{"-1 dia",-86400.},{"-1 h",-3600.},{"+1 h",3600.},{"+1 dia",86400.}};
                     for (size_t i = 0; i < std::size(steps); ++i) {
                         if (i) ImGui::SameLine();
                         if (ImGui::Button(steps[i].first, ImVec2(quarter, 32))) choose(simulatedUtc + steps[i].second);
                     }
-                    if (!dateError.empty()) ImGui::TextColored(attention, "%s", dateError.c_str());
+                    if (!dateError.empty()) {ImGui::PushTextWrapPos(0);ImGui::TextColored(attention, "%s", dateError.c_str());ImGui::PopTextWrapPos();}
                     ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
                     ImGui::TextDisabled("EVENTOS");
                     for (const auto& event : EVENTS) {
                         if (!ImGui::Button(event.label, ImVec2(full, 32))) continue;
                         simulation.choose(albert::time::parseUtc(event.utc).value(), 0.);
                         pendingEvent = PendingEvent{&event, simulation.read().generation};dateError.clear();
-                        const auto text = albert::time::formatUtc(*albert::time::parseUtc(event.utc)).substr(0, 16);
-                        std::snprintf(dateText.data(), dateText.size(), "%s", text.c_str());
+                        const auto civil=albert::time::civil(*albert::time::parseUtc(event.utc));
+                        selectedYear=civil.year;selectedMonth=civil.month;selectedDay=civil.day;
+                        selectedHour=civil.hour;selectedMinute=civil.minute;
                     }
                     ImGui::Spacing();
                     ImGui::BeginDisabled(shown.live);
@@ -2141,7 +2200,7 @@ int albert::runRenderer(int argc, char** argv) {
             }
             // Hover and click use the same nearest visible object: the hover at most ten times a second, a click at once (a ray
             // through a site's every mesh and triangle each frame took most of a core).
-            if(!ImGui::GetIO().WantCaptureMouse && !transition.active&&!covered(ImGui::GetMousePos(),ImGui::GetMousePos())){
+            if(!freeCamera&&!ImGui::GetIO().WantCaptureMouse && !transition.active&&!covered(ImGui::GetMousePos(),ImGui::GetMousePos())){
                 const bool click=ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f;
                 if(click||std::chrono::steady_clock::now()-hoverAt>std::chrono::milliseconds(100)){hoverAt=std::chrono::steady_clock::now();
                     const auto mouse=ImGui::GetMousePos();Raycaster ray;ray.setFromCamera(Vector2(mouse.x/display.x*2.f-1.f,1.f-mouse.y/display.y*2.f),*camera);
@@ -2174,7 +2233,7 @@ int albert::runRenderer(int argc, char** argv) {
                     draw->AddText(ImVec2(screen.x+10,screen.y-8), color, label);
                     const auto mouse=ImGui::GetMousePos();
                     const bool hover=mouse.x>=screen.x-12&&mouse.x<=screen.x+12+text.x&&mouse.y>=screen.y-14&&mouse.y<=screen.y+14;
-                    if(hover&&!ImGui::GetIO().WantCaptureMouse&&!transition.active){ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(id);}
+                    if(!freeCamera&&hover&&!ImGui::GetIO().WantCaptureMouse&&!transition.active){ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(id);}
                 };
                 mark(targets::Earth,earthPosition, systemView(focus) ? "Terra / Lua" : "Terra", IM_COL32(145,208,229,230));
                 if (focus == targets::EarthMoon) mark(targets::Moon,moonPosition, "Lua", IM_COL32(215,220,230,230));
@@ -2213,7 +2272,7 @@ int albert::runRenderer(int argc, char** argv) {
                     auto* draw=ImGui::GetBackgroundDrawList();draw->AddCircle(point,4,IM_COL32(185,203,211,int(190*labelVisibility)),12,1.f);
                     const bool overlap=std::any_of(placed.begin(),placed.end(),[&](const auto& p){return std::abs(p.point.y-point.y)<18&&std::abs(p.point.x-point.x)<100;});
                     if(!overlap||hover){draw->AddText(ImVec2(point.x+9,point.y-8),IM_COL32(185,203,211,int(220*labelVisibility)),body.name.data());placed.push_back({point});}
-                    if(hover&&labelVisibility>.5f&&!ImGui::GetIO().WantCaptureMouse&&!transition.active){ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(std::string(body.id));}
+                    if(!freeCamera&&hover&&labelVisibility>.5f&&!ImGui::GetIO().WantCaptureMouse&&!transition.active){ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);if(ImGui::IsMouseReleased(ImGuiMouseButton_Left)&&ImGui::GetIO().MouseDragMaxDistanceSqr[0]<25.f)setFocus(std::string(body.id));}
                 }
             }
 
@@ -2304,6 +2363,9 @@ int albert::runRenderer(int argc, char** argv) {
 
         bool dataValid = true;
         int renderedFrames = 0;
+        std::optional<SteadyClock::time_point> earthReviewStart;
+        int earthReviewStage=-1,earthReviewLoads=0;
+        bool earthReviewComplete=false;
 
         auto timeGeneration=initialTimeGeneration;
         auto simulationGeneration=initialSimulationGeneration;
@@ -2600,7 +2662,11 @@ int albert::runRenderer(int argc, char** argv) {
             const auto nextOriginId=eyeOrigin?Focus("@flight"):targetId(focus);
             // During flight the floating origin follows the eye, preserving the
             // departure body's detail instead of rebasing immediately to a planet AU away.
-            const auto nextOrigin=eyeOrigin?sceneOrigin+albert::core::Vector{
+            const auto nextOrigin=pendingStarbaseView?albert::core::Vector{
+                (c2t[0][0]*starbaseEyeFixed.x+c2t[1][0]*starbaseEyeFixed.y+c2t[2][0]*starbaseEyeFixed.z)*1000.,
+                (c2t[0][1]*starbaseEyeFixed.x+c2t[1][1]*starbaseEyeFixed.y+c2t[2][1]*starbaseEyeFixed.z)*1000.,
+                (c2t[0][2]*starbaseEyeFixed.x+c2t[1][2]*starbaseEyeFixed.y+c2t[2][2]*starbaseEyeFixed.z)*1000.}:
+                eyeOrigin?sceneOrigin+albert::core::Vector{
                 camera->position.x*albert::core::earthRadiusMeters,-camera->position.z*albert::core::earthRadiusMeters,camera->position.y*albert::core::earthRadiusMeters}:
                 registry.evaluate(nextOriginId,simulatedUtc).state.positionMeters;
             const auto shift=albert::renderPosition(sceneOrigin,nextOrigin);
@@ -2652,10 +2718,27 @@ int albert::runRenderer(int argc, char** argv) {
             if(const auto* at=objects.exact("earth")){earthFrame.at=*at;const double flat=6356.752314245/6378.137;
                 auto turned=[&](double a,double b,double c){const double x=c2t[0][0]*a+c2t[1][0]*b+c2t[2][0]*c,y=c2t[0][1]*a+c2t[1][1]*b+c2t[2][1]*c,z=c2t[0][2]*a+c2t[1][2]*b+c2t[2][2]*c;return std::array<double,3>{x,z,-y};};
                 const auto x=turned(1,0,0),y=turned(0,0,1),z=turned(0,-1,0);earthFrame.linear={x[0],x[1],x[2],y[0]*flat,y[1]*flat,y[2]*flat,z[0],z[1],z[2]};}
-            if(!freeCamera)freeAnchor.reset();
+            if(!freeCamera){freeAnchor.reset();freeMotion.reset();}
             auto rotation = earthOrientation(c2t);
             earth->setRotationFromMatrix(rotation);
             bordersObject->setRotationFromMatrix(rotation);
+            if(pendingStarbaseView){
+                pendingStarbaseView=false;transition.active=false;automaticOrbit=false;controls.autoRotate=false;
+                broadcastCamera.select(albert::core::CameraMode::Orbit);freeCamera=true;freeMouseLook=false;freeAnchor.reset();freeMotion.reset();
+                // Geographic observation only. Aim at the mission's existing
+                // Pad 1 coordinates (starship_flight.hpp), from above its NW side.
+                auto fixedToWorld=[&](Vec3 p){return albert::renderPosition({(c2t[0][0]*p.x+c2t[1][0]*p.y+c2t[2][0]*p.z)*1000.,
+                    (c2t[0][1]*p.x+c2t[1][1]*p.y+c2t[2][1]*p.z)*1000.,(c2t[0][2]*p.x+c2t[1][2]*p.y+c2t[2][2]*p.z)*1000.},sceneOrigin);};
+                camera->position.copy(fixedToWorld(starbaseEyeFixed));
+                const auto aim=fixedToWorld(starbaseAimFixed);
+                const Vec3 localUp{std::cos(radians(starbaseEyeLatitude))*std::cos(radians(starbaseEyeLongitude)),
+                    std::cos(radians(starbaseEyeLatitude))*std::sin(radians(starbaseEyeLongitude)),std::sin(radians(starbaseEyeLatitude))};
+                Vector3 up=graphical({c2t[0][0]*localUp.x+c2t[1][0]*localUp.y+c2t[2][0]*localUp.z,
+                    c2t[0][1]*localUp.x+c2t[1][1]*localUp.y+c2t[2][1]*localUp.z,c2t[0][2]*localUp.x+c2t[1][2]*localUp.y+c2t[2][2]*localUp.z});
+                up.normalize();camera->up.copy(up);camera->fov=preferences.fov;camera->lookAt(aim);controls.target.copy(aim);
+                Vector3 forward=aim;forward.sub(camera->position).normalize();freeAnchor.capture(earth->uuid,earthFrame,camera->position,forward,up);
+                registry.cameraChanged();
+            }
 
 
 #ifdef ALBERT_HAS_RPC
@@ -2694,6 +2777,8 @@ int albert::runRenderer(int argc, char** argv) {
             if(const auto next=broadcastCamera.nextFocus(registry,objects,focus,simulatedUtc))setFocus(*next);
             Vector3 target = targetFor(focus);
 
+            if(!graphics.focused())freeMouseLook=false;
+            graphics.captureMouse(freeCamera&&freeMouseLook&&graphics.focused()&&!menuOpen&&!uiPopupWasOpen&&introductionElapsed>=introductionDuration);
             const auto broadcastView=freeCamera?std::optional<albert::BroadcastView>{}:broadcastCamera.update(registry,objects,focus,simulatedUtc,elapsed);
             broadcastActive=broadcastView.has_value();graphics.setFisheye(broadcastActive&&broadcastView->fisheye);
             if(broadcastActive){
@@ -2774,27 +2859,47 @@ int albert::runRenderer(int argc, char** argv) {
                 const bool anchored=best<2*closestRadius;
                 if(anchored){if(!freeAnchor.follows(anchorId))freeAnchor.capture(anchorId,anchorFrame,camera->position,forward,anchoredUp);
                     freeAnchor.restore(anchorFrame,camera->position,forward,anchoredUp);}else freeAnchor.reset();
+                // Momentum lives in body-fixed orthonormal axes, independently
+                // of the moving eye origin and of the direction of the mouse.
+                auto basis=anchored?anchorFrame.linear:std::array<double,9>{1,0,0,0,1,0,0,0,1};
+                for(int c=0;c<3;++c){const double length=std::hypot(basis[3*c],basis[3*c+1],basis[3*c+2]);for(int row=0;row<3;++row)basis[3*c+row]/=length;}
+                auto localMotion=[&](const Vector3& v){albert::FreeCameraMotion::Vector out{};
+                    for(int c=0;c<3;++c)out[c]=basis[3*c]*v.x+basis[3*c+1]*v.y+basis[3*c+2]*v.z;return out;};
+                auto worldMotion=[&](const albert::FreeCameraMotion::Vector& v){std::array<double,3> out{};
+                    for(int c=0;c<3;++c)for(int row=0;row<3;++row)out[row]+=basis[3*c+row]*v[c];return Vector3(float(out[0]),float(out[1]),float(out[2]));};
+                const bool acceptingInput=graphics.mouseCaptured()&&graphics.focused()&&!menuOpen&&!uiPopupWasOpen&&introductionElapsed>=introductionDuration;
+                if(!acceptingInput)freeMotion.reset();
+                freeMotion.reference(anchored?anchorId:"@inertial");
                 bool changed=false;
                 const auto [eye,floor]=floorUnder();const float height=std::max(eye.length()-floor,0.f); // World units: the bodies are unscaled spheres.
                 Vector3 up=camera->position;up.sub(closest->position).normalize();
-                if(!io.WantCaptureMouse&&ImGui::IsMouseDown(ImGuiMouseButton_Left)){ // Look: yaw about the local up, pitch about the right.
-                    changed=io.MouseDelta.x!=0||io.MouseDelta.y!=0;
-                    const float look=.003f*preferences.sensitivity;forward.applyAxisAngle(up,-io.MouseDelta.x*look);Vector3 side=forward;side.cross(up).normalize();
-                    Vector3 pitched=forward;pitched.applyAxisAngle(side,-io.MouseDelta.y*look*(preferences.invertY?-1.f:1.f));if(std::abs(pitched.dot(up))<.995f)forward=pitched;}
-                if(!io.WantCaptureMouse&&io.MouseWheel!=0.f)freeSpeed=std::clamp(freeSpeed*std::pow(1.25f,io.MouseWheel),.01f,1000.f);
-                const float speed=std::max(2.f,.6f*height*r)/r*freeSpeed*(io.KeyShift?5.f:1.f);
-                Vector3 side=forward;side.cross(up).normalize();Vector3 move;
-                if(!io.WantCaptureKeyboard){
-                    if(ImGui::IsKeyDown(ImGuiKey_W))move.add(forward);
-                    if(ImGui::IsKeyDown(ImGuiKey_S))move.sub(forward);
+                const double sensitivity=.003*preferences.sensitivity;
+                const auto mouse=graphics.mouseDelta();
+                const double keyYaw=acceptingInput?((ImGui::IsKeyDown(ImGuiKey_Q)?1.:0.)-(ImGui::IsKeyDown(ImGuiKey_E)?1.:0.))*1.2*dt:0.;
+                const auto turn=freeMotion.look(acceptingInput?-mouse[0]*sensitivity+keyYaw:0.,acceptingInput?-mouse[1]*sensitivity*(preferences.invertY?-1.:1.):0.,dt);
+                if(turn[0]!=0||turn[1]!=0){
+                    changed=true;forward.applyAxisAngle(up,float(turn[0]));Vector3 side=forward;side.cross(up).normalize();
+                    Vector3 pitched=forward;pitched.applyAxisAngle(side,float(turn[1]));if(std::abs(pitched.dot(up))<.995f)forward=pitched;}
+                if(acceptingInput&&io.MouseWheel!=0.f)freeSpeed=std::clamp(freeSpeed*std::pow(1.25f,io.MouseWheel),.01f,1000.f);
+                const bool boost=ImGui::IsKeyDown(ImGuiKey_LeftCtrl)||ImGui::IsKeyDown(ImGuiKey_RightCtrl);
+                const float speed=std::max(2.f,.6f*height*r)/r*freeSpeed*(boost?5.f:1.f);
+                Vector3 horizontal=forward;horizontal.add(Vector3(up).multiplyScalar(-horizontal.dot(up)));
+                if(horizontal.lengthSq()<1e-8f){horizontal.set(0,0,0);Vector3 cameraRight;camera->getWorldDirection(cameraRight);cameraRight.cross(up).normalize();horizontal.crossVectors(up,cameraRight);}
+                horizontal.normalize();Vector3 side=horizontal;side.cross(up).normalize();Vector3 move;
+                if(acceptingInput){
+                    if(ImGui::IsKeyDown(ImGuiKey_W))move.add(horizontal);
+                    if(ImGui::IsKeyDown(ImGuiKey_S))move.sub(horizontal);
                     if(ImGui::IsKeyDown(ImGuiKey_D))move.add(side);
                     if(ImGui::IsKeyDown(ImGuiKey_A))move.sub(side);
-                    if(ImGui::IsKeyDown(ImGuiKey_Space)||ImGui::IsKeyDown(ImGuiKey_E))move.add(up);
-                    if(ImGui::IsKeyDown(ImGuiKey_LeftCtrl)||ImGui::IsKeyDown(ImGuiKey_Q))move.sub(up);}
-                if(move.lengthSq()>0){camera->position.add(move.normalize().multiplyScalar(speed*dt));changed=true;}
+                    if(ImGui::IsKeyDown(ImGuiKey_Space))move.add(up);
+                    if(ImGui::IsKeyDown(ImGuiKey_LeftShift)||ImGui::IsKeyDown(ImGuiKey_RightShift))move.sub(up);}
+                if(move.lengthSq()>0)move.normalize().multiplyScalar(speed*r);
+                const auto displacement=worldMotion(freeMotion.move(localMotion(move),dt)).divideScalar(r);
+                if(displacement.lengthSq()>0){camera->position.add(displacement);changed=true;}
                 { // Never below the drawn ground under the eye: 2 m over it.
                     auto [now,under]=floorUnder();const float minimum=under+2.f/r;
-                    if(now.length()<minimum){now.multiplyScalar(minimum/std::max(now.length(),1e-12f));closest->localToWorld(now);camera->position.copy(now);changed=true;}}
+                    if(now.length()<minimum){now.multiplyScalar(minimum/std::max(now.length(),1e-12f));closest->localToWorld(now);camera->position.copy(now);
+                        Vector3 normal=camera->position;normal.sub(closest->position).normalize();freeMotion.stopInto(localMotion(normal));changed=true;}}
                 if(anchored&&changed)freeAnchor.capture(anchorId,anchorFrame,camera->position,forward,up);
                 camera->up.copy(up);Vector3 look=camera->position;look.add(forward);camera->lookAt(look);
                 controls.target.copy(camera->position).add(forward.clone().multiplyScalar(std::max(height,100.f/r)));
@@ -2867,6 +2972,30 @@ int albert::runRenderer(int argc, char** argv) {
                 for(const auto& [id,node]:solids.nodes())if(albert::core::surfaceBody(id))keepAbove(*node,static_cast<float>(albert::core::surfaceRadius(id)/albert::core::earthRadiusMeters),solids.terrain(id));
             }
 
+            // Explicit diagnostic mode only: exercise the real regional loader,
+            // terrain, cloud passes and ImGui together in a separate instance.
+            // No input is injected and no preferences are changed or saved.
+            if(reviewEarth&&introductionElapsed>=introductionDuration){
+                if(!earthReviewStart){earthReviewStart=steadyNow;toggleFreeCamera(true);}
+                const double seconds=std::chrono::duration<double>(steadyNow-*earthReviewStart).count();
+                const int stage=std::min(11,static_cast<int>(seconds/15.));
+                if(stage!=earthReviewStage){earthReviewStage=stage;
+                    std::cout<<"EARTH_REVIEW stage="<<stage<<" loads="<<earthReviewLoads<<" "<<graphics.gpuMemory()<<std::endl;}
+                constexpr float distances[]{3.4f,1.08f,1.02f,1.02f,1.08f,3.4f};
+                constexpr float longitudes[]{-97.f,-97.f,-97.f,-69.f,-84.f,-97.f};
+                const int view=stage%6;const float lat=static_cast<float>(albert::parametricLatitude(26.*PI/180)),lon=longitudes[view]*static_cast<float>(PI/180);
+                Vector3 eye(-std::cos(lon)*std::cos(lat),std::sin(lat),std::sin(lon)*std::cos(lat));
+                eye.multiplyScalar(distances[view]);earth->updateMatrixWorld();earth->localToWorld(eye);
+                camera->position.copy(eye);controls.target.copy(earth->position);camera->up.set(0,1,0);camera->lookAt(controls.target);
+                menuOpen=(stage%2)==1;menuPage=stage%3;
+                if(seconds>=180.){
+                    if(earthReviewLoads<4)throw std::runtime_error("Earth review incomplete: fewer than four regional images loaded");
+                    if(albert::gpu::errors()!=0)throw std::runtime_error("Earth review: WebGPU validation errors");
+                    std::cout<<"EARTH_REVIEW complete loads="<<earthReviewLoads<<" "<<graphics.gpuMemory()<<std::endl;
+                    earthReviewComplete=true;
+                    graphics.close();
+                }
+            }
             stars->position.copy(camera->position);
             albert::setStarEpoch(*stars, tdb); // Proper motion for the simulated date.
             const float distance = camera->position.distanceTo(controls.target);
@@ -2996,7 +3125,7 @@ int albert::runRenderer(int argc, char** argv) {
             const float inAir=planets.atmosphereVisibility()*(1.f-std::clamp(airAltitude/30.f,0.f,1.f));
             const Vector3 earthUp=Vector3(camera->position).sub(planets.earth->position).normalize(),earthSun=Vector3(sunPosition).sub(camera->position).normalize();
             const float nightExposure=albert::earthNightExposure(earthUp.dot(earthSun));
-            const float photographicExposure=(exposed==targets::Moon?2.1f*adaptation:solids.contains(exposed)?std::clamp(1.05f*bodyAu*bodyAu,.25f,1200.f):1.05f)
+            const float photographicExposure=(exposed==targets::Sun?.00003f:exposed==targets::Moon?2.1f*adaptation:solids.contains(exposed)?std::clamp(1.05f*bodyAu*bodyAu,.25f,1200.f):1.05f)
                 *(1.f+inAir)*(1.f+inAir*(nightExposure-1.f));
             graphics.setExposure(std::exp(std::lerp(std::log(graphics.exposure()),std::log(photographicExposure),-std::expm1(-dt/.65f))));
             // The body whose regional detail the view wants: the focus, or the body under a focused vehicle near
@@ -3050,7 +3179,8 @@ int albert::runRenderer(int argc, char** argv) {
             } else cloudSync.requestDetail(std::nullopt);
             Vector3 focusSurface; // An external object near the ground: launch-site detail around its ground point.
             const bool nearGround=objects.nodes().contains(focus)&&!albert::core::naturalBody(focus)&&focus!="earth"&&focus!="sun"
-                &&(focusSurface=objects.nodes().at(focus)->position,earth->worldToLocal(focusSurface),focusSurface.length()<1.001f)&&earthCamera.length()<1.002f;
+                &&(focusSurface=objects.nodes().at(focus)->position,earth->worldToLocal(focusSurface),focusSurface.length()<1.001f)
+                &&earthCamera.length()<1.002f&&earthCamera.distanceTo(focusSurface)<.01f;
             // A vehicle near a body's ground keeps the detail it asked for (it was released 3 s after each load,
             // as if the camera had left the body, and loaded again).
             const bool planetReleased=planets.releaseDistantDetails(detailFocus,camera->position,visualSettings.quality||nearGround,elapsed);
@@ -3065,23 +3195,47 @@ int albert::runRenderer(int argc, char** argv) {
             }
             if((focus!=lastRegionalFocus&&(solids.contains(focus)||solids.contains(lastRegionalFocus)))||(lastDetailQuality!=static_cast<bool>(visualSettings.quality)&&solids.contains(focus)))regional.retry();
             lastRegionalFocus=focus;lastDetailQuality=visualSettings.quality;
+            // Select imagery for what the camera sees, not only its nadir or the
+            // vehicle's ground track. The 5x5 ray grid extends 10% beyond each
+            // screen edge; the geographic bound adds its own reuse margin.
+            auto earthViewRegion=[&](double grid,std::optional<albert::GeoRegion> required=std::nullopt){
+                Matrix4 inverseEarth;inverseEarth.copy(*earth->matrixWorld).invert();
+                std::array<std::array<double,3>,27> rays;unsigned next=0;
+                const float half=std::tan(camera->fov*float(PI)/360.f);
+                for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){
+                    Vector3 ray(x*.55f*half*camera->aspect,y*.55f*half,-1);
+                    ray.transformDirection(*camera->matrixWorld).transformDirection(inverseEarth);
+                    rays[next++]={ray.x,ray.y,ray.z};
+                }
+                const auto* terrain=planets.earthTerrain();
+                const double radius=terrain?terrain->ground(earthCamera).value_or(1.):1.;
+                // A pole inside the view can fall between grid samples. Include
+                // its exact ray; the sphere intersection rejects an occluded pole.
+                for(double sign:{-1.,1.}){
+                    Vector3 pole(0,float(sign*radius),0);pole.applyMatrix4(*earth->matrixWorld).applyMatrix4(camera->matrixWorldInverse);
+                    if(pole.z>=0)continue;pole.applyMatrix4(camera->projectionMatrix);
+                    if(std::abs(pole.x)<=1.1f&&std::abs(pole.y)<=1.1f)rays[next++]={-double(earthCamera.x),sign*radius-double(earthCamera.y),-double(earthCamera.z)};
+                }
+                return albert::surfaceRegion({earthCamera.x,earthCamera.y,earthCamera.z},std::span<const std::array<double,3>>(rays.data(),next),grid,required,radius);
+            };
             if(!nearGround)siteRegion.reset();
             if(nearGround){
                 const double latitude=albert::geodeticLatitude(std::asin(std::clamp(focusSurface.y/focusSurface.length(),-1.f,1.f)))*180./PI;
                 const double lon=albert::longitude(std::atan2(focusSurface.z,-focusSurface.x)*180./PI-180.);
-                constexpr double cell=.0439453125,half=.0439453125; // ~10 km box on a 0.044° lattice: 30 m relief.
-                // The site's box kept while what is in focus stays in its middle half, and once it is 3 km up (a climbing vehicle leaves
-                // it for good): moved on each cell crossed, it was loaded again eight times in a climb, the ground blinking at each swap.
-                const double up=(focusSurface.length()-(1-std::pow(std::sin(latitude*PI/180),2)/298.257223563))*6378137.;
+                constexpr double cell=.0439453125,half=.0439453125;
+                // Keep a minimum area around the vehicle without replacing the
+                // camera's footprint by that box. The published crop is reused
+                // by RegionalImagery while it still covers the desired view.
                 const auto inner=[&](const albert::GeoRegion& r){const double w=r.east-r.west,h=r.north-r.south;return lon>r.west+w/4&&lon<r.east-w/4&&latitude>r.south+h/4&&latitude<r.north-h/4;};
-                if(!siteRegion||(up<3000&&!inner(*siteRegion))){const double south=std::floor(latitude/cell)*cell-half,west=std::floor(lon/cell)*cell-half;siteRegion=albert::GeoRegion{west,south,west+2*half+cell,south+2*half+cell};}
-                regional.request(*siteRegion);
+                if(!siteRegion||!inner(*siteRegion)){const double south=std::floor(latitude/cell)*cell-half,west=std::floor(lon/cell)*cell-half;siteRegion=albert::GeoRegion{west,south,west+2*half+cell,south+2*half+cell};}
+                regional.request(earthViewRegion(cell,siteRegion).value_or(*siteRegion));
             } else if(visualSettings.quality && (detailFocus=="earth"||freeCamera) && earthCamera.length()<2.2f) {
                 const double latitude=albert::geodeticLatitude(std::asin(std::clamp(earthCamera.y/earthCamera.length(),-1.f,1.f)))*180./PI;
                 const double lon=albert::longitude(std::atan2(earthCamera.z,-earthCamera.x)*180./PI-180.);
                 const double altitude=std::max(.1,(earthCamera.length()-1.)*6378.137); // km; finer cells near the ground, down to ~10 km.
                 const int finer=std::clamp(static_cast<int>(std::floor(std::log2(150./altitude))),0,4);
-                regional.request(albert::viewRegion(lon,latitude,earthCamera.length(),1.,camera->aspect,camera->fov,1.40625/(1<<finer)));
+                const double grid=1.40625/(1<<finer);
+                regional.request(earthViewRegion(grid).value_or(albert::viewRegion(lon,latitude,earthCamera.length(),1.,camera->aspect,camera->fov,grid)));
             } else if(visualSettings.quality && detailFocus=="moon" && camera->position.distanceTo(moonPosition)<.8f) {
                 Vector3 local=camera->position;moon->worldToLocal(local);
                 const double latitude=std::asin(std::clamp(local.y/local.length(),-1.f,1.f))*180./PI;
@@ -3097,6 +3251,7 @@ int albert::runRenderer(int argc, char** argv) {
                 if(!images->error.empty()) std::cerr<<"Detalhes regionais: "<<images->error<<std::endl;
                 if(images->day || images->night) {
                 std::cout<<"Detalhes locais carregados: "<<images->body<<std::endl;
+                if(reviewEarth&&images->body=="earth")++earthReviewLoads;
                 if(solids.contains(images->body))solids.stage(std::move(*images));else planets.stageRegionalImages(std::move(*images));
                 }
             }
@@ -3187,11 +3342,11 @@ int albert::runRenderer(int argc, char** argv) {
                 const double fade=std::clamp((here.height-30e3)/20e3,0.,1.);
                 cloudShare=albert::animateValue(cloudShare,preferences.volumetricClouds&&visualSettings.quality>0?static_cast<float>(1-fade*fade*(3-2*fade)):0.f,dt);
                 const float volume=shownSettings.clouds==albert::CloudMode::Off?0.f:cloudShare*(coastal.cover>=0?1.f:planets.cloudOpacity()/.88f);cloudVolume=graphics.cloudsShown()?volume:0.f;
-                graphics.setClouds(volume>0,volume,seaClock,1.5f*seaWindEast,1.5f*seaWindNorth);planets.setCloudShell(1-cloudVolume);
+                graphics.setClouds(volume>0,volume,seaClock,1.5f*seaWindEast,1.5f*seaWindNorth,visualSettings.quality>0);planets.setCloudShell(1-cloudVolume);
             }
             // Out of focus (another window over it, a workspace away) the compositor may hold the synced frames back: then unsynced,
             // the frame cap pacing it, so the flights keep moving and their samples keep flowing.
-            graphics.setSamples(preferences.antialias?4:1);graphics.setVsync(preferences.vsync&&graphics.focused());ImGui::GetIO().FontGlobalScale=preferences.uiScale;
+            graphics.setSolarFlare(preferences.solarFlare);graphics.setSamples(preferences.antialias?4:1);graphics.setVsync(preferences.vsync&&graphics.focused());ImGui::GetIO().FontGlobalScale=preferences.uiScale;
 #ifdef ALBERT_HAS_RPC
             { // Retarded spectra stay separate so distant vents and the stack keep their directions.
                 namespace ph=albert::physics;namespace ac=ph::acoustics;
@@ -3338,6 +3493,14 @@ int albert::runRenderer(int argc, char** argv) {
 #endif
             if (!introductionStart) introductionStart = SteadyClock::now();
             if (smokeTest && ++renderedFrames >= 5) {
+                if(lookAtStarbase){
+                    const auto expected=albert::physics::fixedPosition(albert::physics::earth,{radians(starbaseEyeLatitude),radians(starbaseEyeLongitude),starbaseEyeAltitudeKm*1000.});
+                    const auto eye=sceneOrigin+albert::core::Vector{camera->position.x*albert::core::earthRadiusMeters,-camera->position.z*albert::core::earthRadiusMeters,camera->position.y*albert::core::earthRadiusMeters};
+                    const double error=std::hypot(c2t[0][0]*eye.x+c2t[0][1]*eye.y+c2t[0][2]*eye.z-expected.x,
+                        c2t[1][0]*eye.x+c2t[1][1]*eye.y+c2t[1][2]*eye.z-expected.y,c2t[2][0]*eye.x+c2t[2][1]*eye.y+c2t[2][2]*eye.z-expected.z);
+                    if(!std::isfinite(error)||error>2.)throw std::runtime_error("Vista de Starbase fora da posicao geografica esperada");
+                    std::cout<<"Starbase: erro de posicionamento "<<error<<" m"<<std::endl;
+                }
                 std::cout << "Smoke test OK: efemerides reais e 5 quadros renderizados."
                           << std::endl;
                 graphics.close();
@@ -3358,6 +3521,7 @@ int albert::runRenderer(int argc, char** argv) {
         if (refreshing) pending.wait();
         if (refreshingOrbits) pendingOrbits.wait();
         if (smokeTest && renderedFrames < 5) return 1;
+        if (reviewEarth && !earthReviewComplete) return 1;
 
     } catch (const std::exception& e) {
         std::cerr << "Albert Engine: "

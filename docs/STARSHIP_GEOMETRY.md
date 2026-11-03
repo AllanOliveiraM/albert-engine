@@ -1,5 +1,7 @@
 # Starship and Super Heavy drawn geometry
 
+Current review (3 November 2026): see [Booster V3 engine review](BOOSTER_V3_ENGINE_REVIEW.md). The measurements and captures below describe the original implementation. The current renderer has an open aft carrier, no new engine skirt or broad aft heat shield, and a closed, curved lower tank boundary at the existing tank station. Its dome dimensions are estimates; a full V3 engine-head/support/plumbing reconstruction and final barrel cut remain pending. Carrier rails now retain their stations across LOD changes.
+
 The renderer now builds actual open hardware around the existing `VehicleLook`. No flight definition, aerodynamic surface, mass property, contact pin, collision hull, guidance or physics code changes. The attached Flight 11 frames guide the appearance; the installed definitions supply V3's three booster fins, 33 booster engines (3 centre / 10 middle / 20 outer), and six ship engines (three sea-level / three vacuum).
 
 ## Files and behaviour

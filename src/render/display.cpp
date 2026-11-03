@@ -1,5 +1,6 @@
 #include "display.hpp"
 #include "window_icon.hpp"
+#include "free_camera_motion.hpp"
 #include "webgpu_programs.hpp"
 #include "gpu/atmosphere.hpp"
 #include "gpu/context.hpp"
@@ -23,6 +24,7 @@ struct albert::Display::Impl {
     std::function<void()> draw;
     std::unique_ptr<gpu::Window> window;std::unique_ptr<gpu::Context> context;std::unique_ptr<gpu::SceneRenderer> scene;std::unique_ptr<gpu::Atmosphere> earthAir,marsAir;std::unique_ptr<gpu::Ocean> ocean;
     WGPUCommandEncoder encoder=nullptr;WGPUTextureView target=nullptr;bool drawnTarget=false,styled=false;float dpi=1;
+    bool mouseCaptured=false;RelativeMouseMotion mouseMotion;ImGuiConfigFlags savedMouseFlags=0;
     // The second view's image; ones it outgrew are kept to the end (ImGui's backend caches a bind group per view).
     WGPUTexture inset=nullptr;WGPUTextureView insetView=nullptr;unsigned insetWidth=0,insetHeight=0;std::vector<std::pair<WGPUTexture,WGPUTextureView>> retired;
     void framebuffer(unsigned& w,unsigned& h)const{int x=0,y=0;glfwGetFramebufferSize(window->handle(),&x,&y);w=static_cast<unsigned>(std::max(x,1));h=static_cast<unsigned>(std::max(y,1));}
@@ -47,6 +49,7 @@ albert::Display::Display(const std::string& title,WindowSize size,const std::fil
     d.dpi=monitor::contentScale().first;
 }
 albert::Display::~Display(){
+    captureMouse(false);
     auto& d=*impl_;ImGui_ImplWGPU_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();
     if(d.inset)d.retired.emplace_back(d.inset,d.insetView);for(auto [t,v]:d.retired){wgpuTextureViewRelease(v);wgpuTextureRelease(t);}d.scene.reset();d.earthAir.reset();d.marsAir.reset();d.ocean.reset();d.context.reset();d.window.reset();
 }
@@ -59,6 +62,7 @@ void albert::Display::setShadowScale(float metersPerUnit,bool high){impl_->scene
 void albert::Display::setShadows(bool enabled){impl_->scene->shadows=enabled;}
 void albert::Display::setExposure(float value){impl_->scene->exposure=value;}
 void albert::Display::setFisheye(bool enabled){impl_->scene->fisheye=enabled;}
+void albert::Display::setSolarFlare(bool enabled){impl_->scene->solarFlare=enabled?.035f:0.f;}
 void albert::Display::setWeather(threepp::Texture* clouds,float cloudKm,float cloudOpacity,float surfaceWind,float polarRatio,float cloudOffset){
     auto& d=*impl_;auto& a=d.scene->air;a.clouds=clouds;a.cloudKm=cloudKm;a.cloudShadow=clouds?cloudOpacity:0.f;a.surfaceWind=surfaceWind;a.polarRatio=polarRatio;a.cloudOffset=cloudOffset;}
 void albert::Display::setAir(const Object3D* body,float kmPerUnit,float strength,float groundKm,bool mars){
@@ -76,12 +80,32 @@ void albert::Display::setCoastalLight(const CoastalLight& light){
     if(light.cover>=0){s.air.cloudKm=(light.baseKm+light.topKm)*.5f;s.air.cloudShadow=.45f;}
     s.volume.baseKm=light.cover>=0?light.baseKm:1.5f;s.volume.topKm=light.cover>=0?light.topKm:5.5f;
 }
-void albert::Display::setClouds(bool on,float strength,double seconds,float east,float north){
-    auto& v=impl_->scene->volume;v.enabled=on&&strength>0&&!impl_->context->software();v.strength=strength;v.seconds=seconds;v.windEast=east;v.windNorth=north;v.divisor=4;v.steps=32;v.maxRays=80000;}
+void albert::Display::setClouds(bool on,float strength,double seconds,float east,float north,bool highQuality){
+    auto& v=impl_->scene->volume;v.enabled=on&&strength>0&&!impl_->context->software();v.strength=strength;v.seconds=seconds;v.windEast=east;v.windNorth=north;
+    // Raise the ray target at high quality: at 1080p this changes the reconstruction
+    // footprint from 3x3 to 2x2 pixels, which is visible when clouds fill the view.
+    // Keep the ray budget bounded on high-resolution displays and on integrated GPUs.
+    v.divisor=0;v.steps=32;v.maxRays=highQuality?600000u:240000u;}
 bool albert::Display::cloudsShown()const{return impl_->scene->cloudsShown();}
+std::string albert::Display::gpuMemory()const{return impl_->scene->memory();}
 void albert::Display::setSamples(unsigned samples){impl_->scene->samples=samples>1?4u:1u;}
 void albert::Display::setVsync(bool on){impl_->context->setVsync(on);}
 bool albert::Display::focused()const{return glfwGetWindowAttrib(impl_->window->handle(),GLFW_FOCUSED)!=0;}
+void albert::Display::captureMouse(bool enabled){
+    auto& d=*impl_;enabled=enabled&&focused();if(enabled==d.mouseCaptured)return;
+    auto& io=ImGui::GetIO();constexpr auto mask=ImGuiConfigFlags_NoMouse|ImGuiConfigFlags_NavEnableKeyboard;
+    if(enabled){d.savedMouseFlags=io.ConfigFlags&mask;io.ConfigFlags=(io.ConfigFlags|ImGuiConfigFlags_NoMouse)&~ImGuiConfigFlags_NavEnableKeyboard;}
+    else io.ConfigFlags=(io.ConfigFlags&~mask)|d.savedMouseFlags;
+    glfwSetInputMode(d.window->handle(),GLFW_CURSOR,enabled?GLFW_CURSOR_DISABLED:GLFW_CURSOR_NORMAL);
+    if(glfwRawMouseMotionSupported())glfwSetInputMode(d.window->handle(),GLFW_RAW_MOUSE_MOTION,enabled?GLFW_TRUE:GLFW_FALSE);
+    d.mouseCaptured=enabled;d.mouseMotion.reset();
+}
+bool albert::Display::mouseCaptured()const{return impl_->mouseCaptured;}
+std::array<double,2> albert::Display::mouseDelta(){
+    auto& d=*impl_;if(!d.mouseCaptured||!focused())return {};
+    double x,y;glfwGetCursorPos(d.window->handle(),&x,&y);
+    return d.mouseMotion.sample(x,y);
+}
 void albert::Display::setEarthshine(const Object3D* earth,float radius){impl_->scene->earthshine={earth,earth?radius:0.f};}
 float albert::Display::exposure()const{return impl_->scene->exposure;}
 namespace {

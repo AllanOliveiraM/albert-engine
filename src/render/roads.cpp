@@ -35,7 +35,9 @@ void Roads::sync(const core::Scene& scene){
     std::shared_ptr<const core::Scenery> next;
     for(const auto& [id,o]:scene.objects())if(o.visible&&o.scenery&&!o.scenery->roads.empty()){next=o.scenery;break;}
     if(next==source_)return;
-    source_=std::move(next);materials_.clear();for(auto& t:cover_)t.reset();index_.reset();data_.reset();segments_=0;slots_=0;if(source_)build(*source_);
+    source_=std::move(next);materials_.clear();for(auto& t:cover_)t.reset();index_.reset();data_.reset();segments_=0;slots_=0;
+    origin_=Vector4(0,0,0,0);grid_=Vector4(0,0,0,0);geo_=Vector4(1,0,0,0);coverGrid_=Vector4(0,0,1,0);
+    if(source_)build(*source_);
 }
 void Roads::build(const core::Scenery& s){
     std::vector<Primitive> primitives;
@@ -98,28 +100,39 @@ void Roads::cover(int quality){
         t->minFilter=Filter::LinearMipmapLinear;t->magFilter=Filter::Linear;t->generateMipmaps=true;t->anisotropy=slot?4:1;return t;};
     weights.insert(weights.end(),shore.begin(),shore.end());cover_[slot]=make(std::move(weights));
 }
-std::shared_ptr<Material> Roads::material(const std::shared_ptr<MeshStandardMaterial>& base,int quality){
-    if(!base||!data_)return base;
+std::shared_ptr<Material> Roads::material(const std::shared_ptr<MeshStandardMaterial>& base,int quality,
+        const std::shared_ptr<MeshStandardMaterial>& regional,std::optional<Vector4> bounds){
+    if(!base||(!data_&&!regional))return base;
+    defineRoads();
     auto& m=materials_[base->id];if(!m){m=ShaderMaterial::create();m->name="albert:roads";m->lights=true;}
     m->side=base->side;m->visible=base->visible;m->transparent=base->transparent;m->depthWrite=base->depthWrite;
     cover(quality);const unsigned slot=quality>0?1:0;
     auto& u=m->uniforms;u["coverMap"].setValue(cover_[slot].get());u["coverGrid"].setValue(coverGrid_);u["colour"].setValue(four(base->color.r,base->color.g,base->color.b,base->opacity));u["emissive"].setValue(four(0,0,0,base->bumpMap&&base->bumpMap->wrapS==TextureWrapping::Repeat?1:0));
     u["params"].setValue(four(base->roughness,base->metalness,base->alphaTest,base->lightMapIntensity));
-    u["flags"].setValue(four(base->map&&base->map->colorSpace==ColorSpace::sRGB?1:0,2,base->alphaMap?1:0,base->lightMap?1:0));
-    u["specular"].setValue(four(0,0,0,base->bumpScale));u["more"].setValue(four(base->bumpMap?1:0,base->roughnessMap?2:0,base->side==Side::Double?1:0,0));
-    u["map"].setValue(base->map.get());u["alphaMap"].setValue(base->alphaMap.get());u["lightMap"].setValue(base->lightMap.get());u["bumpMap"].setValue(base->bumpMap.get());u["roughnessMap"].setValue(base->roughnessMap.get());
-    u["roadOffset"].setValue(four(((source_->longitude+pi)/(2*pi)-origin_.x)*-origin_.z,(source_->latitude/pi+.5-origin_.y)*-origin_.w,0,0));
-    u["roadIndex"].setValue(index_.get());u["roadData"].setValue(data_.get());u["roadOrigin"].setValue(origin_);u["roadGrid"].setValue(grid_);auto geo=geo_;geo.w=quality;u["roadGeo"].setValue(geo);return m;
+    u["flags"].setValue(four(base->map&&base->map->colorSpace==ColorSpace::sRGB?1:0,2,!regional&&base->alphaMap?1:0,base->lightMap?1:0));
+    u["specular"].setValue(four(0,0,0,regional?0:base->bumpScale));u["more"].setValue(four(!regional&&base->bumpMap?1:0,(base->roughnessMap||(regional&&regional->roughnessMap))?2:0,base->side==Side::Double?1:0,0));
+    // Terrain has geometric normals and no alpha cutout. Reuse those two slots
+    // for regional colour/roughness to remain within WebGPU's 16-texture limit.
+    u["map"].setValue(base->map.get());u["alphaMap"].setValue(regional?regional->map.get():base->alphaMap.get());u["lightMap"].setValue(base->lightMap.get());u["bumpMap"].setValue(regional?regional->roughnessMap.get():base->bumpMap.get());u["roughnessMap"].setValue(base->roughnessMap.get());
+    u["roadOffset"].setValue(source_?four(((source_->longitude+pi)/(2*pi)-origin_.x)*-origin_.z,(source_->latitude/pi+.5-origin_.y)*-origin_.w,0,0):Vector4());
+    u["regionBounds"].setValue(bounds.value_or(Vector4(0,0,1,1)));
+    u["regionState"].setValue(four(regional&&bounds?1:0,regional&&regional->map&&regional->map->colorSpace==ColorSpace::sRGB?1:0,regional&&regional->roughnessMap?1:0,0));
+    if(!data_&&!empty_)empty_=texture(std::vector<float>(4,0.f),1,1);
+    u["roadIndex"].setValue(index_?index_.get():empty_.get());u["roadData"].setValue(data_?data_.get():empty_.get());u["roadOrigin"].setValue(origin_);u["roadGrid"].setValue(grid_);auto geo=geo_;geo.x=std::max(1.f,geo.x);geo.w=quality;u["roadGeo"].setValue(geo);return m;
 }
 namespace {
 void defineRoads(){
     static const bool defined=[](){using gpu::Uniform;auto p=gpu::surfaceProgram();
-        for(const char* n:{"colour","emissive","params","flags","specular","more","roadOrigin","roadGrid","roadGeo","roadOffset","coverGrid"})p.uniforms.emplace_back(n,Uniform::vec4);
+        for(const char* n:{"colour","emissive","params","flags","specular","more","roadOrigin","roadGrid","roadGeo","roadOffset","coverGrid","regionBounds","regionState"})p.uniforms.emplace_back(n,Uniform::vec4);
         p.exactTextures={"roadIndex","roadData"};p.textures.push_back("roadIndex");p.textures.push_back("roadData");p.textures.push_back("coverMap");p.attributes.emplace_back("geoResidual",2);
-        auto& w=p.wgsl;auto at=w.find("more: vec4f }");w.replace(at,std::string("more: vec4f }").size(),"more: vec4f, roadOrigin: vec4f, roadGrid: vec4f, roadGeo: vec4f, roadOffset: vec4f, coverGrid: vec4f }");
-        at=w.find("@location(5) worldNormal: vec3f }");w.replace(at,std::string("@location(5) worldNormal: vec3f }").size(),"@location(5) worldNormal: vec3f, @location(6) road: vec2f }");
+        auto& w=p.wgsl;auto at=w.find("more: vec4f }");w.replace(at,std::string("more: vec4f }").size(),"more: vec4f, roadOrigin: vec4f, roadGrid: vec4f, roadGeo: vec4f, roadOffset: vec4f, coverGrid: vec4f, regionBounds: vec4f, regionState: vec4f }");
+        at=w.find("@location(5) worldNormal: vec3f }");w.replace(at,std::string("@location(5) worldNormal: vec3f }").size(),"@location(5) worldNormal: vec3f, @location(6) road: vec2f, @location(7) region: vec2f, @location(8) regionTurn: f32 }");
         at=w.find("@location(3) uv2: vec2f) -> Varyings");w.replace(at,std::string("@location(3) uv2: vec2f) -> Varyings").size(),"@location(3) uv2: vec2f, @location(4) geoResidual: vec2f) -> Varyings");
         at=w.find("    return o;\n}");w.insert(at,"    o.road = (uv2 - material.roadOrigin.xy) * material.roadOrigin.zw + geoResidual * material.roadOrigin.zw + material.roadOffset.xy;\n"+std::string(R"(
+    let delta = uv2-material.regionBounds.xy;
+    let turn = floor(delta.x-material.regionBounds.z*0.5+0.5);
+    o.region = (delta-vec2f(turn,0.0)+geoResidual)/material.regionBounds.zw;
+    o.regionTurn = turn;
     // Only the drawn vertices move: neither the DEM provider nor Terrain::ground changes.
     let coverUV = (o.road-material.coverGrid.xy)/material.coverGrid.z;
     let inside = all(coverUV>vec2f(0.0))&&all(coverUV<vec2f(1.0));
@@ -253,6 +266,20 @@ fn roadSurface(q: vec2f, dx: vec2f, dy: vec2f) -> vec4f {
     return vec4f(colour,cover);
 }
 )");
+        at=w.find("    var base = material.colour * texel;");w.insert(at,R"(
+    // Vertices on opposite sides of the crop's antipode use different turns.
+    // Undo their fractional interpolation before wrapping once per fragment;
+    // otherwise the far side of the globe gets a spurious strip of local imagery.
+    let fragmentTurn = floor((v.region.x-0.5)*material.regionBounds.z+v.regionTurn+0.5);
+    let regionUV = v.region+vec2f((v.regionTurn-fragmentTurn)/material.regionBounds.z,0.0);
+    let regional = textureSample(alphaMap,alphaSampler,regionUV);
+    let edge = min(min(regionUV.x,regionUV.y),min(1.0-regionUV.x,1.0-regionUV.y));
+    let blend = material.regionState.x*smoothstep(0.0,0.04,edge)*regional.a;
+    let regionalRGB = select(regional.rgb,srgbToLinear(regional.rgb),material.regionState.y>0.5);
+    texel = vec4f(mix(texel.rgb,regionalRGB,blend),texel.a);
+)");
+        const std::string rough="let roughTexel = textureSample(roughnessMap, roughnessSampler, v.uv);";
+        at=w.find(rough);w.replace(at,rough.size(),"let regionFinish = textureSample(bumpMap,bumpSampler,regionUV);\n    let roughTexel = mix(textureSample(roughnessMap, roughnessSampler, v.uv),regionFinish,blend*material.regionState.z);");
         at=w.find("    let light = airLight");w.insert(at,R"(
     let groundDx = dpdx(v.road);let groundDy = dpdy(v.road);
     let cover = coverSurface(v.road,groundDx,groundDy,base.rgb);

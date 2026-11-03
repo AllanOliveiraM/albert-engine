@@ -46,6 +46,28 @@ int main(){try{
     s.setRate(60.);mono+=1;state=s.read();require(!state.limited&&state.utcSeconds==Simulation::earliestUtc+60.,"Leaves the limit in the opposite direction");
     s.live();state=s.read();require(state.live&&state.rate==1.&&state.utcSeconds==real&&state.generation==4,"Back to live time");
     s.stall(0.);require(s.read().live,"Live time never stalls");
+    // The time panel offers a logarithmic range up to one Julian year/s.
+    // Exercise its actual endpoint, not a value derived from the old core limit.
+    constexpr double yearPerSecond=365.25*86400.;
+    for(double rate:{1.,0.,-3600.,yearPerSecond,-yearPerSecond}){
+        double tick=0;Simulation chosen([]{return 0.;},[&]{return tick;});
+        const double sunset=unixSeconds({2026,11,3,23,42,0});
+        chosen.choose(sunset,rate);tick+=2;
+        require(chosen.read().utcSeconds==sunset+2*rate,"Time panel rate does not advance the chosen date");
+        const auto generation=chosen.read().generation;
+        chosen.jump(sunset+86400.);tick+=3;
+        const auto moved=chosen.read();
+        require(moved.utcSeconds==sunset+86400.+3*rate&&moved.rate==rate&&moved.pace==rate&&!moved.live&&moved.generation==generation+1,
+                "Applying a date changed pause, speed or direction");
+    }
+    for(double direction:{-1.,1.}){
+        double tick=0;Simulation extreme([]{return 0.;},[&]{return tick;});
+        const double edge=direction>0?Simulation::latestUtc:Simulation::earliestUtc;
+        extreme.choose(edge-direction*100.,direction*yearPerSecond);tick+=1;
+        require(extreme.read().limited&&extreme.read().utcSeconds==edge&&extreme.read().rate==0.,"Maximum playback escaped the supported calendar");
+        extreme.setRate(-direction);tick+=1;
+        require(!extreme.read().limited&&extreme.read().utcSeconds==edge-direction,"Playback could not leave a calendar limit");
+    }
     // Analytic positions against NASA/JPL Horizons (geocentric ICRF, km, no corrections)
     // at 1969-07-20 and 2026-10-17 00:00 TDB, within the published ERFA maxima
     // (planets: longitude/latitude arcseconds at their distance plus radius error).

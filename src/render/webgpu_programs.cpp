@@ -97,7 +97,18 @@ void earthLayers(){
     var intensity = clamp(dot(photo, vec3f(0.2126, 0.7152, 0.0722)) / 0.74, 0.05, 1.1);
     intensity = mix(1.0, intensity, smoothstep(0.0, 0.65, n.z));
     let mu = max(0.0, dot(normalize(v.worldNormal), normalize(frame.camera.xyz - v.world)));
-    return vec4f(linearToSrgb(vec3f(1.0, 0.96, 0.88) * intensity * (0.4 + 0.6 * mu) * airFilter(v.world)), 1.0); // Reddened through the air.
+    // The scene's irradiance at 1 AU is 2.4. A resolved solar disc is radiance,
+    // E / (pi * angularRadius^2), rather than a unit-bright surface texture
+    // (Bruneton's GetSolarRadiance). Its emission stays constant with distance.
+    let solarRadiance = vec3f(1.0, 0.96, 0.88) * (2.4 / (3.14159265 * 0.00465047 * 0.00465047));
+    var emission = solarRadiance * intensity * (0.4 + 0.6 * mu) / 0.8;
+    if (frame.air.w > 0.0) {
+        let ray = normalize((frame.planet * vec4f(v.world - frame.camera.xyz, 0.0)).xyz);
+        if (skyHitsGround(frame.air.xyz, ray)) { emission = vec3f(0.0); } // Also close gaps below the curved horizon in the coarse globe.
+    }
+    // An opaque disc overwrites the background sky: retain the foreground
+    // scattering as well as extinction, then apply the same exposure as the sky.
+    return vec4f(finish(airApply(v.world, emission)), 1.0);
 }
 )";
     albert::gpu::define("albert:sun",sun);

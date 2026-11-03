@@ -167,7 +167,14 @@ fn cloudMarch(ndc: vec2f, jitter: f32) -> CloudRay {
     let c = frame.air.xyz; let segment = cloudSegment(c, ray); let start = segment.x; let span = min(segment.y, start + 300.0) - start;
     if (!(span > 0.0) || start > 2000.0) { return none; }
     let sun = frame.airSun.xyz; let phase = cloudPhase(dot(ray, sun)); let scaled = 1.0 - CLOUD_G * CLOUD_G;
-    let n = u32(clouds.size.z); let curve = clamp(span / 40.0, 0.0, 0.9); // Long rays: steps growing with distance.
+    // Cloud shape repeats every 12 km. Keep the far end of a grazing ray below
+    // half that spacing, adding steps only where the atmosphere shell makes the
+    // view ray long; the old 32 fixed steps skipped whole cloud lobes and made
+    // them crawl or break into slabs as the camera moved.
+    let requestedSteps = u32(max(clouds.size.z, 1.0));
+    let spatialSteps = u32(ceil(span / 4.0));
+    let n = max(requestedSteps, min(64u, max(32u, spatialSteps)));
+    let curve = clamp(span / 80.0, 0.0, 0.25); // Mild near-field bias; keep the horizon adequately sampled too.
     var light = vec3f(0.0); var direct = 1.0; var diffuse = 1.0; var weighted = 0.0; var weights = 0.0; var previous = start;
     for (var i = 0u; i < n; i++) {
         let x1 = f32(i + 1u) / f32(n); let next = start + span * mix(x1, x1 * x1, curve); let dt = next - previous; previous = next;

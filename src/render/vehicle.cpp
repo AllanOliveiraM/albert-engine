@@ -48,6 +48,17 @@ std::shared_ptr<BufferGeometry> strut(Vector3 a,Vector3 b,float radius,int sides
 std::shared_ptr<BufferGeometry> collar(float radius,float thickness,float y,int segments=40){
     auto g=TorusGeometry::create(radius,thickness,4,segments);g->rotateX(pi/2);g->translate(0,y,0);return g;
 }
+// A closed, thin dished pressure boundary, not a disc at the nozzle exits.
+// Both skins join at the rim; the centre is below the rim (convex aft).
+std::shared_ptr<BufferGeometry> tankDome(float radius,float depth,float thickness,float y,int segments,int steps){
+    std::vector<Vector2> profile;
+    for(int skin=0;skin<2;++skin)for(int j=0;j<=steps;++j){const int i=skin?steps-j:j;
+        const float angle=pi*.5f*float(i)/steps;
+        // Bevel the joined rim inward. A vertical strip at the hull's exact
+        // radius would be coplanar with its barrel and flicker from the side.
+        profile.emplace_back(i==0?0.f:(radius-skin*thickness)*std::sin(angle),y-depth*std::cos(angle)+skin*thickness);}
+    return LatheGeometry::create(profile,segments);
+}
 std::shared_ptr<ShaderMaterial> plumeMaterial(){ // Dense exhaust hides the background; rarefied gas mostly adds light.
     auto m=ShaderMaterial::create();m->name="albert:plume";m->transparent=true;m->depthWrite=false;m->side=Side::Double;m->blending=Blending::Custom;m->blendSrc=BlendFactor::One;m->blendDst=BlendFactor::OneMinusSrcAlpha;
     m->uniforms={{"core",Uniform(Vector3(.78f,.86f,1))},{"edge",Uniform(Vector3(1,.28f,.19f))},{"strength",Uniform(0.f)},{"diamonds",Uniform(0.f)},
@@ -99,6 +110,10 @@ Vehicle::Vehicle(const core::VehicleLook& look){
     // slightly aft-staggered inner-engine exits. Keep the aft opening clear around every bell.
     double base=0,bay=1e9;for(const auto& s:look.sections)base=std::max(base,s.to);
     for(const auto& e:look.engines)bay=std::min(bay,(e.exitRadius>1?2.6:2.2)*e.exitRadius*.85); // Shortest bell's open envelope.
+    const auto enginesInRing=[&](double inner,double outer){return std::count_if(look.engines.begin(),look.engines.end(),[&](const auto& e){const double r=std::hypot(e.position.y,e.position.z);return r>=inner&&r<outer;});};
+    const bool boosterCarrier=look.engines.size()==33&&enginesInRing(0,1)==3&&enginesInRing(1,3)==10&&enginesInRing(3,5)==20;
+    double aftTank=0;for(const auto& t:look.tanks)aftTank=std::max(aftTank,t.to);
+    const bool boosterDome=boosterCarrier&&aftTank>0&&aftTank<base;
     auto surface=[&](Color colour,float metal,float rough,float kind,Vector4 hull={},float width=0,float span=0,bool open=false){
         auto m=assistedMaterial(colour,metal,rough,false,open);m->name="albert:vehicle";
         m->uniforms.emplace("vehicleHull",Uniform(hull));m->uniforms.emplace("vehicleSurface",Uniform(Vector4(kind,width,span,0.f)));
@@ -216,22 +231,23 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         const Vector3 along=axisOf(e.direction).normalize();x.pivot=Object3D::create();x.pivot->position.copy(point(e.position)).add(Vector3(along).multiplyScalar(length));
         // An open divergent nozzle with rolled lips, chamber and external feed lines.
         const float throat=r*(vacuum?.12f:.18f);
+        const auto bellRadius=[&](float t){return throat+(mouth-throat)*std::sqrt(t);};
         x.bell=assistedMaterial(Color(vacuum?0x4a443e:0x3a3530),.75f,.45f,false,true);x.bell->name="albert:bell";
         x.bell->uniforms.at("emissive").setValue(Vector3());
         x.bell->uniforms.emplace("burn",Uniform(Vector3()));x.bell->uniforms.emplace("lip",Uniform(Vector3()));x.bell->uniforms.emplace("bellLength",Uniform(length));
         // Retain the named joint marker for gimballing() and engine diagnostics. It has no draw.
         auto marker=part(BufferGeometry::create(),x.bell);marker->visible=false;x.pivot->add(marker);
         for(int tier=0;tier<2;++tier){std::vector<Vector2> points;
-            for(int i=0;i<=int(tier==0?16:6);++i){const float t=float(i)/(tier==0?16:6);points.emplace_back(throat+(mouth-throat)*std::sqrt(t),-length*t);}
+            for(int i=0;i<=int(tier==0?16:6);++i){const float t=float(i)/(tier==0?16:6);points.emplace_back(bellRadius(t),-length*t);}
             hardware_[tier].add(LatheGeometry::create(points,tier==0?32:12),x.pivot.get(),Color(vacuum?.25f:.21f,vacuum?.23f:.22f,.23f),.45f,.75f,x.bell);
             // Rolled mouth and throat rims, chamber, and fuel/oxidizer feed elbows.
             hardware(collar(mouth-.012f,.022f,-length,tier==0?32:12),x.pivot.get(),steel,.35f,.85f,tier);
             auto chamber=CylinderGeometry::create(throat*.82f,throat,.35f*r,tier==0?16:8);chamber->translate(0,.16f*r,0);hardware(chamber,x.pivot.get(),dark,.46f,.75f,tier);
             if(tier==0){for(float side:{-1.f,1.f}){
-                const float elbow=throat+(r-throat)*.5f+.08f*r,end=throat+(r-throat)*std::sqrt(.55f)+.08f*r;
+                const float elbow=bellRadius(.25f)+.08f*r,end=bellRadius(.55f)+.08f*r;
                 hardware(bar({side*(throat+.08f*r),.28f*r,0},{side*elbow,-.25f*length,.08f*r},.055f*r,8),x.pivot.get(),steel,.4f,.9f,tier);
                 hardware(bar({side*elbow,-.25f*length,.08f*r},{side*end,-length*.55f,.12f*r},.045f*r,8),x.pivot.get(),steel,.4f,.9f,tier);}
-                for(int i=0;i<3;++i)hardware(collar(throat+(r-throat)*std::sqrt(.25f+i*.21f)+.05f*r,.016f*r,-length*(.25f+i*.21f),16),x.pivot.get(),dark,.48f,.7f,tier);}
+                for(int i=0;i<3;++i)hardware(collar(bellRadius(.25f+i*.21f)+.05f*r,.016f*r,-length*(.25f+i*.21f),16),x.pivot.get(),dark,.48f,.7f,tier);}
         }
         // Fixed thrust frame and articulated engine-side yoke. Hardware is
         // batched with the other engine pieces at both distance tiers.
@@ -249,16 +265,21 @@ Vehicle::Vehicle(const core::VehicleLook& look){
                 // Unequal feed diameters and short welded elbows, rather than
                 // identical straight decoration around every nozzle.
                 for(int line=0;line<3;++line){const float a=.7f+line*2.1f,radius=throat+.10f*r,thickness=(line==0?.075f:.042f)*r;
-                    const Vector3 p0(radius*std::cos(a),.38f*r,radius*std::sin(a)),p1((radius+.18f*r)*std::cos(a),-.08f*length,(radius+.18f*r)*std::sin(a));
-                    const Vector3 p2((radius+.32f*r)*std::cos(a),-.25f*length,(radius+.32f*r)*std::sin(a));
+                    // Clear the divergent wall by the tube's own radius plus
+                    // a gap. The old fixed offsets and flange crossed the
+                    // bell, exposing pipes inside the exhaust passage.
+                    const float r1=bellRadius(.08f)+thickness+.05f*r,r2=bellRadius(.25f)+thickness+.05f*r;
+                    const Vector3 p0(radius*std::cos(a),.38f*r,radius*std::sin(a)),p1(r1*std::cos(a),-.08f*length,r1*std::sin(a));
+                    const Vector3 p2(r2*std::cos(a),-.25f*length,r2*std::sin(a));
                     hardware(bar(p0,p1,thickness,10),x.pivot.get(),steel,.35f,.85f,tier);hardware(bar(p1,p2,thickness,10),x.pivot.get(),dark,.48f,.6f,tier);
-                    auto flange=collar(throat+.10f*r,.025f*r,-.08f*length,24);if(line==0)hardware(flange,x.pivot.get(),steel,.45f,.7f,tier);
+                    if(line==0)hardware(collar(bellRadius(.08f)+.05f*r,.025f*r,-.08f*length,24),x.pivot.get(),steel,.45f,.7f,tier);
                 }
             }
         }
         if(steerable)for(unsigned k=0;k<2;++k){const float a=float(k)*pi/2+.35f;
             x.anchors[k]=Vector3((throat+.35f*r)*std::cos(a),.42f*r,(throat+.35f*r)*std::sin(a)).add(x.pivot->position);
-            x.lugs[k]={(throat+.16f*r)*std::cos(a),-.24f*length,(throat+.16f*r)*std::sin(a)};
+            const float lugRadius=bellRadius(.24f)+.12f*r;
+            x.lugs[k]={lugRadius*std::cos(a),-.24f*length,lugRadius*std::sin(a)};
             x.actuators[k]=Object3D::create();x.actuators[k]->name="engine gimbal actuator";root_->add(x.actuators[k]);
             for(int tier=0;tier<2;++tier){auto housing=CylinderGeometry::create(.055f*r,.055f*r,.52f,tier==0?12:6);housing->translate(0,-.18f,0);hardware(housing,x.actuators[k].get(),dark,.42f,.7f,tier);
                 auto piston=CylinderGeometry::create(.028f*r,.028f*r,.48f,tier==0?12:6);piston->translate(0,.23f,0);hardware(piston,x.actuators[k].get(),steel,.22f,.92f,tier);}
@@ -278,8 +299,7 @@ Vehicle::Vehicle(const core::VehicleLook& look){
         auto cloud=SphereGeometry::create(1,12,8);for(auto& p:x.gas){p.mesh=Mesh::create(cloud,engineCloud());p.mesh->name="engine puff";p.mesh->visible=false;p.mesh->renderOrder=9;p.mesh->frustumCulled=false;root_->add(p.mesh);}
         x.pivot->quaternion.setFromUnitVectors(Vector3(0,1,0),along);root_->add(x.pivot);engines_.push_back(std::move(x));
     }
-    const auto enginesInRing=[&](double inner,double outer){return std::count_if(look.engines.begin(),look.engines.end(),[&](const auto& e){const double r=std::hypot(e.position.y,e.position.z);return r>=inner&&r<outer;});};
-    if(look.engines.size()==33&&enginesInRing(0,1)==3&&enginesInRing(1,3)==10&&enginesInRing(3,5)==20){ // Open V3 aft carrier, built around the measured engine sites rather than a closed base plate.
+    if(boosterCarrier){ // Open V3 aft carrier, built around the declared engine sites rather than a closed base plate.
         // The user-supplied underside photo shows a short annular carrier with repeated mount brackets. NASA confirms this
         // version has no skirt, individual shrouds or large-scale base heat shield; the sparse truss below is an image-based
         // interpretation of the visible support, not a claim about hidden internal plumbing or exact member dimensions.
@@ -290,11 +310,20 @@ Vehicle::Vehicle(const core::VehicleLook& look){
             const unsigned group=radial<1?0:radial<3?1:2;const float angle=std::atan2(static_cast<float>(e.position.z),static_cast<float>(e.position.y));
             rings[group].push_back({radial,angle,pivot.y+.27f*r,group});}
         const std::array<float,3> carrierRadius{1.12f,2.83f,4.28f};std::array<float,3> carrierY{};
+        // B19's exposed aft region (NSF, Colleen Liedtke, 17 March 2026)
+        // retains a closed boundary above the engine heads. Its curvature and
+        // thickness here are visual estimates, not manufacturing dimensions.
+        const float domeRadius=float(look.diameter/2),domeY=float(half-aftTank),domeDepth=.15f*domeRadius;
+        if(boosterDome)for(int tier=0;tier<2;++tier){
+            // Match the barrel's 64-sided perimeter in both tiers so the low
+            // LOD cannot open slits at the weld; only its interior simplifies.
+            hardware(tankDome(domeRadius,domeDepth,.008f,domeY,64,tier==0?12:6),nullptr,dark,.66f,.65f,tier);
+        }
         for(unsigned g=0;g<rings.size();++g){for(const auto& site:rings[g])carrierY[g]+=site.mountY;carrierY[g]/=static_cast<float>(rings[g].size());
             const float inner=carrierRadius[g]-.11f,outer=carrierRadius[g]+.11f;
             // Two narrow circumferential rails form an open band; the repeated ties are the short vertical brackets visible
             // around the photographed engine carrier. No surface spans the nozzle exits.
-            for(int tier=0;tier<2;++tier){const float y=carrierY[g]+(tier==0?.24f:-.24f);
+            for(int tier=0;tier<2;++tier){const float y=carrierY[g]+.24f;
                 hardware(collar(inner,.055f,y,g==2?80:56),nullptr,dark,.62f,.62f,tier);
                 hardware(collar(outer,.055f,y,g==2?80:56),nullptr,carrierSteel,.62f,.72f,tier);}
             for(std::size_t i=0;i<rings[g].size();++i){const auto& site=rings[g][i];const float c=std::cos(site.angle),s=std::sin(site.angle);

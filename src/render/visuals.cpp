@@ -169,7 +169,7 @@ albert::PlanetVisuals::PlanetVisuals(Scene& scene, DecodedAssets assets):scene_(
 
     sunMaterial_ = ShaderMaterial::create();sunMaterial_->name="albert:sun";
     sunMaterial_->uniforms.emplace("sunMap", Uniform(static_cast<Texture*>(nullptr)));
-    sunMaterial_->toneMapped = false;
+    sunMaterial_->toneMapped = true;
     sun = Mesh::create(SphereGeometry::create(static_cast<float>(695700.0 / 6378.137), 256, 128), sunMaterial_);
     scene.add(sun);
     auto coronaMaterial = overlay();
@@ -324,10 +324,11 @@ void albert::PlanetVisuals::setCloudDetail(Image image, const GeoRegion& region)
 
 void albert::PlanetVisuals::stageRegionalImages(RegionalImages images) {
     if(uploads_.active()) return;
+    if(images.body=="earth")images.textureOnly=true;
     prepareRegionalImages(images);
     if(images.day) images.gpu[0]=texture(std::move(*images.day));
     if(images.night) images.gpu[1]=texture(std::move(*images.night),ColorSpace::NoColorSpace);
-    if(images.height) images.gpu[2]=elevationTexture(std::move(*images.height));
+    if(images.height&&images.body!="earth") images.gpu[2]=elevationTexture(std::move(*images.height));
     if(images.roughness) images.gpu[3]=texture(std::move(*images.roughness),ColorSpace::NoColorSpace);
     if(images.surfaceMask) images.gpu[4]=texture(std::move(*images.surfaceMask),ColorSpace::NoColorSpace);
     for(const auto& item:images.gpu) if(item) uploads_.add(item);
@@ -345,6 +346,7 @@ void albert::PlanetVisuals::updateUploads() {
 }
 
 void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
+    if(images.body=="earth")images.textureOnly=true;
     prepareRegionalImages(images);
     const auto& region=images.region;
     if(images.night && images.body!="moon") {
@@ -357,72 +359,60 @@ void albert::PlanetVisuals::setRegionalImages(RegionalImages images) {
         nightMaterial_->uniforms.at("nightDetailEnabled").setValue(1.f);
     }
     if(!images.day) return;
-    const size_t slot=(images.body=="moon") ? 2 : 0;
-    const size_t bodySlot=(images.body=="moon") ? 1 : 0;
-    auto& patch=(images.body=="moon") ? moonDetail_ : earthDetail_;
-    auto& parent=(images.body=="moon") ? moon : earth;
-    // The high-resolution DEM can lie below the coarse interpolated globe.
-    // Remove the coarse surface inside the patch instead of exaggerating the
-    // new terrain to draw it on top. The overlap margin is outside the viewport.
-    const auto oldMask=surfaceMasks_[bodySlot];
-    surfaceMasks_[bodySlot]=images.gpu[4] ? images.gpu[4] : texture(std::move(*images.surfaceMask),ColorSpace::NoColorSpace);
-    if((images.body=="moon")) {moonMaterial_->alphaMap=surfaceMasks_[bodySlot];moonMaterial_->needsUpdate();}
-    else {earthMaterial_->alphaMap=surfaceMasks_[bodySlot];earthMaterial_->needsUpdate();}
-    if(oldMask) oldMask->dispose();
-    if(patch) { if(patch->parent)patch->parent->remove(*patch);patch->geometry()->dispose();patch->material()->dispose(); }
-    if(regionalTextures_[slot]) regionalTextures_[slot]->dispose();
-    regionalTextures_[slot]=images.gpu[0] ? images.gpu[0] : texture(std::move(*images.day));
-    auto geometry=std::move(images.geometry);
-    const size_t heightSlot=(images.body=="moon") ? 1 : 0;
-    if(images.height) {
-        if(regionalHeights_[heightSlot]) regionalHeights_[heightSlot]->dispose();
-        regionalHeights_[heightSlot]=images.gpu[2] ? images.gpu[2] : elevationTexture(std::move(*images.height));
+    if(images.body=="earth"){
+        // One depth surface carries both resolutions. A separate regional DEM
+        // intersected the globe at grazing angles and exposed its rectangular rim.
+        if(regionalTextures_[0])regionalTextures_[0]->dispose();
+        regionalTextures_[0]=images.gpu[0]?images.gpu[0]:texture(std::move(*images.day));
+        if(regionalTextures_[1])regionalTextures_[1]->dispose();
+        regionalTextures_[1]=images.roughness?(images.gpu[3]?images.gpu[3]:texture(std::move(*images.roughness),ColorSpace::NoColorSpace)):nullptr;
+        earthTerrainDetail_=MeshStandardMaterial::create();earthTerrainDetail_->map=regionalTextures_[0];earthTerrainDetail_->roughnessMap=regionalTextures_[1];
+        terrainBounds_[0]=Vector4(float((region.west+180.)/360.),float((region.south+90.)/180.),float((region.east-region.west)/360.),float((region.north-region.south)/180.));
+        if(earthTerrain_)earthTerrain_->material(roads_.material(earthTerrainMaterial_,terrainQuality_,earthTerrainDetail_,terrainBounds_[0]));
+        return;
     }
-    if((images.body=="moon")) {
-        moonDetailMaterial_=MeshPhongMaterial::create();moonDetailMaterial_->name="albert:moon";
-        moonDetailMaterial_->map=regionalTextures_[slot];
-        moonDetailMaterial_->lightMap=surfaceFillTextures_[1];
-        moonDetailMaterial_->specular=Color(0x050505);moonDetailMaterial_->shininess=3;
-        moonDetailMaterial_->bumpMap=regionalHeights_[1];moonDetailMaterial_->bumpScale=1.f/6378137.f;
-        // Terrain must populate depth in the opaque pass before orbit overlays.
-        moonDetailMaterial_->transparent=false;moonDetailMaterial_->depthWrite=true;
-        moonDetailMaterial_->alphaTest=.001f;
-        moonTerrainDetail_=MeshPhongMaterial::create();moonTerrainDetail_->name="albert:moon";moonTerrainDetail_->map=regionalTextures_[slot];moonTerrainDetail_->lightMap=surfaceFillTextures_[1];
-        moonTerrainDetail_->specular=Color(0x050505);moonTerrainDetail_->shininess=3;
-        patch=Mesh::create(geometry,moonDetailMaterial_);
-    } else {
-        auto material=MeshStandardMaterial::create();
-        material->map=regionalTextures_[slot];material->roughness=1;material->metalness=0;material->name="albert:water";
-        material->lightMap=surfaceFillTextures_[0];
-        material->bumpMap=regionalHeights_[0];material->bumpScale=1.f/6378137.f;
-        if(regionalTextures_[1]) regionalTextures_[1]->dispose();
-        if(images.roughness) {
-            regionalTextures_[1]=images.gpu[3] ? images.gpu[3] : texture(std::move(*images.roughness),ColorSpace::NoColorSpace);
-            material->roughnessMap=regionalTextures_[1];
-        }
-        material->transparent=false;material->depthWrite=true;material->alphaTest=.001f;
-        earthTerrainDetail_=MeshStandardMaterial::create();earthTerrainDetail_->map=material->map;earthTerrainDetail_->roughnessMap=material->roughnessMap;
-        earthTerrainDetail_->roughness=1;earthTerrainDetail_->metalness=0;earthTerrainDetail_->lightMap=surfaceFillTextures_[0];earthTerrainDetail_->name="albert:water";
-        earthDetailBounds_=region;
-        patch=Mesh::create(geometry,material);
+    if(images.body!="moon")throw std::invalid_argument("Planet imagery must target Earth or Moon");
+    // The Moon keeps its existing regional fallback; Earth never creates a
+    // second terrain mesh or an alpha cutout in its coarse globe.
+    const auto oldMask=surfaceMasks_[1];
+    surfaceMasks_[1]=images.gpu[4]?images.gpu[4]:texture(std::move(*images.surfaceMask),ColorSpace::NoColorSpace);
+    moonMaterial_->alphaMap=surfaceMasks_[1];moonMaterial_->needsUpdate();
+    if(oldMask)oldMask->dispose();
+    if(moonDetail_){moon->remove(*moonDetail_);moonDetail_->geometry()->dispose();moonDetail_->material()->dispose();}
+    if(regionalTextures_[2])regionalTextures_[2]->dispose();
+    regionalTextures_[2]=images.gpu[0]?images.gpu[0]:texture(std::move(*images.day));
+    if(images.height){
+        if(regionalHeights_[1])regionalHeights_[1]->dispose();
+        regionalHeights_[1]=images.gpu[2]?images.gpu[2]:elevationTexture(std::move(*images.height));
     }
-    patch->castShadow=patch->receiveShadow=true;patch->renderOrder=1;
-    if(images.body=="earth"&&images.geometryOrigin!=std::array<double,3>{}){earthDetailOrigin_=images.geometryOrigin;scene_->add(patch);patch->matrixAutoUpdate=false;}
-    else {if(images.body=="earth")earthDetailOrigin_={};parent->add(patch);}
-    terrainBounds_[bodySlot]=Vector4(static_cast<float>((region.west+180.)/360.),static_cast<float>((region.south+90.)/180.),
-        static_cast<float>((region.east-region.west)/360.),static_cast<float>((region.north-region.south)/180.));
+    moonDetailMaterial_=MeshPhongMaterial::create();moonDetailMaterial_->name="albert:moon";
+    moonDetailMaterial_->map=regionalTextures_[2];moonDetailMaterial_->lightMap=surfaceFillTextures_[1];
+    moonDetailMaterial_->specular=Color(0x050505);moonDetailMaterial_->shininess=3;
+    moonDetailMaterial_->bumpMap=regionalHeights_[1];moonDetailMaterial_->bumpScale=1.f/6378137.f;
+    moonDetailMaterial_->transparent=false;moonDetailMaterial_->depthWrite=true;moonDetailMaterial_->alphaTest=.001f;
+    moonTerrainDetail_=MeshPhongMaterial::create();moonTerrainDetail_->name="albert:moon";
+    moonTerrainDetail_->map=regionalTextures_[2];moonTerrainDetail_->lightMap=surfaceFillTextures_[1];
+    moonTerrainDetail_->specular=Color(0x050505);moonTerrainDetail_->shininess=3;
+    moonDetail_=Mesh::create(std::move(images.geometry),moonDetailMaterial_);
+    moonDetail_->castShadow=moonDetail_->receiveShadow=true;moonDetail_->renderOrder=1;moon->add(moonDetail_);
+    terrainBounds_[1]=Vector4(float((region.west+180.)/360.),float((region.south+90.)/180.),
+        float((region.east-region.west)/360.),float((region.north-region.south)/180.));
 }
 
 bool albert::PlanetVisuals::releaseDistantDetails(const std::string& focus,const Vector3& camera,bool enabled,float seconds){
     bool released=false;
-    for(size_t i=0;i<2;++i){auto& parent=i?moon:earth;auto& patch=i?moonDetail_:earthDetail_;
+    for(size_t i=0;i<2;++i){auto& parent=i?moon:earth;auto patch=i?moonDetail_:nullptr;
         const bool wanted=enabled&&focus==(i?"moon":"earth")&&camera.distanceTo(parent->position)<(i?.9f:2.4f);
         detailIdle_[i]=wanted?0.f:detailIdle_[i]+seconds;
-        if(detailIdle_[i]<3.f||!patch)continue;
+        if(detailIdle_[i]<3.f||(!patch&&!regionalTextures_[i?2:0]))continue;
         auto& terrain=i?moonTerrain_:earthTerrain_;if(terrain)terrain->detail(nullptr,std::nullopt);terrainBounds_[i].reset();
         if(i){moonMaterial_->alphaMap=opaqueMask_;moonMaterial_->needsUpdate();moonDetailMaterial_.reset();moonTerrainDetail_.reset();}
-        else {earthMaterial_->alphaMap=opaqueMask_;earthMaterial_->needsUpdate();earthDetailBounds_.reset();earthTerrainDetail_.reset();nightMaterial_->uniforms.at("nightDetailMap").setValue(textures_[1].get());nightMaterial_->uniforms.at("nightDetailEnabled").setValue(0.f);}
-        if(patch->parent)patch->parent->remove(*patch);patch->geometry()->dispose();patch->material()->dispose();patch.reset();
+        else {earthMaterial_->alphaMap=opaqueMask_;earthMaterial_->needsUpdate();earthTerrainDetail_.reset();
+            // Release may run after update(): visible nodes must stop sampling the
+            // region before its textures are destroyed, even without a scenery decal.
+            if(earthTerrain_)earthTerrain_->material(roads_.material(earthTerrainMaterial_,terrainQuality_));
+            nightMaterial_->uniforms.at("nightDetailMap").setValue(textures_[1].get());nightMaterial_->uniforms.at("nightDetailEnabled").setValue(0.f);}
+        if(patch){if(patch->parent)patch->parent->remove(*patch);patch->geometry()->dispose();patch->material()->dispose();moonDetail_.reset();patch.reset();}
         for(size_t slot:i?std::vector<size_t>{2}:std::vector<size_t>{0,1,3})if(regionalTextures_[slot]){regionalTextures_[slot]->dispose();regionalTextures_[slot].reset();}
         if(regionalHeights_[i]){regionalHeights_[i]->dispose();regionalHeights_[i].reset();}
         if(surfaceMasks_[i]){surfaceMasks_[i]->dispose();surfaceMasks_[i].reset();}
@@ -473,6 +463,7 @@ void albert::PlanetVisuals::updateImageDetail(const Vector3& camera, bool enable
 
 void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3& cameraPosition, const VisualSettings& settings, float seconds, Camera* camera,
                                    const TerrainFrame* earthFrame,const std::array<double,3>* moonAt) {
+    terrainQuality_=settings.quality;
     if(settings.clouds!=CloudMode::Off)cloudSource_=settings.clouds;
     if(cloudSource_==CloudMode::Simulated&&!simulatedCloudTexture_){
         if(!simulatedClouds_.valid()){
@@ -522,24 +513,13 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     if(displayedFill_[0]>0.f) updateFillMask(*surfaceFillTextures_[0],surfaceFillDirections_[0],localSun,true);
     const float earthFill=displayedFill_[0]*static_cast<float>(pi);
     earthMaterial_->lightMapIntensity=earthFill;
-    if(earthDetail_) earthDetail_->material()->as<MeshStandardMaterial>()->lightMapIntensity=earthFill;
     if(earthTerrainDetail_) earthTerrainDetail_->lightMapIntensity=earthFill;
     atmosphereMaterial_->uniforms.at("localCamera").setValue(localCamera);
     atmosphereMaterial_->uniforms.at("localSun").setValue(localSun);
     atmosphere_->visible = displayedAtmosphere_>0.f;
     clouds_->visible = displayedClouds_*cloudShell_>0.f;
-    if(earthDetail_&&earthDetailOrigin_!=std::array<double,3>{}){
-        earth->updateMatrixWorld();auto& e=earthDetail_->matrix->elements;e=earth->matrixWorld->elements;
-        const auto& m=earth->matrixWorld->elements;
-        for(int row=0;row<3;++row){double at=earthFrame?earthFrame->at[row]:m[12+row];
-            for(int c=0;c<3;++c){const double linear=earthFrame?earthFrame->linear[3*c+row]:m[4*c+row];e[4*c+row]=float(linear);at+=linear*earthDetailOrigin_[c];}e[12+row]=float(at);}
-        earthDetail_->matrixWorldNeedsUpdate=true;
-    }
-    if(earthDetail_) earthDetail_->visible=settings.quality && localCamera.length()<2.2f;
     if(moonDetail_) moonDetail_->visible=settings.quality && cameraPosition.distanceTo(moon->position)<.8f;
-    const auto earthMask=earthDetail_ && earthDetail_->visible ? surfaceMasks_[0] : opaqueMask_;
     const auto moonMask=moonDetail_ && moonDetail_->visible ? surfaceMasks_[1] : opaqueMask_;
-    if(earthMaterial_->alphaMap!=earthMask) {earthMaterial_->alphaMap=earthMask;earthMaterial_->needsUpdate();}
     if(moonMaterial_->alphaMap!=moonMask) {moonMaterial_->alphaMap=moonMask;moonMaterial_->needsUpdate();}
     // Near the Earth the quadtree terrain draws the surface (the globe's material, without bump).
     {auto& t=*earthTerrainMaterial_;const auto& e=*earthMaterial_;
@@ -549,24 +529,28 @@ void albert::PlanetVisuals::update(const Vector3& solarDirection, const Vector3&
     auto frustumIn=[&](Object3D& body){std::optional<Frustum> f; // The camera's frustum in a body's frame.
         if(camera){Matrix4 m;m.multiplyMatrices(camera->projectionMatrix,camera->matrixWorldInverse);m.multiply(*body.matrixWorld);f.emplace();f->setFromProjectionMatrix(m);}return f;};
     const auto view=cullToView_?frustumIn(*earth):std::nullopt; // With a second view on screen: by the horizon only (its ground was cut to the main view's).
-    if(earthTerrain_){earthTerrain_->material(roads_.material(earthTerrainMaterial_,settings.quality));earthTerrain_->detail(roads_.material(earthTerrainDetail_,settings.quality),terrainBounds_[0]);} // The region's imagery on its nodes (at every quality: a texture, not a rendering cost).
+    if(earthTerrain_){
+        earthTerrain_->material(roads_.material(earthTerrainMaterial_,settings.quality,earthTerrainDetail_,terrainBounds_[0]));
+        earthTerrain_->detail(nullptr,std::nullopt);
+        earthTerrain_->refinement(settings.terrain?12:8);
+    }
     if(moonTerrain_)moonTerrain_->detail(settings.quality?moonTerrainDetail_:nullptr,terrainBounds_[1]);
-    const bool terrainCovers=earthTerrain_&&settings.terrain&&localCamera.length()<3.f&&earthTerrain_->update(localCamera,view?&*view:nullptr,true,earthFrame);
-    if(earthTerrain_&&!terrainCovers) earthTerrain_->hide();
+    const bool terrainActive=earthTerrain_&&localCamera.length()<3.f;
+    const bool terrainCovers=terrainActive&&earthTerrain_->update(localCamera,view?&*view:nullptr,true,earthFrame);
+    if(earthTerrain_&&!terrainActive) earthTerrain_->hide();
     earthMaterial_->visible=!terrainCovers;
-    if(terrainCovers&&earthDetail_) earthDetail_->visible=false; // The terrain has the relief, and the region's imagery on its nodes.
     {auto& t=*moonTerrainMaterial_;const auto& e=*moonMaterial_; // The Moon's terrain, within three radii.
      if(t.map!=e.map||t.lightMap!=e.lightMap){t.map=e.map;t.lightMap=e.lightMap;t.needsUpdate();}
      t.lightMapIntensity=e.lightMapIntensity;}
     moon->updateMatrixWorld();Vector3 moonCamera=cameraPosition;moon->worldToLocal(moonCamera);const auto moonView=frustumIn(*moon);
-    const bool moonCovers=moonTerrain_&&settings.terrain&&moonCamera.length()<3.f*static_cast<float>(1737.4/6378.137)&&moonTerrain_->update(moonCamera,moonView?&*moonView:nullptr,true,[&]()->const TerrainFrame*{static TerrainFrame f;if(!moonAt)return nullptr;const auto& e=moon->matrixWorld->elements; // Its turn as the float matrix has it (~0.1 m on its radius).
+    const bool moonTerrainActive=moonTerrain_&&settings.terrain&&moonCamera.length()<3.f*static_cast<float>(1737.4/6378.137);
+    const bool moonCovers=moonTerrainActive&&moonTerrain_->update(moonCamera,moonView?&*moonView:nullptr,true,[&]()->const TerrainFrame*{static TerrainFrame f;if(!moonAt)return nullptr;const auto& e=moon->matrixWorld->elements; // Its turn as the float matrix has it (~0.1 m on its radius).
         f.at=*moonAt;for(int c=0;c<3;++c)for(int r=0;r<3;++r)f.linear[3*c+r]=e[4*c+r];return &f;}());
-    if(moonTerrain_&&!moonCovers) moonTerrain_->hide();
+    if(moonTerrain_&&!moonTerrainActive) moonTerrain_->hide();
     moonMaterial_->visible=!moonCovers;
     if(moonCovers&&moonDetail_) moonDetail_->visible=false;
-    // Close-up city lights are a visual overlay above the regional terrain.
-    // No other body can lie between this near-Earth camera and the surface.
-    nightMaterial_->depthTest=!(earthDetail_ && earthDetail_->visible);
+    // City lights use the same depth test over the unified Earth surface.
+    nightMaterial_->depthTest=true;
     night_->visible = displayedNight_>0.f;
     // A didactic fill restricted to the hemisphere without direct sunlight.
     // The near/far hemispheres have no role in this visual aid.
@@ -585,15 +569,8 @@ threepp::Texture* albert::PlanetVisuals::cloudMap() const{
     const auto* t=std::get_if<Texture*>(&cloudMaterial_->uniforms.at("cloudMap").value());return t?*t:nullptr;}
 void albert::PlanetVisuals::updateBorderMaterial(ShaderMaterial& material,const Vector3& cameraPosition) {
     material.uniforms.at("heightMap").setValue(textures_[5].get());
-    const bool detailed=earthDetail_ && earthDetail_->visible && earthDetailBounds_;
-    material.uniforms.at("detailHeightMap").setValue(detailed ? regionalHeights_[0].get() : textures_[5].get());
-    material.uniforms.at("detailEnabled").setValue(detailed ? 1.f : 0.f);
-    if(detailed) {
-        const auto& region=*earthDetailBounds_;
-        material.uniforms.at("detailBounds").setValue(Vector4(
-            static_cast<float>((region.west+180.)/360.),static_cast<float>((region.south+90.)/180.),
-            static_cast<float>((region.east-region.west)/360.),static_cast<float>((region.north-region.south)/180.)));
-    }
+    material.uniforms.at("detailHeightMap").setValue(textures_[5].get());
+    material.uniforms.at("detailEnabled").setValue(0.f);
     // A sub-pixel clearance covers interpolation error without a kilometre-high
     // fixed cartographic shell. The line still participates in depth testing.
     const float distance=cameraPosition.distanceTo(earth->position);

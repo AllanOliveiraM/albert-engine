@@ -21,6 +21,38 @@ std::vector<float> glowingHardware(threepp::Mesh& mesh){using namespace threepp;
     return out;
 }
 void vehicleGeometryControls(){
+    // An unlit nozzle must have a clear divergent interior. Cast radial rays
+    // from its axis at the mesh's axial stations, with the actual hardware
+    // poses (including the actuator), at both geometry tiers and gimbal poses.
+    for(const auto& [radius,radial]:{std::pair{.65,0.},std::pair{.65,3.9},std::pair{1.15,0.}}){
+        albert::core::VehicleLook isolated;isolated.length=10;isolated.diameter=9;
+        isolated.engines.push_back({{10,radial,0},{1,0,0},radius});
+        albert::Vehicle engine(isolated);
+        auto* levels=engine.node()->getObjectByName("vehicle detail LOD")->as<LOD>();
+        const float r=float(radius),length=(r>1?2.6f:2.2f)*r,throat=r*(r>1?.12f:.18f),mouth=r*(radial>3.3?.9f:1.f);
+        for(float angle:{0.f,.26f,-.26f}){
+            auto pose=geometrySample(isolated);pose[1]=angle;pose[2]=-.7f*angle;engine.animate(&pose,1);
+            // Match the flight axes using the marker's actual posed frame.
+            Object3D* pivot=nullptr;engine.node()->traverse([&](Object3D& o){if(auto* mesh=o.as<Mesh>();mesh&&mesh->material()&&mesh->material()->name=="albert:bell")pivot=o.parent;});
+            require(pivot,"Missing nozzle diagnostic frame");
+            for(int tier=0;tier<2;++tier){
+                auto* batch=levels->getLevels()[tier].object->as<Mesh>();
+                auto material=MeshBasicMaterial::create();material->side=Side::Double;
+                auto posed=Mesh::create(BufferGeometry::create(),material);
+                posed->geometry()->setIndex(batch->geometry()->getIndex()->array());
+                posed->geometry()->setAttribute("position",FloatBufferAttribute::create(posedHardware(*batch),3));posed->updateMatrixWorld();
+                const int axial=tier==0?16:6,angular=tier==0?64:48;
+                for(int j=1;j<axial;++j){const float t=float(j)/axial,clearance=(throat+(mouth-throat)*std::sqrt(t))*(tier==0?.99f:.955f);
+                    for(int k=0;k<angular;++k){const float a=2*std::numbers::pi_v<float>*k/angular;
+                        Vector3 origin(0,-length*t,0),direction(std::cos(a),0,std::sin(a));
+                        origin.applyQuaternion(pivot->quaternion).add(pivot->position);direction.applyQuaternion(pivot->quaternion);
+                        Raycaster ray(origin,direction);ray.farPlane=clearance;
+                        require(ray.intersectObject(*posed).empty(),"External engine hardware protrudes inside the divergent nozzle");
+                    }
+                }
+            }
+        }
+    }
     namespace ex=albert::example::starship;const auto look=captureLook(ex::superHeavy());albert::Vehicle booster(look);
     require(booster.engineCount()==33&&std::count_if(look.parts.begin(),look.parts.end(),[](const auto& p){return p.grid;})==3,"V3 drawn engine or fin count");
     unsigned centre=0,middle=0,outer=0;for(const auto& e:look.engines){const double r=std::hypot(e.position.y,e.position.z);if(r<1)++centre;else if(r<3)++middle;else ++outer;}
@@ -33,6 +65,29 @@ void vehicleGeometryControls(){
     auto* lod=booster.node()->getObjectByName("vehicle detail LOD")->as<LOD>();require(lod&&lod->getLevels().size()==2,"Vehicle geometry LOD missing");
     auto* near=lod->getLevels()[0].object->as<Mesh>();auto* far=lod->getLevels()[1].object->as<Mesh>();
     require(near->geometry()->getIndex()->count()>far->geometry()->getIndex()->count()*2,"Coarse vehicle geometry did not reduce triangles");
+    // The pressure vessel must be closed above the exposed engines, in both
+    // LODs. Probe between engine sites, from both sides of the tank boundary.
+    const auto aftTank=std::max_element(look.tanks.begin(),look.tanks.end(),[](const auto& a,const auto& b){return a.to<b.to;});
+    require(aftTank!=look.tanks.end(),"Booster tank boundary missing");
+    const float tankY=float(look.length/2-aftTank->to);
+    for(auto* batch:{near,far}){
+        auto material=MeshBasicMaterial::create();material->side=Side::Double;
+        auto mesh=Mesh::create(BufferGeometry::create(),material);
+        mesh->geometry()->setIndex(batch->geometry()->getIndex()->array());
+        mesh->geometry()->setAttribute("position",FloatBufferAttribute::create(posedHardware(*batch),3));mesh->updateMatrixWorld();
+        for(float radius:{0.f,.35f,1.55f,3.35f,4.44f,4.49f})for(int i=0;i<12;++i){const float a=float(i)*std::numbers::pi_v<float>/6;
+            for(float direction:{-1.f,1.f}){Raycaster ray({radius*std::cos(a),tankY+(direction>0?-1.f:.15f),radius*std::sin(a)},{0,direction,0});
+                ray.farPlane=direction>0?1.1f:1.2f;
+                require(!ray.intersectObject(*mesh).empty(),"Booster aft tank is open between the engine mounts");}
+        }
+    }
+    // Fixed carrier rails must occupy the same stations when only the LOD
+    // changes. Previously the far tier shifted them 48 cm down the vehicle.
+    auto carrierBounds=[&](Mesh& batch){const auto points=posedHardware(batch);const auto* finish=batch.geometry()->getAttribute<float>("finish");float lo=1e9f,hi=-1e9f;
+        for(int i=0;i<finish->count();++i)if(std::abs(finish->getX(i)-.62f)<1e-5f&&std::abs(finish->getY(i)-.62f)<1e-5f){lo=std::min(lo,points[3*i+1]);hi=std::max(hi,points[3*i+1]);}
+        require(lo<hi,"Missing fixed carrier geometry");return std::pair{lo,hi};};
+    const auto nearCarrier=carrierBounds(*near),farCarrier=carrierBounds(*far);
+    require(std::abs(nearCarrier.first-farCarrier.first)<1e-4f&&std::abs(nearCarrier.second-farCarrier.second)<1e-4f,"Carrier rails moved when switching geometry LOD");
     auto sample=geometrySample(look);booster.animate(&sample,0);auto* poses=near->material()->as<ShaderMaterial>()->uniforms.at("poses").value<Texture*>();const auto neutral=posedHardware(*near);
     sample=geometrySample(look,.43f);sample[1]=.07f;sample[2]=-.05f;booster.animate(&sample,1);
     require(posedHardware(*near)!=neutral&&albert::Vehicle::gimballing(*booster.node(),look)>.08f,"Reported fins and nozzle gimbals did not pose geometry");
@@ -91,7 +146,7 @@ void vehicleGeometryGraphics(GpuTarget& target){
     camera->position.set(30*scale,35*scale,50*scale);camera->lookAt(Vector3(0,28*scale,0));target.render(*world,*camera);target.readRGBPixels();require(lod->getCurrentLevel()==0,"Earth-unit close geometry failed to restore");
     booster.quality(0);target.render(*world,*camera);target.readRGBPixels();require(!lod->getLevels()[0].object->visible&&lod->getLevels()[1].object->visible,"Low-quality geometry was overridden by camera LOD");
 }
-void vehicleGeometryCaptures(const std::string& directory){
+void vehicleGeometryCaptures(const std::string& directory,bool aftOnly=false){
     namespace ex=albert::example::starship;std::filesystem::create_directories(directory);GpuTarget target(1280,960);target.scene.toneMapping=true;target.scene.samples=4;
     auto world=Scene::create();world->background=Color(.035f,.055f,.085f);
     auto sun=DirectionalLight::create(Color(0xffead1),3);sun->position.set(30,40,50);world->add(sun);world->add(AmbientLight::create(Color(0xbacbdf),1.2f));
@@ -111,6 +166,18 @@ void vehicleGeometryCaptures(const std::string& directory){
         std::sort(times.begin(),times.end());std::cout<<name<<": "<<target.scene.drawn()<<" draws, "<<triangles<<" triangles, "<<bytes<<" geometry bytes, GPU median "<<(times.empty()?-1:times[times.size()/2])<<" ms\n";
     };
     const float bh=float(boosterLook.length/2),sh=float(shipLook.length/2);
+    if(aftOnly){
+        sun->position.set(10,-35,20);
+        view(booster,{0,-bh+1,0},{4,-bh-12,5},54);report("booster-engine-bay");
+        camera->up.set(0,0,-1);view(booster,{0,-bh+1,0},{0,-bh-15,0},48);report("booster-aft-axial");camera->up.set(0,1,0);
+        view(booster,{0,-bh+2,0},{12,-bh+1,15},35);report("booster-aft-side");
+        booster.quality(0);report("booster-aft-side-low");booster.quality(1);
+        for(std::size_t i=0;i<13;++i){bs[3*i+1]=.26f;bs[3*i+2]=-.18f;}booster.animate(&bs,1);
+        view(booster,{0,-bh+1,0},{4,-bh-12,5},54);report("booster-aft-gimbal");
+        view(stack,{0,float(stackLook.length/2-ex::shipLength-ex::boosterLength)+2,0},{12,float(stackLook.length/2-ex::shipLength-ex::boosterLength)+1,15},35);report("stack-aft-side");
+        std::cout<<"Adapter "<<target.context.adapter()<<", validation errors "<<albert::gpu::errors()<<'\n';
+        require(albert::gpu::errors()==0,"Aft captures produced GPU validation errors");return;
+    }
     view(booster,{-6.35f,bh-7.5f,0},{-13,bh+4,-12},55);report("grid-fins-deflected");booster.quality(0);report("grid-fins-low");booster.quality(1);
     view(booster,{0,bh-1,0},{13,bh+1,19},48);report("hot-staging-ring");
     view(booster,{3,bh-43,0},{28,bh-40,30},50);report("booster-chine");

@@ -1,9 +1,20 @@
 #pragma once
 #include <imgui.h>
 #include <algorithm>
+#include <cmath>
 #include <span>
 
 namespace albert::menu {
+// Ctrl+click also edits a slider as text: keep those edits inside the same
+// range as dragging, and never send a nonfinite rate to the simulation.
+inline bool rateSlider(const char* id,double& value,double minimum,double maximum,const char* format=""){
+    const double previous=value;
+    const bool changed=ImGui::SliderScalar(id,ImGuiDataType_Double,&value,&minimum,&maximum,format,
+        ImGuiSliderFlags_Logarithmic|ImGuiSliderFlags_NoRoundToFormat|ImGuiSliderFlags_AlwaysClamp);
+    if(!std::isfinite(value)){value=previous;return false;}
+    if(changed)value=std::clamp(value,minimum,maximum);
+    return changed;
+}
 // Preserve readable labels when a narrow window or a large font needs another row.
 inline void pages(std::span<const char* const> labels,int& selected) {
     const float available=ImGui::GetContentRegionAvail().x;
@@ -40,6 +51,21 @@ inline bool checkbox(const char* label,bool& value) {
 inline bool section(const char* label,bool open=false) {
     ImGui::Spacing();
     return ImGui::CollapsingHeader(label,open?ImGuiTreeNodeFlags_DefaultOpen:0);
+}
+// Direct numeric entry leaves room for the complete value on small panels and
+// large interface scales. InputInt's two step buttons previously hid the year.
+inline void utcFields(int& year,int& month,int& day,int& hour,int& minute){
+    auto field=[](const char* label,const char* id,int& value){
+        ImGui::TextDisabled("%s",label);ImGui::SetNextItemWidth(-1);ImGui::InputInt(id,&value,0,0);
+    };
+    field("ANO","##AnoUTC",year);
+    if(ImGui::BeginTable("##DataUTCFields",2,ImGuiTableFlags_SizingStretchSame)){
+        ImGui::TableNextColumn();field("MÊS","##MesUTC",month);
+        ImGui::TableNextColumn();field("DIA","##DiaUTC",day);
+        ImGui::TableNextColumn();field("HORA","##HoraUTC",hour);
+        ImGui::TableNextColumn();field("MINUTO","##MinutoUTC",minute);
+        ImGui::EndTable();
+    }
 }
 inline void repositoryLink(){
     const float size=ImGui::GetFrameHeight();const auto at=ImGui::GetCursorScreenPos();

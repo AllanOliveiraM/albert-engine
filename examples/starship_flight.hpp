@@ -384,11 +384,17 @@ inline void profile(std::FILE* f,double t,const char* who,const api::FlightSampl
 struct Pacer {
     bool fast=false;std::chrono::steady_clock::time_point start=std::chrono::steady_clock::now();double wall=0,last=0;
     double hurry=1; // --landings: every phase but the landings this many times faster (1: as they happen).
-    void operator()(double sim,double rate){if(fast){last=sim;return;}
+    void operator()(double sim,double rate,bool coast=false){if(fast){last=sim;return;}
         if(flightSpeed){const auto paused=std::chrono::steady_clock::now();double speed=flightSpeed();
             while(speed<=0){waitFlightUntil(std::chrono::steady_clock::now()+std::chrono::milliseconds(25));speed=flightSpeed();}
             if(std::chrono::steady_clock::now()-paused>std::chrono::milliseconds(10))start+=std::chrono::steady_clock::now()-paused;
             rate*=speed;
+        }
+        // A requested milestone skips the wait in the ship's coast, not its
+        // guidance or integration. Poll pause/stop above even in this mode.
+        // Rebase pacing at every step so the next burn/entry has no time debt.
+        if(coast&&flightAdvance&&flightAdvance()){
+            last=paceSim=sim;wall=0;start=std::chrono::steady_clock::now();return;
         }
         wall+=(sim-last)/rate;last=sim;paceSim=sim;
         const auto due=start+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(wall)),now=std::chrono::steady_clock::now();
@@ -528,7 +534,7 @@ inline Home flyHome(api::FlightService::Stub& flight,api::FlightSample& ship,Pac
         const bool skipping=skip&&back.phase()==ShipReturn::Phase::entry;
         const bool landing=back.phase()>=ShipReturn::Phase::flip||(back.falling()&&ship.geodetic().height_meters()-towerGround<6e3); // --landings: as it happens from 6 km in its belly flop.
         const double rate=back.phase()==ShipReturn::Phase::orbit?warp:back.phase()==ShipReturn::Phase::glide||skipping?std::min(warp,60.):1;
-        pace(ship.elapsed_seconds(),landing?rate:std::max(rate,pace.hurry));
+        pace(ship.elapsed_seconds(),landing?rate:std::max(rate,pace.hurry),back.phase()==ShipReturn::Phase::orbit||back.phase()==ShipReturn::Phase::glide);
     }
 }
 // The flight from Starbase:

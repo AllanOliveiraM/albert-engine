@@ -19,6 +19,7 @@ namespace albert::example {
 // External clients keep the default token and their existing timing behaviour.
 inline thread_local std::stop_token flightStop;
 inline thread_local std::function<double()> flightSpeed; // Embedded playback multiplier; 0 pauses the flight computer.
+inline thread_local std::function<bool()> flightAdvance; // Explicit milestone advance: coast can run without wall-clock waits.
 inline void checkFlightStop(){if(flightStop.stop_requested())throw std::runtime_error("Missão encerrada");}
 inline void waitFlightUntil(std::chrono::steady_clock::time_point due){
     checkFlightStop();
