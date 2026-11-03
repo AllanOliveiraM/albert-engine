@@ -4,6 +4,31 @@ Este documento reúne os pedidos ainda relevantes da conversa e serve como brief
 
 ## Prioridades por relevância — 3/11/2026
 
+### Ordem ativa de implementação — atualização do usuário
+
+Continuar pelos itens que ainda exigem implementação, sem interromper a fila
+para pedir confirmação a cada bloco. Testar as alterações com monitoramento de
+RAM e manter as evidências e limitações registradas. Pendências exclusivamente
+de validação da tabela histórica abaixo não entram nesta sequência.
+
+1. Sol e atmosfera: coluna esférica de névoa corrigida e testada nas três GPUs;
+   Sol conferido na cena nativa. Restam limites do modelo RGB e acabamento final.
+2. Terreno: nitidez das imagens e acabamento das cores (em andamento).
+3. Precisão distante: tremor da câmera e órbitas deslocadas em Plutão e além.
+4. Nuvens: realismo, definição no zoom e estabilidade em movimento.
+5. Efeitos: plumas, queima de pouso, reentrada e dilúvio — antecipados pelo usuário,
+   antes do trabalho de hardware V3 (era o item 8 da lista reduzida).
+6. Satélites terrestres: pesquisa e seleção de ISS, satélites e constelações —
+   antecipados pelo usuário para logo depois dos efeitos.
+7. Booster e Ship V3: motores, suportes, tubulações, folgas e escudo térmico.
+8. Torre e SQD: formato/conexões reais, tubulações e sobreposições.
+9. Áudio: mixagem da tank farm e ventilações.
+10. Órbitas: oclusão indevida e aparência das linhas.
+11. README: novas capturas com melhores ângulos e qualidade máxima.
+
+Os números desta sequência se referem à lista reduzida de implementação. A
+tabela de 14 prioridades e as seções detalhadas preservam o histórico completo.
+
 **Execução autorizada novamente em 3/11:** o usuário liberou testes e demais verificações, com monitoramento de RAM para evitar esgotamento. Compilar/testar com baixa concorrência, observar RAM disponível e swap e interromper apenas os processos desta validação se houver pressão de memória. Commit/push continuam pedidos, após a validação aprovada.
 
 Ordem atualizada conforme pedido do usuário: estabilidade em primeiro, Sol e atmosfera em segundo, interface e tempo em terceiro. Os demais itens seguem por impacto no uso, gravidade, dependências e evidências atuais. Recursos novos e imagens de divulgação ficam depois das correções. Os detalhes de todos os pedidos foram preservados nas seções seguintes.
@@ -96,6 +121,15 @@ Não executar os itens históricos abaixo nesta fila. A migração, suas correç
 - Na versão intermediária da migração, 48 testes habilitados passaram, mas o sweep tinha 41 desvios seguros e zero capturas. A varredura adicional da Ship encontrou 2 cenários inseguros em 17. Isso demonstra que aprovação de desvio seguro não comprova funcionamento da missão. As alterações experimentais posteriores de abertura/ponto de captura ainda apresentaram falha no aborto com vento/motor 1.
 
 ## 5 · P1 — Terreno detalhado integrado ao entorno
+
+**Próximo bloco de nitidez — análise inicial:** as imagens planetárias já pedem
+anisotropia 8 e o WebGPU respeita essa configuração com mipmaps. Não atribuir o
+borrado à ausência desse filtro. O mosaico terrestre empacotado é preparado a
+86400×43200, cerca de 500 m por pixel no equador; um recorte regional de 4096
+não cria detalhe ausente na fonte. Separar essa limitação da resolução perdida
+ao cobrir uma vista ampla com um só recorte. Avaliar fonte regional medida e
+distribuição do orçamento pela vista antes de aumentar texturas ou acrescentar
+ruído artificial. Preservar as correções de continuidade/LOD já verificadas.
 
 **Etapa de continuidade em 3/11 — ainda não encerrada:** imagens regionais e globais da Terra agora usam a mesma malha, com mistura nas bordas. O modo sem relevo detalhado mantém a curvatura e limita o refinamento ao nível 8; o modo detalhado vai ao 12. Retirados a máscara/patch separados da Terra e o download regional duplicado de DEM. Ajustadas as transições de refinamento, redução de LOD e atualização de alturas; a consulta do chão ignora nós ocultos no cache. Não altera pad, geometria do foguete ou física de captura.
 

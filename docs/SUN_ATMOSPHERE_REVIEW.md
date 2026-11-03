@@ -73,10 +73,81 @@ ALBERT_GPU=high ALBERT_GPU_TIMING=1 ./build/linux/tests/visual_test flare-check 
 
 Capturas em `build/mission-review/flare-software/`, `flare-high/`, `flare-low/` e `flare-high-hd/`. O teste também verifica que os reflexos não escurecem a imagem e que o aumento de um canal não passa de 16 níveis de 255 na configuração padrão.
 
+## Continuação — integração esférica da névoa (3/11)
+
+O limite anterior de 80 km era aplicado a partir da câmera. Em um raio rasante
+ou vindo do espaço, isso podia omitir a camada marinha mais densa. A altura
+linearizada também fazia um mesmo percurso atenuar a luz de maneira diferente
+quando observado no sentido inverso. A transmissão deve depender da integral da
+densidade ao longo do percurso, conforme as
+[funções atmosféricas de referência](https://ebruneton.github.io/precomputed_atmospheric_scattering/atmosphere/functions.glsl.html).
+
+`coastalColumn` agora integra a densidade exponencial com altura esférica. O
+intervalo é recortado na camada de doze alturas de escala e dividido no ponto
+de tangência, com quadratura de seis pontos por trecho. O corte despreza somente
+a cauda de densidade muito baixa, em vez de descartar a parte distante do raio.
+A transmissão da luz solar usa a mesma integral; o limbo ainda visível conserva
+um percurso rasante quando o centro do disco está abaixo do horizonte. A
+ocultação parcial continua a cargo do modelo de ar limpo existente.
+
+Não há novas texturas, passes, LUTs ou buffers na aplicação. O cálculo passa a
+ter mais operações aritméticas; isso não representa uma otimização de tempo de
+GPU. Sem névoa, o intervalo tem comprimento zero e pula a quadratura. O
+espalhamento adicional continua sendo a aproximação RGB existente; esta correção
+não calibra aerossóis reais de Starbase nem implementa refração atmosférica.
+
+### Regressão e verificações
+
+O novo `coastal_optics_test` executa as funções de produção na GPU e compara os
+resultados com integração Simpson independente, em dupla precisão, de 40.000
+subintervalos. São treze casos: vertical, horizontal, rasante vindo do espaço,
+orientação arbitrária, percurso nulo, ida/volta e transmissão solar no horizonte.
+
+| Percurso, escala de 0,8 km | Antes | Referência independente |
+| --- | ---: | ---: |
+| Horizontal a 10 m, 150 km | 58,708 km | 85,282 km |
+| Mesmo percurso no sentido inverso | 23,298 km | 85,282 km |
+| Rasante de 1.000 km, altura mínima de 0,4 km | 0 km | 108,623 km |
+
+São quilômetros de coluna de densidade relativa, não altura da atmosfera. Após
+a correção, todos os casos passaram em MX350, Iris Xe e llvmpipe, incluindo
+reciprocidade e transmissão nos três canais; tolerância de coluna de 0,2% mais
+3 m. Evidências em `build/mission-review/solar-refinement/`:
+
+- `before-high.log`: falha reproduzida antes de alterar o shader.
+- `optics-adapters.log`: primeira comparação nas três GPUs.
+- `solar-adapters-final.log`: treze casos e oito cenas solares aprovados nas três
+  GPUs após a estabilização do cálculo do horizonte.
+- `focused-tests.log`: renderização integrada, reflexos, nuvens, atmosfera e
+  coluna aprovados. O teste solar inicialmente falhou por exigir saturação sob
+  névoa; foi corrigido e repetido no log final acima. Não houve uma execução
+  integral sem falhas dessa sequência inicial.
+
+O teste solar agora compara o mesmo horizonte com e sem névoa, preservando a
+checagem contra um disco mais escuro que o céu à frente. A saturação continua
+obrigatória nos casos sem névoa adicional. No caso a 0,1° e 0,04/km, o centro
+passou a RGB 236,29,23, contra 255,229,179 sem essa névoa. A névoa densa pode
+ocultar legitimamente o disco; não foi acrescentado um brilho mínimo artificial.
+
+Na cena nativa de 1280×720, MX350, qualidade alta e nuvens desligadas, o disco
+foi visível acima do horizonte em 3/11/2026 às 23:40 UTC. A simulação avançou
+1,50 s em 1,51 s reais, a 1×. Captura inspecionada:
+`native-corrected/solar-horizon.png`; relatório em `native-corrected/results.json`.
+A instância própria foi encerrada, sem erros WebGPU. A menor RAM disponível foi
+5.478,7 MiB e o pico de RSS da validação foi 1.707,7 MiB. Os tempos GPU são
+absolutos dessa cena (`native-corrected/starbase-review.log`), sem uma medição
+anterior equivalente para atribuir custo à mudança.
+
+O primeiro ensaio nativo (`native/`) foi descartado como conferência solar: o
+script lia o campo de geometria do objeto no lugar do estado físico, apontando
+para outra direção. O mesmo erro existia no antigo `solar-review-disc.py`; sua
+captura não sustenta uma conclusão sobre o Sol estar oculto por nuvens. Isso não
+invalida os testes isolados, que usam diretamente as posições dos objetos.
+
 ## Próximas etapas
 
 Capturas da cena nativa na MX350 foram inspecionadas em dia (18:00 UTC), fim de tarde (23:40 UTC) e crepúsculo (23:57 UTC), em 3/11/2026, mantendo 1×. Evidências em `build/mission-review/time-controls/starbase-wide/` e relatório `starbase-results.json`. O primeiro enquadramento apontava demais para o solo; a vista foi aberta para incluir o horizonte.
 
-Essa inspeção **não aprova ainda o resultado fotorealista**: mostra terreno sem definição, uma costura triangular no horizonte próximo e nuvens escuras com contornos recortados. A captura adicional voltada ao Sol (`starbase-solar/solar-horizon.png`) não fornece um disco solar legível nesta combinação de névoa/nuvens; ainda é necessário distinguir oclusão legítima de atenuação/composição indevida. Os testes isolados aprovados acima não substituem essa verificação da cena completa. Esses pontos permanecem na fila de Sol/atmosfera, terreno e nuvens.
+Essa inspeção **não aprova ainda o resultado fotorealista**: mostra terreno sem definição, uma costura triangular no horizonte próximo e nuvens escuras com contornos recortados. A captura adicional `starbase-solar/solar-horizon.png` foi descartada como evidência solar após identificar o erro de direção no script; a repetição correta, descrita acima, mostra o disco sem nuvens. A composição com nuvens e o acabamento do terreno continuam na fila. Os testes isolados aprovados não substituem essa conferência da cena completa.
 
 Continuar a conferência da exposição na transição entre foco solar/planetário e passagem entre a casca de nuvens e os volumes. Refinar o espalhamento fotográfico do brilho sem encobrir o veículo. Não usar um halo ou um mínimo artificial de brilho para esconder erros de transmissão.

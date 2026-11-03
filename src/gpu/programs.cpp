@@ -175,21 +175,48 @@ fn airEntry(camera: vec3f, ray: vec3f) -> AirRay { // From space: moved to the t
     let half = sqrt(top * top - h2); return AirRay(camera + ray * (-rmu - half), top, -half, true);
 }
 // A shallow marine layer added to the global clear-air LUTs without rebuilding them.
-// Exponential column integral with spherical endpoint height; bounded to 80 km.
+fn coastalDensity(c: vec3f, ray: vec3f, distance: f32, scale: f32) -> f32 {
+    return exp(-max(length(c + ray * distance) - bottomRadius(), 0.0) / scale);
+}
+// Six-point Gauss-Legendre integration on a monotone half of the spherical path.
+// Unrolled: no texture lookups or variable shader loops in this extra layer.
+fn coastalInterval(c: vec3f, ray: vec3f, start: f32, end: f32, scale: f32) -> f32 {
+    if (end <= start) { return 0.0; }
+    let mid = (start + end) * 0.5; let half = (end - start) * 0.5;
+    let a = half * 0.2386191861; let b = half * 0.6612093865; let d = half * 0.9324695142;
+    return half * (0.4679139346 * (coastalDensity(c, ray, mid - a, scale) + coastalDensity(c, ray, mid + a, scale))
+        + 0.3607615730 * (coastalDensity(c, ray, mid - b, scale) + coastalDensity(c, ray, mid + b, scale))
+        + 0.1713244924 * (coastalDensity(c, ray, mid - d, scale) + coastalDensity(c, ray, mid + d, scale)));
+}
+// Clip to twelve scale heights, not the first kilometres from the camera: a
+// space-to-ground ray must include the dense layer at its far end. Splitting at
+// the tangent point also keeps the integral reciprocal on grazing paths.
 fn coastalColumn(c: vec3f, ray: vec3f, distance: f32) -> f32 {
-    let d = clamp(distance, 0.0, 80.0); let h0 = max(length(c) - bottomRadius(), 0.0);
-    let mu = dot(normalize(c), ray); let h1 = max(h0 + d * mu + d * d * (1.0 - mu * mu) / (2.0 * bottomRadius()), 0.0);
-    let scale = max(frame.coastal.y, 0.1); let dh = (h1 - h0) / scale; let safeDh = select(dh, 1.0, abs(dh) < 0.01);
-    return select(d * (exp(-h0 / scale) - exp(-h1 / scale)) / safeDh, d * exp(-(h0 + h1) * 0.5 / scale), abs(dh) < 0.01);
+    if (distance <= 0.0) { return 0.0; }
+    let scale = max(frame.coastal.y, 0.1); let top = bottomRadius() + 12.0 * scale;
+    let perpendicular = cross(c, ray); let disc = top * top - dot(perpendicular, perpendicular);
+    if (disc <= 0.0) { return 0.0; }
+    let center = -dot(c, ray); let half = sqrt(disc);
+    let start = max(0.0, center - half); let end = min(distance, center + half);
+    if (end <= start) { return 0.0; }
+    let tangent = clamp(center, start, end);
+    return coastalInterval(c, ray, start, tangent, scale) + coastalInterval(c, ray, tangent, end, scale);
 }
 fn coastalSun(p: vec3f, sun: vec3f) -> vec3f {
-    let h = max(length(p) - bottomRadius(), 0.0); let mu = dot(normalize(p), sun); let scale = max(frame.coastal.y, 0.1);
-    let column = scale * exp(-h / scale) / sqrt(max(mu, 0.0) * max(mu, 0.0) + 0.637 * scale / bottomRadius());
+    let r = clampRadius(length(p)); let bottom = bottomRadius(); let horizon = -sqrt(max((r - bottom) * (r + bottom), 0.0)) / r;
+    // The clear-air LUT handles the finite solar disc's partial occultation.
+    // Its visible limb still crosses the marine layer when the centre is just
+    // below the horizon; do not replace that grazing column with a zero-length
+    // path into the ground. Spherical symmetry lets us use a canonical ray.
+    let mu = clamp(max(dot(normalize(p), sun), horizon), -1.0, 1.0);
+    let ray = vec3f(sqrt(max(1.0 - mu * mu, 0.0)), 0.0, mu);
+    let distance = select(0.0, distanceToTop(r, mu), frame.coastal.x > 0.0);
+    let column = coastalColumn(vec3f(0.0, 0.0, r), ray, distance);
     return select(vec3f(1.0), exp(-vec3f(0.88, 1.0, 1.13) * frame.coastal.x * column), frame.coastal.x > 0.0);
 }
 fn coastalScatter(c: vec3f, ray: vec3f, distance: f32, sun: vec3f, clear: Sky) -> Sky {
     let k = max(frame.coastal.x, 0.0);
-    let t = exp(-vec3f(0.88, 1.0, 1.13) * k * coastalColumn(c, ray, distance));
+    let t = exp(-vec3f(0.88, 1.0, 1.13) * k * coastalColumn(c, ray, select(0.0, distance, k > 0.0)));
     let r = clampRadius(length(c) + 0.4); let muS = dot(normalize(c), sun);
     let sunlight = transmittanceToSun(airTransmittance, airSampler, r, muS) * coastalSun(normalize(c) * r, sun);
     let diffuse = lookupIrradiance(airIrradiance, airSampler, r, muS);

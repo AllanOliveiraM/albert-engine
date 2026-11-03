@@ -35,14 +35,19 @@ bool sunVisuals(const std::string& directory={}){
         std::cout<<"Solar "<<name<<": RGB "<<int(disc[at])<<","<<int(disc[at+1])<<","<<int(disc[at+2])<<" sky "<<luminance(sky)<<" disc "<<luminance(disc)<<'\n';
         if(elevation>=0){
             require(luminance(disc)+2>=luminance(sky),"Solar disc replaced foreground sky with a dark hole");
-            if(exposure>.1f&&haze<.1f)require(disc[at]>240,"Unoccluded solar disc is underexposed");
+            // Added aerosol genuinely attenuates a grazing solar ray. Reserve
+            // the saturation check for clear air; a hazy sunset need not clip.
+            if(exposure>.1f&&haze==0)require(disc[at]>240,"Unoccluded solar disc is underexposed");
         }
         if(elevation< -1&&altitudeKm<.1f)require(std::abs(luminance(disc)-luminance(sky))<2,"Sun shone through opaque Earth");
         return disc;
     };
     shot("sun-day",.01f,30,0,1.05f);
+    const auto clearHorizon=shot("sun-horizon-clear",.01f,.1f,0,1.05f);
     const auto horizon=shot("sun-horizon",.01f,.1f,.04f,1.05f);
     require(horizon[3*(192*384+192)]>=horizon[3*(192*384+192)+2],"Horizon absorption did not warm the solar disc");
+    require(horizon[3*(192*384+192)]<clearHorizon[3*(192*384+192)]&&horizon[3*(192*384+192)+2]<clearHorizon[3*(192*384+192)+2],
+        "Marine haze did not attenuate the horizon Sun");
     shot("sun-dense-haze",.01f,.4f,.3f,1.05f);
     shot("sun-hidden",.01f,-3,0,1.05f);
     shot("sun-orbital-limb",400,-19.5f,0,1.05f);
