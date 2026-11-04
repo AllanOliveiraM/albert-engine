@@ -15,8 +15,10 @@ class FailureReport(unittest.TestCase):
             if xml is not None:(root/'test-results.xml').write_text(xml,encoding='utf-8')
             if output is not None:
                 temporary=root/'Testing'/'Temporary';temporary.mkdir(parents=True)
-                (temporary/'LastTestsFailed.log').write_text('13:visual_sun\r\n',encoding='utf-8')
-                (temporary/'LastTest.log').write_text('13/56 Test: visual_sun\r\nOutput:\r\n----------\r\n'+output+'\r\n<end of output>\r\n',encoding='utf-8')
+                # Write exact CRLF bytes: text mode on Windows would translate
+                # these explicit CRLFs again, producing CRCRLF and blank lines.
+                (temporary/'LastTestsFailed.log').write_bytes(b'13:visual_sun\r\n')
+                (temporary/'LastTest.log').write_bytes(('13/56 Test: visual_sun\r\nOutput:\r\n----------\r\n'+output+'\r\n<end of output>\r\n').encode('utf-8'))
             return subprocess.run([sys.executable,str(REPORTER),str(root)],check=True,capture_output=True,text=True).stdout
 
     def test_crash_without_stdout_or_legacy_log(self):
