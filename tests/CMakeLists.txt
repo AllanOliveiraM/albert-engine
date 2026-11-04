@@ -59,6 +59,8 @@ target_include_directories(asset_download_test PRIVATE ${PROJECT_SOURCE_DIR}/src
 target_link_libraries(asset_download_test PRIVATE albert_download threepp::threepp nlohmann_json::nlohmann_json Threads::Threads)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
+    add_test(NAME ci_failure_reporting COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ci_test_failures_test.py)
+    set_tests_properties(ci_failure_reporting PROPERTIES TIMEOUT 10)
     add_test(NAME asset_checkout COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/asset_checkout_fixture.py)
     set_tests_properties(asset_checkout PROPERTIES TIMEOUT 30)
     add_test(NAME release_archive COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/release_fixture.py)

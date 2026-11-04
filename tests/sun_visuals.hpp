@@ -3,6 +3,7 @@
 bool sunVisuals(const std::string& directory={}){
     if(!directory.empty())std::filesystem::create_directories(directory);
     std::unique_ptr<GpuTarget> gpu;
+    std::cout<<"Solar: creating WebGPU target\n";
     try{gpu=std::make_unique<GpuTarget>(384,384);}catch(const std::exception& e){std::cout<<"Sun checks skipped: "<<e.what()<<'\n';return false;}
     auto& target=*gpu;target.scene.toneMapping=true;target.scene.exposure=1.05f;
     auto world=Scene::create();world->background=Color(0);
@@ -10,7 +11,9 @@ bool sunVisuals(const std::string& directory={}){
     albert::PlanetVisuals planets(*world,std::move(data));planets.moon->visible=false;
     auto sunlight=DirectionalLight::create(Color(0xffffff),2.4f);world->add(sunlight);
     auto camera=PerspectiveCamera::create(1.6f,1.f,1e-8f,100000.f);
+    std::cout<<"Solar adapter: "<<target.context.adapter()<<"; precomputing atmosphere\n";
     albert::gpu::Atmosphere air(target.context,albert::gpu::earthAtmosphere());air.precompute(target.context);
+    std::cout<<"Solar: atmosphere ready\n";
     target.scene.air={&air,planets.earth.get(),6378.137f,1.f};
     albert::VisualSettings settings;settings.terrain=false;settings.clouds=albert::CloudMode::Off;
     settings.shadows=settings.nightLights=false;
@@ -20,6 +23,7 @@ bool sunVisuals(const std::string& directory={}){
         for(int y=383;y>=0;--y)file.write(reinterpret_cast<const char*>(pixels.data()+y*384*3),384*3);
     };
     auto shot=[&](const char* name,float altitudeKm,float elevation,float haze,float exposure){
+        std::cout<<"Solar render: "<<name<<'\n';
         target.scene.exposure=exposure;target.scene.air.strength=altitudeKm<1000?1.f:0.f;
         target.scene.air.hazeExtinction=haze;target.scene.air.hazeScaleKm=.8f;
         const float angle=elevation*math::PI/180.f;Vector3 direction(std::cos(angle),0,std::sin(angle));

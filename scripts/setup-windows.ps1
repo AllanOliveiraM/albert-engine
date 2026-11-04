@@ -128,7 +128,7 @@ try {
     } finally { $buildLock.Dispose() }
     if ($Task -eq 'render-test' -or $Task -eq 'render-dist') {
         $ctest = Join-Path (Split-Path $cmake -Parent) 'ctest.exe'
-        Invoke-Checked -Program $ctest -Arguments @('--preset', 'windows')
+        Invoke-Checked -Program $ctest -Arguments @('--preset', 'windows', '--output-junit', (Join-Path $root 'build/windows/test-results.xml'))
     }
     if ($Task -eq 'render-dist') {
         $dist = Join-Path $root 'dist/windows'

@@ -133,10 +133,21 @@ jobs:
           path: ~/.ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
       - name: Tests
-        run: ctest --preset ${{ matrix.preset }}
+        run: ctest --preset ${{ matrix.preset }} --output-junit "${{ github.workspace }}/build/${{ matrix.preset }}/test-results.xml"
       - name: Report test failures
         if: failure()
         run: python scripts/ci-test-failures.py build/${{ matrix.preset }}
+      - name: Preserve test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-tests-${{ matrix.preset }}
+          path: |
+            build/${{ matrix.preset }}/test-results.xml
+            build/${{ matrix.preset }}/Testing/Temporary/LastTest.log
+            build/${{ matrix.preset }}/Testing/Temporary/LastTestsFailed.log
+          if-no-files-found: ignore
+          retention-days: 3
       - name: HTTP errors, retry and cancellation (Linux)
         if: runner.os == 'Linux'
         run: python3 tests/http_fixture.py build/linux/tests/download_test

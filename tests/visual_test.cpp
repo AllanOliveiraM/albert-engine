@@ -23,6 +23,7 @@
 #include "gpu/shadows.hpp"
 #include "gpu/atmosphere.hpp"
 #include "gpu/ocean.hpp"
+#include <webgpu/wgpu.h>
 #include <numbers>
 #include "lighting.hpp"
 #include "sound.hpp"
@@ -296,8 +297,10 @@ struct GpuTarget final:Target {
         WGPUBufferDescriptor bd{};bd.size=row*height;bd.usage=WGPUBufferUsage_CopyDst|WGPUBufferUsage_MapRead;WGPUBuffer b=wgpuDeviceCreateBuffer(context.device(),&bd);
         WGPUCommandEncoder e=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);WGPUTexelCopyTextureInfo src{};src.texture=texture;WGPUTexelCopyBufferInfo dst{};dst.buffer=b;dst.layout.bytesPerRow=row;dst.layout.rowsPerImage=height;
         const WGPUExtent3D size{width,height,1};wgpuCommandEncoderCopyTextureToBuffer(e,&src,&dst,&size);WGPUCommandBuffer c=wgpuCommandEncoderFinish(e,nullptr);wgpuQueueSubmit(context.queue(),1,&c);
-        bool done=false;WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&done;cb.callback=[](WGPUMapAsyncStatus,WGPUStringView,void* u,void*){*static_cast<bool*>(u)=true;};
-        wgpuBufferMapAsync(b,WGPUMapMode_Read,0,bd.size,cb);while(!done)wgpuInstanceProcessEvents(context.instance());
+        bool done=false;WGPUMapAsyncStatus status{};WGPUBufferMapCallbackInfo cb{};cb.mode=WGPUCallbackMode_AllowProcessEvents;cb.userdata1=&done;cb.userdata2=&status;
+        cb.callback=[](WGPUMapAsyncStatus result,WGPUStringView,void* u,void* s){*static_cast<WGPUMapAsyncStatus*>(s)=result;*static_cast<bool*>(u)=true;};
+        wgpuBufferMapAsync(b,WGPUMapMode_Read,0,bd.size,cb);while(!done){wgpuDevicePoll(context.device(),true,nullptr);wgpuInstanceProcessEvents(context.instance());}
+        if(status!=WGPUMapAsyncStatus_Success){wgpuBufferRelease(b);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);throw std::runtime_error("Visual readback failed (map status "+std::to_string(static_cast<int>(status))+")");}
         const auto* p=static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(b,0,bd.size));std::vector<unsigned char> out(width*height*3);const bool bgra=context.format()==WGPUTextureFormat_BGRA8Unorm;
         for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){const auto* s=p+(height-1-y)*row+x*4;auto* d=&out[(y*width+x)*3];d[0]=bgra?s[2]:s[0];d[1]=s[1];d[2]=bgra?s[0]:s[2];}
         wgpuBufferUnmap(b);wgpuBufferRelease(b);wgpuCommandBufferRelease(c);wgpuCommandEncoderRelease(e);return out;
@@ -957,6 +960,7 @@ void lunarAdaptationLevels(){
     require(std::abs(night-quarter/(.434/(60.27*60.27)))<1&&crescent>1&&crescent<night&&albert::lunarAdaptation(180,0,0,30)<night,"Exposure follows the light the Moon sends");
 }
 int main(int argc,char** argv) {
+    std::cout.setf(std::ios::unitbuf); // Keep the last completed stage if a driver/compiler aborts in CI.
     try {
         if(argc>1&&std::string_view(argv[1])=="media-check"){mediaGraphics();return 0;}
         keepGoing=argc>1&&std::string_view(argv[1])=="webgpu-keep-going";

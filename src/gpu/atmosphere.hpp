@@ -40,7 +40,7 @@ public:
     // each, ~230 for 4 orders); true once everything has been recorded. The tables are valid when the
     // commands carrying the last step have run.
     bool advance(WGPUCommandEncoder encoder,unsigned steps);
-    void precompute(Context& context); // All remaining steps in one submission.
+    void precompute(Context& context); // All remaining steps; software adapters wait after each slice.
     [[nodiscard]] bool ready()const;
 private:
     struct Plan;

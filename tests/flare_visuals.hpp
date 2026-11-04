@@ -1,6 +1,7 @@
 bool flareVisuals(const std::string& directory={},bool hd=false){
     if(!directory.empty())std::filesystem::create_directories(directory);
     std::unique_ptr<GpuTarget> gpu;
+    std::cout<<"Flare: creating WebGPU target\n";
     try{gpu=std::make_unique<GpuTarget>(hd?1920:384,hd?1080:256);}catch(const std::exception& e){std::cout<<"Flare checks skipped: "<<e.what()<<'\n';return false;}
     auto& target=*gpu;target.scene.toneMapping=true;target.scene.exposure=1.05f;
     std::cout<<"Flare adapter: "<<target.context.adapter()<<'\n';
@@ -13,6 +14,7 @@ bool flareVisuals(const std::string& directory={},bool hd=false){
     auto black=MeshBasicMaterial::create();black->color=Color(0);
     auto blocker=Mesh::create(PlaneGeometry::create(.4f,.4f),black);blocker->position.set(2.2f,.8f,-10);blocker->visible=false;world->add(blocker);
     auto render=[&](float strength,const std::string& name){
+        if(!name.empty())std::cout<<"Flare render: "<<name<<'\n';
         target.scene.solarFlare=strength;target.render(*world,*camera);auto pixels=target.readRGBPixels();
         if(!directory.empty()&&!name.empty()){
             std::ofstream file(directory+"/"+name+".ppm",std::ios::binary);file<<"P6\n"<<target.width<<' '<<target.height<<"\n255\n";
@@ -52,7 +54,9 @@ bool flareVisuals(const std::string& directory={},bool hd=false){
     }
     // Exercise real atmosphere tables and the volumetric output, including
     // both sides of the clouds' 50%-opacity depth-write threshold.
+    std::cout<<"Flare: precomputing atmosphere\n";
     albert::gpu::Atmosphere air(target.context,albert::gpu::earthAtmosphere());air.precompute(target.context);
+    std::cout<<"Flare: atmosphere ready\n";
     auto earth=Group::create();world->add(earth);
     target.scene.air={&air,earth.get(),6378.137f,1.f};
     const Vector3 direction(.8660254f,0,.5f);camera->position.set(0,0,1.0000016f);camera->up.set(0,0,1);

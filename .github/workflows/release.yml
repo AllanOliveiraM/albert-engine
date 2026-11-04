@@ -67,6 +67,7 @@ jobs:
           # The checkout drive is small; keep build, dist and ZIP volumes on C:.
           $workspace = Join-Path ($env:SystemDrive + '\') 'albert-release'
           New-Item -ItemType Directory -Force $workspace | Out-Null
+          "RELEASE_WORKSPACE=$workspace" >> $env:GITHUB_ENV
           & robocopy $env:GITHUB_WORKSPACE $workspace /E /NFL /NDL /NJH /NJS /NP
           if ($LASTEXITCODE -ge 8) { throw 'Failed to prepare Windows release workspace' }
           Set-Location $workspace
@@ -75,7 +76,23 @@ jobs:
           & python scripts/light-dist.py dist/windows dist/windows-light
           if ($LASTEXITCODE -ne 0) { throw 'Windows light folder failed' }
           "CATALOG_PATH=$workspace\dist\windows-light\assets\catalog.json" >> $env:GITHUB_ENV
-          "RELEASE_WORKSPACE=$workspace" >> $env:GITHUB_ENV
+      - name: Report portable Windows test failures
+        if: failure() && runner.os == 'Windows' && env.RELEASE_WORKSPACE != ''
+        shell: pwsh
+        run: |
+          $reporter = Join-Path $env:RELEASE_WORKSPACE 'scripts/ci-test-failures.py'
+          if (Test-Path $reporter) { python $reporter (Join-Path $env:RELEASE_WORKSPACE 'build/windows') }
+      - name: Preserve portable Windows test diagnostics
+        if: failure() && runner.os == 'Windows' && env.RELEASE_WORKSPACE != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-tests-portable-windows
+          path: |
+            ${{ env.RELEASE_WORKSPACE }}/build/windows/test-results.xml
+            ${{ env.RELEASE_WORKSPACE }}/build/windows/Testing/Temporary/LastTest.log
+            ${{ env.RELEASE_WORKSPACE }}/build/windows/Testing/Temporary/LastTestsFailed.log
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Archive portable distribution
         shell: bash
         env:

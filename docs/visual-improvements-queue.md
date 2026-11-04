@@ -6,6 +6,13 @@ Este documento reúne os pedidos ainda relevantes da conversa e serve como brief
 
 ### Ordem ativa de implementação — atualização do usuário
 
+**Bloqueador de CI antes de seguir a fila:** as execuções Windows de `7b4768a`
+falharam nos testes gráficos; Linux passou. Investigação, mitigação do trabalho
+acumulado no adaptador CPU e diagnóstico ampliado em
+[WINDOWS_GPU_CI_REVIEW.md](WINDOWS_GPU_CI_REVIEW.md). A aprovação nas três GPUs
+Linux não substitui a validação Direct3D/WARP. Não considerar resolvido antes
+da nova execução Windows.
+
 Continuar pelos itens que ainda exigem implementação, sem interromper a fila
 para pedir confirmação a cada bloco. Testar as alterações com monitoramento de
 RAM e manter as evidências e limitações registradas. Pendências exclusivamente

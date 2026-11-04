@@ -354,8 +354,15 @@ bool Atmosphere::advance(WGPUCommandEncoder encoder,unsigned steps){
     return !plan_;
 }
 void Atmosphere::precompute(Context& context){
-    while(!ready()){WGPUCommandEncoder encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);advance(encoder,context.software()?8u:~0u);
-        WGPUCommandBuffer commands=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(encoder);}
-    if(context.software())wgpuDevicePoll(context.device(),true,nullptr);
+    const bool software=context.software();const unsigned initialErrors=errors();
+    while(!ready()){WGPUCommandEncoder encoder=wgpuDeviceCreateCommandEncoder(context.device(),nullptr);advance(encoder,software?1u:~0u);
+        WGPUCommandBuffer commands=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(context.queue(),1,&commands);wgpuCommandBufferRelease(commands);wgpuCommandEncoderRelease(encoder);
+        // A submit is not a completion boundary: queueing every slice at once
+        // still lets D3D12/WARP combine the work into a long-running batch.
+        // Bound synchronous CPU-adapter precomputation to one completed slice,
+        // retaining every LUT texel/order and the asynchronous hardware path.
+        if(software){wgpuDevicePoll(context.device(),true,nullptr);wgpuInstanceProcessEvents(context.instance());
+            if(errors()!=initialErrors)throw std::runtime_error("Atmosphere precomputation failed on "+context.adapter());}
+    }
 }
 }
