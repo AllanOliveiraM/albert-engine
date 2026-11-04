@@ -133,6 +133,8 @@ jobs:
           path: ~/.ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
       - name: Tests
+        env:
+          ALBERT_GPU_TRACE: ${{ runner.os == 'Windows' && '1' || '0' }}
         run: ctest --preset ${{ matrix.preset }} --output-junit "${{ github.workspace }}/build/${{ matrix.preset }}/test-results.xml"
       - name: Report test failures
         if: failure()

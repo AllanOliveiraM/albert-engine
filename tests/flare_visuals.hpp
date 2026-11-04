@@ -42,6 +42,14 @@ bool flareVisuals(const std::string& directory={},bool hd=false){
         sun->visible=true;sun->position.z=23455;const auto behind=render(0,""),behindOn=render(.035f,"");
         require(behind==behindOn,"Sun behind the camera produced ghosts");sun->position.z=-23455;
         const auto repeat=render(.035f,"");require(repeat==on,"Stationary lens flare flickers between frames");
+        // Some lanes now reject samples outside the viewport, while the rest
+        // contribute. They must still synchronize and measure the visible rim.
+        const float sourceX=sun->position.x;
+        sun->position.x=-sun->position.z*std::tan(25.f*math::PI/180.f)*float(target.width)/target.height;
+        const auto edge=render(0,""),edgeOn=render(.035f,"flare-viewport-edge-"+suffix);
+        require(difference(edge,edgeOn)>0,"Partially visible Sun lost its lens effect at the viewport edge");
+        require(render(.035f,"")==edgeOn,"Viewport-clipped lens flare flickers between frames");
+        sun->position.x=sourceX;
         target.scene.renderScale=.6f;render(.035f,"flare-scaled-"+suffix);target.scene.renderScale=1;
         target.scene.fisheye=true;render(.035f,"flare-fisheye-"+suffix);target.scene.fisheye=false;
         camera->nearPlane=1e-9f;camera->updateProjectionMatrix();

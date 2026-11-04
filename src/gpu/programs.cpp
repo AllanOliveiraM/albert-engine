@@ -181,8 +181,7 @@ fn coastalDensity(c: vec3f, ray: vec3f, distance: f32, scale: f32) -> f32 {
 // Six-point Gauss-Legendre integration on a monotone half of the spherical path.
 // Unrolled: no texture lookups or variable shader loops in this extra layer.
 fn coastalInterval(c: vec3f, ray: vec3f, start: f32, end: f32, scale: f32) -> f32 {
-    if (end <= start) { return 0.0; }
-    let mid = (start + end) * 0.5; let half = (end - start) * 0.5;
+    let mid = (start + end) * 0.5; let half = max(end - start, 0.0) * 0.5;
     let a = half * 0.2386191861; let b = half * 0.6612093865; let d = half * 0.9324695142;
     return half * (0.4679139346 * (coastalDensity(c, ray, mid - a, scale) + coastalDensity(c, ray, mid + a, scale))
         + 0.3607615730 * (coastalDensity(c, ray, mid - b, scale) + coastalDensity(c, ray, mid + b, scale))
@@ -192,13 +191,12 @@ fn coastalInterval(c: vec3f, ray: vec3f, start: f32, end: f32, scale: f32) -> f3
 // space-to-ground ray must include the dense layer at its far end. Splitting at
 // the tangent point also keeps the integral reciprocal on grazing paths.
 fn coastalColumn(c: vec3f, ray: vec3f, distance: f32) -> f32 {
-    if (distance <= 0.0) { return 0.0; }
     let scale = max(frame.coastal.y, 0.1); let top = bottomRadius() + 12.0 * scale;
     let perpendicular = cross(c, ray); let disc = top * top - dot(perpendicular, perpendicular);
-    if (disc <= 0.0) { return 0.0; }
-    let center = -dot(c, ray); let half = sqrt(disc);
-    let start = max(0.0, center - half); let end = min(distance, center + half);
-    if (end <= start) { return 0.0; }
+    let center = -dot(c, ray); let half = sqrt(max(disc, 0.0));
+    // Empty/missing intersections collapse to a zero-length interval. Keep
+    // this arithmetic branch-free before the caller's atmospheric LUT reads.
+    let start = max(0.0, center - half); let end = max(start, min(distance, center + half));
     let tangent = clamp(center, start, end);
     return coastalInterval(c, ray, start, tangent, scale) + coastalInterval(c, ray, tangent, end, scale);
 }

@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <chrono>
 #include <cstring>
 #include <future>
@@ -194,8 +195,9 @@ struct SceneRenderer::Impl {
     std::array<WGPUBuffer,4> casterBuffers{};std::array<WGPUBindGroup,4> casterGroups{};WGPURenderPipeline shadowPipeline=nullptr;WGPUPipelineLayout shadowLayout=nullptr;WGPUShaderModule shadowModule=nullptr;
     // Scene-pass GPU time: two timestamps resolved into a buffer, read back a few frames later.
     WGPUQuerySet timestamps=nullptr;WGPUBuffer resolved=nullptr,readback=nullptr;bool mapping=false,mapPending=false;double gpuMs=-1;WGPUBufferMapCallbackInfo pendingMap{};
-    PassTiming passTiming;std::array<std::unique_ptr<LocalMedia>,2> media;
+    PassTiming passTiming;std::array<std::unique_ptr<LocalMedia>,2> media;bool tracePipelines=false;
     explicit Impl(Context& c):gpu(c),device(c.device()),queue(c.queue()),passTiming(c){
+        const char* trace=std::getenv("ALBERT_GPU_TRACE");tracePipelines=trace&&std::string_view(trace)=="1";
         WGPULimits limits{};
         if(wgpuDeviceGetLimits(device,&limits)==WGPUStatus_Success)maxTexture2D=limits.maxTextureDimension2D;
         auto uniformLayout=[&](bool dynamic){
@@ -352,7 +354,9 @@ struct SceneRenderer::Impl {
         const Program* p=gpu::program(name);if(!p){report("no WebGPU program for material '"+name+"'");return nullptr;}
         Compiled c;c.program=*p;const std::string source=std::string(prelude)+atmosphereWgsl+gpu::air+photometry+lighting+p->wgsl;
         WGPUShaderSourceWGSL w{};w.chain.sType=WGPUSType_ShaderSourceWGSL;w.code=sv(source);WGPUShaderModuleDescriptor md{};md.nextInChain=&w.chain;md.label=sv(name);
+        if(tracePipelines){std::fprintf(stderr,"WebGPU module begin: %s\n",name.c_str());std::fflush(stderr);}
         c.module=wgpuDeviceCreateShaderModule(device,&md);
+        if(tracePipelines){std::fprintf(stderr,"WebGPU module ready: %s\n",name.c_str());std::fflush(stderr);}
         std::vector<WGPUBindGroupLayoutEntry> entries(1+2*p->textures.size());
         entries[0].binding=0;entries[0].visibility=WGPUShaderStage_Vertex|WGPUShaderStage_Fragment;entries[0].buffer.type=WGPUBufferBindingType_Uniform;
         for(std::size_t i=0;i<p->textures.size();++i){
@@ -560,7 +564,10 @@ struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
         WGPURenderPipelineDescriptor d{};d.label=sv(name);d.layout=c.pipelineLayout;d.vertex.module=c.module;d.vertex.entryPoint=sv("vs_main");d.vertex.bufferCount=buffers.size();d.vertex.buffers=buffers.data();
         d.primitive.topology=WGPUPrimitiveTopology_TriangleList;d.primitive.frontFace=WGPUFrontFace_CCW;d.primitive.cullMode=c.program.points?WGPUCullMode_None:c.program.background?WGPUCullMode_Front:cull;
         d.depthStencil=&ds;d.multisample.count=samples;d.multisample.mask=~0u;d.fragment=&f;
-        return pipelines.emplace(key,wgpuDeviceCreateRenderPipeline(device,&d)).first->second;
+        if(tracePipelines){std::fprintf(stderr,"WebGPU pipeline begin: %s (%ux MSAA)\n",name.c_str(),samples);std::fflush(stderr);}
+        auto pipeline=wgpuDeviceCreateRenderPipeline(device,&d);
+        if(tracePipelines){std::fprintf(stderr,"WebGPU pipeline ready: %s (%ux MSAA)\n",name.c_str(),samples);std::fflush(stderr);}
+        return pipelines.emplace(key,pipeline).first->second;
     }
     void ensureDepth(unsigned w,unsigned h,unsigned samples){
         Targets* t=nullptr;for(auto& x:slots)if(x.depth&&x.width==w&&x.height==h&&x.samples==samples)t=&x;

@@ -63,6 +63,8 @@ jobs:
       - name: Build and test portable Windows (MSVC x64)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          ALBERT_GPU_TRACE: '1'
         run: |
           # The checkout drive is small; keep build, dist and ZIP volumes on C:.
           $workspace = Join-Path ($env:SystemDrive + '\') 'albert-release'

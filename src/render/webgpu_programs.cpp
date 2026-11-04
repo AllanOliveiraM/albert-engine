@@ -520,8 +520,12 @@ struct Material { visibility: f32 };
 @group(2) @binding(0) var<uniform> material: Material;
 @fragment fn fs_main(v: Surface) -> @location(0) vec4f {
     if (frame.air.w <= 0.0) { discard; }
-    let c = frame.air.xyz; let ray = normalize(airPoint(v.world) - c); var sky = skyRadiance(c, ray, frame.airSun.xyz);
-    if (length(c) < topRadius() && skyHitsGround(c, ray)) { sky = skyRadianceToPoint(c, horizonPoint(c, ray), frame.airSun.xyz, true); } // Below the sphere's horizon, where the coarser globe mesh leaves gaps: the horizon's haze.
+    let c = frame.air.xyz; let ray = normalize(airPoint(v.world) - c);
+    // Select the path before evaluating the atmosphere. Two complete sky calls
+    // duplicate the inlined LUT/haze calculation in legacy HLSL compilers.
+    let ground = length(c) < topRadius() && skyHitsGround(c, ray);
+    let point = horizonPoint(c, ray);
+    let sky = skySegment(c, select(ray, normalize(point - c), ground), point, frame.airSun.xyz, ground, ground);
     return vec4f(finish(sky.radiance * frame.sunColor.rgb), material.visibility * frame.air.w);
 }
 )";

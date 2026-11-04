@@ -32,8 +32,12 @@ bool sunVisuals(const std::string& directory={}){
         sunlight->position.copy(direction).multiplyScalar(100.f);
         camera->lookAt(planets.sun->position);camera->updateProjectionMatrix();
         planets.update(direction,camera->position,settings,1.f);
-        planets.sun->visible=false;target.render(*world,*camera);const auto sky=target.readRGBPixels();
-        planets.sun->visible=true;target.render(*world,*camera);const auto disc=target.readRGBPixels();save(name,disc);
+        std::cout<<"Solar: sky encode/submit\n";
+        planets.sun->visible=false;target.render(*world,*camera);
+        std::cout<<"Solar: sky readback\n";const auto sky=target.readRGBPixels();
+        std::cout<<"Solar: disc encode/submit\n";
+        planets.sun->visible=true;target.render(*world,*camera);
+        std::cout<<"Solar: disc readback\n";const auto disc=target.readRGBPixels();save(name,disc);
         const int at=3*(192*384+192);
         const auto luminance=[&](const auto& p){return .2126*p[at]+.7152*p[at+1]+.0722*p[at+2];};
         std::cout<<"Solar "<<name<<": RGB "<<int(disc[at])<<","<<int(disc[at+1])<<","<<int(disc[at+2])<<" sky "<<luminance(sky)<<" disc "<<luminance(disc)<<'\n';

@@ -29,41 +29,42 @@ fn shellTransmission(c: vec3f, ray: vec3f) -> f32 {
     }
     return t;
 }
-@compute @workgroup_size(1) fn measure() {
-    var colour = vec3f(0.0);
-    for (var i = 0u; i < 32u; i++) {
-        // Deterministic, uniform-area disc samples: no random flicker or stale
-        // visibility when the camera changes direction or an object covers it.
-        let angle = f32(i) * 2.39996323; let radius = sqrt((f32(i)+0.5)/32.0);
-        let uv = flare.source.xy + vec2f(cos(angle),sin(angle)) * radius * flare.disc.xy;
-        if (any(uv < vec2f(0.0)) || any(uv >= vec2f(1.0))) { continue; }
-        let pixel = vec2i(uv * flare.screen.xy);
-        var visible = 0.0;
-        for (var sample = 0u; sample < SAMPLE_COUNT; sample++) {
-            let z = LOAD_DEPTH;
-            // Reversed-Z keeps relative precision even with tiny near planes.
-            // An absolute epsilon would swallow the depth of distant blockers.
-            visible += select(0.0,1.0,z <= flare.source.z * 1.02) / f32(SAMPLE_COUNT);
-        }
-        if (visible == 0.0) { continue; }
-        let ndc = (uv * 2.0 - 1.0) * vec2f(1.0,-1.0);
-        let rayView = normalize(vec3f(ndc.x/frame.projection[0][0], ndc.y/frame.projection[1][1],-1.0));
-        let ray = transpose(mat3x3f(frame.view[0].xyz,frame.view[1].xyz,frame.view[2].xyz)) * rayView;
-        var transmission = vec3f(1.0);
-        if (frame.air.w > 0.0) {
-            let airRay = normalize((frame.planet * vec4f(ray,0.0)).xyz);
-            if (skyHitsGround(frame.air.xyz,airRay)) { continue; }
-            transmission = airFilter(frame.camera.xyz + ray * flare.source.w);
-            if (flare.screen.w == 0.0) { transmission *= shellTransmission(frame.air.xyz,airRay); }
-        }
-        if (flare.screen.w > 0.0) {
-            transmission *= mix(1.0,textureSampleLevel(cloudImage,cloudLinear,uv,0.0).a,flare.screen.w);
-        }
-        // Reflected optical energy follows transmission and camera exposure;
-        // don't derive it from the already saturated display value of the Sun.
-        colour += visible * transmission * vec3f(1.0,0.96,0.88) * frame.exposure.x / 32.0;
+// One independent disc sample per lane. Keep texture reads and atmospheric
+// functions out of nested serial loops (especially for the D3D12 FXC path).
+fn discSample(i: u32) -> vec3f {
+    let angle = f32(i) * 2.39996323; let radius = sqrt((f32(i)+0.5)/32.0);
+    let uv = flare.source.xy + vec2f(cos(angle),sin(angle)) * radius * flare.disc.xy;
+    if (any(uv < vec2f(0.0)) || any(uv >= vec2f(1.0))) { return vec3f(0.0); }
+    let pixel = vec2i(uv * flare.screen.xy);
+    // Reversed-Z needs a relative tolerance, including at tiny near planes.
+    let visible = DEPTH_VISIBILITY;
+    if (visible == 0.0) { return vec3f(0.0); }
+    let ndc = (uv * 2.0 - 1.0) * vec2f(1.0,-1.0);
+    let rayView = normalize(vec3f(ndc.x/frame.projection[0][0], ndc.y/frame.projection[1][1],-1.0));
+    let ray = transpose(mat3x3f(frame.view[0].xyz,frame.view[1].xyz,frame.view[2].xyz)) * rayView;
+    var transmission = vec3f(1.0);
+    if (frame.air.w > 0.0) {
+        let airRay = normalize((frame.planet * vec4f(ray,0.0)).xyz);
+        if (skyHitsGround(frame.air.xyz,airRay)) { return vec3f(0.0); }
+        transmission = airFilter(frame.camera.xyz + ray * flare.source.w);
+        if (flare.screen.w == 0.0) { transmission *= shellTransmission(frame.air.xyz,airRay); }
     }
-    signal = vec4f(min(colour * flare.disc.z,vec3f(1.0)),1.0);
+    if (flare.screen.w > 0.0) {
+        transmission *= mix(1.0,textureSampleLevel(cloudImage,cloudLinear,uv,0.0).a,flare.screen.w);
+    }
+    return visible * transmission * vec3f(1.0,0.96,0.88) * frame.exposure.x / 32.0;
+}
+var<workgroup> discColours: array<vec3f,32>;
+@compute @workgroup_size(32) fn measure(@builtin(local_invocation_index) i: u32) {
+    discColours[i] = discSample(i);
+    // Every lane reaches the barrier, including samples rejected by discSample.
+    workgroupBarrier();
+    if (i == 0u) {
+        var colour = vec3f(0.0);
+        // Texture-free reduction in the original deterministic sample order.
+        for (var j = 0u; j < 32u; j++) { colour += discColours[j]; }
+        signal = vec4f(min(colour * flare.disc.z,vec3f(1.0)),1.0);
+    }
 }
 )";
 constexpr const char* drawShader=R"(
@@ -103,8 +104,14 @@ SolarFlare::SolarFlare(Context& gpu,WGPUBindGroupLayout frameLayout):gpu_(gpu){
         e[3].texture.sampleType=WGPUTextureSampleType_Float;e[3].texture.viewDimension=WGPUTextureViewDimension_2D;e[4].sampler.type=WGPUSamplerBindingType_Filtering;
         WGPUBindGroupLayoutDescriptor ld{};ld.entryCount=5;ld.entries=e;measureLayouts_[variant]=wgpuDeviceCreateBindGroupLayout(device,&ld);
         std::string code=std::string(prelude)+atmosphereWgsl+air+parameters;
-        code+=variant?"@group(1) @binding(2) var depth: texture_depth_multisampled_2d;\nconst SAMPLE_COUNT=4u;\n":"@group(1) @binding(2) var depth: texture_depth_2d;\nconst SAMPLE_COUNT=1u;\n";
-        std::string body=measureShader;const auto at=body.find("LOAD_DEPTH");body.replace(at,10,variant?"textureLoad(depth,pixel,i32(sample))":"textureLoad(depth,pixel,0)");code+=body;
+        code+=variant?"@group(1) @binding(2) var depth: texture_depth_multisampled_2d;\n":"@group(1) @binding(2) var depth: texture_depth_2d;\n";
+        std::string visibility;
+        const unsigned samples=variant?4:1;
+        for(unsigned sample=0;sample<samples;++sample){
+            if(sample)visibility+=" + ";
+            visibility+="select(0.0,"+std::string(variant?"0.25":"1.0")+",textureLoad(depth,pixel,"+std::to_string(sample)+") <= flare.source.z * 1.02)";
+        }
+        std::string body=measureShader;const std::string token="DEPTH_VISIBILITY";body.replace(body.find(token),token.size(),visibility);code+=body;
         WGPUShaderSourceWGSL wgsl{};wgsl.chain.sType=WGPUSType_ShaderSourceWGSL;wgsl.code=sv(code);WGPUShaderModuleDescriptor md{};md.nextInChain=&wgsl.chain;
         auto module=wgpuDeviceCreateShaderModule(device,&md);WGPUBindGroupLayout layouts[]{frameLayout,measureLayouts_[variant]};WGPUPipelineLayoutDescriptor pl{};pl.bindGroupLayoutCount=2;pl.bindGroupLayouts=layouts;
         auto layout=wgpuDeviceCreatePipelineLayout(device,&pl);WGPUComputePipelineDescriptor pd{};pd.layout=layout;pd.compute.module=module;pd.compute.entryPoint=sv("measure");measurePipelines_[variant]=wgpuDeviceCreateComputePipeline(device,&pd);

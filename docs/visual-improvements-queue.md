@@ -11,7 +11,13 @@ falharam nos testes gráficos; Linux passou. Investigação, mitigação do trab
 acumulado no adaptador CPU e diagnóstico ampliado em
 [WINDOWS_GPU_CI_REVIEW.md](WINDOWS_GPU_CI_REVIEW.md). A aprovação nas três GPUs
 Linux não substitui a validação Direct3D/WARP. Não considerar resolvido antes
-da nova execução Windows.
+da nova execução Windows. A execução de `984e922` repetiu as duas falhas e
+confirmou que o pré-cálculo termina antes do crash solar; reflexos passam em
+MSAA 1× e falham ao ligar em 4×. Implementados: execução paralela das amostras,
+índices MSAA constantes e uma única avaliação atmosférica no shader do céu,
+preservando a qualidade e com rastreamento de compilação no próximo CI. Casos
+solares/reflexos/névoa passaram em llvmpipe, MX350 e Iris Xe; 24 capturas
+comparadas. Ainda aguardar confirmação no Windows.
 
 Continuar pelos itens que ainda exigem implementação, sem interromper a fila
 para pedir confirmação a cada bloco. Testar as alterações com monitoramento de
