@@ -65,6 +65,7 @@ jobs:
         shell: pwsh
         env:
           ALBERT_GPU_TRACE: '1'
+          ALBERT_REQUIRE_GPU: '1'
         run: |
           # The checkout drive is small; keep build, dist and ZIP volumes on C:.
           $workspace = Join-Path ($env:SystemDrive + '\') 'albert-release'

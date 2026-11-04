@@ -132,10 +132,19 @@ jobs:
         with:
           path: ~/.ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
+      # Fail early on the remaining Windows blocker, before long mission tests.
+      # The complete suite below excludes only this already-tested case.
+      - name: Windows solar regression
+        if: runner.os == 'Windows'
+        env:
+          ALBERT_GPU_TRACE: '1'
+          ALBERT_REQUIRE_GPU: '1'
+        run: ctest --preset windows -R "^visual_sun$" --output-junit "${{ github.workspace }}/build/windows/test-results.xml"
       - name: Tests
         env:
           ALBERT_GPU_TRACE: ${{ runner.os == 'Windows' && '1' || '0' }}
-        run: ctest --preset ${{ matrix.preset }} --output-junit "${{ github.workspace }}/build/${{ matrix.preset }}/test-results.xml"
+          ALBERT_REQUIRE_GPU: '1'
+        run: ctest --preset ${{ matrix.preset }} --exclude-regex "${{ runner.os == 'Windows' && '^visual_sun$' || '^$' }}" --output-junit "${{ github.workspace }}/build/${{ matrix.preset }}/test-results.xml"
       - name: Report test failures
         if: failure()
         run: python scripts/ci-test-failures.py build/${{ matrix.preset }}

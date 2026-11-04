@@ -4,7 +4,9 @@ bool sunVisuals(const std::string& directory={}){
     if(!directory.empty())std::filesystem::create_directories(directory);
     std::unique_ptr<GpuTarget> gpu;
     std::cout<<"Solar: creating WebGPU target\n";
-    try{gpu=std::make_unique<GpuTarget>(384,384);}catch(const std::exception& e){std::cout<<"Sun checks skipped: "<<e.what()<<'\n';return false;}
+    try{gpu=std::make_unique<GpuTarget>(384,384);}catch(const std::exception& e){
+        const char* required=std::getenv("ALBERT_REQUIRE_GPU");if(required&&std::string_view(required)=="1")throw;
+        std::cout<<"Sun checks skipped: "<<e.what()<<'\n';return false;}
     auto& target=*gpu;target.scene.toneMapping=true;target.scene.exposure=1.05f;
     auto world=Scene::create();world->background=Color(0);
     auto data=assets();data.images[5]=height(0.f);

@@ -19,6 +19,9 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#if defined(_WIN32)
+#include <filesystem>
+#endif
 namespace albert::gpu {
 namespace {std::atomic<unsigned> errorCount{0};thread_local std::function<void(Context&)> pendingPresent;}
 unsigned errors(){return errorCount.load();}
@@ -40,7 +43,24 @@ WGPUSurface surfaceFor(WGPUInstance instance,GLFWwindow* window){
 Context::Context(GLFWwindow* window){
     wgpuSetLogCallback([](WGPULogLevel level,WGPUStringView m,void*){std::fprintf(stderr,"wgpu [%d]: %s\n",static_cast<int>(level),text(m).c_str());std::fflush(stderr);},nullptr);
     wgpuSetLogLevel(WGPULogLevel_Warn);
-    instance_=wgpuCreateInstance(nullptr);if(!instance_)throw std::runtime_error("WebGPU unavailable");
+    WGPUInstanceDescriptor instanceDescriptor{};
+#if defined(_WIN32)
+    // Use the packaged DXC, with an absolute UTF-8 path independent of cwd/PATH.
+    // Avoid the legacy compiler on the atmospheric pipeline path that crashes
+    // in CI before command submission. Preserve every shader/atmosphere detail.
+    std::vector<wchar_t> executable(32768);
+    const auto length=GetModuleFileNameW(nullptr,executable.data(),static_cast<DWORD>(executable.size()));
+    if(!length||length==executable.size())throw std::runtime_error("Cannot locate the executable for the D3D12 shader compiler");
+    const auto compiler=std::filesystem::path(std::wstring(executable.data(),length)).parent_path()/L"dxcompiler.dll";
+    if(!std::filesystem::is_regular_file(compiler))throw std::runtime_error("Bundled D3D12 shader compiler is missing: dxcompiler.dll");
+    if(!std::filesystem::is_regular_file(compiler.parent_path()/L"dxil.dll"))throw std::runtime_error("Bundled D3D12 shader validator is missing: dxil.dll");
+    const auto utf8=compiler.u8string();const std::string compilerPath(utf8.begin(),utf8.end());
+    WGPUInstanceExtras extras{};extras.chain.sType=static_cast<WGPUSType>(WGPUSType_InstanceExtras);
+    extras.dx12ShaderCompiler=WGPUDx12Compiler_Dxc;extras.dxcPath=view(compilerPath);
+    instanceDescriptor.nextInChain=&extras.chain;
+    std::fprintf(stderr,"WebGPU D3D12 shader compiler: bundled DXC 1.8.2505.1\n");std::fflush(stderr);
+#endif
+    instance_=wgpuCreateInstance(&instanceDescriptor);if(!instance_)throw std::runtime_error("WebGPU unavailable");
     if(window&&!(surface_=surfaceFor(instance_,window)))throw std::runtime_error("No WebGPU surface for the window");
     const char* choice=std::getenv("ALBERT_GPU");const std::string_view pick=choice?choice:"high";
     WGPURequestAdapterOptions o{};o.compatibleSurface=surface_;o.forceFallbackAdapter=pick=="software";

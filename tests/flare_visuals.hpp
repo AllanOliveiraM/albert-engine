@@ -2,7 +2,9 @@ bool flareVisuals(const std::string& directory={},bool hd=false){
     if(!directory.empty())std::filesystem::create_directories(directory);
     std::unique_ptr<GpuTarget> gpu;
     std::cout<<"Flare: creating WebGPU target\n";
-    try{gpu=std::make_unique<GpuTarget>(hd?1920:384,hd?1080:256);}catch(const std::exception& e){std::cout<<"Flare checks skipped: "<<e.what()<<'\n';return false;}
+    try{gpu=std::make_unique<GpuTarget>(hd?1920:384,hd?1080:256);}catch(const std::exception& e){
+        const char* required=std::getenv("ALBERT_REQUIRE_GPU");if(required&&std::string_view(required)=="1")throw;
+        std::cout<<"Flare checks skipped: "<<e.what()<<'\n';return false;}
     auto& target=*gpu;target.scene.toneMapping=true;target.scene.exposure=1.05f;
     std::cout<<"Flare adapter: "<<target.context.adapter()<<'\n';
     auto world=Scene::create();world->background=Color(0);

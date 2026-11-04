@@ -58,10 +58,23 @@ else()
     set_target_properties(albert_wgpu PROPERTIES IMPORTED_LOCATION ${wgpu_SOURCE_DIR}/lib/libwgpu_native.a)
 endif()
 target_include_directories(albert_wgpu SYSTEM INTERFACE ${wgpu_SOURCE_DIR}/include)
-# MSVC executables load wgpu_native.dll from their own directory.
+if(WIN32)
+    # DXC is the maintained D3D12 shader compiler. Bundle a pinned compiler and
+    # matching validator instead of relying on the host SDK or legacy FXC.
+    FetchContent_Declare(dxcompiler
+        URL https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip
+        URL_HASH SHA256=9ad895a6b039e3a8f8c22a1009f866800b840a74b50db9218d13319e215ea8a4
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(dxcompiler)
+    set(albert_dxc_runtime ${dxcompiler_SOURCE_DIR}/bin/x64/dxcompiler.dll ${dxcompiler_SOURCE_DIR}/bin/x64/dxil.dll)
+endif()
+# Each GPU executable, including tests, has its shader compiler beside it.
 function(albert_copy_wgpu target)
     if(MSVC)
-        add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:albert_wgpu> $<TARGET_FILE_DIR:${target}>)
+        add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:albert_wgpu> $<TARGET_FILE_DIR:${target}> VERBATIM)
+    endif()
+    if(WIN32)
+        add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${albert_dxc_runtime} $<TARGET_FILE_DIR:${target}> VERBATIM)
     endif()
 endfunction()
 target_link_libraries(albert_wgpu INTERFACE ${albert_wgpu_system})

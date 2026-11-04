@@ -130,3 +130,65 @@ Os cenários solares, reflexos e teste numérico da névoa também passaram na
 NVIDIA MX350 e Intel Iris Xe (6,07 s no total; log `refactor-native.log`). RAM
 disponível mínima nessa rodada: 7.985,3 MiB. As três rodadas não registraram
 erros WebGPU. Os dois YAMLs foram lidos com sucesso; `git diff --check` passou.
+
+## Execução de `ee42081`: falha localizada na criação do pipeline
+
+[Nova execução](https://github.com/AllanOliveiraM/albert-engine/actions/runs/41761113285):
+Linux aprovado; Windows compilou. O relatório público agora contém somente
+`visual_sun` como falha (`SEGFAULT`, 134,142 s). `visual_solar_flare` deixou de
+ser relatado como falha; o XML completo não está acessível sem autenticação
+para distinguir aprovação de eventual skip nesta rodada.
+
+O rastreamento termina exatamente em:
+
+```text
+Solar: atmosphere ready
+Solar render: sun-day
+Solar: sky encode/submit
+WebGPU module begin: albert:builtin
+WebGPU module ready: albert:builtin
+WebGPU module begin: albert:atmosphere
+WebGPU module ready: albert:atmosphere
+WebGPU pipeline begin: albert:atmosphere (1x MSAA)
+```
+
+Portanto, a falha ocorre dentro de `wgpuDeviceCreateRenderPipeline` para o céu,
+antes da submissão do frame/readback; não é uma evidência de falta de VRAM,
+falha de mapeamento ou pré-cálculo interrompido. Sem dump ainda não se identifica
+a instrução nativa responsável.
+
+### Próxima correção: compilador D3D12 explícito e distribuído
+
+O contexto Windows passa a pedir DXC por `WGPUInstanceExtras`, com caminho
+absoluto UTF-8 ao lado do executável, independente de cwd/PATH. A versão
+[v1.8.2505.1 oficial da Microsoft](https://github.com/microsoft/DirectXShaderCompiler/releases/tag/v1.8.2505.1)
+é fixada por SHA-256 (`9ad895a6…215ea8a4`); o hash foi também calculado no ZIP
+baixado e confere com o digest publicado. A API da wgpu-native v29 documenta
+DXC mínimo v1.8.2502 e Windows/WDDM compatível. Nenhuma expressão do modelo
+atmosférico foi removida nesta etapa.
+
+`dxcompiler.dll` e `dxil.dll` x64 acompanham cada executável GPU e a distribuição
+instalada, com os três arquivos de licença do pacote. Ausência de qualquer DLL
+é diagnosticada no início. O uso de DXC evita depender do compilador legado do
+host; sua relação com este crash precisa ser confirmada no runner.
+
+O CI Windows executa `visual_sun` primeiro, antes dos testes longos. O restante
+da suíte exclui somente esse caso já executado; a cobertura total é preservada,
+sem testar o mesmo caso duas vezes. `ALBERT_REQUIRE_GPU=1` faz a inicialização
+dos casos solares/reflexos falhar em vez de retornar skip nos workflows de build
+e release. Isso também evita aceitar um pacote sem as DLLs como CI aprovado.
+
+Verificados os blocos reais de cópia/instalação CMake em um projeto pequeno,
+com caminhos contendo espaços: os dois binários e as três licenças coincidem
+byte a byte com o pacote oficial. Esse ensaio verifica empacotamento, **não**
+execução Windows; não executou binários Microsoft no Linux. Evidências em
+`build/mission-review/windows-ci/dxc package check/`.
+
+Build Linux dos quatro alvos aprovada (um job, proteção de RAM). A rodada
+direcionada com GPU obrigatória passou Sol/reflexos na MX350 e Iris Xe e o
+teste numérico da névoa nos três adaptadores (incluindo llvmpipe), em 5,06 s;
+RAM disponível mínima de 8.122 MiB. Logs `dxc-final-build.log` e
+`dxc-linux-regressions.log`. Os imports PE das novas DLLs foram inspecionados:
+componentes do Windows/UCRT, sem dependência nova de VCRUNTIME/MSVCP. Os YAMLs
+foram lidos com sucesso e `git diff --check` passou. Não há compilador/runtime
+Windows local: o bloco nativo e o uso efetivo de DXC ainda dependem do novo CI.

@@ -2,6 +2,11 @@ install(TARGETS render RUNTIME DESTINATION . COMPONENT Runtime)
 if(MSVC)
     install(FILES $<TARGET_FILE:albert_wgpu> DESTINATION . COMPONENT Runtime)
 endif()
+if(WIN32)
+    install(FILES ${albert_dxc_runtime} DESTINATION . COMPONENT Runtime)
+    install(FILES ${dxcompiler_SOURCE_DIR}/LICENSE-LLVM.txt ${dxcompiler_SOURCE_DIR}/LICENSE-MIT.txt ${dxcompiler_SOURCE_DIR}/LICENSE-MS.txt
+        DESTINATION licenses/DirectXShaderCompiler COMPONENT Runtime)
+endif()
 install(FILES
     ${PROJECT_SOURCE_DIR}/assets/countries.geojson
     ${PROJECT_SOURCE_DIR}/assets/stars.csv

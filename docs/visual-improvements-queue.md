@@ -17,7 +17,11 @@ MSAA 1× e falham ao ligar em 4×. Implementados: execução paralela das amostr
 índices MSAA constantes e uma única avaliação atmosférica no shader do céu,
 preservando a qualidade e com rastreamento de compilação no próximo CI. Casos
 solares/reflexos/névoa passaram em llvmpipe, MX350 e Iris Xe; 24 capturas
-comparadas. Ainda aguardar confirmação no Windows.
+comparadas. Na execução de `ee42081`, somente o teste solar foi relatado como
+falha: o rastreamento localizou o crash na criação do pipeline do céu, antes de
+submeter o frame. Em validação: DXC oficial fixado/distribuído no Windows e
+inicialização GPU obrigatória nos dois testes solares do CI. O bloqueador
+continua aberto até a confirmação no runner.
 
 Continuar pelos itens que ainda exigem implementação, sem interromper a fila
 para pedir confirmação a cada bloco. Testar as alterações com monitoramento de
