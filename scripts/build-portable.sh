@@ -16,7 +16,7 @@ run=(docker run --rm --init --user "$(id -u):$(id -g)" -v "$root:/work" -w /work
 if [[ "$platform" == linux || "$platform" == all ]]; then
     "${run[@]}" 'cmake -S . -B build/portable-linux -G Ninja -DCMAKE_BUILD_TYPE=Release &&
         cmake --build build/portable-linux --parallel 2 &&
-        ctest --test-dir build/portable-linux --output-on-failure &&
+        ALBERT_REQUIRE_GPU=1 LP_NUM_THREADS=2 ctest --test-dir build/portable-linux --output-on-failure &&
         python3 tests/http_fixture.py build/portable-linux/tests/download_test &&
         python3 tests/wms_fixture.py build/portable-linux/tests/wms_test &&
         cmake -E rm -rf dist/linux &&

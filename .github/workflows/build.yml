@@ -144,6 +144,7 @@ jobs:
         env:
           ALBERT_GPU_TRACE: ${{ runner.os == 'Windows' && '1' || '0' }}
           ALBERT_REQUIRE_GPU: '1'
+          LP_NUM_THREADS: '2'
         run: ctest --preset ${{ matrix.preset }} --exclude-regex "${{ runner.os == 'Windows' && '^visual_sun$' || '^$' }}" --output-junit "${{ github.workspace }}/build/${{ matrix.preset }}/test-results.xml"
       - name: Report test failures
         if: failure()

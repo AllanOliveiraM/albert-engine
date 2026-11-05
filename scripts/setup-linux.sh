@@ -22,13 +22,14 @@ case "$ID" in
         "${elevate[@]}" apt-get update
         "${elevate[@]}" apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build pkg-config ca-certificates python3 git-lfs \
-            libssl-dev xorg-dev libglu1-mesa-dev
+            libssl-dev xorg-dev libglu1-mesa-dev libvulkan1 mesa-vulkan-drivers
         ;;
     fedora)
         "${elevate[@]}" dnf install -y \
             gcc gcc-c++ cmake ninja-build pkgconf-pkg-config ca-certificates python3 git-lfs \
             openssl-devel libX11-devel libXrandr-devel libXinerama-devel \
-            libXcursor-devel libXi-devel libXext-devel mesa-libGL-devel mesa-libGLU-devel
+            libXcursor-devel libXi-devel libXext-devel mesa-libGL-devel mesa-libGLU-devel \
+            vulkan-loader mesa-vulkan-drivers
         ;;
     *)
         echo "Distribuicao nao automatizada: $ID. Consulte README.md." >&2

@@ -192,3 +192,63 @@ RAM disponível mínima de 8.122 MiB. Logs `dxc-final-build.log` e
 componentes do Windows/UCRT, sem dependência nova de VCRUNTIME/MSVCP. Os YAMLs
 foram lidos com sucesso e `git diff --check` passou. Não há compilador/runtime
 Windows local: o bloco nativo e o uso efetivo de DXC ainda dependem do novo CI.
+
+## Retomada em 5/11: erros explícitos no Windows e drivers ausentes no Linux
+
+A [execução de `06f194a`](https://github.com/AllanOliveiraM/albert-engine/actions/runs/41765655522)
+compilou nas duas plataformas, mas ambas falharam nos testes:
+
+- Windows: `visual_sun`, 129,847 s, agora informa `DXC compile error: error:
+  error reading 'albert:atmosphere'` e depois o mesmo erro para `albert:builtin`.
+  Os pipelines inválidos causam o abort na submissão (`0xc0000409`). O restante
+  da suíte Windows não chegou a executar nesta rodada.
+- Linux: Sol e reflexos falham imediatamente, sem adaptador; as bibliotecas e
+  drivers Vulkan não estão disponíveis no ambiente preparado pelo workflow.
+
+O DXC passou a produzir um diagnóstico útil, mas sua inclusão sozinha não
+resolveu o Windows. No código da
+[wgpu-hal v29](https://github.com/gfx-rs/wgpu/blob/v29.0.0/wgpu-hal/src/dx12/shader_compilation.rs),
+o rótulo do módulo vira o argumento de nome de arquivo do compilador. O
+[relato upstream #5659](https://github.com/gfx-rs/wgpu/issues/5659) contém o
+mesmo erro e confirma a opção `DISCARD_HAL_LABELS` como solução. O contexto
+Windows passa a usar `WGPUInstanceFlag_DiscardHalLabels`: preserva os nomes da
+aplicação/WebGPU, mas impede que o backend nativo entregue esses nomes ao DXC.
+Não modifica WGSL, amostras, resolução ou cálculos atmosféricos. A confirmação
+de execução D3D12 continua dependendo do próximo runner Windows.
+
+O setup Linux e o container portátil agora instalam `libvulkan1` e
+`mesa-vulkan-drivers` (Fedora: `vulkan-loader` e `mesa-vulkan-drivers`). Os testes
+portáteis exigem GPU, como o workflow principal, e o llvmpipe fica limitado a
+dois threads. **O verde anterior do CI Linux podia incluir skip dos testes
+solares**; não deve ser apresentado como prova de renderização desses casos.
+As aprovações locais nas GPUs físicas e no llvmpipe permanecem válidas.
+
+O problema de drivers foi reproduzido em containers limpos Ubuntu 24.04 e
+Debian 12, sem GPU do host: antes dos pacotes, nenhum adaptador; depois, criação
+de dispositivo llvmpipe com as duas features opcionais da aplicação. Os
+containers tinham limite de 1 GiB e um CPU; RAM disponível global mínima de
+7.598,7 e 7.310,7 MiB. Logs locais `driver-probe.log` e
+`driver-probe-debian12.log`, em `build/mission-review/windows-ci/`.
+
+Outras verificações isoladas da rodada anterior: shader real do céu convertido
+por Naga 29 e compilado em DXIL pela distribuição Linux do DXC da mesma release;
+cópia/instalação das DLLs e licenças verificadas byte a byte; tradução C++ do
+contexto Windows compilada com MinGW. Essas verificações cobrem compilação e
+empacotamento, **não** execução Windows. Um ensaio de rótulos pelo DXC Linux
+aceitou nomes com dois-pontos, portanto também não reproduz a restrição Windows.
+
+Próximo critério: Sol e reflexos realmente executados e aprovados nos dois
+sistemas. Se houver outro crash nativo sem diagnóstico de validação, coletar
+código de exceção e stack/dump antes de alterar novamente o shader. Não mover
+a tag `v0.0.2-beta` nem retomar a fila visual como se este bloqueador estivesse
+resolvido.
+
+Validação desta correção: `AlbertEngine` e `visual_test` compilados com um job;
+`visual_sun`, `visual_solar_flare` e `ci_failure_reporting` passaram sem skip
+(107,43 s), com `ALBERT_REQUIRE_GPU=1` e llvmpipe limitado a dois threads.
+O contexto Windows atualizado também compilou com MinGW em container de 1 GiB;
+isso não substitui a execução MSVC/D3D12. RAM disponível mínima de 7.144,4 MiB
+na verificação Windows e 7.241,1 MiB no build local; não houve uso de swap.
+Logs locais `label-fix-{build,tests,windows-compile}.log` no diretório de
+evidências já indicado. Sintaxe Bash, leitura dos YAMLs e `git diff --check`
+aprovados.

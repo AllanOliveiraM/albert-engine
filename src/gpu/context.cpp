@@ -57,6 +57,10 @@ Context::Context(GLFWwindow* window){
     const auto utf8=compiler.u8string();const std::string compilerPath(utf8.begin(),utf8.end());
     WGPUInstanceExtras extras{};extras.chain.sType=static_cast<WGPUSType>(WGPUSType_InstanceExtras);
     extras.dx12ShaderCompiler=WGPUDx12Compiler_Dxc;extras.dxcPath=view(compilerPath);
+    // wgpu passes HAL shader labels to DXC as source filenames. Names such as
+    // "albert:atmosphere" fail Windows filename handling (wgpu issue #5659).
+    // Keep WebGPU/application diagnostics, but omit labels at the native layer.
+    extras.flags=WGPUInstanceFlag_DiscardHalLabels;
     instanceDescriptor.nextInChain=&extras.chain;
     std::fprintf(stderr,"WebGPU D3D12 shader compiler: bundled DXC 1.8.2505.1\n");std::fflush(stderr);
 #endif

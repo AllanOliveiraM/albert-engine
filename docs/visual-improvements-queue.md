@@ -23,6 +23,14 @@ submeter o frame. Em validação: DXC oficial fixado/distribuído no Windows e
 inicialização GPU obrigatória nos dois testes solares do CI. O bloqueador
 continua aberto até a confirmação no runner.
 
+**Atualização de 5/11:** `06f194a` ainda falhou: Windows agora registra erro DXC
+ao ler o nome `albert:atmosphere`; Linux não possui drivers Vulkan no ambiente
+de testes. Correções preparadas: omitir rótulos no backend nativo Windows
+(solução documentada pela wgpu) e instalar loader/drivers Mesa no Linux e no
+container portátil. Verde Linux anterior podia incluir skip dos testes solares.
+Manter o bloqueador até uma nova execução aprovar Sol/reflexos com GPU
+obrigatória. Evidências e limites no documento de revisão acima.
+
 Continuar pelos itens que ainda exigem implementação, sem interromper a fila
 para pedir confirmação a cada bloco. Testar as alterações com monitoramento de
 RAM e manter as evidências e limitações registradas. Pendências exclusivamente
